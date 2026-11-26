@@ -513,13 +513,14 @@ describe('GitWorktreeGateway worktree lifecycle', () => {
     should((actual as Error).message).containEql('git worktree add failed');
   });
 
-  it('should remove a linked worktree through the shared Git directory', async () => {
+  it('should prune only the metadata of an already removed checkout', async () => {
     // Arrange
     const repository = await tempRepository('gw-remove');
     const linked = path.join(await tempDirectory('gw-remove-child'), 'wt');
     await setupGit(repository.root, 'worktree', 'add', '-b', 'feature/remove', '--', linked);
     // Act
-    await gateway().remove(linked);
+    await rm(linked, { recursive: true });
+    await gateway().prune(path.join(repository.root, '.git'));
 
     // Assert
     should(await files.type(linked)).equal('missing');
@@ -527,7 +528,7 @@ describe('GitWorktreeGateway worktree lifecycle', () => {
     should(await gateway().localBranchExists(repository.root, 'feature/remove')).be.true();
   });
 
-  it('should refuse to remove a checkout Git considers unsafe to delete', async () => {
+  it('should leave an existing dirty checkout intact when pruning metadata', async () => {
     // Arrange
     const repository = await tempRepository('gw-remove-dirty');
     const linked = path.join(await tempDirectory('gw-remove-dirty-child'), 'wt');
@@ -535,11 +536,11 @@ describe('GitWorktreeGateway worktree lifecycle', () => {
     await Bun.write(path.join(linked, 'README.md'), '# changed\n');
 
     // Act
-    const actual = await error(gateway().remove(linked));
+    await gateway().prune(path.join(repository.root, '.git'));
 
     // Assert
-    should((actual as Error).message).containEql('git worktree remove failed');
     should(await files.type(linked)).equal('directory');
+    should(await Bun.file(path.join(linked, 'README.md')).text()).equal('# changed\n');
   });
 });
 
@@ -811,18 +812,22 @@ describe('GitWorktreeGateway destructive operations', () => {
     should(await setupGit(repository.root, 'branch', '--list', '--format=%(refname:short)')).equal('main\n');
   });
 
-  it('should remove a dirty checkout only when the consent that covers it was given', async () => {
+  it('should report a failed metadata prune', async () => {
     // Arrange
     const repository = await tempRepository('gw-remove-force');
     const destination = path.join(await tempDirectory('gw-remove-force-dest'), 'checkout');
     await setupGit(repository.root, 'worktree', 'add', '-b', 'feature/dirty', '--', destination, repository.head);
     await Bun.write(path.join(destination, 'README.md'), '# edited\n');
     // Act
-    const refusal = await error(gateway().remove(destination));
-    await gateway().remove(destination, true);
+    const refusal = await error(
+      gateway({ run: async () => execution({ exitCode: 1, stderr: 'synthetic prune failure' }) }).prune(
+        repository.root,
+      ),
+    );
 
-    // Assert — without the forceful form a consented discard says yes and does nothing
+    // Assert — a metadata failure never authorizes deleting checkout contents.
     should(refusal).be.instanceof(Error);
-    should(await files.type(destination)).equal('missing');
+    should((refusal as Error).message).containEql('git worktree prune failed');
+    should(await files.type(destination)).equal('directory');
   });
 });

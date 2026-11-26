@@ -74,6 +74,8 @@ export interface WorktreeListEntry {
 export interface ManagedWorktree {
   readonly origin?: 'managed' | 'adopted';
   readonly adoptionIdentity?: WorktreeAdoptionIdentity;
+  /** Written before quarantine; recovery can remove only this directory incarnation. */
+  readonly removalIdentity?: WorktreeAdoptionIdentity;
   readonly version: 1;
   readonly path: string;
   readonly branch: string;
@@ -281,6 +283,7 @@ export interface ManagedWorktreeInspection {
 }
 
 export interface RemoveManagedWorktreeInput extends CheckManagedWorktreeRemovalInput {
+  readonly recordRemovalIdentity?: (identity: WorktreeAdoptionIdentity) => Promise<void>;
   readonly overrides: readonly WorktreeRemovalOverride[];
   readonly deleteBranch: boolean;
   /** Re-read host occupancy inside the repository queue, before preflight AND after pinning at the delete boundary. */

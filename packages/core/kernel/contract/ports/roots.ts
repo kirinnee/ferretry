@@ -431,7 +431,18 @@ export interface RootHandle {
    * recursing. A file or link at the name behaves as without the option. A folder without descriptor reach is refused
    * `no_descriptor_reach` exactly as above (the option never widens what a host without reach may remove).
    */
-  remove(path: FencedPath, options?: { readonly onlyIfEmpty?: boolean }): Promise<void>;
+  remove(
+    path: FencedPath,
+    options?: { readonly onlyIfEmpty?: boolean; readonly expectedIdentity?: RootIdentity },
+  ): Promise<void>;
+  /**
+   * Work/worktrees only: moves a directory to a `.fy-remove-*` sibling through its held parent, without following
+   * links. Checks the expected device/inode before AND after the move. A source swapped inside rename is restored
+   * with an exclusive move when possible, otherwise preserved at `to`, and refused `changed`; it is never deleted.
+   * The caller durably records the identity and destination before calling, then removes with `expectedIdentity`.
+   * Optional for test doubles; every production handle supplies it (other roots refuse `read_only`).
+   */
+  quarantineRename?(from: FencedPath, to: FencedPath, expectedIdentity: RootIdentity): Promise<void>;
   /**
    * A symlink at `at` (today's "stored once, never copied" link from a runtime home to the host's credential or
    * history) whose text is the REAL path of `target` in one of THIS plugin's own root handles — the rule `copyTree`'s

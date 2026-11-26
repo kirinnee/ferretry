@@ -1,6 +1,6 @@
 import { type ManagedWorktreeDocument, ManagedWorktreeDocumentSchema } from '../../../contract/state.ts';
 import { WorktreeError } from './errors.ts';
-import type { ManagedWorktree, ManagedWorktreeIntent } from './types.ts';
+import type { ManagedWorktree, ManagedWorktreeIntent, WorktreeAdoptionIdentity } from './types.ts';
 
 /**
  * The durable record of every checkout this daemon created, and of every one it was part-way through.
@@ -30,7 +30,7 @@ import type { ManagedWorktree, ManagedWorktreeIntent } from './types.ts';
  * `state/ferrets/worktrees.json` (§9.2, the contract's `WorktreesFile`, which owns the schema). Its `format: 1` is
  * stamped and checked by the kernel's state port, so the document here is the body only.
  */
-export { type ManagedWorktreeDocument } from '../../../contract/state.ts';
+export type { ManagedWorktreeDocument } from '../../../contract/state.ts';
 
 /** Everything the registry holds: finished records, and creations Git was asked for. */
 export interface ManagedWorktreeRegistryState {
@@ -102,10 +102,15 @@ export function withRemovalStarted(
   state: ManagedWorktreeRegistryState,
   path: string,
   startedAt: string,
+  identity?: WorktreeAdoptionIdentity,
 ): ManagedWorktreeRegistryState {
   return {
     ...state,
-    worktrees: state.worktrees.map(entry => (entry.path === path ? { ...entry, removalStartedAt: startedAt } : entry)),
+    worktrees: state.worktrees.map(entry =>
+      entry.path === path
+        ? { ...entry, removalStartedAt: startedAt, ...(identity === undefined ? {} : { removalIdentity: identity }) }
+        : entry,
+    ),
   };
 }
 
@@ -121,7 +126,7 @@ export function withRemovalAbandoned(state: ManagedWorktreeRegistryState, path: 
     ...state,
     worktrees: state.worktrees.map(entry => {
       if (entry.path !== path) return entry;
-      const { removalStartedAt: _started, ...rest } = entry;
+      const { removalStartedAt: _started, removalIdentity: _identity, ...rest } = entry;
       return rest;
     }),
   };

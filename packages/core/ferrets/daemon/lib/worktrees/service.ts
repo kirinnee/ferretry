@@ -373,7 +373,8 @@ export class ManagedWorktreeService {
       });
     };
     const context = await refreshEvidence();
-    await this.registry.write(state => withRemovalStarted(state, managed.path, this.clock.nowIso()));
+    const startedAt = this.clock.nowIso();
+    await this.registry.write(state => withRemovalStarted(state, managed.path, startedAt));
     let removed: RemovedManagedWorktree;
     try {
       removed = await this.operations.remove({
@@ -381,6 +382,8 @@ export class ManagedWorktreeService {
         overrides: request.overrides,
         deleteBranch: request.deleteBranch,
         refreshEvidence,
+        recordRemovalIdentity: async identity =>
+          await this.registry.write(state => withRemovalStarted(state, managed.path, startedAt, identity)),
       });
     } catch (error) {
       if (error instanceof WorktreeRemovalRefusal) {
@@ -514,6 +517,7 @@ export class ManagedWorktreeService {
    * neither, so the stamp stays for the next read.
    */
   async #reconcileFailedRemoval(managed: ManagedWorktree): Promise<void> {
+    managed = (await this.registry.read()).worktrees.find(entry => entry.path === managed.path) ?? managed;
     const presence = await this.operations.presence(managed).catch(() => undefined);
     if (presence?.kind === 'owned') {
       await this.registry.write(state => withRemovalAbandoned(state, managed.path));

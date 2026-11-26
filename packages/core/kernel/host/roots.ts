@@ -37,7 +37,7 @@ import type {
   SharedTreeSource,
 } from '../contract/ports.ts';
 import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
-import { rootRemoval } from './root-removal.ts';
+import { rootQuarantine, rootRemoval } from './root-removal.ts';
 import {
   absolute,
   type Fence,
@@ -1090,6 +1090,7 @@ async function adoptLeftoverName(scope: Scope, full: string, random: () => strin
 }
 
 const removeChecked = rootRemoval<Scope>({ openCheckedFolder, folderProblem, heldMember, refuseHeldName, refuse });
+const quarantineChecked = rootQuarantine<Scope>({ openCheckedFolder, heldMember, refuse });
 
 /** The names in a checked folder, each with its own (never followed) identity reached through that folder. */
 async function entriesChecked(
@@ -1687,7 +1688,7 @@ const NO_NOREPLACE: ReadonlySet<string> = new Set(['EINVAL', 'ENOSYS', 'ENOTSUP'
  * at through its held parent without following it (a regular file with one name, passing `guard`), then
  * `renameat2(RENAME_NOREPLACE)` between the two held descriptors. A taken target is `exists` with the source untouched,
  * decided by the kernel in the same call (no look-then-move window on the target). A host with no no-replace move
- * (macOS, a `renameat2` that did not load or failed its self-test, a filesystem without the flag) is
+ * (a native primitive that did not load or failed its self-test, a filesystem without the flag) is
  * `no_descriptor_reach`: there is no plain-rename fallback.
  *
  * The source checks and the move are still two calls (a same-user writer can swap the leaf or add a hard link in
@@ -2776,8 +2777,18 @@ function rootHandle(setup: HandleSetup): RootHandle {
         const found = await scope.fs.identity(full);
         if (found !== undefined && found.kind !== 'link' && heldByFence(fence, [toComponent(found)])) refuse('fenced');
       }
-      await removeChecked(scope, full, removeOptions?.onlyIfEmpty === true);
+      await removeChecked(scope, full, removeOptions?.onlyIfEmpty === true, removeOptions?.expectedIdentity);
       PLACED_LINKS.forgetUnder(full);
+    },
+    quarantineRename: async (from, to, expected) => {
+      writable();
+      if (name !== 'work' && name !== 'worktrees') return refuse('read_only');
+      gate(from, 'remove');
+      gate(to, 'remove');
+      const source = await realParent(from);
+      const target = await realParent(to);
+      if (source.full !== from || target.full !== to) return refuse('link_escape');
+      await quarantineChecked(source.scope, source.full, target.full, expected);
     },
     linkTo: async (at: FencedPath, target: RootLinkTarget) => {
       writable();

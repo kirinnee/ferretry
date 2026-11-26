@@ -120,7 +120,7 @@ export interface OpenedDirectory {
    * Moves `leaf` of THIS folder to `toLeaf` of `into` (another folder this host opened) with
    * `renameat2(RENAME_NOREPLACE)` on the two held descriptors, after proving both are still the folders they were
    * opened on: a taken `toLeaf` throws `EEXIST` and nothing moves, in the kernel, atomically. Neither leaf is followed.
-   * `undefined` where this host has no no-replace move (macOS; a Linux whose `renameat2` did not load or failed its
+   * `undefined` where this host has no no-replace move (the native primitive did not load or failed its
    * self-test): the caller refuses, never falls back to a plain rename. A filesystem without the flag throws `EINVAL`.
    * Additive.
    */
@@ -303,7 +303,7 @@ async function listedGroups(database: string, user: string): Promise<readonly nu
   });
 }
 
-/** The default no-replace move on Linux: `renameat2` from the C library, trusted only once it has passed its self-test here. */
+/** The platform's no-replace move, trusted only once it has passed its self-test here. */
 const provenNoReplaceRename = async (): Promise<NoReplaceRename> => {
   const loaded = loadNoReplaceRename();
   await selfTestNoReplaceRename(loaded);
@@ -333,9 +333,9 @@ export function nodeFs(
      */
     readonly bracket?: () => DescriptorBracket;
     /**
-     * Where a host WITH `descriptorFolder` gets `renameat2(RENAME_NOREPLACE)` (`OpenedDirectory.renameNoReplace`): asked
+     * Where a host gets its exclusive descriptor-relative rename (`OpenedDirectory.renameNoReplace`): asked
      * once, on the first folder opened, then self-tested in a scratch folder (asynchronously); a throw or rejection from
-     * either means none. Default: loaded from the C library on Linux, none elsewhere.
+     * either means none. Default: loaded from the C library on Linux and macOS, none elsewhere.
      */
     readonly noReplaceRename?: () => NoReplaceRename | Promise<NoReplaceRename>;
   } = {},
@@ -369,7 +369,9 @@ export function nodeFs(
     }
     return bracket;
   };
-  const loadNoReplace = options.noReplaceRename ?? (process.platform === 'linux' ? provenNoReplaceRename : undefined);
+  const loadNoReplace =
+    options.noReplaceRename ??
+    (process.platform === 'linux' || process.platform === 'darwin' ? provenNoReplaceRename : undefined);
   // Asked once, without blocking: every folder opened after the first waits on the same answer.
   let noReplace: Promise<NoReplaceRename | undefined> | undefined;
   const noReplaceOrNone = (): Promise<NoReplaceRename | undefined> =>
@@ -460,7 +462,7 @@ export function nodeFs(
     const [handle, identity] = await opened(path, READ_DIRECTORY);
     const descriptorCalls = reached ? undefined : callsOrNone();
     const workingDirectory = descriptorCalls === undefined ? undefined : bracketOrNone();
-    const noReplaceCall = reached ? await noReplaceOrNone() : undefined;
+    const noReplaceCall = await noReplaceOrNone();
     const at =
       descriptorCalls === undefined
         ? undefined

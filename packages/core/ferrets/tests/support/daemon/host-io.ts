@@ -1,4 +1,8 @@
 import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { rootsPortFor } from '../../../../kernel/host/roots.ts';
+import { nodeFs } from '../../../../kernel/host/adapters/node-fs.ts';
+import { tempDirectory } from '../../integration/daemon/support/repository.ts';
 import { type GitByteSpawn, KernelGitRunner } from '../../../daemon/adapters/git/runner.ts';
 import {
   DEFAULT_GIT_STDERR_LIMIT,
@@ -149,6 +153,40 @@ class BunGitByteSpawn implements GitByteSpawn {
 }
 
 export class NodeWorktreeFileSystem implements WorktreeFileSystem {
+  async directoryIdentity(target: string): Promise<string | undefined> {
+    const info = await lstat(target, { bigint: true }).catch(() => undefined);
+    return info?.isDirectory() === true ? `${info.dev}:${info.ino}` : undefined;
+  }
+
+  async #removalRoot(target: string) {
+    const home = await tempDirectory('worktree-removal-kernel-home');
+    await mkdir(path.join(home, 'state'), { recursive: true });
+    return rootsPortFor(
+      nodeFs(() => crypto.randomUUID()),
+      { home, worktrees: path.dirname(target), plugin: 'ferrets' },
+      ['worktrees'],
+      () => undefined,
+      {},
+    ).root('worktrees');
+  }
+
+  async quarantineRename(target: string, quarantine: string, expected: string): Promise<void> {
+    const root = await this.#removalRoot(target);
+    const from = root.resolve(target);
+    const to = root.resolve(quarantine);
+    if (!from.ok || !to.ok) throw new Error('fixture outside root');
+    const [device, inode] = expected.split(':').map(BigInt);
+    await root.quarantineRename!(from.value, to.value, { device: device!, inode: inode! });
+  }
+
+  async removeTree(target: string, expected: string): Promise<void> {
+    const root = await this.#removalRoot(target);
+    const at = root.resolve(target);
+    if (!at.ok) throw new Error('fixture outside root');
+    const [device, inode] = expected.split(':').map(BigInt);
+    await root.remove(at.value, { expectedIdentity: { device: device!, inode: inode! } });
+  }
+
   async makeDirectory(target: string, mode: number): Promise<void> {
     await mkdir(target, { recursive: true, mode });
   }

@@ -27,9 +27,11 @@ import type {
   WorktreeListEntry,
   WorktreeRemovalBlocker,
   WorktreeRemovalEvidence,
+  WorktreeAdoptionIdentity,
 } from '../../lib/worktrees/types.ts';
 import type { GitWorktreeGateway } from './git-gateway.ts';
 import type { WorktreeOperationQueue } from './queue.ts';
+import { quarantinePath, removalIdentity } from './quarantine.ts';
 
 const OWNERSHIP_MARKER = 'worktree-owner';
 
@@ -253,6 +255,7 @@ export class ManagedWorktreeAdapter {
     private readonly clock: WorktreeClock,
     private readonly queue: WorktreeOperationQueue,
     private readonly pinner: WorktreeDirectoryPinner,
+    private readonly verifiedRemovalIdentity?: WorktreeAdoptionIdentity,
   ) {}
 
   async create(input: CreateManagedWorktreeInput): Promise<CreatedManagedWorktree> {
@@ -584,6 +587,8 @@ export class ManagedWorktreeAdapter {
    */
   async remove(input: RemoveManagedWorktreeInput): Promise<RemovedManagedWorktree> {
     return await this.queue.run(input.managed.commonDir, async () => {
+      const identity =
+        this.verifiedRemovalIdentity ?? (await removalIdentity(this.fileSystem, input.managed).catch(() => undefined));
       const preflight = await this.examine(input);
       const uncleared = unclearedRemovalBlockers(preflight.decision.blockers, input.overrides);
       if (uncleared.length > 0) {
@@ -602,8 +607,7 @@ export class ManagedWorktreeAdapter {
         );
       }
 
-      // Git's own refusal of a dirty tree is answered only by the consent that already covered it.
-      const discarding = fresh.decision.blockers.some(blocker => blocker.override === 'discard_worktree_changes');
+      if (identity === undefined) throw new WorktreeRemovalRefusal('checkout identity could not be established');
       await this.#withPinned(
         fresh.decision.path,
         () =>
@@ -611,9 +615,23 @@ export class ManagedWorktreeAdapter {
             `refusing to remove ${fresh.decision.path}: checkout identity changed at the mutation boundary`,
             fresh.decision.blockers,
           ),
-        async pinnedCwd => {
+        async () => {
           await verifyWorktreeOccupancy(refreshed, input.refreshEvidence);
-          return await this.gateway.remove(pinnedCwd, discarding);
+          const status = await this.gateway.status(fresh.decision.path);
+          if (JSON.stringify(status) !== JSON.stringify(fresh.live.status))
+            throw new WorktreeRemovalRefusal('the checkout status changed at the mutation boundary');
+          await input.recordRemovalIdentity?.(identity);
+          const quarantine = quarantinePath(input.managed);
+          try {
+            await this.fileSystem.quarantineRename(input.managed.path, quarantine, identity.checkout);
+            await this.fileSystem.removeTree(quarantine, identity.checkout);
+          } catch (error) {
+            throw new WorktreeError(
+              'unsafe_remove',
+              `removal refused; inspect recovery path ${quarantine}: ${message(error)}`,
+            );
+          }
+          await this.gateway.prune(input.managed.commonDir);
         },
       );
       const retained = { path: fresh.decision.path, branch: input.managed.branch, removedAt: this.clock.nowIso() };

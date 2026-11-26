@@ -1,7 +1,7 @@
 import { isListableCommonDirectory } from '../../../contract/index.ts';
 import { WorktreeError } from '../../lib/worktrees/errors.ts';
 import { parseWorktreeList } from '../../lib/worktrees/parser.ts';
-import type { GitRunner } from '../../lib/worktrees/ports.ts';
+import type { GitExecution, GitRunner } from '../../lib/worktrees/ports.ts';
 import type { WorktreeListEntry } from '../../lib/worktrees/types.ts';
 import { decodeGitOutput, stripFinalLineFeed } from '../git/result.ts';
 import type { RepoCheckoutPin, RepoDirectoryPin, RepoWorktreeAccess } from './repo-access.ts';
@@ -76,11 +76,35 @@ export class GitRepoWorktreeRows {
     return await this.access.checkout(folder, this.repository);
   }
 
+  async verifyRepository(expected?: string): Promise<void> {
+    const repository = this.repository;
+    if (
+      repository === undefined ||
+      (expected !== undefined && `${repository.identity.device}:${repository.identity.inode}` !== expected)
+    )
+      throw notACommonDirectory();
+    await repository.verify();
+  }
+
+  /** Metadata-only mutation in U3's held, authorized, offline common directory; no checkout pathname is deleted. */
+  async prune(signal?: AbortSignal, expected?: string): Promise<GitExecution> {
+    signal?.throwIfAborted();
+    await this.verifyRepository(expected);
+    const result = await this.runner.run({
+      cwd: this.repository!.cwd,
+      signal,
+      args: ['--git-dir=.', 'worktree', 'prune', '--expire=now'],
+    });
+    await this.verifyRepository(expected);
+    if (result.timedOut || result.exitCode !== 0 || result.stdoutTruncated)
+      throw new WorktreeError('verification_failed', 'Git could not prune the removed worktree metadata');
+    return result;
+  }
+
   async inCheckout<T>(
     folder: string,
     signal: AbortSignal | undefined,
     read: (runner: GitRunner) => Promise<T>,
-    removesCheckout = false,
     held?: RepoCheckoutPin,
   ): Promise<T> {
     const repository = this.repository;
@@ -101,14 +125,14 @@ export class GitRepoWorktreeRows {
             args: [`--git-dir=${checkout.gitDirectory}`, '--work-tree=.', ...invocation.args],
           });
           signal?.throwIfAborted();
-          if (!removesCheckout) await checkout.verify();
+          await checkout.verify();
           return result;
         },
       });
       // The inspection records Git failures as evidence. Identity failures must still escape that catch before a
       // successful inspection can authorize a managed label.
       signal?.throwIfAborted();
-      if (!removesCheckout) await checkout.verify();
+      await checkout.verify();
       return result;
     } finally {
       if (held === undefined) await checkout.close();
