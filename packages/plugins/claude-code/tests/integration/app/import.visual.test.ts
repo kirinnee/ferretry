@@ -84,6 +84,14 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
+/** The scene's page clips at the window (the real shell scrolls inside it), so a shot grows the window to the whole page first. */
+const shoot = async (tab: Page, viewport: (typeof VIEWPORTS)[number], path: string): Promise<void> => {
+  const height = await tab.evaluate(() => document.body.scrollHeight);
+  await tab.setViewportSize({ width: viewport.width, height: Math.max(viewport.height, height + 24) });
+  await tab.waitForTimeout(150);
+  await tab.screenshot({ fullPage: true, path });
+};
+
 const newContext = async (viewport: (typeof VIEWPORTS)[number], mode: 'light' | 'dark'): Promise<BrowserContext> => {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -145,8 +153,7 @@ describe('the Claude import pages', () => {
             // The radio is visually hidden (the card is the control), so it paints nothing over the text.
             expect((await card.locator('input').boundingBox())?.width ?? 0).toBeLessThanOrEqual(1);
           }
-          if (shotsDir !== '')
-            await tab.screenshot({ fullPage: true, path: join(shotsDir, `${page}-${viewport.name}-${mode}.png`) });
+          if (shotsDir !== '') await shoot(tab, viewport, join(shotsDir, `${page}-${viewport.name}-${mode}.png`));
           await context.close();
         }, 60_000);
 
@@ -409,10 +416,7 @@ describe('the part-way import note at the highest rounding (Neumorphism)', () =>
         expect(await tab.locator('[data-import-landed] li').count()).toBeGreaterThan(0);
         expect(await tab.locator('[data-import-not-landed] li').count()).toBeGreaterThan(0);
         if (shotsDir !== '')
-          await tab.screenshot({
-            fullPage: true,
-            path: join(shotsDir, `run-partial-neumorphism-${viewport.name}-${mode}.png`),
-          });
+          await shoot(tab, viewport, join(shotsDir, `run-partial-neumorphism-${viewport.name}-${mode}.png`));
         await context.close();
       }, 60_000);
 });
