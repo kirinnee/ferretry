@@ -124,7 +124,7 @@ class DaemonShutdownFailedError extends Error {
 /** What the shell's launcher came to. */
 type DaemonLaunchOutcome = { readonly started: true } | { readonly started: false; readonly why: string };
 
-/** What `fy daemon status` learns of the daemon's supervisor; `unread` is a manager this build does not ask (launchd). */
+/** What `fy daemon status` learns of the daemon's supervisor; `unread` is a manager that could not be read, and says why. */
 export type DaemonSupervision =
   | {
       readonly kind: 'read';
@@ -135,7 +135,7 @@ export type DaemonSupervision =
       /** Serving, but not as the installed service manager's daemon. */
       readonly orphan: boolean;
     }
-  | { readonly kind: 'unread'; readonly daemon: string; readonly manager: DaemonManagerKind };
+  | { readonly kind: 'unread'; readonly daemon: string; readonly manager: DaemonManagerKind; readonly why: string };
 
 /** The two reads that need a connection to the daemon, supplied by the verb that runs. */
 export interface DaemonControlReads {
@@ -288,14 +288,15 @@ export class DaemonController {
   }
 
   /**
-   * What supervises the daemon, for `fy daemon status`: a read, never a change. launchd is not read in 5.0 (the Mac end
-   * list), so a Mac says so instead of asking `launchctl`. The pid is the answering daemon's own (`GET /healthz`).
+   * What supervises the daemon, for `fy daemon status`: a read, never a change. A launchd that cannot be read (no
+   * `launchctl`, a refusal, output no one understands) is said as such, not guessed. The pid is the answering daemon's own
+   * (`GET /healthz`).
    */
   async supervision(): Promise<DaemonSupervision> {
     const { manager, daemonName: daemon } = this.deps.layout;
-    if (manager === 'launchd') return { kind: 'unread', daemon, manager };
     const owner = await this.#owner();
     const report = await owner.inspect();
+    if (report.unreadable !== undefined) return { kind: 'unread', daemon, manager, why: report.unreadable };
     const answering = await this.deps.health.probe();
     return {
       kind: 'read',

@@ -133,6 +133,16 @@ export interface DaemonSupervisorReport {
    * declares none. `null` is the throttled default — see `LAUNCHD_PROCESS_TYPE`.
    */
   readonly processType?: string | null | undefined;
+  /** launchd only: is the job loaded into the user domain (`launchctl print` found it)? */
+  readonly loaded?: boolean | undefined;
+  /** launchd only: the job's last exit status, when launchd names one. */
+  readonly lastExit?: number | undefined;
+  /** launchd only: the signal that last killed the job (`SIGABRT`), when launchd names one. */
+  readonly lastSignal?: string | undefined;
+  /** launchd only: the plist path, when the file is on disk. */
+  readonly definition?: string | undefined;
+  /** launchd only: why launchd could not be read (launchctl missing, refused, or unintelligible); the verdict above is then a guess. */
+  readonly unreadable?: string | undefined;
 }
 
 /** How a stop is pressed: politely first, then harder. */
