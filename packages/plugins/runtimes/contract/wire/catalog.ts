@@ -46,12 +46,8 @@ import {
   NonNegativeIntegerSchema,
 } from './shared.ts';
 
-/**
- * Which harnesses a component or a profile can be used with (§3.4 P7): both, or one. DERIVED by the
- * daemon — a component from its harness or its model ids, a profile from the union of its layers —
- * and never sent by a caller.
- */
-export const HarnessScopeSchema = z.enum(['generic', 'claude-code', 'codex']);
+/** Derived scope: generic or a registered harness key, validated by the daemon against its registry. */
+export const HarnessScopeSchema = HarnessKeySchema;
 export type HarnessScope = z.infer<typeof HarnessScopeSchema>;
 
 /**
@@ -527,11 +523,7 @@ export const RuntimeModelChoiceSchema = z.strictObject({
 });
 export type RuntimeModelChoice = z.infer<typeof RuntimeModelChoiceSchema>;
 
-/**
- * What a runtime offers when its login reads a model catalog: exactly that catalog's models for the
- * runtime's CLI, and the one it launches with. Absent for a login with no catalog, whose runtimes offer
- * their profile's model set (`modelSet`).
- */
+/** The reviewed catalog a runtime reads; plugin discovery is carried separately. */
 export const RuntimeModelsSchema = z.strictObject({
   catalog: z.strictObject({
     id: NonEmptyStringSchema,
@@ -575,6 +567,7 @@ export const RuntimeViewSchema = z.strictObject({
   /** The command name `fy start --agent` takes: the manifest account row's `wrapper`. */
   wrapper: NonEmptyStringSchema,
   harness: HarnessKeySchema,
+  harnessDisplayName: NonEmptyStringSchema.optional(),
   credential: z.strictObject({
     id: NonEmptyStringSchema,
     store: CredentialStoreSchema,
@@ -586,6 +579,9 @@ export const RuntimeViewSchema = z.strictObject({
   modelSet: RuntimeModelSetSchema,
   /** What the runtime offers from its login's model catalog, when the login reads one. Wins over `modelSet`. */
   models: RuntimeModelsSchema.optional(),
+  discovery: z
+    .strictObject({ choices: z.array(RuntimeModelChoiceSchema).readonly(), default: NonEmptyStringSchema.optional() })
+    .optional(),
   /** Agent runtimes only. */
   fixedLayer: FixedLayerViewSchema.optional(),
   /** Whether it can launch now; when not, `reason` is the button's words ("Sign in to launch"). */
@@ -1004,7 +1000,7 @@ export const AccountChangeOutcomeSchema = z.discriminatedUnion('outcome', [
   }),
   z.strictObject({
     outcome: z.literal('executed'),
-    executor: z.enum(['setup', 'clone']),
+    executor: z.enum(['setup', 'clone', 'runtime']),
     summary: NonEmptyStringSchema,
   }),
 ]);

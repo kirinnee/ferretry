@@ -3,6 +3,7 @@ import {
   type FerretRuntimeRename,
   recordedHarnessOf,
   type RuntimeStartResolution,
+  type StartRequest,
 } from '../../../contract/index.ts';
 import { ok, type Result } from '@ferretry/std';
 import type { FerretsCore } from './core.ts';
@@ -72,11 +73,19 @@ export function accountOf<Failure>(
   answer: Extract<RuntimeStartResolution, { ok: true }>,
   stored: string | undefined,
   refuse: (reason: string) => Result<never, Failure>,
-): Result<
-  { readonly harness: Extract<RuntimeStartResolution, { ok: true }>['harness']; readonly login: string },
-  Failure
-> {
+): Result<Pick<Extract<RuntimeStartResolution, { ok: true }>, 'harness' | 'login' | 'model'>, Failure> {
   if (answer.derived === true && stored !== undefined && stored !== answer.login)
     return refuse(loginGoneSentence(stored));
-  return ok({ harness: answer.harness, login: answer.login });
+  return ok({
+    harness: answer.harness,
+    login: answer.login,
+    ...(answer.model === undefined ? {} : { model: answer.model }),
+  });
+}
+
+/** Persist the runtime's selected model with the start, so every subsequent launch uses the same choice. */
+export function withRuntimeModel(request: StartRequest, model: string | undefined): StartRequest {
+  return model === undefined || request.options?.model !== undefined
+    ? request
+    : { ...request, options: { ...request.options, model } };
 }

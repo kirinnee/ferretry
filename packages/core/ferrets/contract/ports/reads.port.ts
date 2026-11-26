@@ -2,6 +2,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import type { FerretState, FerretSummary, HarnessKey, PackId } from '../ids.ts';
 import type { ConversationImport, HarnessFacts, SitrepLine } from '../kinds.ts';
+import type { HarnessRuntimeDescriptor } from '../kinds/runtime-descriptor.ts';
 import type { HarnessHistorySource } from '../history.ts';
 
 /**
@@ -90,6 +91,7 @@ export interface ReadsApi {
    * installed harness has that key: a caller refuses by name and never falls back to another harness.
    */
   harnessFacts(key: HarnessKey): HarnessFacts | undefined;
+  harnessRuntime?(key: HarnessKey): HarnessRuntimeDescriptor | undefined;
   /**
    * Additive (shared history): asks the harness `harness` to copy one conversation of the owner's own history into its
    * shared pool (`Harness.importConversation`). Conversation's alone (it writes no other plugin's state: the harness does);
