@@ -53,10 +53,23 @@ export interface QuestionWatchDeps {
    */
   transcriptEvents?(ferret: string, limit?: number): Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
   /**
+   * The harness's OWN id of the conversation the ferret's transcript holds now (a Codex rollout's session id), never a path
+   * or a handle token: a renamed file is the same conversation. It is stored with a Codex question when first seen, and is
+   * the only evidence that the conversation was replaced (a tail that merely lacks the call is not: the reader keeps a
+   * bounded window). `undefined` when it cannot be told. Absent: a changed conversation is never inferred.
+   */
+  conversation?(ferret: string): Promise<string | undefined>;
+  /**
    * The one writer for a question the transcript projected (it has no hook payload): stored whole, or `undefined`.
    * `askedAt` is the call's own time, or absent when the event carried none (the writer stamps the instant it saw it).
+   * `conversation` is stored with the question (see {@link QuestionWatchDeps.conversation}).
    */
-  writeProjected?(ferret: string, pending: PendingQuestion, askedAt: string | undefined): Promise<Question | undefined>;
+  writeProjected?(
+    ferret: string,
+    pending: PendingQuestion,
+    askedAt: string | undefined,
+    conversation?: string,
+  ): Promise<Question | undefined>;
   /**
    * M7, Claude's half: what the ferret's PANE shows. `form` is the structured question on screen (`readOpenForm`);
    * `ownsPane` is a numbered surface that is not an extractable question (a review page, a form scrolled out of the
@@ -211,7 +224,7 @@ export class QuestionWatch {
 
   /** The question Claude's hook recorded, for a ferret launched with the hook (older launches; a new one writes none). */
   async #hookFile(ferret: string, harness: WatchedHarness): Promise<void> {
-    const open = await this.deps.current(ferret);
+    let open = await this.deps.current(ferret);
     // Read before the file, so a stamp written in between can only make a question over, never bring one back.
     const stamped = await this.deps.lastAnswered(ferret);
     if (
@@ -221,6 +234,7 @@ export class QuestionWatch {
     ) {
       await this.deps.clear(ferret, open.toolUseId);
       await this.deps.answered(ferret, open.toolUseId);
+      open = undefined;
     }
     const file = await harness.askedQuestion?.();
     if (file === undefined || this.#seen.get(ferret) === file.payload) return;
@@ -247,6 +261,8 @@ export class QuestionWatch {
       const stored = await this.deps.write(ferret, file.payload, file.writtenAt, file.transcript);
       this.#seen.set(ferret, file.payload);
       this.#failed.delete(ferret);
+      // The write replaces the file whole: the question it held is gone, and its card goes with it.
+      if (open !== undefined && stored?.toolUseId !== open.toolUseId) await this.deps.answered(ferret, open.toolUseId);
       if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
     } catch (error) {
       if (this.#seen.get(ferret) === file.payload) throw error;
@@ -294,7 +310,7 @@ export class QuestionWatch {
         (claude
           ? events.some(event => resultsTool(event, open.toolUseId)) ||
             (isPaneQuestionId(open.toolUseId) && paneAnswered(events, open))
-          : await this.#codexReleased(ferret, open.toolUseId, events)));
+          : await this.#codexReleased(ferret, open, events)));
     if (over) {
       await this.deps.clear(ferret, open.toolUseId);
       await this.deps.answered(ferret, open.toolUseId);
@@ -303,7 +319,7 @@ export class QuestionWatch {
     // (same id, same time: nothing is retired or asked anew). The pane's own look still runs for its retirement.
     if (upgrade !== undefined && open !== undefined && !over) {
       if (upgrade.questions.length > storedQuestionCount(open)) {
-        const stored = await write(ferret, upgrade, open.askedAt);
+        const stored = await write(ferret, upgrade, open.askedAt, open.conversation);
         if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
       }
       return 'skip';
@@ -314,7 +330,9 @@ export class QuestionWatch {
     const key = `codex:${pending.toolUseId}`;
     if (this.#seen.get(ferret) === key) return 'handled';
     try {
-      const stored = await write(ferret, pending, pending.askedAt);
+      // The conversation is stored WITH the question the first time it is seen, so a later watcher (after a restart) can tell a switch.
+      const conversation = claude ? undefined : await this.deps.conversation?.(ferret).catch(() => undefined);
+      const stored = await write(ferret, pending, pending.askedAt, conversation);
       this.#seen.set(ferret, key);
       this.#failed.delete(ferret);
       if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
@@ -395,22 +413,29 @@ export class QuestionWatch {
    *
    * 1. its exact tool-result is among the events: released;
    * 2. its exact call is among them with no result: still open (a turn event is never release evidence);
-   * 3. neither, and the tail is not full: the transcript simply does not say, so nothing is decided;
-   * 4. neither, and the tail is full: a wider read looks for the same ids; a result there releases, a call there keeps
-   *    it, and a FULL wide read holding neither means the call is more than {@link QUESTION_DEEP_EVENTS} events old.
-   *    An open form writes no such run of events, so that too is a positive release.
+   * 3. neither: a tail that lacks the call proves nothing (the reader's window is bounded and says neither where it began
+   *    nor whether it is whole), so a full tail takes one wider read for the exact ids (a result there releases, a call
+   *    there keeps it), and then the ONLY release is positive evidence the conversation was replaced: the ferret's
+   *    transcript holds a different conversation (its native id, stored with the question) from the one it was asked in.
    *
-   * An unreadable wide read decides nothing.
+   * An unreadable wide read decides nothing. An empty read decides nothing (a transcript still being written).
    */
-  async #codexReleased(ferret: string, toolUseId: string, events: readonly TranscriptEvent[]): Promise<boolean> {
+  async #codexReleased(ferret: string, open: Question, events: readonly TranscriptEvent[]): Promise<boolean> {
+    const toolUseId = open.toolUseId;
     if (events.some(event => resultsTool(event, toolUseId))) return true;
     if (events.some(event => callsTool(event, toolUseId))) return false;
-    if (events.length < QUESTION_TAIL_EVENTS) return false;
-    const wide = await this.deps.transcriptEvents?.(ferret, QUESTION_DEEP_EVENTS);
-    if (wide === undefined || wide === 'unreadable') return false;
-    if (wide.some(event => resultsTool(event, toolUseId))) return true;
-    if (wide.some(event => callsTool(event, toolUseId))) return false;
-    return wide.length >= QUESTION_DEEP_EVENTS;
+    if (events.length === 0) return false;
+    if (events.length >= QUESTION_TAIL_EVENTS) {
+      const wide = await this.deps.transcriptEvents?.(ferret, QUESTION_DEEP_EVENTS);
+      if (wide === undefined || wide === 'unreadable') return false;
+      if (wide.some(event => resultsTool(event, toolUseId))) return true;
+      if (wide.some(event => callsTool(event, toolUseId))) return false;
+    }
+    // The conversation the question was first seen in is stored with it, so this holds across a restart. A question stored
+    // without one (an older file) is never retired by a switch.
+    const known = open.conversation;
+    const now = known === undefined ? undefined : await this.deps.conversation?.(ferret).catch(() => undefined);
+    return known !== undefined && now !== undefined && now !== known;
   }
 
   /** `true` the question is over, `false` still open, `undefined` the transcript could not be read. */

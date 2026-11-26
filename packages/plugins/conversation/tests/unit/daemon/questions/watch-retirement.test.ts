@@ -42,6 +42,8 @@ function world(first: TranscriptEvent[]) {
     events: first as Read,
     wide: undefined as Read | undefined,
     current: undefined as Question | undefined,
+    /** The native conversation id the ferret's transcript holds now; a different one is a replaced conversation. */
+    conversation: 'conv-a' as string | undefined,
   };
   const cleared: string[] = [];
   const limits: (number | undefined)[] = [];
@@ -64,7 +66,8 @@ function world(first: TranscriptEvent[]) {
         ? state.wide
         : state.events;
     },
-    writeProjected: async (_ferret, pending) =>
+    conversation: async () => state.conversation,
+    writeProjected: async (_ferret, pending, _askedAt, conversation) =>
       (state.current = {
         format: 1,
         toolUseId: pending.toolUseId,
@@ -72,6 +75,7 @@ function world(first: TranscriptEvent[]) {
         options: [{ label: 'One' }, { label: 'Two' }],
         multiple: false,
         askedAt: ASKED,
+        ...(conversation === undefined ? {} : { conversation }),
       }),
   };
   return { state, cleared, limits, answered, watch: new QuestionWatch(deps) };
@@ -105,7 +109,7 @@ describe('a stored Codex question is retired by its exact result, wherever the t
   it('releases only the stored question: another question’s result in the tail is not its release', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
-    w.state.events = [resultEvent('someone-else'), ...filler(10)];
+    w.state.events = [callEvent('q1'), resultEvent('someone-else'), ...filler(10)];
     await w.watch.sweep();
     expect(w.cleared).toEqual([]);
     expect(w.state.current?.toolUseId).toBe('q1');
@@ -121,7 +125,7 @@ describe('a stored Codex question is retired by its exact result, wherever the t
     expect(w.limits.every(limit => limit === undefined)).toBe(true);
   });
 
-  it('decides nothing from a short tail that names neither call nor result (the transcript simply does not say)', async () => {
+  it('keeps it when a short tail of the SAME conversation holds neither call nor result (a bounded tail proves nothing)', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
     w.state.events = filler(5);
@@ -129,7 +133,27 @@ describe('a stored Codex question is retired by its exact result, wherever the t
     await w.watch.sweep();
     expect(w.cleared).toEqual([]);
     expect(w.state.current?.toolUseId).toBe('q1');
+  });
+
+  it('retires it when the ferret is on a different conversation and the tail holds neither (D-02, positive evidence)', async () => {
+    const w = world([callEvent('q1')]);
+    await w.watch.sweep();
+    w.state.events = filler(5);
+    w.state.conversation = 'conv-b';
+    await w.watch.sweep();
+    expect(w.cleared).toEqual(['q1']);
+    expect(w.answered).toEqual(['q1']);
+    expect(w.state.current).toBeUndefined();
     expect(w.limits.every(limit => limit === undefined)).toBe(true);
+  });
+
+  it('decides nothing from an empty read (a transcript still being written is not a changed conversation)', async () => {
+    const w = world([callEvent('q1')]);
+    await w.watch.sweep();
+    w.state.events = [];
+    await w.watch.sweep();
+    expect(w.cleared).toEqual([]);
+    expect(w.state.current?.toolUseId).toBe('q1');
   });
 });
 
@@ -156,17 +180,28 @@ describe('positive release recovery when both the call and the result left the n
     expect(w.state.current?.toolUseId).toBe('q1');
   });
 
-  it('releases when a FULL wider read holds neither: the call is older than a form can stay open under', async () => {
+  it('keeps it when a FULL wider read of the same conversation holds neither (absence is not release)', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
     w.state.events = full();
     w.state.wide = filler(QUESTION_DEEP_EVENTS);
     await w.watch.sweep();
+    expect(w.cleared).toEqual([]);
+    expect(w.state.current?.toolUseId).toBe('q1');
+  });
+
+  it('releases when a wider read holds neither and the conversation changed', async () => {
+    const w = world([callEvent('q1')]);
+    await w.watch.sweep();
+    w.state.events = full();
+    w.state.wide = filler(QUESTION_DEEP_EVENTS);
+    w.state.conversation = 'conv-b';
+    await w.watch.sweep();
     expect(w.cleared).toEqual(['q1']);
     expect(w.answered).toEqual(['q1']);
   });
 
-  it('does not release on a wider read that is not full and names neither (not positive evidence)', async () => {
+  it('keeps it on a wider read that is not full and names neither (the reader drops completeness)', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
     w.state.events = full();
@@ -174,6 +209,15 @@ describe('positive release recovery when both the call and the result left the n
     await w.watch.sweep();
     expect(w.cleared).toEqual([]);
     expect(w.state.current?.toolUseId).toBe('q1');
+  });
+
+  it('decides nothing when the conversation cannot be told', async () => {
+    const w = world([callEvent('q1')]);
+    await w.watch.sweep();
+    w.state.events = filler(5);
+    w.state.conversation = undefined;
+    await w.watch.sweep();
+    expect(w.cleared).toEqual([]);
   });
 
   it('never releases on an unreadable wider read, and releases once it can be read', async () => {

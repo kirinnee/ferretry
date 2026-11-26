@@ -186,6 +186,17 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // SIXTH EXEMPTION: a question card is the Agenda's own record, and whether it survives a refused answer (Asks applies the
+  // source BEFORE it records, inside its board mutation, and leaves the card open when the source refuses) exists only in the
+  // real Asks half. Only Conversation's tests may reach the one harness Asks' own tests mount that half with.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/plugin-conversation' &&
+    toPkg.id === 'asks' &&
+    /\/asks\/tests\/support\/daemon\/asks-half\.ts$/u.test(edge.specifier)
+  )
+    return undefined;
+
   // Another package.
   switch (to) {
     case 'kernel-contract':
