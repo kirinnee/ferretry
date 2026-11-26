@@ -176,6 +176,12 @@ export class GitAccountsService {
         maxStderrBytes: MAX_GH_OUTPUT_BYTES,
       });
       const scrub = (text: string, cut: boolean) => (cut ? scrubCut(text, token ?? '') : scrubToken(text, token ?? ''));
+      if (result.exitCode === 0 && result.stdoutTruncated && filter !== undefined)
+        throw new ApiError(
+          403,
+          'GitHub JSON output is too large to filter: narrow the request and try again.',
+          GIT_ACCOUNT_CODES.invalidRequest,
+        );
       if (result.exitCode === 0 && !result.stdoutTruncated && formatter !== undefined && filter !== undefined) {
         if (!(await formatter.verify()))
           throw new ApiError(

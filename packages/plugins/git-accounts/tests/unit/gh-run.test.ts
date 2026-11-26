@@ -572,6 +572,18 @@ describe('G21b tokenless formatting and help', () => {
     expect(world.calls).toHaveLength(0);
   });
 
+  test('capped JSON refuses filtering instead of silently returning unfiltered output', async () => {
+    const world = await boot({
+      projects: [linked('/w')],
+      where: { executables: [GH_REAL, '/usr/bin/jq'] },
+      spawn: () => ({ ...OK, stdout: JSON.stringify('x'.repeat(4 * 1024 * 1024)) }),
+    });
+    expect((await world.gh(['api', 'user', '--jq', '.'], '/w')).json()).toEqual({
+      refused: expect.stringContaining('too large to filter'),
+    });
+    expect(world.calls).toHaveLength(1);
+  });
+
   test('a changed formatter refuses before a filter child is started', async () => {
     let changed = false;
     const world = await boot({

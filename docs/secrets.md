@@ -2091,7 +2091,7 @@ close reopen`), `run` (`list view watch cancel rerun`), `workflow` (`list view`)
     package/profile prefixes as gh, never pane PATH, and rechecks identity before exec. Missing trusted formatters
     refuse before gh starts, naming **Install jq or gojq**. A failed gh keeps its exit code and stderr without starting
     a formatter; a formatter's exit code and stderr pass through, with gh's stderr retained. Both captures stay capped
-    and scrubbed; truncated gh stdout is returned with the existing cut note without formatting incomplete JSON.
+    and scrubbed; truncated gh JSON refuses filtering with a sentence asking to narrow the request.
     **Templates (`--template`/`-T`) say “use --jq instead”**: gh's
     [formatting interface](https://cli.github.com/manual/gh_help_formatting) formats command results and exposes no
     standalone stdin template formatter. Ambiguous `-t` still needs the long flag;
