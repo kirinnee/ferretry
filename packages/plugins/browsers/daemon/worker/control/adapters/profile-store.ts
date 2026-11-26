@@ -17,8 +17,12 @@ import {
   passwordSavingOff,
   sameBrowserProfileLease,
 } from '../index.ts';
-import { clearRecordedChrome, type OrphanChromeInspector } from './orphan-chrome.ts';
-import { systemOrphanChromeInspector } from '../../adapters/proc-chrome.ts';
+import {
+  clearRecordedChrome,
+  type OrphanChromeInspector,
+  type ProcessIdentity,
+  type SignalOutcome,
+} from './orphan-chrome.ts';
 
 // GAP (kernel port, banned-globals stays visible here): Chrome takes a REAL `--user-data-dir`, so the agent profile, its
 // lease file and the symlink checks need a real state path and a lease no kernel port gives (`kernel.state` stores
@@ -43,6 +47,54 @@ const BrowserProfileMetadataSchema = z.object({
   latestChromeVersion: MetadataFieldSchema,
   latestAt: MetadataFieldSchema,
 }) satisfies z.ZodType<BrowserProfileMetadata>;
+
+// The real process table (`/proc`) and a signal: the only way to prove which Chrome is Ferretry's and stop it.
+/** Field 22 of `/proc/<pid>/stat` (start time in ticks) and the state, after the parenthesised command name. */
+function readStat(text: string): { readonly state: string; readonly ticks: string } | undefined {
+  const rest = text.slice(text.lastIndexOf(')') + 2).split(' ');
+  const state = rest[0];
+  const ticks = rest[19];
+  return state && ticks ? { state, ticks } : undefined;
+}
+
+/**
+ * Identity from `/proc` (Linux). Where there is no `/proc` nothing can be identified, so nothing is ever signalled:
+ * a flattened `ps` line loses argument boundaries and cannot prove which profile a process holds.
+ */
+function systemOrphanChromeInspector(): OrphanChromeInspector {
+  let bootId: Promise<string | undefined> | undefined;
+  const boot = (): Promise<string | undefined> =>
+    (bootId ??= readFile('/proc/sys/kernel/random/boot_id', 'utf8').then(
+      text => text.trim(),
+      () => undefined,
+    ));
+  return {
+    identify: async (pid): Promise<ProcessIdentity | undefined> => {
+      try {
+        const id = await boot();
+        if (id === undefined) return undefined;
+        const before = readStat(await readFile(`/proc/${pid}/stat`, 'utf8'));
+        if (before === undefined || before.state === 'Z' || before.state === 'X') return undefined;
+        const args = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').filter(part => part !== '');
+        // The same process answered both reads, or neither is trusted.
+        const after = readStat(await readFile(`/proc/${pid}/stat`, 'utf8'));
+        if (after?.ticks !== before.ticks) return undefined;
+        return { startedAt: `${id}:${before.ticks}`, args };
+      } catch {
+        return undefined;
+      }
+    },
+    signal: (pid, signal): SignalOutcome => {
+      try {
+        process.kill(pid, signal);
+        return 'delivered';
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'gone' : 'denied';
+      }
+    },
+    sleep: milliseconds => Bun.sleep(milliseconds),
+  };
+}
 
 type SingletonLockState =
   | { readonly kind: 'missing' }
