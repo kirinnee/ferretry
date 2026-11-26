@@ -853,6 +853,86 @@ describe('the agenda reply batcher on receipt', () => {
     });
   }
 
+  for (const lifecycle of ['stopped', 'gone'] as const) {
+    it(`should not replay an unsent closing after a restart for a ferret Ferrets says is ${lifecycle}, and keep what else it carried`, async () => {
+      // Arrange: written down as sending, never accepted (the staged pre-send boundary); A1 closes, A2~1 is a request
+      const { batcher, sends, outboxes, undelivered, lifecycle: ferret, timers } = delivering();
+      ferret.state = lifecycle;
+      const replies = [
+        { id: 'A1' as const, message: 'one', at: AT },
+        { id: 'A2~1' as const, message: 'two', at: AT },
+      ];
+      await outboxes.write({
+        ...emptyAgendaOutbox(SESSION),
+        sending: [{ sendId: 'attention-session-1-A1-A2~1-x', ids: ['A1', 'A2~1'], message: 'one\n\ntwo', replies }],
+      });
+
+      // Act
+      await batcher.resume([SESSION]);
+
+      // Assert: nothing typed at replay, the closing is dropped untold, the request waits to go the normal way
+      should(sends.sent).deepEqual([]);
+      should(undelivered).deepEqual([]);
+      should(outboxes.files.get(SESSION)).containDeep({ sending: [], pending: [{ id: 'A2~1' }] });
+      should(outboxes.files.get(SESSION)?.pending.map(each => each.id)).deepEqual(['A2~1']);
+      should(timers.tasks.has(SESSION)).be.true();
+    });
+
+    it(`should drop an unsent closing-only batch with no recorded answers for a ${lifecycle} ferret`, async () => {
+      // Arrange
+      const { batcher, sends, outboxes, undelivered, lifecycle: ferret } = delivering();
+      ferret.state = lifecycle;
+      await outboxes.write({
+        ...emptyAgendaOutbox(SESSION),
+        sending: [{ sendId: 'attention-session-1-A1-x', ids: ['A1'], message: 'one' }],
+      });
+
+      // Act
+      await batcher.resume([SESSION]);
+
+      // Assert
+      should(sends.sent).deepEqual([]);
+      should(undelivered).deepEqual([]);
+      should(outboxes.files.get(SESSION)).containDeep({ sending: [], pending: [] });
+    });
+  }
+
+  it("should still replay an unsent closing after a restart when the lifecycle reads live, and keep an accepted batch's receipt", async () => {
+    // Arrange
+    const { batcher, sends, outboxes } = delivering();
+    await outboxes.write({
+      ...emptyAgendaOutbox(SESSION),
+      sending: [
+        { sendId: 'attention-session-1-A1-x', ids: ['A1'], message: 'one', sentAt: AT },
+        { sendId: 'attention-session-1-A2-y', ids: ['A2'], message: 'two' },
+      ],
+    });
+
+    // Act
+    await batcher.resume([SESSION]);
+
+    // Assert
+    should(sends.sent).deepEqual([{ message: 'two', sendId: 'attention-session-1-A2-y' }]);
+  });
+
+  it('should keep the receipt of an accepted batch for a stopped ferret on restart', async () => {
+    // Arrange: accepted before the restart, then the ferret stopped: its proof is still looked for
+    const { batcher, sends, outboxes, lifecycle, timers } = delivering();
+    lifecycle.state = 'stopped';
+    await outboxes.write({
+      ...emptyAgendaOutbox(SESSION),
+      sending: [{ sendId: 'attention-session-1-A1-x', ids: ['A1'], message: 'one', sentAt: AT }],
+    });
+
+    // Act
+    await batcher.resume([SESSION]);
+
+    // Assert
+    should(sends.sent).deepEqual([]);
+    should(outboxes.files.get(SESSION)?.sending.map(batch => batch.sentAt)).deepEqual([AT]);
+    should(timers.tasks.has(`${SESSION}#receipt`)).be.true();
+  });
+
   it('should look for the proof of an accepted batch after a restart, and re-send one never accepted', async () => {
     // Arrange — one batch accepted before the restart, one written down but never handed over.
     const { batcher, sends, outboxes, timers } = delivering();

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { AsksPort } from '../../../../asks/contract/index.ts';
+import { defineState } from '../../../contract/index.ts';
 import { Harnesses, Runners, StartDecide } from '../../../../ferrets/contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../ferrets/contract/testing/index.ts';
 import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '../../../../gate/contract/testing/index.ts';
@@ -23,6 +24,14 @@ const real = (id: string) => {
   if (found === undefined) throw new Error(`the generated registry has no ${id} half`);
   return found;
 };
+
+/** Asks' held-answers file, declared as Asks declares it: a plugin's own file is reached only through its contract. */
+const AgendaRepliesFiles = defineState({
+  name: 'replies',
+  path: 'ferrets/*/agenda-replies.json',
+  store: 'opaque',
+  format: 1,
+});
 
 const ASK = {
   action: 'add',
@@ -337,6 +346,50 @@ describe('the owner closing an item whose ferret cannot take the closing message
     expect(board.delivery).toBeUndefined();
     // The count `fy tidy` printed was true: the close it counted is still closed, with nothing queued behind it.
     expect(done.status).toBe(200);
+  });
+
+  test('a closing written down as sending but never accepted is not replayed to a stopped ferret by the recovery job after a restart', async () => {
+    const w = await open();
+    const { lead } = await closed(w);
+    // The staged pre-send boundary: the daemon died after the batch was written down as `sending`, before the send path
+    // accepted it (no `sentAt`). The held answer moves from `pending` to that batch.
+    const bytes = w.h.state('asks').rawBytes(AgendaRepliesFiles, lead.id);
+    expect(bytes).toBeDefined();
+    const outbox = JSON.parse(new TextDecoder().decode(bytes)) as {
+      pending: { id: string; message: string; at: string }[];
+      sending: unknown[];
+    };
+    expect(outbox.pending.map(each => each.id)).toEqual(['A1']);
+    outbox.sending = [
+      {
+        sendId: `agenda-${lead.id}-A1-staged`,
+        ids: ['A1'],
+        message: outbox.pending[0]?.message,
+        replies: outbox.pending,
+      },
+    ];
+    outbox.pending = [];
+    expect((await w.h.request('POST', `/v1/ferrets/${lead.id}/stop`, { body: {} })).status).toBeLessThan(300);
+    await w.h.settle();
+    w.h.state('asks').plantBytes(AgendaRepliesFiles, new TextEncoder().encode(JSON.stringify(outbox)), lead.id);
+    const resumed = resumes(w);
+
+    // The mounted recovery job runs again on a restarted daemon.
+    const again = await w.h.restart();
+    worlds.push({ ...w, h: again });
+    await again.runJob('recover');
+    await again.settle();
+    for (let look = 0; look < 20; look += 1) {
+      await again.settle();
+      await Bun.sleep(20);
+    }
+
+    const board = (await again.request('GET', `/v1/ferrets/${lead.id}/agenda`)).json<Board>();
+    expect(resumed).toEqual([]);
+    expect(w.runner.deliveries.filter(d => d.delivery.text.includes('[answer to'))).toHaveLength(0);
+    expect(board.items).toEqual([]);
+    expect(board.resolved.map(item => item.id)).toEqual(['A1']);
+    expect(board.delivery).toBeUndefined();
   });
 
   test('a ferret Ferrets still holds as live is sent to normally, and nothing is dropped', async () => {

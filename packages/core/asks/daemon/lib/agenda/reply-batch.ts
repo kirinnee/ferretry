@@ -469,6 +469,7 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
   async resume(sessionIds: readonly string[]): Promise<void> {
     for (const sessionId of sessionIds) {
       await (async () => {
+        await this.closeUnsentForStoppedFerret(sessionId);
         const outbox = await this.outboxes.read(sessionId);
         if (outbox === null) return;
         for (const batch of outbox.sending) if (batch.sentAt === undefined) await this.deliver(sessionId, batch);
@@ -526,6 +527,29 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
     await this.locked(sessionId, async outbox => {
       const closings = outbox.pending.filter(each => isClosingKey(each.id)).map(each => each.id);
       if (closings.length > 0) await this.outboxes.write(dropPendingReplies(outbox, closings));
+    });
+  }
+
+  /**
+   * The same gate for a batch a restart interrupted BEFORE it was accepted (`sending`, no `sentAt`): replaying it would
+   * type to a stopped ferret and revive it for a closing. Decided from Ferrets' typed lifecycle only. Each unsent batch
+   * goes back to waiting (nothing was typed, so nothing is lost), then the closings are dropped as at a flush; whatever
+   * else it carried is delivered the normal way. A batch that cannot be split (no recorded answers) is dropped only when
+   * every item in it is a closing. A batch already accepted keeps its receipt handling untouched.
+   */
+  private async closeUnsentForStoppedFerret(sessionId: string): Promise<void> {
+    const state = await this.ports.lifecycle?.state(sessionId).catch((): AgendaFerretLifecycle => 'unknown');
+    if (state !== 'stopped' && state !== 'gone') return;
+    await this.locked(sessionId, async outbox => {
+      let next = outbox;
+      for (const batch of outbox.sending) {
+        if (batch.sentAt !== undefined) continue;
+        if (batch.replies !== undefined) next = returnAgendaBatch(next, batch);
+        else if (batch.ids.every(isClosingKey)) next = dropAgendaBatch(next, batch);
+      }
+      const closings = next.pending.filter(each => isClosingKey(each.id)).map(each => each.id);
+      if (closings.length > 0) next = dropPendingReplies(next, closings);
+      if (next !== outbox) await this.outboxes.write(next);
     });
   }
 
