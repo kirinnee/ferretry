@@ -270,7 +270,8 @@ describe('R227 the relay deploy does not touch the link store', () => {
     Bun.YAML.parse(workflow()) as never;
 
   it('R227 no step of the relay workflow names the link store, its config, its route or its Worker', () => {
-    const text = workflow();
+    // A global resource allowlist may name its permitted binding; no job may deploy or control that Worker.
+    const text = JSON.stringify(parsed().jobs);
     expect(text).not.toMatch(/link[-_ ]?store/iu);
     expect(text).not.toContain('wrangler.link-store');
     expect(text).not.toContain('/v1/operator/link-store');
