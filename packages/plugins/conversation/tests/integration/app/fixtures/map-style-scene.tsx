@@ -23,6 +23,11 @@ html.dataset.palette = 'studio';
 html.dataset.mode = mode;
 html.dataset.theme = `studio-${mode}`;
 const view = params.get('view') ?? 'setting';
+// The app locks the page to the screen; this scene is taller than the screen (settings, then a map), so let it grow.
+if (view === 'blocked') {
+  html.style.overflow = 'visible';
+  document.body.style.overflow = 'visible';
+}
 
 /** A FAKE key of the right shape. */
 const FAKE_KEY = 'AIzaFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0';
