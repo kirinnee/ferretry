@@ -46,7 +46,7 @@ describe.skipIf(!ASKED)('the native engines give their memory back on unload', (
       files: new DiskFiles(process.env.FY_REPLY_VOICE_DIR ?? ''),
       clock,
       machine: () => 'this box',
-      start: kind => (kind === 'native' ? (nativeHost('reply') as ReplyThread) : startReplyThread(bunWorkers())),
+      start: kind => (kind === 'native' ? (nativeHost('reply') as ReplyThread) : startReplyThread(bunWorkers(), clock)),
       availableMemory: () => undefined,
       log: { info: quiet, warn: quiet },
       native,
@@ -72,7 +72,8 @@ describe.skipIf(!ASKED)('the native engines give their memory back on unload', (
       files: new DiskFiles(process.env.FY_VOICE_ENGINE_DIR ?? ''),
       clock,
       machine: () => 'this box',
-      start: kind => (kind === 'native' ? (nativeHost('speech') as SpeechThread) : startSpeechThread(bunWorkers())),
+      start: kind =>
+        kind === 'native' ? (nativeHost('speech') as SpeechThread) : startSpeechThread(bunWorkers(), clock),
       availableMemory: () => undefined,
       log: { info: quiet, warn: quiet },
       native,

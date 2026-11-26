@@ -250,6 +250,23 @@ describe('route parity', () => {
     expect(journal.map(entry => entry.fields)).toEqual([{ fields: JSON.stringify(['caps']) }]);
   });
 
+  test('E-140 a first naming of the Jev key journals jev; asking again once it is named does not', async () => {
+    const real = realWardenConfig({ judge: 'owner-at-machine' });
+    const { host } = await wardenHost({ realConfig: real });
+    const save = async (enabled: boolean) =>
+      await host.request('PATCH', '/v1/warden/config', { body: { enabled, nameJevKey: true }, as: owner() });
+    const journal = () =>
+      host.logs.filter(entry => entry.message === 'fleet.warden_config_changed').map(entry => entry.fields);
+
+    expect((await save(false)).status).toBe(200);
+    expect(journal()).toEqual([{ fields: JSON.stringify(['enabled', 'jev']) }]);
+    expect((await save(true)).status).toBe(200);
+    expect(journal()).toEqual([
+      { fields: JSON.stringify(['enabled', 'jev']) },
+      { fields: JSON.stringify(['enabled']) },
+    ]);
+  });
+
   test('R-0232 an owner save over a hand edit the kernel has not reloaded yet is refused 409 (try again) and the hand edit is kept', async () => {
     const real = realWardenConfig({ judge: 'owner-at-machine' });
     await real.handEdit('enabled: false\n');

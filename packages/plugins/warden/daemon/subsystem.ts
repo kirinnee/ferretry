@@ -17,6 +17,7 @@ import {
   FileWardenArtifacts,
   ScratchWardenWorkFolders,
   kernelSecretSender,
+  StateListedNotices,
   StateMachineMembers,
   StateWardenJevCheckLog,
   StateWardenReportFiles,
@@ -170,7 +171,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
   const turns = new TurnOrdinals();
   const entries = new NoticeEntries();
   const agenda = new AsksWardenAgenda(asks, entries);
-  const machineNotices = agenda.machineNotices();
+  const machineNotices = agenda.machineNotices(new StateListedNotices(kernel.state));
   const nowIso = (): string => new Date(kernel.clock.nowMs()).toISOString();
   const files = new StateWardenReportFiles(kernel.state);
   const reader = new WardenReportReader(files, REPORTS_DIRECTORY);
@@ -598,7 +599,14 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
     report: async reportPath => await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath))),
     run: async spawn => await loop.run(spawn),
     config: async () => naming(await service.view()),
-    updateConfig: async (patch, options) => naming(await service.updateConfig(parseWardenConfigPatch(patch), options)),
+    // A save that asks to name a key already named names nothing, so the journal does not say it did.
+    updateConfig: async (patch, options) =>
+      naming(
+        await service.updateConfig(
+          parseWardenConfigPatch(patch),
+          options?.nameJevKey === true && configStore.jevKeyNamed() ? { ...options, nameJevKey: false } : options,
+        ),
+      ),
     nameJevKey: async () => {
       const held = await configStore.nameJevKey();
       const view = naming(await service.view());
