@@ -21,7 +21,7 @@
  * - `fy-worker` makes the script URL of the app's own workers, and only three kinds exist: the signed service
  *   worker every registration names (`sw.verified.js`, with a machine label for a push registration),
  *   the on-device speech workers the build emits beside the app (`/assets/parakeet-worker-<hash>.js`,
- *   or its dev-server address), and Conversation's Durian worker (`/assets/durian-worker-<hash>.js`, which reads
+ *   or its dev-server `/@fs` address), and Conversation's Durian worker (`/assets/durian-worker-<hash>.js`, which reads
  *   a message off the main thread so a slow parse can be stopped). A registration and a `new Worker` are script sinks to the browser, so
  *   without a policy neither could start at all.
  * - `fy-fragment` exists for ONE caller, the `fy-render` html fragment sanitizer
@@ -72,12 +72,14 @@ const WORKER_SCRIPT = new RegExp(
 );
 
 /**
- * The speech workers (`src/worker/parakeet-worker.ts`, `sherpa-worker.ts`, `google-worker.ts`, `vosk-worker.ts`,
- * `whisper-worker.ts`): Vite's content-hashed build output, or the address its dev server serves the
- * same module at. Nothing else under `/assets/` is a worker.
+ * The speech workers (Voice's `app/worker/parakeet-worker.ts`, `sherpa-worker.ts`, `google-worker.ts`, `vosk-worker.ts`,
+ * `whisper-worker.ts`): Vite's content-hashed build output, or the address its dev server serves the same module at. A
+ * plugin's folder is outside the app's root, so the dev server names it by absolute path under `/@fs`: any checkout
+ * location is allowed, but only through plain path segments (a `.worktrees` folder is fine; `.`, `..`, an empty segment or an escape is not) and only to those five
+ * files of Voice's worker folder. Nothing else under `/assets/` is a worker.
  */
 const SPEECH_WORKER_SCRIPT =
-  /^(?:\/assets\/(?:parakeet|sherpa|google|vosk|whisper)-worker-[A-Za-z0-9_-]+\.js|\/src\/worker\/(?:parakeet|sherpa|google|vosk|whisper)-worker\.ts\?worker_file&type=module)$/u;
+  /^(?:\/assets\/(?:parakeet|sherpa|google|vosk|whisper)-worker-[A-Za-z0-9_-]+\.js|\/@fs(?:\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._ -]+)+\/packages\/plugins\/voice\/app\/worker\/(?:parakeet|sherpa|google|vosk|whisper)-worker\.ts\?worker_file&type=module)$/u;
 
 /** Whether a URL is one of the app's own SPEECH worker scripts (not the service worker). */
 export const isSpeechWorkerScriptUrl = (url: string): boolean => SPEECH_WORKER_SCRIPT.test(url);

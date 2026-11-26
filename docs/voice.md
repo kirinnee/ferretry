@@ -369,7 +369,7 @@ Voice › **Voice mode** installs, shows the state, removes, and offers **Talk t
   app ships), in one **worker thread** of the daemon (`daemon/worker/speech.worker.ts`), never in the daemon's own
   event loop. Parakeet TDT 0.6B v3 (int8, multilingual) decodes. **Silero VAD v5** finds the voice, run by
   onnxruntime-web in the same thread, because sherpa's WebAssembly build has no voice-detector entry point. Where this machine can run it,
-  the **native** sherpa-onnx library (fetched at Install, pinned by size and SHA-256 and hashed again before every load) runs
+  the **native** sherpa-onnx library (fetched at Install, pinned by size and SHA-256; it AND the models are hashed again before every load, and a file that changed on disk is deleted, not loaded) runs
   instead; see the next bullet and the declared gaps in `docs/design/voice-modes.md` §2.3.1.
 - **The native engine runs in a child process of the daemon, one per loaded engine** (`daemon/worker/speech-host.ts`), so a native
   crash (a fault in sherpa-onnx or onnxruntime) ends that engine and not `fyd`: it reports itself stopped in Settings, the turn
@@ -661,7 +661,7 @@ at both eight and ten threads. Bounding clauses, as below, leaves room for the s
 It is installed **apart from speech to text** (`GET|POST|DELETE /v1/voice/reply-voice`, the same two grants and the same
 install/measure/unload rules as the engine's routes), in `state/voice/models/kokoro-82m-int8/`. Install chooses native
 first: **394 MB** on linux-x64, including the addon and its two neighbouring libraries. Every file is pinned by size and
-SHA-256, the model URL pins a Hugging Face commit, and the native libraries are hashed again before every load. The fp32
+SHA-256, the model URL pins a Hugging Face commit, and every file (the native libraries and the models) is hashed again before every load. The fp32
 model is **325,560,556 bytes**, below the existing largest speech-model download; no size limit needs raising
 (`daemon/lib/reply/catalog.ts`, `daemon/lib/native/catalog.ts`).
 

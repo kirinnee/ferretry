@@ -15,7 +15,7 @@ import { ensureRoom, installFiles, missingOf } from '../engine/installer.ts';
 import type { EnginePathsPort, HttpPort, ReplyThread } from '../engine/ports.ts';
 import { NATIVE_ADDON_ROLE, type NativeParts } from '../native/catalog.ts';
 import { asUnavailable, installNativeFirst, NativeUnavailable, reasonOf, type RuntimeKind } from '../native/install.ts';
-import { unverified } from '../native/verify.ts';
+import { isPinned, unverified } from '../native/verify.ts';
 import { MAX_CONSECUTIVE_STOPS, StopLedger, wasStopped } from '../native/stopped.ts';
 import { REPLY_FILES, REPLY_LABEL, REPLY_NATIVE_MODEL, REPLY_SHARED_ROLES, type ReplyFile } from './catalog.ts';
 
@@ -488,7 +488,7 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
     if (kind === 'native') {
       // EVERY native load re-hashes the addon and both shared libraries (about 0.1 s next to the model load): the files sit
       // in a folder other programs of this user can write, and what is hashed here is what is loaded next.
-      const bad = await unverified(files, this.nativeAddonFiles);
+      const bad = await unverified(files, this.nativeSet);
       if (bad.length > 0) {
         // Not the pinned bytes: not loaded, and deleted, so the next Install fetches them again.
         for (const file of bad) await files.remove(file);
@@ -505,9 +505,23 @@ export class ReplyVoiceEngine implements ReplyVoiceApi {
         },
       ];
     } else {
-      const runtime = await files.read(role('runtime'));
+      const runtimeFile = role('runtime');
+      const runtime = await files.read(runtimeFile);
       if (runtime === undefined)
         throw new VoiceEngineError('not_ready', 'The reply voice is not installed on this machine yet.');
+      // The model, voices and lexicon are read by path inside the worker, the runtime is sent as bytes: every file of the plan
+      // is hashed as it stands before any of it is used.
+      const bad = [
+        ...(isPinned(runtime, runtimeFile) ? [] : [runtimeFile]),
+        ...(await unverified(
+          files,
+          this.catalog.filter(file => file.role !== runtimeFile.role),
+        )),
+      ];
+      if (bad.length > 0) {
+        for (const file of bad) await files.remove(file);
+        throw new VoiceEngineError('hash_mismatch', SENTENCES.hash_mismatch);
+      }
       const bytes =
         runtime.byteOffset === 0 && runtime.byteLength === runtime.buffer.byteLength
           ? (runtime.buffer as ArrayBuffer)

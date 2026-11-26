@@ -36,6 +36,8 @@ class FakeFal {
   videoUrl = CDN;
   cdn: 'ok' | 'not-found' | 'wrong-type' = 'ok';
   video: Uint8Array = MP4;
+  /** While set, storage answers only once this resolves: a download that is in flight. */
+  cdnGate: Promise<void> | undefined;
   /** The status every new request starts with. */
   startAs: Queued['status'] = 'IN_QUEUE';
   private count = 0;
@@ -92,6 +94,7 @@ class FakeFal {
       return Response.json({ video: { url: this.videoUrl, content_type: 'video/mp4' } });
     }
     if (url.host.endsWith('fal.media')) {
+      await this.cdnGate;
       if (this.cdn === 'not-found')
         return { ok: false, status: 404, headers: new Map(), arrayBuffer: async () => new ArrayBuffer(0) } as never;
       const bytes = this.video;
@@ -452,6 +455,31 @@ describe('generation_status: checking is free; the clip is fetched once it is ma
     expect(net(w)).toBe(350_000);
     expect(ledgerLines(w)).toHaveLength(1);
     expect(jobLines(w)[1]).toMatchObject({ kind: 'finished', job, outcome: 'delivered' });
+  });
+
+  test('a clip downloading does not hold up another job’s check, and the same job is fetched once', async () => {
+    const w = await world();
+    const first = jobOf((await video(w)).text);
+    const second = jobOf((await video(w, { prompt: 'a bear walks through rain' })).text);
+    let open!: () => void;
+    w.fake.cdnGate = new Promise<void>(resolve => (open = resolve));
+    w.fake.finish('req-1');
+    const downloading = status(w, first);
+    await Bun.sleep(50);
+    // Another job is checked while the first clip is still coming down.
+    const other = await Promise.race([status(w, second), Bun.sleep(500).then(() => 'blocked' as const)]);
+    // The same job asked meanwhile is told it is being fetched, and fetches nothing.
+    const again = await Promise.race([status(w, first), Bun.sleep(500).then(() => 'blocked' as const)]);
+    open();
+    const done = await downloading;
+    expect(other).not.toBe('blocked');
+    expect((other as { text: string }).text).toContain('Nothing more was spent');
+    expect(again).not.toBe('blocked');
+    expect((again as { text: string }).text).toContain('is being fetched');
+    expect(done.text).toContain('Put these lines in your reply:');
+    expect(w.fake.to('v3b.fal.media')).toHaveLength(1);
+    expect(w.delivered).toHaveLength(1);
+    expect(net(w)).toBe(700_000);
   });
 
   test('asked again after it was delivered it gives the same block, fetches nothing and charges nothing', async () => {

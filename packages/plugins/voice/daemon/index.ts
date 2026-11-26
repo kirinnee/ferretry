@@ -89,7 +89,7 @@ export default implementDaemon(manifest, {
               command: nativeHostCommand('speech'),
               words: 'speech engine',
             }) as SpeechThread)
-          : startSpeechThread(kernel.workers),
+          : startSpeechThread(kernel.workers, kernel.clock),
       availableMemory: () => freemem(),
       log: {
         info: (message, fields) => engineLog.info(message, fields),
@@ -114,7 +114,7 @@ export default implementDaemon(manifest, {
               command: nativeHostCommand('reply'),
               words: 'reply voice',
             }) as ReplyThread)
-          : startReplyThread(kernel.workers),
+          : startReplyThread(kernel.workers, kernel.clock),
       availableMemory: () => freemem(),
       log: {
         info: (message, fields) => replyLog.info(message, fields),

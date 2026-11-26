@@ -245,9 +245,22 @@ function generateVideo(deps: GenerateVideoDeps) {
     });
 }
 
+/** A made clip ready to be fetched: what the check found, handed on to the fetch that runs outside the shared queue. */
+interface ToFetch {
+  readonly submitted: Submitted;
+  readonly unread: number;
+  readonly url: string;
+}
+
+/**
+ * THE CHECK IS SERIAL, THE DOWNLOAD IS NOT. Everything that reads or writes the ledger and the jobs file runs in the shared
+ * queue with the other creative tools, but the clip's download (up to two minutes) does not: it would hold every other tool
+ * for that long. A job being fetched is marked, so a second ask for it meanwhile is told so and fetches nothing.
+ */
 function generationStatus(deps: GenerateVideoDeps) {
-  return (ferret: string, rawInput: unknown): Promise<ToolAnswer> =>
-    deps.serial(async () => {
+  const fetching = new Set<string>();
+  const check = (ferret: string, rawInput: unknown): Promise<ToolAnswer | ToFetch> =>
+    deps.serial(async (): Promise<ToolAnswer | ToFetch> => {
       const parsed = GenerationStatusInputSchema.safeParse(rawInput);
       if (!parsed.success)
         return refusal(`The status request is not valid: ${parsed.error.issues[0]?.message ?? 'bad input'}.`);
@@ -258,6 +271,10 @@ function generationStatus(deps: GenerateVideoDeps) {
       const { submitted, finished } = found;
 
       if (finished !== undefined) return answerFinished(submitted, finished);
+      if (fetching.has(submitted.job))
+        return {
+          text: `The clip for job ${submitted.job} is being fetched right now. Nothing more was spent; call generation_status again in a minute.`,
+        };
 
       const poll = await pollQueued(deps.secrets, submitted.statusUrl);
       switch (poll.kind) {
@@ -301,33 +318,47 @@ function generationStatus(deps: GenerateVideoDeps) {
           break;
       }
 
-      const got = await download(deps.fetch, result.url, VIDEO_TYPES, 'video', VIDEO_DOWNLOAD);
-      if ('why' in got) {
-        if (got.hostRefused === true || got.permanent === true)
-          return await end(deps, submitted, 'counted', { sentence: unfetchedSentence(submitted, got.why) });
-        return (
-          (await unreadAndGiveUp(deps, submitted, found.unread, got.why)) ?? {
-            text: `The clip for job ${submitted.job} was made and paid for (${submitted.paid}), but ${got.why}. Nothing more is charged for checking; call generation_status again in a minute.`,
-            isError: true,
-          }
-        );
-      }
-      const name = `create-video-${submitted.model}-${submitted.job.slice(4)}.${VIDEO_EXTENSION[got.type] ?? 'mp4'}`;
-      const where = await deps.deliver(ferret, name, got.bytes);
-      if (where === undefined)
-        return {
-          text: `The clip for job ${submitted.job} was made and paid for (${submitted.paid}), but it could not be saved for you yet. Nothing more is charged for checking; call generation_status again in a minute.`,
-          isError: true,
-        };
-      const done = await closeJob(deps, submitted, { outcome: 'delivered', where, bytes: got.bytes.byteLength });
-      if (done !== undefined) return done;
-      return {
-        text: [
-          `The video clip is ready (job ${submitted.job}, ${submitted.label}), paid for: ${submitted.paid}.`,
-          ...pasteOf(submitted, where),
-        ].join('\n'),
-      };
+      fetching.add(submitted.job);
+      return { submitted, unread: found.unread, url: result.url };
     });
+
+  return async (ferret: string, rawInput: unknown): Promise<ToolAnswer> => {
+    const checked = await check(ferret, rawInput);
+    if (!('submitted' in checked)) return checked;
+    const { submitted, unread } = checked;
+    try {
+      const got = await download(deps.fetch, checked.url, VIDEO_TYPES, 'video', VIDEO_DOWNLOAD);
+      return await deps.serial(async (): Promise<ToolAnswer> => {
+        if ('why' in got) {
+          if (got.hostRefused === true || got.permanent === true)
+            return await end(deps, submitted, 'counted', { sentence: unfetchedSentence(submitted, got.why) });
+          return (
+            (await unreadAndGiveUp(deps, submitted, unread, got.why)) ?? {
+              text: `The clip for job ${submitted.job} was made and paid for (${submitted.paid}), but ${got.why}. Nothing more is charged for checking; call generation_status again in a minute.`,
+              isError: true,
+            }
+          );
+        }
+        const name = `create-video-${submitted.model}-${submitted.job.slice(4)}.${VIDEO_EXTENSION[got.type] ?? 'mp4'}`;
+        const where = await deps.deliver(ferret, name, got.bytes);
+        if (where === undefined)
+          return {
+            text: `The clip for job ${submitted.job} was made and paid for (${submitted.paid}), but it could not be saved for you yet. Nothing more is charged for checking; call generation_status again in a minute.`,
+            isError: true,
+          };
+        const done = await closeJob(deps, submitted, { outcome: 'delivered', where, bytes: got.bytes.byteLength });
+        if (done !== undefined) return done;
+        return {
+          text: [
+            `The video clip is ready (job ${submitted.job}, ${submitted.label}), paid for: ${submitted.paid}.`,
+            ...pasteOf(submitted, where),
+          ].join('\n'),
+        };
+      });
+    } finally {
+      fetching.delete(submitted.job);
+    }
+  };
 }
 
 const unfetchedSentence = (submitted: Submitted, why: string): string =>

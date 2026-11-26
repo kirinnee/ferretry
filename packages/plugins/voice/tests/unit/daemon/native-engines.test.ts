@@ -733,6 +733,36 @@ describe('every native load is hashed, and Switch works on a loaded WebAssembly 
     expect(files.has('libonnxruntime.so')).toBe(false);
   });
 
+  test('speech engine: a MODEL swapped on disk at the same size is refused and deleted, not loaded', async () => {
+    const { engine, files, requests } = speechEngine();
+    await engine.install();
+    await engine.settled();
+    await engine.transcribe(new Float32Array(16_000));
+    await engine.unload();
+    const original = files.held.get('encoder');
+    expect(original).toBeDefined();
+    files.held.set('encoder', body('x'.repeat(original?.byteLength ?? 1)).slice(0, original?.byteLength));
+    requests.length = 0;
+    await expect(engine.transcribe(new Float32Array(16_000))).rejects.toMatchObject({ code: 'hash_mismatch' });
+    expect(requests).toEqual([]);
+    expect(files.has('encoder')).toBe(false);
+  });
+
+  test('reply voice: a MODEL swapped on disk at the same size is refused and deleted, not loaded', async () => {
+    const { engine, files, requests } = replyEngine();
+    await engine.install();
+    await engine.settled();
+    await engine.speak('hello');
+    await engine.unload();
+    const original = files.held.get('model-fp32');
+    expect(original).toBeDefined();
+    files.held.set('model-fp32', body('x'.repeat(original?.byteLength ?? 1)).slice(0, original?.byteLength));
+    requests.length = 0;
+    await expect(engine.speak('hello')).rejects.toMatchObject({ code: 'hash_mismatch' });
+    expect(requests).toEqual([]);
+    expect(files.has('model-fp32')).toBe(false);
+  });
+
   test('speech engine: Switch to the fast engine with the WebAssembly models loaded keeps the files and ends native', async () => {
     const { engine, files, requests } = speechEngine();
     for (const file of SPEECH_CATALOG) files.held.set(file.role, body(`speech ${file.role}`));
