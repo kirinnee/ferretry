@@ -145,11 +145,15 @@ export function hostLockProbe(procRoot = '/proc'): LockProbe {
         }
         return unknown ? undefined : false;
       }
-      const lsof = Bun.spawnSync(['lsof', '-t', '--', path], { stdout: 'pipe', stderr: 'pipe' });
-      if (lsof.error !== undefined || lsof.stderr.toString().trim() !== '') return undefined;
-      if (lsof.exitCode === 0) return lsof.stdout.toString().trim().length > 0;
-      if (lsof.exitCode === 1) return false;
-      return undefined;
+      try {
+        const lsof = Bun.spawnSync(['lsof', '-t', '--', path], { stdout: 'pipe', stderr: 'pipe' });
+        if (lsof.stderr.toString().trim() !== '') return undefined;
+        if (lsof.exitCode === 0) return lsof.stdout.toString().trim().length > 0;
+        if (lsof.exitCode === 1) return false;
+        return undefined;
+      } catch {
+        return undefined;
+      }
     },
   };
 }
