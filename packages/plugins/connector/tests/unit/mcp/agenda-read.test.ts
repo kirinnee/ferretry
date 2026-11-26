@@ -175,16 +175,16 @@ const section = (name: string, text: string): AttentionSection => ({ id: name.to
 
 describe('renderWhole always fits the cap', () => {
   it('returns a small item untouched', () => {
-    const out = renderWhole('!A1 — T — from X', [section('One', 'a'), section('Two', 'b')]);
+    const out = renderWhole('^A1 — T — from X', [section('One', 'a'), section('Two', 'b')]);
     should(out.cut).eql([]);
-    should(out.text).equal('!A1 — T — from X\nSections: One; Two.\n\n## One\na\n\n## Two\nb');
+    should(out.text).equal('^A1 — T — from X\nSections: One; Two.\n\n## One\na\n\n## Two\nb');
   });
 
   it('fits six long tabs whose names are long, the case that once came out at 24 024 characters', () => {
     const sections = Array.from({ length: 6 }, (_, index) =>
       section(`${String(index)} ${'a-long-redacted-tab-name '.repeat(3).trim()}`, `${'x'.repeat(60)}\n`.repeat(2000)),
     );
-    const out = renderWhole(`!A1 — ${'T'.repeat(120)} — from Lizzette`, sections);
+    const out = renderWhole(`^A1 — ${'T'.repeat(120)} — from Lizzette`, sections);
     should(out.text.length).be.belowOrEqual(ATTENTION_READ_CAP);
     should(out.cut.length).equal(6);
     for (const each of sections) should(out.text).containEql(`tab "${each.name}" to read it whole`);
@@ -192,7 +192,7 @@ describe('renderWhole always fits the cap', () => {
 
   it('fits when only the shrinking loop can find the room (a few lines of huge width)', () => {
     const sections = Array.from({ length: 9 }, (_, index) => section(`Tab ${String(index)}`, 'y'.repeat(30_000)));
-    const out = renderWhole('!A1 — T — from X', sections);
+    const out = renderWhole('^A1 — T — from X', sections);
     should(out.text.length).be.belowOrEqual(ATTENTION_READ_CAP);
     should(out.text).containEql('Clipped to fit one answer.');
   });
@@ -201,7 +201,7 @@ describe('renderWhole always fits the cap', () => {
     const sections = Array.from({ length: 200 }, (_, index) =>
       section(`${String(index)} ${'N'.repeat(200)}`, 'text'.repeat(500)),
     );
-    const out = renderWhole('!A1 — T — from X', sections);
+    const out = renderWhole('^A1 — T — from X', sections);
     should(out.text.length).equal(ATTENTION_READ_CAP);
     should(out.cut.length).equal(200);
   });
@@ -209,7 +209,7 @@ describe('renderWhole always fits the cap', () => {
   it('fits when every section is wide enough to need its width halved, and many lines are cut at line ends', () => {
     const wide = Array.from({ length: 700 }, () => 'z'.repeat(999)).join('\n');
     const sections = Array.from({ length: 4 }, (_, index) => section(`Wide ${String(index)}`, wide));
-    const out = renderWhole('!A1 — T — from X', sections);
+    const out = renderWhole('^A1 — T — from X', sections);
     should(out.text.length).be.belowOrEqual(ATTENTION_READ_CAP);
   });
 });

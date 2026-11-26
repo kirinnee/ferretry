@@ -385,7 +385,7 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
 | `list_ferrets`      | read  | readOnly     | live ferrets: call sign, task name, state, last activity                                      |
 | `get_ferret`        | read  | readOnly     | one ferret: state, current task, recent-activity summary, last error                          |
 | `get_ferret_output` | read  | readOnly     | tail of recent output; `lines` default 40, hard cap 200 lines / 8 000 chars                   |
-| `list_attention`    | read  | readOnly     | open agenda items (`!A12`): who asks, title, question; `snoozed: true` adds the sleeping ones |
+| `list_attention`    | read  | readOnly     | open agenda items (`^A12`): who asks, title, question; `snoozed: true` adds the sleeping ones |
 | `get_attention`     | read  | readOnly     | ONE agenda item in full: options, context, every tab; 24 000 chars, see below                 |
 | `send_to_ferret`    | write | not readOnly | send a message to a ferret, exactly as the app's composer does                                |
 | `answer_attention`  | write | not readOnly | answer one open agenda item                                                                   |
@@ -399,12 +399,12 @@ mean lizzette (Build MCP Connector)?` More than one match lists them and asks wh
 The agenda is the main channel between the owner and Claude, and `list_attention` shows only a summary line. `get_attention`
 reads ONE item completely, so Claude can work from what the ferret wrote.
 
-- **Input**: `item` — the id as `list_attention` prints it (`A12`, `!A12`, `12`, `a 12`); a title also works when exactly one
+- **Input**: `item` — the id as `list_attention` prints it (`A12`, `^A12`, `12`, `a 12`); a title also works when exactly one
   item has it (a part of a title is enough for READING; `snooze_attention` wants the whole title). `ferret` — when two
   ferrets have an item with the same id (the same rule, and the same sentence, as `answer_attention`); a `ferret` that
   is named narrows a title match FIRST too, so the title is looked for among that ferret's items only. `tab` — one section by name in any case or by id. `from` — with `tab`, the character to start at.
 - **Output** (Markdown-ish text, an item's own Markdown kept exactly as written, so a table stays a table): a heading
-  `!A12 — Title — from Lizzette`, the list of sections, then each section under `## Name`:
+  `^A12 — Title — from Lizzette`, the list of sections, then each section under `## Name`:
   **Overview** (title, summary, who raised it and on whose agenda, state, kind, waiting since, whether only the app can
   answer it, the question, the options with their one-line description and longer explanation, the recommendation,
   numbered questions, form fields, premise, impact, urgency, steps with their ticks, links with their meaning, terms,
@@ -452,7 +452,7 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   `fleet.use` (the daemon's route declares none), so the connector reaches it as the owner's own act, stamped remote and
   governed like every connector call. Scope `fleet:write`; it is in the calls log and the security log (`connector.tool`,
   with the ferret's session id) like `answer_attention`. It never answers, closes or edits the item.
-- **Input**: `item` (the same forms and lookup as `get_attention`: `A12`, `!A12`, `12`; `ferret` when two ferrets
+- **Input**: `item` (the same forms and lookup as `get_attention`: `A12`, `^A12`, `12`; `ferret` when two ferrets
   share an id; but a TITLE must be the whole title, matched exactly in any case, because this changes something: a part
   of a title is only offered back as "Did you mean …?") and EXACTLY ONE of:
   - `until` — an ISO time with a zone (`2026-11-25T09:00:00Z`) or without (**read as Pacific, `America/Los_Angeles`**,
@@ -467,7 +467,7 @@ Hides one open agenda item until a time and lists it again afterwards — the da
   needs "still ahead"). An item that waits on its ferret (resting: `parked: replied`, or `waitingOn: ferret` for more information or a
   discussion — `agendaState` says `resting`) is refused ("not on you, nothing to snooze"); a
   notice is refused by the daemon in its own words; an already snoozed item may be snoozed again and the answer says so.
-- **Answer**: "Snoozed !A12 (Title) until Wed, Nov 25, 9:00 AM PST (in 29 h)." — the wake time in Pacific, always, and the
+- **Answer**: "Snoozed ^A12 (Title) until Wed, Nov 25, 9:00 AM PST (in 29 h)." — the wake time in Pacific, always, and the
   time the DAEMON will wake it: an item with a `neededBy` before the time asked for wakes at the deadline (`agendaWakeAt`),
   so the answer says that time and "sooner than the … you asked for, because it is needed by …"; a deadline that has
   already passed is said too ("which has passed, so the daemon wakes it again at once").

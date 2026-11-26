@@ -118,8 +118,8 @@ describe('answer_attention refuses what only the owner may approve (finding 1)',
     const plain = agendaItem({ id: 'A6', subject: 'Plain', why: 'Question?', ask: { kind: 'open-question' } });
     r.delegate.on(ferretsRoute([LIZ, MARIN])).on(openRoute({ [LIZ.id]: [gated, plain] }));
     const lines = (await tool(r, 'list_attention', {})).text.split('\n');
-    should(lines.find(line => line.startsWith('!A5'))).endWith('Only the Ferretry app can answer this one.');
-    should(lines.find(line => line.startsWith('!A6'))).not.containEql('Only the Ferretry app');
+    should(lines.find(line => line.startsWith('^A5'))).endWith('Only the Ferretry app can answer this one.');
+    should(lines.find(line => line.startsWith('^A6'))).not.containEql('Only the Ferretry app');
   });
 });
 
@@ -290,7 +290,7 @@ describe('an answer carries the ask it was given to (finding 4)', () => {
       const reply = await tool(r, 'answer_attention', args);
       should(reply.isError).be.true();
       should(reply.text).startWith(
-        'That question changed, so nothing was sent; here it is now: !A12 (revised: say version 2 when you answer)',
+        'That question changed, so nothing was sent; here it is now: ^A12 (revised: say version 2 when you answer)',
       );
       should(reply.text).containEql('May I force-push main?');
     }
@@ -313,7 +313,7 @@ describe('an answer carries the ask it was given to (finding 4)', () => {
     const reply = await tool(r, 'answer_attention', { item: 'A12', answer: 'sqlite' });
     should(reply.isError).be.true();
     should(reply.text).startWith(
-      'That question changed, so nothing was sent; here it is now: !A12 (revised: say version 2 when you answer) — from Lizzette — Pick — Which cache?',
+      'That question changed, so nothing was sent; here it is now: ^A12 (revised: say version 2 when you answer) — from Lizzette — Pick — Which cache?',
     );
     should(reply.text).containEql('Options: Postgres, SQLite.');
     should(r.calls.records[0]?.outcome).equal('error');

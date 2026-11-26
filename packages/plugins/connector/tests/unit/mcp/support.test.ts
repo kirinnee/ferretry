@@ -54,7 +54,8 @@ describe('SlidingWindowLimiter', () => {
 
 describe('parseAttentionRef', () => {
   it('accepts the spoken spellings of an item id and nothing else', () => {
-    for (const ref of ['A12', '!A12', 'a12', '12', ' ! a 12 ', 'A012']) should(parseAttentionRef(ref)).equal('A12');
+    for (const ref of ['A12', '^A12', 'a12', '12', ' ! a 12 ', 'A012', '!A12'])
+      should(parseAttentionRef(ref)).equal('A12');
     for (const ref of ['', 'A', 'B12', '12x', 'A-1', '0']) should(parseAttentionRef(ref)).be.undefined();
   });
 });

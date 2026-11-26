@@ -91,7 +91,7 @@ const attentionKeys = (entry: OpenAgendaItem) => ({
 });
 
 const describeItem = async (env: ToolEnvironment, entry: OpenAgendaItem): Promise<string> =>
-  `!${entry.item.id} (${await itemName(env, entry.item, 60)})`;
+  `^${entry.item.id} (${await itemName(env, entry.item, 60)})`;
 
 /** The sentence for an item that is not there: the ids it is near, else the ids that are open, so the next call can be right. */
 async function noSuchItem(
@@ -107,7 +107,7 @@ async function noSuchItem(
     const described = await Promise.all(near.slice(0, 3).map(async entry => await describeItem(env, entry)));
     return new ToolFailure(`${lead} Did you mean ${described.join(', or ')}?`);
   }
-  const open = readable.slice(0, 8).map(entry => `!${entry.item.id}`);
+  const open = readable.slice(0, 8).map(entry => `^${entry.item.id}`);
   return new ToolFailure(
     `${lead} Open items: ${open.join(', ')}${readable.length > open.length ? `, and ${readable.length - open.length} more` : ''}.`,
   );
@@ -172,7 +172,7 @@ const getAttention: ConnectorToolSpec<{
 }> = {
   name: 'get_attention',
   title: 'Read one agenda item in full',
-  description: `Read ONE agenda item in full, read-only: its title, who raised it and its state, the question, the options with their explanations and the recommendation, the steps, the links, the owner's earlier replies, the context, and EVERY tab by name with its full content (Markdown, tables included). Give the item id as list_attention shows it (A12, !A12 or 12). The answer is capped at ${ATTENTION_READ_CAP} characters; when a section had to be cut it says which, and you call this again with tab set to that section's name (and from, a character offset, to continue a long one). Secrets are masked.`,
+  description: `Read ONE agenda item in full, read-only: its title, who raised it and its state, the question, the options with their explanations and the recommendation, the steps, the links, the owner's earlier replies, the context, and EVERY tab by name with its full content (Markdown, tables included). Give the item id as list_attention shows it (A12, ^A12 or 12). The answer is capped at ${ATTENTION_READ_CAP} characters; when a section had to be cut it says which, and you call this again with tab set to that section's name (and from, a character offset, to continue a long one). Secrets are masked.`,
   scope: 'fleet:read',
   annotations: READ,
   input: {
@@ -182,7 +182,7 @@ const getAttention: ConnectorToolSpec<{
       .min(1)
       .max(200)
       .describe(
-        'The item id, like A12, !A12 or 12, as list_attention shows it. A title also works when it is unambiguous.',
+        'The item id, like A12, ^A12 or 12, as list_attention shows it. A title also works when it is unambiguous.',
       ),
     ferret: z
       .string()
@@ -230,7 +230,7 @@ const getAttention: ConnectorToolSpec<{
         text: await env.clean(section.text),
       })),
     );
-    const heading = await env.clean(`!${target.item.id} — ${await itemName(env, target.item, 120)} — from ${asker}`);
+    const heading = await env.clean(`^${target.item.id} — ${await itemName(env, target.item, 120)} — from ${asker}`);
     if (tab === undefined) return { text: renderWhole(heading, sections).text };
     const section = findSection(sections, tab);
     if (section === undefined)
@@ -249,7 +249,7 @@ const snoozeAttention: ConnectorToolSpec<{
 }> = {
   name: 'snooze_attention',
   title: 'Snooze an open question',
-  description: `Hide one open agenda item until a later time, as the app's Snooze does: list_attention stops showing it, and the daemon lists it again, fresh, at that time. Give the item id (A12, !A12 or 12, as list_attention shows it) and EITHER until (an ISO time; a time with no zone is Pacific time; "tomorrow 9am" and "17:00" also work) OR duration (like 90m, 2h or 1d). It must be at least a minute and at most ${Math.round(SNOOZE_MAX_MS / 86_400_000)} days ahead. The answer says the wake time in Pacific time. It does not answer or close the item.`,
+  description: `Hide one open agenda item until a later time, as the app's Snooze does: list_attention stops showing it, and the daemon lists it again, fresh, at that time. Give the item id (A12, ^A12 or 12, as list_attention shows it) and EITHER until (an ISO time; a time with no zone is Pacific time; "tomorrow 9am" and "17:00" also work) OR duration (like 90m, 2h or 1d). It must be at least a minute and at most ${Math.round(SNOOZE_MAX_MS / 86_400_000)} days ahead. The answer says the wake time in Pacific time. It does not answer or close the item.`,
   scope: 'fleet:write',
   annotations: { ...WRITE, idempotentHint: true },
   input: {
@@ -298,7 +298,7 @@ const snoozeAttention: ConnectorToolSpec<{
     const byId = new Map<string, FerretSummary>(sessions.map(view => [view.id, view]));
     const target = await pickAttention(env, items, byId, item, ferret, 'exact');
     const id = target.item.id;
-    const named = `!${id} (${await itemName(env, target.item, 60)})`;
+    const named = `^${id} (${await itemName(env, target.item, 60)})`;
     if (agendaState(target.item).state === 'resting')
       throw new ToolFailure(`${named} is waiting on its ferret, not on you, so there is nothing to snooze.`, {
         sessionId: target.sessionId,

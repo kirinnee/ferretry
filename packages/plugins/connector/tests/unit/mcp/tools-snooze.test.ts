@@ -135,7 +135,7 @@ describe('snooze_attention', () => {
     const { r, bodies } = world([a12()]);
     const reply = await tool(r, 'snooze_attention', { item: 'A12', until: '2026-11-25T09:00' });
     should(reply.isError).be.false();
-    should(reply.text).startWith('Snoozed !A12 (Today: close OCBC 365 card) until Wed, Nov 25, 9:00 AM PST (in 29 h).');
+    should(reply.text).startWith('Snoozed ^A12 (Today: close OCBC 365 card) until Wed, Nov 25, 9:00 AM PST (in 29 h).');
     should(bodies).eql([
       {
         path: `/v1/ferrets/${LIZ.id}/agenda`,
@@ -144,8 +144,8 @@ describe('snooze_attention', () => {
     ]);
   });
 
-  it('takes a duration, and accepts the id as "!A12", "a 12" or "12"', async () => {
-    for (const spoken of ['!A12', 'a 12', '12']) {
+  it('takes a duration, and accepts the id as "^A12", "a 12" or "12"', async () => {
+    for (const spoken of ['^A12', 'a 12', '12']) {
       const { r, bodies } = world([a12()]);
       const reply = await tool(r, 'snooze_attention', { item: spoken, duration: '2h' });
       should(reply.text).containEql('until Tue, Nov 24, 6:00 AM PST (in 2 h)');
@@ -201,7 +201,7 @@ describe('snooze_attention', () => {
     r.state.now = NOW + 2 * 3_600_000;
     const back = (await tool(r, 'list_attention', {})).text;
     should(back).containEql('1 waiting on you:');
-    should(back).containEql('!A12');
+    should(back).containEql('^A12');
     should(back).not.containEql('snoozed');
   });
 
@@ -322,7 +322,7 @@ describe('snooze_attention — a deadline wakes it sooner', () => {
     const reply = await tool(r, 'snooze_attention', { item: 'A12', duration: '2h' });
     should(reply.isError).be.false();
     should(reply.text).startWith(
-      'Snoozed !A12 (Today: close OCBC 365 card) until Tue, Nov 24, 4:15 AM PST (in 15 min).',
+      'Snoozed ^A12 (Today: close OCBC 365 card) until Tue, Nov 24, 4:15 AM PST (in 15 min).',
     );
     should(reply.text).containEql(
       'That is sooner than the Tue, Nov 24, 6:00 AM PST you asked for, because it is needed by Tue, Nov 24, 4:15 AM PST.',
@@ -342,7 +342,7 @@ describe('snooze_attention — a deadline wakes it sooner', () => {
   it('keeps the time asked for when the deadline is later', async () => {
     const { r } = world([a12({ neededBy: '2026-12-01T12:00:00.000Z' })]);
     const reply = await tool(r, 'snooze_attention', { item: 'A12', duration: '2h' });
-    should(reply.text).startWith('Snoozed !A12 (Today: close OCBC 365 card) until Tue, Nov 24, 6:00 AM PST (in 2 h).');
+    should(reply.text).startWith('Snoozed ^A12 (Today: close OCBC 365 card) until Tue, Nov 24, 6:00 AM PST (in 2 h).');
     should(reply.text).not.containEql('sooner');
   });
 });
@@ -376,7 +376,7 @@ describe('snooze_attention — a title is a write target only when it is exact',
     const part = await tool(r, 'snooze_attention', { item: 'close OCBC', duration: '2h' });
     should(part.isError).be.true();
     should(part.text).containEql('no item has exactly that title.');
-    should(part.text).containEql('Did you mean !A12 (Today: close OCBC 365 card)?');
+    should(part.text).containEql('Did you mean ^A12 (Today: close OCBC 365 card)?');
     should(bodies.length).equal(0);
     const whole = await tool(r, 'snooze_attention', { item: 'today: CLOSE ocbc 365 card', duration: '2h' });
     should(whole.isError).be.false();
@@ -422,7 +422,7 @@ describe('answer_attention and list_attention agree on what is open', () => {
 
   it('answers a snoozed item whose time has come, before the daemon timer has woken it', async () => {
     const { r, bodies } = world([due('A12')]);
-    should((await tool(r, 'list_attention', {})).text).containEql('!A12');
+    should((await tool(r, 'list_attention', {})).text).containEql('^A12');
     const reply = await tool(r, 'answer_attention', { item: 'A12', answer: 'approve' });
     should(reply.isError).be.false();
     should(bodies.map(entry => entry.body.action)).eql(['resolve']);

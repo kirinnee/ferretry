@@ -74,7 +74,7 @@ describe('get_attention — the whole item', () => {
     const reply = await tool(r, 'get_attention', { item: 'A12' });
     should(reply.isError).be.false();
     const text = reply.text;
-    should(text.split('\n')[0]).equal('!A12 — Database choice — from Lizzette');
+    should(text.split('\n')[0]).equal('^A12 — Database choice — from Lizzette');
     should(text).containEql('Sections: Overview; Context; Where we are now; The full picture; Costs');
     for (const said of [
       'Raised by: Lizzette',
@@ -124,11 +124,11 @@ describe('get_attention — the whole item', () => {
     should(text).containEql('[ferret, question-answer, 40 min ago] It needs a server.');
   });
 
-  it('accepts "A12", "!A12", "a 12" and "12" alike, and a title when it is unambiguous', async () => {
+  it('accepts "A12", "^A12", "a 12" and "12" alike, and a title when it is unambiguous', async () => {
     const r = world([full()]);
-    for (const spoken of ['A12', '!A12', 'a 12', '12', 'database choice'])
+    for (const spoken of ['A12', '^A12', 'a 12', '12', 'database choice'])
       should((await tool(r, 'get_attention', { item: spoken })).text.split('\n')[0]).equal(
-        '!A12 — Database choice — from Lizzette',
+        '^A12 — Database choice — from Lizzette',
       );
   });
 
@@ -310,12 +310,12 @@ describe('get_attention — an id that is not there', () => {
     const other = agendaItem({ id: 'A21', subject: 'Other', why: 'Other?', extra: { title: 'Other thing' } });
     const reply = await tool(world([full(), other]), 'get_attention', { item: 'A22' });
     should(reply.isError).be.true();
-    should(reply.text).equal('There is no open item A22. Did you mean !A12 (Database choice), or !A21 (Other thing)?');
+    should(reply.text).equal('There is no open item A22. Did you mean ^A12 (Database choice), or ^A21 (Other thing)?');
   });
 
   it('lists what is open when nothing is near, and says when nothing is waiting', async () => {
     const reply = await tool(world([full()]), 'get_attention', { item: 'A900' });
-    should(reply.text).equal('There is no open item A900. Open items: !A12.');
+    should(reply.text).equal('There is no open item A900. Open items: ^A12.');
     should((await tool(world([]), 'get_attention', { item: 'A1' })).text).equal(
       'There is no open item A1. Nothing is waiting on you.',
     );
@@ -326,7 +326,7 @@ describe('get_attention — an id that is not there', () => {
     should(reply.isError).be.true();
     should(reply.text).containEql('"zzzz" is not an item id (they look like A12) and no title matches it.');
     const near = await tool(world([full()]), 'get_attention', { item: 'databse choice' });
-    should(near.text).containEql('Did you mean !A12 (Database choice)?');
+    should(near.text).containEql('Did you mean ^A12 (Database choice)?');
   });
 
   it('asks which ferret when two have an item with the same id, and `ferret` settles it', async () => {
@@ -343,10 +343,10 @@ describe('get_attention — an id that is not there', () => {
     should(both.isError).be.true();
     should(both.text).equal('Item A12 is open for more than one ferret (Lizzette and Marin). Which ferret asked?');
     should((await tool(r, 'get_attention', { item: 'A12', ferret: 'marin' })).text.split('\n')[0]).equal(
-      '!A12 — Login question — from Marin',
+      '^A12 — Login question — from Marin',
     );
     should((await tool(r, 'get_attention', { item: 'A12', ferret: 'lizzette' })).text.split('\n')[0]).equal(
-      '!A12 — Database choice — from Lizzette',
+      '^A12 — Database choice — from Lizzette',
     );
   });
 
@@ -371,9 +371,9 @@ describe('get_attention and list_attention agree', () => {
       agendaItem({ id: 'A13', subject: 'Looks good?', why: 'Review the plan', ask: { kind: 'answer-review' } }),
     ]);
     const listed = (await tool(r, 'list_attention', {})).text;
-    const ids = [...listed.matchAll(/^!(A\d+) /gmu)].map(match => match[1] as string);
+    const ids = [...listed.matchAll(/^\^(A\d+) /gmu)].map(match => match[1] as string);
     should(ids).eql(['A12', 'A13']);
-    for (const id of ids) should((await tool(r, 'get_attention', { item: `!${id}` })).isError).be.false();
+    for (const id of ids) should((await tool(r, 'get_attention', { item: `^${id}` })).isError).be.false();
     const description = (CONNECTOR_TOOLS.find(spec => spec.name === 'list_attention') as { description: string })
       .description;
     should(description).containEql('get_attention');
@@ -411,7 +411,7 @@ describe('get_attention — a title, read loosely, and the ferret that is named'
     const reply = await tool(world([full(), other]), 'get_attention', { item: 'database' });
     should(reply.isError).be.true();
     should(reply.text).equal(
-      'More than one item matches "database": !A12 (Database choice); !A21 (Database backup). Which one?',
+      'More than one item matches "database": ^A12 (Database choice); ^A21 (Database backup). Which one?',
     );
   });
 
@@ -420,10 +420,10 @@ describe('get_attention — a title, read loosely, and the ferret that is named'
     const unqualified = await tool(r, 'get_attention', { item: 'database' });
     should(unqualified.text).containEql('More than one item matches');
     should((await tool(r, 'get_attention', { item: 'database', ferret: 'marin' })).text.split('\n')[0]).equal(
-      '!A40 — Database backup — from Marin',
+      '^A40 — Database backup — from Marin',
     );
     should((await tool(r, 'get_attention', { item: 'database', ferret: 'lizzette' })).text.split('\n')[0]).equal(
-      '!A12 — Database choice — from Lizzette',
+      '^A12 — Database choice — from Lizzette',
     );
   });
 

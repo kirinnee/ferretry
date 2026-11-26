@@ -85,12 +85,12 @@ export async function attentionLine(
   const appOnly = needsTheApp(item) ? ' Only the Ferretry app can answer this one.' : '';
   const revised =
     (item.askVersion ?? 1) > 1 ? ` (revised: say version ${String(item.askVersion)} when you answer)` : '';
-  return `!${item.id}${revised} — from ${askerOf(item, byId)} — ${await itemName(env, item, 80)} — ${await shortClean(env, item.why, 240)}${choices}${appOnly}`;
+  return `^${item.id}${revised} — from ${askerOf(item, byId)} — ${await itemName(env, item, 80)} — ${await shortClean(env, item.why, 240)}${choices}${appOnly}`;
 }
 
-/** "A12", "!A12", "a 12", "12" → "A12"; undefined when it is none of those. */
+/** "A12", "^A12", "!A12", "a 12", "12" → "A12"; undefined when it is none of those. */
 export function parseAttentionRef(raw: string): string | undefined {
-  const match = /^\s*!?\s*a?\s*0*([1-9][0-9]{0,8})\s*$/iu.exec(raw);
+  const match = /^\s*[!^]?\s*a?\s*0*([1-9][0-9]{0,8})\s*$/iu.exec(raw);
   return match === null ? undefined : `A${match[1]}`;
 }
 

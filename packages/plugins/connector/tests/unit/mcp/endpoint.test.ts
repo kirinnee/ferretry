@@ -374,9 +374,9 @@ describe('attention', () => {
     const reply = await tool(r, 'list_attention', {});
     should(reply.text).containEql('2 waiting on you:');
     should(reply.text).containEql(
-      '!A12 — from Lizzette — Pick a database — Which database should the connector use? Options: Postgres, SQLite.',
+      '^A12 — from Lizzette — Pick a database — Which database should the connector use? Options: Postgres, SQLite.',
     );
-    should(reply.text).containEql('!A13 — from Lizzette');
+    should(reply.text).containEql('^A13 — from Lizzette');
   });
 
   it('says nothing is waiting', async () => {
@@ -385,7 +385,7 @@ describe('attention', () => {
     should((await tool(r, 'list_attention', {})).text).equal('Nothing is waiting on you.');
   });
 
-  it('answers a multiple-choice item by option, accepting "!A12", "A12" and "12"', async () => {
+  it('answers a multiple-choice item by option, accepting "^A12", "A12" and "12"', async () => {
     const items = [
       agendaItem({
         id: 'A12',
@@ -394,7 +394,7 @@ describe('attention', () => {
         ask: { kind: 'multiple-choice', options: [{ label: 'Postgres' }, { label: 'SQLite' }] },
       }),
     ];
-    for (const ref of ['!A12', 'A12', '12', ' a 12 ']) {
+    for (const ref of ['^A12', 'A12', '12', ' a 12 ']) {
       const r = rig();
       r.delegate
         .on(ferretsRoute())

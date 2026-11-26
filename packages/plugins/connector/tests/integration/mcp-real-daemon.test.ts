@@ -209,7 +209,7 @@ describe('an MCP client signs in and uses the tools on a real daemon', () => {
 
     const list = await call('list_attention');
     expect(list.text).toContain('Region choice');
-    const idOf = (title: string) => new RegExp(`!(A\\d+) — from E2e-lead — ${title}`, 'u').exec(list.text)?.[1] ?? '';
+    const idOf = (title: string) => new RegExp(`\\^(A\\d+) — from E2e-lead — ${title}`, 'u').exec(list.text)?.[1] ?? '';
     const region = idOf('Region choice');
     const notes = idOf('Release notes');
     expect(region).not.toBe('');

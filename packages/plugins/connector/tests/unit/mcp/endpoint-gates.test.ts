@@ -339,10 +339,10 @@ describe('/mcp — get_attention through the official MCP SDK client', () => {
       should(found?.annotations).containEql({ readOnlyHint: true, destructiveHint: false, idempotentHint: true });
       should(Object.keys(found?.inputSchema.properties ?? {}).sort()).eql(['ferret', 'from', 'item', 'tab']);
       should(found?.inputSchema.required).eql(['item']);
-      const called = await client.callTool({ name: 'get_attention', arguments: { item: '!A12' } });
+      const called = await client.callTool({ name: 'get_attention', arguments: { item: '^A12' } });
       const text = (called.content as { type: string; text: string }[]).map(part => part.text).join('\n');
       should(called.isError).not.be.true();
-      should(text).containEql('!A12 — Database choice — from Lizzette');
+      should(text).containEql('^A12 — Database choice — from Lizzette');
       should(text).containEql(`Costs compared:\n\n${TABLE}`);
       should(text).not.containEql('sk-ant-ABCDEFGH12345678');
       const one = await client.callTool({ name: 'get_attention', arguments: { item: 'A12', tab: 'costs' } });
@@ -387,7 +387,7 @@ describe('/mcp — get_attention through the official MCP SDK client', () => {
       });
       should(done.isError).not.be.true();
       should((done.content as { text: string }[])[0]?.text).startWith(
-        'Snoozed !A12 (Database choice) until Wed, Nov 25, 9:00 AM PST',
+        'Snoozed ^A12 (Database choice) until Wed, Nov 25, 9:00 AM PST',
       );
       should(posted).eql([{ action: 'snooze', id: 'A12', until: '2026-11-25T17:00:00.000Z' }]);
       should(r.calls.records.map(entry => entry.tool)).eql(['snooze_attention']);
