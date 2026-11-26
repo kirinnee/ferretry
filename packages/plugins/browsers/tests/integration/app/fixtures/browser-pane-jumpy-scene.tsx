@@ -6,6 +6,10 @@
  * edge on every animation frame into `window.__tops`.
  *
  *   ?theme=<family>-<mode>
+ *   &connection=<connected|connecting|disconnected|detached>   the display link the status row speaks of (default connected)
+ *   &actor=none   a browser nobody has driven yet (the "No input yet" chip)
+ *   &text=larger   the Larger text size (the factor the Text size setting publishes on the root)
+ *   &loading=1    the page starts out loading (the "Loading page…" label)
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
@@ -13,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   RemoteBrowserControls,
+  type RemoteBrowserConnection,
   RemoteBrowserStatusBar,
 } from '../../../../app/features/browser/remote-browser-chrome.tsx';
 import type { RemoteBrowserPaneProps } from '../../../../app/features/browser/remote-browser-pane.tsx';
@@ -23,7 +28,20 @@ import type { BrowserAction, BrowserStatus } from '../../../../contract/wire/bro
 import { paneState } from '../../../support/app/browser-pane-state.ts';
 
 const params = new URLSearchParams(window.location.search);
-document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+// `theme` is <style>-<mode>; the style, its own default palette and the mode are what the stylesheet reads.
+const [style = 'studio', mode = 'light'] = (params.get('theme') ?? 'studio-light').split('-');
+const PALETTE: Readonly<Record<string, string>> = { studio: 'studio', genz: 'vaporwave', neumorphism: 'afterglow' };
+document.documentElement.dataset.theme = `${style}-${mode}`;
+document.documentElement.dataset.style = style;
+document.documentElement.dataset.palette = PALETTE[style] ?? 'studio';
+document.documentElement.dataset.mode = mode;
+const connection = (params.get('connection') ?? 'connected') as RemoteBrowserConnection;
+const driven = params.get('actor') !== 'none';
+if (params.get('text') === 'larger') {
+  document.documentElement.dataset.textScale = 'larger';
+  document.documentElement.style.setProperty('--fy-text-scale', '1.25');
+}
+const startsLoading = params.get('loading') === '1';
 
 declare global {
   interface Window {
@@ -53,13 +71,13 @@ const status = (loading: boolean): BrowserStatus =>
     persistentProfile: true,
     idleTimeoutSeconds: 900,
     capacity: { running: 1, maximum: 3 },
-    lastActor: { kind: 'agent', at: '2026-10-30T22:00:00.000Z', action: 'type' },
+    ...(driven ? { lastActor: { kind: 'agent', at: '2026-10-30T22:00:00.000Z', action: 'type' } } : {}),
     proxy: { url: 'http://proxy.invalid:8080', authenticated: false, bypassCount: 0 },
   }) as unknown as BrowserStatus;
 
 function StandInPane({ onStateChange }: RemoteBrowserPaneProps) {
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(startsLoading);
   const runAction = useCallback((_action: BrowserAction) => undefined, []);
   const current = useMemo(() => status(loading), [loading]);
 
@@ -76,11 +94,11 @@ function StandInPane({ onStateChange }: RemoteBrowserPaneProps) {
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface"
       aria-label="Shared remote browser"
     >
-      <RemoteBrowserStatusBar status={current} connection="connected" busy={busy} />
+      <RemoteBrowserStatusBar status={current} connection={connection} busy={busy} />
       <div data-controls="">
         <RemoteBrowserControls
           status={current}
-          connection="connected"
+          connection={connection}
           busy={busy}
           fit
           viewportMode="responsive"

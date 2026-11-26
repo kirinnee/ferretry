@@ -13,7 +13,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { sceneBuilder, sharedChromium } from '../support/browser/index.ts';
-import type { Page } from 'playwright-core';
+import type { BrowserContext, Page } from 'playwright-core';
 
 setDefaultTimeout(90_000);
 
@@ -52,10 +52,19 @@ beforeAll(async () => {
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: request =>
-      new URL(request.url).pathname === '/app.js'
+    fetch: (request, self) => {
+      const path = new URL(request.url).pathname;
+      // A socket that echoes: it exists so the leak watch can be shown to read frames, and the app never opens one here.
+      if (path === '/echo' && self.upgrade(request, { data: undefined })) return undefined;
+      return path === '/app.js'
         ? new Response(js, { headers: { 'content-type': 'text/javascript' } })
-        : new Response(page, { headers: { 'content-type': 'text/html' } }),
+        : new Response(page, { headers: { 'content-type': 'text/html' } });
+    },
+    websocket: {
+      message: (socket, message) => {
+        socket.send(message);
+      },
+    },
   });
   if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
 }, 300_000);
@@ -80,6 +89,64 @@ const READY: Record<Tab, string> = {
   audit: '[data-security-log-panel]',
 };
 
+/** The fixed fake pairing code of `fixtures/access-settings-data.ts`: two groups of it are enough to know it. */
+const holdsCode = (text: string): boolean => /7F3K|Q2ND/i.test(text);
+
+/**
+ * Everything a pairing code must be in NONE of, however the page could have said it outside its own screen: a page error, a
+ * console line and every object it was given, each request's URL, headers and body, each WebSocket frame either way. `inPage`
+ * reads what the page keeps: its title, its address and history state, every attribute value, and what it stored. A real
+ * browser reads each; nothing is inferred.
+ */
+const watchLeaks = (page: Page, context: BrowserContext) => {
+  const said: string[] = [];
+  const pending: Promise<void>[] = [];
+  page.on('pageerror', error => said.push(`pageerror ${error.message} ${error.stack ?? ''}`));
+  page.on('console', message => {
+    said.push(`console ${message.text()}`);
+    for (const argument of message.args())
+      pending.push(
+        argument
+          .jsonValue()
+          .then(value => void said.push(`console-arg ${JSON.stringify(value)}`))
+          .catch(() => undefined),
+      );
+  });
+  page.on('request', request => {
+    said.push(`request ${request.url()} ${JSON.stringify(request.headers())} ${request.postData() ?? ''}`);
+  });
+  page.on('websocket', socket => {
+    said.push(`websocket ${socket.url()}`);
+    socket.on('framesent', frame => said.push(`frame-sent ${String(frame.payload)}`));
+    socket.on('framereceived', frame => said.push(`frame-received ${String(frame.payload)}`));
+  });
+  return {
+    /** Every line the page said outside itself so far, once the reads still in flight have landed. */
+    leaked: async (): Promise<string[]> => {
+      await Promise.all(pending);
+      return said.filter(holdsCode);
+    },
+    /** What the page keeps, other than the words on its screen. */
+    inPage: async (): Promise<string[]> => {
+      const kept = await page.evaluate(() => {
+        const out: string[] = [`title ${document.title}`, `location ${location.href}`];
+        out.push(`history ${JSON.stringify(history.state)}`);
+        for (const element of document.querySelectorAll('*'))
+          for (const attribute of element.attributes)
+            out.push(`attribute ${element.tagName}[${attribute.name}] ${attribute.value}`);
+        for (const store of [localStorage, sessionStorage])
+          for (let at = 0; at < store.length; at += 1) {
+            const key = store.key(at) ?? '';
+            out.push(`storage ${key} ${store.getItem(key) ?? ''}`);
+          }
+        return out;
+      });
+      const cookies = (await context.cookies()).map(cookie => `cookie ${cookie.name} ${cookie.value}`);
+      return [...kept, ...cookies].filter(holdsCode);
+    },
+  };
+};
+
 const open = async (viewport: (typeof VIEWPORTS)[number], theme: string, tab: Tab, state = 'default') => {
   const ready = state === 'refused' ? '[data-security-log-refused]' : READY[tab];
   const context = await browser.newContext({
@@ -96,6 +163,7 @@ const open = async (viewport: (typeof VIEWPORTS)[number], theme: string, tab: Ta
   const page = await context.newPage();
   const problems: string[] = [];
   page.on('pageerror', error => problems.push(error.message));
+  const leaks = watchLeaks(page, context);
   await page.goto(`${origin}/d/ws/settings/access/${tab}?theme=${theme}&state=${state}`);
   try {
     // A phone opens the list first; a tab link opens the page.
@@ -110,7 +178,7 @@ const open = async (viewport: (typeof VIEWPORTS)[number], theme: string, tab: Ta
     ).slice(0, 600);
     throw new Error(`the scene did not draw ${ready}: ${String(error)}\n${problems.join('\n')}\nON SCREEN: ${seen}`);
   }
-  return { page, context, problems };
+  return { page, context, problems, leaks };
 };
 
 /** The page measures that must hold on every tab at every width. */
@@ -223,10 +291,13 @@ describe('Access settings, in the real Settings shell, over a fake machine', () 
 
   for (const viewport of VIEWPORTS) {
     it(`devices: the pairing code and a device's capabilities, by the panel's width (${viewport.name})`, async () => {
-      const { page, context } = await open(viewport, 'studio-light', 'devices', 'long');
+      const { page, context, leaks } = await open(viewport, 'studio-light', 'devices', 'long');
       try {
         await page.locator('[data-pair-mint]').click();
         await page.locator('[data-pair-invite]').waitFor();
+        // The QR is drawn locally: the code is on the screen on purpose, and in nothing the browser said, asked for or kept.
+        expect(await leaks.leaked()).toEqual([]);
+        expect(await leaks.inPage()).toEqual([]);
         await page.locator('[data-device-capabilities]').first().locator('summary').click();
         const m = await measure(page);
         expect(m.pageScroll).toBeLessThanOrEqual(0);
@@ -269,6 +340,70 @@ describe('Access settings, in the real Settings shell, over a fake machine', () 
       }
     });
   }
+
+  // The code is on the screen until Done, and then it is nowhere: not in a message, a request, a frame, the address, the title,
+  // the history, an attribute or a store, and not in the words on the page either.
+  for (const viewport of VIEWPORTS) {
+    it(`devices: the pairing code is in nothing the page says or keeps, and not on the page after Done (${viewport.name})`, async () => {
+      const { page, context, leaks } = await open(viewport, 'studio-light', 'devices', 'long');
+      try {
+        await page.locator('[data-pair-mint]').click();
+        await page.locator('[data-pair-invite]').waitFor();
+        expect(await page.locator('[data-pair-invite]').innerText()).toMatch(/7F3K/);
+        expect(await leaks.leaked()).toEqual([]);
+        expect(await leaks.inPage()).toEqual([]);
+        await page.locator('[data-pair-discard]').click();
+        await page.locator('[data-pair-invite]').waitFor({ state: 'detached' });
+        // Let anything the dismissal schedules (a timer, a late render, a deferred log) run.
+        await page.waitForTimeout(500);
+        expect(await leaks.leaked()).toEqual([]);
+        expect(await leaks.inPage()).toEqual([]);
+        expect(holdsCode(await page.locator('body').innerText())).toBe(false);
+      } finally {
+        await context.close();
+      }
+    });
+  }
+
+  // The watch is not blind: a code planted through each way a page can say or keep a thing is caught by the same reads.
+  it('the leak watch sees a code planted in each channel it claims to read', async () => {
+    const { page, context, leaks } = await open(VIEWPORTS[1], 'studio-light', 'devices');
+    try {
+      expect(await leaks.leaked()).toEqual([]);
+      expect(await leaks.inPage()).toEqual([]);
+      const origin = server?.url.origin ?? '';
+      await page.evaluate(async (base: string) => {
+        console.log('plain 7F3K-Q2ND');
+        console.log({ nested: ['Q2ND'] });
+        setTimeout(() => {
+          throw new Error('late 7F3K');
+        }, 0);
+        await fetch(`${base}/probe?code=7F3K`, { method: 'POST', headers: { 'x-code': 'Q2ND' }, body: 'body 7F3K' });
+        await new Promise<void>(done => {
+          const socket = new WebSocket(`${base.replace('http', 'ws')}/echo`);
+          socket.onopen = () => socket.send('frame 7F3K');
+          socket.onmessage = () => {
+            socket.close();
+            done();
+          };
+          socket.onerror = () => done();
+        });
+        document.title = 'title 7F3K';
+        history.replaceState({ code: 'Q2ND' }, '', `#code=7F3K`);
+        document.body.setAttribute('data-probe', '7F3K-Q2ND');
+        sessionStorage.setItem('probe', 'Q2ND');
+      }, origin);
+      await page.waitForTimeout(300);
+      const said = (await leaks.leaked()).join('\n');
+      for (const channel of ['console plain', 'console-arg', 'pageerror', 'request', 'frame-sent', 'frame-received'])
+        expect(said).toContain(channel);
+      const kept = (await leaks.inPage()).join('\n');
+      for (const channel of ['title ', 'location ', 'history ', 'attribute BODY[data-probe]', 'storage probe'])
+        expect(kept).toContain(channel);
+    } finally {
+      await context.close();
+    }
+  });
 
   for (const theme of THEMES) {
     it(`devices: the pairing address wraps only at its separators on a phone (390, ${theme})`, async () => {

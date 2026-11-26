@@ -112,7 +112,7 @@ export const checkSettingsScene = async (browser: Browser, one: SettingsCase): P
 export const sceneContext = async (
   browser: Browser,
   origin: string,
-  viewport: Viewport,
+  viewport: { readonly width: number; readonly height: number },
   theme: Theme,
 ): Promise<BrowserContext> => {
   const context = await browser.newContext({
