@@ -14,6 +14,7 @@ import {
   encodeUplinkUnit,
 } from '../../../contract/index.ts';
 import { spansFromProbabilities, VAD_CHUNK } from '../../../daemon/lib/engine/spans.ts';
+import { splitForSpeech } from '../../../daemon/lib/reply/chunks.ts';
 import { createSaid, noteText, splitHeard } from '../../../daemon/lib/stream/said.ts';
 import { VoiceStream } from '../../../daemon/lib/stream/session.ts';
 
@@ -195,6 +196,22 @@ describe('V2: the words a cut falls on (pure)', () => {
     expect(noteText(words(13), words(31, 100))).toBe(
       NOTE(`"… ${words(13).slice(1).join(' ')}"`, `${words(30, 100).join(' ')} …`).replace('…"]', '…"]'),
     );
+  });
+
+  test('a barge-in at any piece boundary never splits a long token between heard and not heard', () => {
+    const url = `https://example.com/${'a'.repeat(244)}`;
+    const text = `${'checking '.repeat(27)}${url} before publishing the report.`;
+    const pieces = splitForSpeech(text);
+    for (let cut = 0; cut <= pieces.length; cut += 1) {
+      const samples = pieces.slice(0, cut).reduce((sum, piece) => sum + piece.length * 1_600, 0);
+      const heard = splitHeard([[0, { pieces, made: pieces.map(piece => piece.length * 1_600) }]], { id: 0, samples });
+      const inHeard = heard.heard.filter(word => word === url).length;
+      const inUnheard = heard.unheard.filter(word => word === url).length;
+      expect([inHeard, inUnheard].sort()).toEqual([0, 1]);
+      expect([...heard.heard, ...heard.unheard].join(' ')).toBe(text);
+      expect(heard.heard.some(word => word.startsWith('https://') && word !== url)).toBe(false);
+      expect(heard.unheard.some(word => word.startsWith('aaaa'))).toBe(false);
+    }
   });
 
   test('a quote mark in the words cannot break the note’s own quotes', () => {

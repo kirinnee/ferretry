@@ -63,6 +63,15 @@ describe('fy catalog / fy member', () => {
     expect(out.join('\n')).toContain(catalog().name);
   });
 
+  test('D-47 ls ends its output with a newline, the empty answer included', async () => {
+    const filled = harness({ 'GET /v1/catalogs': catalogList() });
+    await filled.run('catalog ls');
+    expect(filled.out.join('').endsWith('\n')).toBe(true);
+    const empty = harness({ 'GET /v1/catalogs': { ...catalogList(), catalogs: [] } });
+    await empty.run('catalog ls');
+    expect(empty.out.join('')).toMatch(/Make one with: fy catalog create <name>\n$/u);
+  });
+
   test('-y is --yes: a delete goes ahead off a terminal', async () => {
     const { run, sent } = harness({
       'GET /v1/catalogs': catalogList(),

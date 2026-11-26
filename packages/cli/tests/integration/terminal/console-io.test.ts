@@ -70,6 +70,17 @@ describe('ConsoleIo', () => {
     should(io.isTty).be.false();
   });
 
+  it('reports stdin on its own, so a redirected stdout does not make a typing terminal look piped', () => {
+    const io = new ConsoleIo();
+    setTty(process.stdin, true);
+    setTty(process.stdout, false);
+    should(io.stdinIsTty).be.true();
+    should(io.isTty).be.false();
+    setTty(process.stdin, undefined);
+    setTty(process.stdout, true);
+    should(io.stdinIsTty).be.false();
+  });
+
   /** Types one line into the process's own stdin once the question is on stderr, as a person at a terminal would. */
   async function answerWith(line: string): Promise<{ answer: string; asked: string }> {
     // A stream of its own: the real stdin may be closed or shared with other files, and would end the question.

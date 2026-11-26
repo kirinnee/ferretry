@@ -16,8 +16,8 @@ import {
   encodeUplinkUnit,
 } from '../../contract/index.ts';
 import { startReplyThread } from '../../daemon/adapters/worker-speech-thread.ts';
-import { nativeTargetFor, nativeThreads, type NativeParts } from '../../daemon/lib/native/catalog.ts';
-import { REPLY_FILES } from '../../daemon/lib/reply/catalog.ts';
+import { nativeTargetFor, type NativeParts } from '../../daemon/lib/native/catalog.ts';
+import { REPLY_FILES, replyNativeThreads } from '../../daemon/lib/reply/catalog.ts';
 import { ReplyVoiceEngine } from '../../daemon/lib/reply/engine.ts';
 import type { EnginePathsPort } from '../../daemon/lib/engine/ports.ts';
 import { VoiceStream } from '../../daemon/lib/stream/session.ts';
@@ -33,14 +33,15 @@ import { VoiceStream } from '../../daemon/lib/stream/session.ts';
  * It downloads about 380 MB (the native engine and the fp32 model; 164 MB with FY_REPLY_ENGINE=wasm) from huggingface.co
  * and cdn.jsdelivr.net, so it runs only when asked: FY_REPLY_VOICE_REAL=1. FY_REPLY_VOICE_DIR names a folder to keep the files
  * in between runs (it is created if missing). On a Nix shell without libstdc++ the native library cannot start and the engine
- * (correctly) says so and runs WebAssembly: put the compiler's lib folder on LD_LIBRARY_PATH to measure the native one.
+ * (correctly) says so and runs WebAssembly. For this test only, FY_NATIVE_LD can name the compiler's lib folder; the
+ * production child stays sealed and relies on the machine's system libraries. The release binary is measured separately.
  */
 const ASKED = process.env.FY_REPLY_VOICE_REAL === '1';
 const LINE = 'I found the bug, it was a missing await, and I have fixed it.';
 /** `FY_REPLY_ENGINE=wasm` measures the fallback; anything else the native engine this machine can run (WebAssembly where none). */
 const NATIVE: NativeParts = {
   target: process.env.FY_REPLY_ENGINE === 'wasm' ? undefined : nativeTargetFor(process.platform, process.arch),
-  threads: () => nativeThreads(availableParallelism()),
+  threads: () => replyNativeThreads(availableParallelism()),
   platform: `${process.platform}-${process.arch}`,
 };
 

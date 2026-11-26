@@ -56,8 +56,13 @@ export default implementCli(manifest, {
             io.err(`${message}\n`);
             return 1;
           };
-          const ferret = text(invocation.options.ferret);
-          if (ferret === undefined) return fail('no ferret id — pass --ferret <id>');
+          // `-s, --session` is the declared flag; `--ferret` is its former spelling. Neither: the ferret this fy runs inside.
+          const ferret =
+            text(invocation.options.session) ??
+            text(invocation.options.s) ??
+            text(invocation.options.ferret) ??
+            text(ctx.env?.FY_SESSION_ID);
+          if (ferret === undefined) return fail('no ferret id — run inside a ferret or pass --session <id>');
           // `--ping` is v4's spelling of `--buzz`. Help names only `--buzz` (help.test.ts), but agents' old instructions still say `--ping`.
           // It is no declared switch, so `--ping "summary"` reads the summary as its value: that word is given back.
           const ping = invocation.options.ping;

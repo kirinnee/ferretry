@@ -11,6 +11,19 @@ describe('a spoken line as pieces', () => {
     expect(splitForSpeech('I found it. Is that "fixed?" Yes!')).toEqual(['I found it.', 'Is that "fixed?"', 'Yes!']);
   });
 
+  test('a long first sentence without commas starts at a natural clause boundary', () => {
+    expect(
+      splitForSpeech('I looked through the logs and the build failed because one dependency was missing.'),
+    ).toEqual(['I looked through the logs and the build failed', 'because one dependency was missing.']);
+  });
+
+  test('bounds unpunctuated speech without losing words or leaving a tiny tail', () => {
+    const text = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen';
+    const pieces = splitForSpeech(text);
+    expect(pieces.map(piece => piece.split(' ').length)).toEqual([11, 3]);
+    expect(pieces.join(' ')).toBe(text);
+  });
+
   test('a long sentence is cut at its commas, and a clause that is too short joins its neighbour', () => {
     const pieces = splitForSpeech('I found the bug, it was a missing await in the send path, and I have fixed it now.');
     expect(pieces).toEqual([
@@ -20,10 +33,11 @@ describe('a spoken line as pieces', () => {
     ]);
     expect(
       splitForSpeech('Yes, I have checked the whole build and all of the tests across the repository today.'),
-    ).toEqual(['Yes, I have checked the whole build and all of the tests across the repository today.']);
+    ).toEqual(['Yes, I have checked the whole build', 'and all of the tests across the repository today.']);
     // A trailing clause with one word joins the one before it.
     expect(splitForSpeech('I have checked the whole build and all of the tests across the repository, ok.')).toEqual([
-      'I have checked the whole build and all of the tests across the repository, ok.',
+      'I have checked the whole build',
+      'and all of the tests across the repository, ok.',
     ]);
   });
 
@@ -40,6 +54,18 @@ describe('a spoken line as pieces', () => {
     expect(pieces.join(' ')).toBe('word '.repeat(200).trim());
     // Nowhere to cut at a space: cut at the limit.
     expect(splitForSpeech('x'.repeat(600)).map(piece => piece.length)).toEqual([280, 280, 40]);
+  });
+
+  test('a token that fits on its own is never cut, even when the only space is early in the piece', () => {
+    const url = `https://example.com/${'a'.repeat(244)}`;
+    const text = `${'checking '.repeat(27)}${url} before publishing the report.`;
+    const pieces = splitForSpeech(text);
+    expect(pieces.join(' ')).toBe(text);
+    expect(pieces.filter(piece => piece.includes(url))).toHaveLength(1);
+    expect(pieces.filter(piece => piece.includes('https://'))).toHaveLength(1);
+    for (const piece of pieces) expect(piece.length).toBeLessThanOrEqual(280);
+    // Only a token that alone exceeds the limit is cut inside.
+    expect(splitForSpeech(`go ${'x'.repeat(300)} now`)).toEqual(['go', 'x'.repeat(280), `${'x'.repeat(20)} now`]);
   });
 });
 

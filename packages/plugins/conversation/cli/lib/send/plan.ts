@@ -53,8 +53,7 @@ export function planSend(flags: SendFlags, environment: SendEnvironment): SendPl
   const attachmentPaths = [...(flags.attachmentPaths ?? [])];
   // The wire contract requires a message: an attachment with no words is a file the agent was never
   // told what to do with.
-  if (message === '')
-    throw new CommandError('provide a message (arguments and/or --message-file) to send with the attachments');
+  if (message === '') throw new CommandError('no message: pass the text, --message-file <file>, or pipe it in');
 
   const caller = environment.callerFerret?.trim();
   if (flags.ask === true && (caller === undefined || caller === ''))

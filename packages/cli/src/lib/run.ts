@@ -5,6 +5,7 @@
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import type { VerbHandler } from '@ferretry/kernel/manifest';
 import { declaredSwitches, parseArgs } from './argv.ts';
+import { renamedPointer } from './renamed-verbs.ts';
 import { type ClientDeps, type Surfaces, surfacesOf } from './client.ts';
 import { AS_OWNER_NOTE, inPane } from './credential.ts';
 import { askVerb } from './commands/ask.ts';
@@ -179,6 +180,14 @@ function helpRequest(table: VerbTable, tokens: readonly string[]): HelpRequest |
 /** A known verb with sub-verbs and a word where its sub-verb belongs that is none of them (or no word at all). */
 function subverbRefusal(world: CliWorld, resolved: Subverb): number {
   const { io, identity } = world;
+  const renamed = renamedPointer(identity.binary, [
+    ...resolved.parent.words,
+    ...(resolved.word === undefined ? [] : [resolved.word]),
+  ]);
+  if (renamed !== undefined) {
+    io.err(`${renamed}\n`);
+    return EXIT.usage;
+  }
   const parent = resolved.parent.words.join(' ');
   const subs = resolved.subverbs.map(each => `  ${identity.binary} ${each.words.join(' ')}`);
   const said =
@@ -195,6 +204,11 @@ function subverbRefusal(world: CliWorld, resolved: Subverb): number {
 
 function unknownVerb(world: CliWorld, resolved: Unknown): number {
   const { io, identity } = world;
+  const renamed = renamedPointer(identity.binary, resolved.typed);
+  if (renamed !== undefined) {
+    io.err(`${renamed}\n`);
+    return EXIT.usage;
+  }
   const typed = resolved.typed.join(' ');
   const near = resolved.nearby.map(entry => `  ${identity.binary} ${entry.words.join(' ')}`);
   io.err(
@@ -244,7 +258,7 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
   for (let hops = 0; resolved.kind === 'verb' && resolved.entry.alias !== undefined; hops += 1) {
     if (hops >= 4) throw new ShellError(`the alias "${resolved.entry.line}" runs another alias too many times`);
     // A hidden alias is an old spelling: it runs, and says on stderr what replaced it.
-    if (resolved.entry.hidden === true)
+    if (resolved.entry.hidden === true && resolved.entry.quiet !== true)
       io.err(`\`${identity.binary} ${resolved.entry.line}\` is now \`${identity.binary} ${resolved.entry.alias}\`\n`);
     tokens = expandAlias(resolved.entry, resolved.rest) ?? tokens;
     resolved = resolveVerb(table, tokens);
