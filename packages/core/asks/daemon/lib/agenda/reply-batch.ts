@@ -80,6 +80,9 @@ export const tellReplyKey = (digest: string): ReplyKey => ReplyKeySchema.parse(`
 /** The item a key belongs to, or `undefined` for a key that is not about one. */
 export const itemOfKey = (key: ReplyKey): AgendaId | undefined => AgendaIdSchema.safeParse(key.split('~')[0]).data;
 
+/** Whether a key is the owner CLOSING an item (`A3`), not a request that leaves it open (`A3~1`) or a note. */
+const isClosingKey = (key: ReplyKey): boolean => !key.includes('~') && itemOfKey(key) !== undefined;
+
 const PendingReplySchema = z.strictObject({
   /** A reply key (an item id for an answer); the field keeps its name so an outbox written before is read. */
   id: ReplyKeySchema,
@@ -481,7 +484,15 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
         await this.locked(sessionId, async outbox => await this.outboxes.write(returnAgendaBatch(outbox, batch)));
         return this.recheck(sessionId);
       }
-      return await this.fail(sessionId, batch, error instanceof Error ? error.message : 'the send was refused');
+      // Refused outright: the ferret cannot receive replies (its terminal is gone, it was stopped). An owner's closing
+      // of an item then stands (nothing to send, nobody to ask again), so only a rested or asked-about item, which is
+      // still open and waiting on that ferret, goes back to the owner.
+      return await this.fail(
+        sessionId,
+        batch,
+        error instanceof Error ? error.message : 'the send was refused',
+        isClosingKey,
+      );
     }
     await this.locked(sessionId, async outbox => {
       await this.outboxes.write(sentAgendaBatch(outbox, batch.sendId, this.clock.now()));
@@ -489,10 +500,22 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
     this.watchLater(sessionId);
   }
 
-  /** Forgets a batch that did not arrive, then tells the board each of its items is the owner's again. */
-  private async fail(sessionId: string, batch: SendingBatch, reason: string): Promise<void> {
+  /**
+   * Forgets a batch that did not arrive, then tells the board each of its items is the owner's again, but for the
+   * keys `quiet` names: those are dropped with it and nothing is told.
+   */
+  private async fail(
+    sessionId: string,
+    batch: SendingBatch,
+    reason: string,
+    quiet: (key: ReplyKey) => boolean = () => false,
+  ): Promise<void> {
     await this.locked(sessionId, async outbox => await this.outboxes.write(dropAgendaBatch(outbox, batch)));
-    await this.report(sessionId, batch.ids, reason);
+    await this.report(
+      sessionId,
+      batch.ids.filter(key => !quiet(key)),
+      reason,
+    );
   }
 
   /** The composer never emptied in time: every held answer goes back to the owner. */

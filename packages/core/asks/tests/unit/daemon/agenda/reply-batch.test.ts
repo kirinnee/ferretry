@@ -782,17 +782,18 @@ describe('the agenda reply batcher on receipt', () => {
     should(undelivered[0]?.reason).match(/never showed it arriving/);
   });
 
-  it('should hand a batch the send path refused outright straight back to the owner', async () => {
-    // Arrange
+  it('should drop a closing the send path refused outright, and hand back only what still waits on the ferret', async () => {
+    // Arrange: A1 is the owner closing an item, A2~1 an answer that left its item open waiting on the ferret
     const { batcher, sends, outboxes, undelivered, fire } = delivering();
     sends.failure = new Error('the ferret was removed');
     await batcher.add(SESSION, 'A1', 'one');
+    await batcher.add(SESSION, 'A2~1', 'two');
 
     // Act
     await fire();
 
     // Assert
-    should(undelivered).deepEqual([{ key: 'A1', reason: 'the ferret was removed' }]);
+    should(undelivered).deepEqual([{ key: 'A2~1', reason: 'the ferret was removed' }]);
     should(outboxes.files.get(SESSION)).containDeep({ pending: [], sending: [], delivered: [] });
   });
 

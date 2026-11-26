@@ -1867,7 +1867,9 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
    items: the app's "Sending…"). It is **delivered only when the send ledger proves it** in the
    ferret's transcript (the send tracker’s `delivered` fate). The outbox then never queues
    those items again.
-5. **Undelivered.** A send refused outright, a fate of `timed_out`, `unaccounted`, `withdrawn` or
+5. **Undelivered.** A send refused outright (the ferret's terminal is gone or it was stopped) is the one exception for
+   a done or dismiss: the owner's closing **stands**, nothing is sent and nothing reopens (an answer that rested
+   the item still comes back, below). A fate of `timed_out`, `unaccounted`, `withdrawn` or
    `cancelled`, no proof within the receipt wait (15 minutes), or a composer that never emptied: each
    item goes **back to the owner as an open item**. A done or dismiss reopens the closed item; an answer that
    rested a ferret's item brings it back from resting (each answer is its own delivery, keyed by the item's request
