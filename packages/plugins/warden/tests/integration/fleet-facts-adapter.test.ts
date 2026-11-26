@@ -34,7 +34,7 @@ function facts(
         };
   return new WardenFleetFacts(
     () => runtimes,
-    () => parts.logins,
+    () => ('logins' in parts ? parts.logins : { list: async () => ({ logins: [] }) }),
     () => parts.usage,
     parts.ferrets ?? (async () => []),
     () => NOW,
@@ -58,15 +58,20 @@ describe('the fleet facts the Warden moves a ferret from (the real adapter)', ()
     expect(result.now).toBe(NOW);
   });
 
-  test('a login that cannot be read is no login, never a ready one', async () => {
-    const result = await facts({
-      logins: {
-        list: async () => {
-          throw new Error('logins is down');
+  test('C-110 Logins that cannot be read refuses to choose a login: never every login read as signed out', async () => {
+    await expect(
+      facts({
+        logins: {
+          list: async () => {
+            throw new Error('logins is down');
+          },
         },
-      },
-    });
-    expect(result.credentials).toEqual([]);
+      }),
+    ).rejects.toThrow('the logins could not be read, so no login can be chosen');
+  });
+
+  test('C-110 an absent Logins refuses to choose a login, as an absent Runtimes does', async () => {
+    await expect(facts({ logins: undefined })).rejects.toThrow('the logins are not available');
   });
 
   test('a limit is the login’s: named directly, or through the runtime that hit it, first word kept', async () => {
