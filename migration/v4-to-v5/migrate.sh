@@ -282,7 +282,7 @@ preflight)
   # EVERY external tool a later phase calls, so a missing one stops here and not at verify, after the backup. (nix, brew, curl and
   # xattr are optional and each checked where it is used.)
   missing_tools=""
-  for tool in bash jq tmux bun git awk basename cat chmod cmp comm cp date df dirname du env find grep ls mkdir mktemp mv rm sed sleep sort tail tr uname wc; do
+  for tool in bash jq tmux bun git awk basename cat chmod cmp comm cp date df dirname du env find grep ls mkdir mktemp mv rm sed sleep sort stat tail tr uname wc; do
     command -v "${tool}" >/dev/null || missing_tools="${missing_tools:+${missing_tools}, }${tool}"
   done
   [ -z "${missing_tools}" ] || fail "not on PATH: ${missing_tools}; install them and run preflight again"
@@ -574,11 +574,13 @@ quiet)
     say "📝 agenda-change queues that are not a readable list (convert cannot carry them: it sets each aside byte for byte and names it in its report) for:${oddq}"
   fi
   if [ "${found}" = 1 ]; then
-    say "⚠️ FOUND: something is pending (names above). Starting v4 for a minute so it can finish, then stopping it again"
+    say "⚠️ pending files (names above). Starting v4 for a minute so it can finish, then stopping it again"
     mark quiet-retry
     orig_env "${v4_fy}" daemon start || fail "'fy daemon start' failed"
     sleep 60
     orig_env "${v4_fy}" daemon stop || fail "'fy daemon stop' failed"
+    if daemon_live; then fail "the retry could not prove v4 stopped (${DAEMON_WHY}); do not run backup"; fi
+    say "⚠️ FOUND: something is pending (names above); the retry stopped v4 again"
     fail "pending files were found. The quiet window is NOT established: ask the owner again and rerun quiet (the whole phase). If the same files are listed again, stop and tell the owner"
   fi
   mark quiet
@@ -609,10 +611,18 @@ backup)
   [ -z "$(git -C "${src}" status --porcelain)" ] || fail "the converter checkout has local changes. Nothing was moved: undo them, then run backup again"
   dry_report="$(dirname "${NOTES}")/v4-v5-dry-run-$(note_get STAMP).json"
   (cd "${CONVERTER_DIR}" && bun install --frozen-lockfile) || fail "bun install failed in ${CONVERTER_DIR}. Nothing was moved"
-  say "🔨 converter dry run on ${H} (read-only: creates and changes nothing; nothing is moved yet)"
+  # v4 owns an exclusive SQLite transaction on daemon.lock. Keep that same exclusion across BOTH phases, including
+  # the dependency-install/restart race, dry pass, verified copy, rename and real conversion. flock is not sufficient.
+  lease="$(dirname "${NOTES}")/v4-v5-lease-$(note_get STAMP)"
+  (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts start "${H}" "${lease}") || fail "cannot prove v4 stopped and exclusively locked; nothing was moved. Run quiet again"
+  note_set LEASE "${lease}"
+  trap '(cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts release "${lease}") >/dev/null 2>&1 || true' EXIT
+  if daemon_live; then fail "a daemon restarted (${DAEMON_WHY}); nothing was moved. Run quiet again"; fi
+  note_set HOME_MODE "$(stat -c '%a' "${H}" 2>/dev/null || stat -f '%Lp' "${H}")"
+  say "🔨 converter dry run on ${H} (reads home; writes its report at ${dry_report}; nothing is moved yet)"
   mark dry-running
   status=0
-  (cd "${CONVERTER_DIR}" && bun src/main.ts --from "${H}" --to "${B}.dry-target" --dry-run --report "${dry_report}") || status=$?
+  (cd "${CONVERTER_DIR}" && bun src/main.ts --from "${H}" --to "${B}.dry-target" --original-home "${H}" --cutover-lease "${lease}" --dry-run --report "${dry_report}") || status=$?
   case "${status}" in
   0) ;;
   3) echo "❌ the dry run says a step would not convert (exit 3): read the summary to the owner. NOTHING was moved and v4 is still stopped: run rollback --owner-yes (or fy daemon start with the v4 fy) to bring v4 back, and wait for a fixed converter" >&2 && exit 3 ;;
@@ -621,10 +631,16 @@ backup)
   esac
   [ ! -e "${B}.dry-target" ] || fail "the dry run created ${B}.dry-target: that must never happen"
   mark dry-run-ok
+  say "⚙️ making and verifying the independent recovery copy (counts, sizes and SHA-256 hashes)"
+  (cd "${CONVERTER_DIR}" && bun src/recovery-copy.ts copy "${H}" "${B}.recovery") || fail "recovery copy failed; nothing was moved"
+  note_set RECOVERY "${B}.recovery"
+  (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts check "${lease}" "${H}/daemon.lock") || fail "cutover exclusion was lost; nothing was moved"
+  [ ! -e "${B}" ] && [ ! -L "${B}" ] || fail "${B} appeared during backup; nothing was moved"
   mark backing-up
-  mv "${H}" "${B}" || fail "mv ${H} ${B} failed"
+  (cd "${CONVERTER_DIR}" && bun src/recovery-copy.ts move "${H}" "${B}") || fail "cannot move ${H} to ${B} without replacing a destination"
   chmod 700 "${B}" || fail "chmod 700 ${B} failed"
   mark backed-up
+  trap - EXIT # The lease remains held until convert finishes or rollback releases it.
   say "✅ backed up: ${B} (mode 700). Send nothing to any ferret and type into no pane until v5 is started"
   ;;
 
@@ -640,11 +656,14 @@ convert)
   [ ! -e "${H}" ] || fail "${H} exists: the converter writes a new home"
   (cd "${CONVERTER_DIR}" && bun install --frozen-lockfile) || fail "bun install failed in ${CONVERTER_DIR}"
   has_mark dry-run-ok || fail "the converter dry run has not passed: run backup first (it dry-runs before anything moves)"
+  lease="$(note_get LEASE)"
+  [ -n "${lease}" ] || fail "no cutover lease recorded; roll back before trying again"
+  (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts check "${lease}" "${B}/daemon.lock") || fail "cutover exclusion was lost; roll back before trying again"
 
   say "🔨 converter real run"
   mark converting
   status=0
-  (cd "${CONVERTER_DIR}" && bun src/main.ts --from "${B}" --to "${H}") || status=$?
+  (cd "${CONVERTER_DIR}" && bun src/main.ts --from "${B}" --to "${H}" --original-home "${H}" --cutover-lease "${lease}") || status=$?
   case "${status}" in
   0) ;;
   3) echo "❌ the conversion did not finish (exit 3): there is no home.json, v5 refuses it by design. Roll back, or wait for a fixed converter" >&2 && exit 3 ;;
@@ -653,6 +672,7 @@ convert)
   esac
   [ -f "${H}/home.json" ] || fail "exit 0 but ${H}/home.json is missing"
   mark converted
+  (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts release "${lease}") || fail "converted but could not release cutover lease"
   say "✅ converted; report at ${H}.conversion-report.json (show the owner the summary above)"
   ;;
 
@@ -1247,7 +1267,11 @@ rollback)
       note_set V5_FAILED_HOME "${failed}"
       say "📝 the v5 home was moved to ${failed} (nothing deleted; it holds copies of sealed files: the owner decides when to delete it)"
     fi
+    lease="$(note_get LEASE)"
+    if [ -n "${lease}" ]; then (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts release "${lease}") >/dev/null 2>&1 || true; fi
     mv "${B}" "${H}" || fail "cannot restore ${B} to ${H}"
+    original_mode="$(note_get HOME_MODE)"
+    if [ -n "${original_mode}" ]; then chmod "${original_mode}" "${H}" || fail "cannot restore original home mode"; fi
   elif [ -e "${H}" ] && [ -f "${H}/layout-version" ]; then
     say "📝 no backup folder and ${H} is still a v4 home: nothing moved"
   else

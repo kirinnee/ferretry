@@ -78,7 +78,7 @@ export async function componentFileSource(ctx: StepContext, value: string): Prom
   const isHomeRelative = value === '~' || value.startsWith('~/') || value === '$HOME' || value.startsWith('$HOME/');
   // The path on the REAL filesystem, as v4 resolved it; only one under the real v4 home's fleet/assets is reachable,
   // as its snapshot copy.
-  const realHome = normalize(ctx.previewV4Home ?? home);
+  const realHome = normalize(ctx.originalV4Home ?? ctx.previewV4Home ?? home);
   const userHome = ctx.previewUserHome ?? ctx.host?.homeDirectory;
   let absolute: string;
   if (isHomeRelative) {

@@ -58,6 +58,8 @@ export interface EnforcedConversion {
 }
 
 export interface StepContext {
+  /** The home before cutover moved it. Absolute asset paths keep this meaning in both passes. */
+  readonly originalV4Home?: string;
   readonly v4: V4Paths;
   readonly v5: V5Writer;
   readonly dryRun: boolean;

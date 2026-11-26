@@ -2,7 +2,7 @@
  * What must be true before anything is written: the source is a stopped v4 home, the target is new.
  * Every check reads metadata or the plain-text layout marker only — never a state file's content.
  */
-import { lstat, readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 import { fenceReport } from './v4/fence.ts';
 import { V4_LAYOUT_VERSION, v4Paths } from './v4/layout.ts';
@@ -117,21 +117,36 @@ async function exists(path: string): Promise<boolean> {
  * The host's lock probe: on Linux, whether any process has the file open (`/proc/<pid>/fd` links); elsewhere
  * `undefined` unless `lsof` answers. Reads link targets only, never a file.
  */
-export function hostLockProbe(): LockProbe {
+export function hostLockProbe(procRoot = '/proc'): LockProbe {
   return {
     async held(path) {
-      const target = await realpath(path);
+      const target = await stat(path);
       if (process.platform === 'linux') {
-        const pids = (await readdir('/proc').catch(() => [] as string[])).filter(name => /^\d+$/.test(name));
+        let unknown = false;
+        const pids = (
+          await readdir(procRoot).catch(() => {
+            unknown = true;
+            return [] as string[];
+          })
+        ).filter(name => /^\d+$/.test(name));
         for (const pid of pids) {
-          const fds = await readdir(`/proc/${pid}/fd`).catch(() => [] as string[]);
+          const fds = await readdir(`${procRoot}/${pid}/fd`).catch(error => {
+            // A process exiting during the scan is absent. Permission/IO errors prove nothing about its open files.
+            if (error.code !== 'ENOENT' && error.code !== 'ESRCH') unknown = true;
+            return [] as string[];
+          });
           for (const fd of fds) {
-            if ((await readlink(`/proc/${pid}/fd/${fd}`).catch(() => '')) === target) return true;
+            const info = await stat(`${procRoot}/${pid}/fd/${fd}`).catch(error => {
+              if (error.code !== 'ENOENT' && error.code !== 'ESRCH') unknown = true;
+              return undefined;
+            });
+            if (info?.dev === target.dev && info.ino === target.ino) return true;
           }
         }
-        return false;
+        return unknown ? undefined : false;
       }
-      const lsof = Bun.spawnSync(['lsof', '-t', '--', target], { stdout: 'pipe', stderr: 'ignore' });
+      const lsof = Bun.spawnSync(['lsof', '-t', '--', path], { stdout: 'pipe', stderr: 'pipe' });
+      if (lsof.error !== undefined || lsof.stderr.toString().trim() !== '') return undefined;
       if (lsof.exitCode === 0) return lsof.stdout.toString().trim().length > 0;
       if (lsof.exitCode === 1) return false;
       return undefined;

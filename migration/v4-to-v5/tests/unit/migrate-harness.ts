@@ -185,6 +185,9 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
   await cp(SCRIPT, join(repo, 'migration', 'v4-to-v5', 'migrate.sh'));
   await cp(join(dirname(SCRIPT), 'left-behind.txt'), join(repo, 'migration', 'v4-to-v5', 'left-behind.txt'));
   await cp(join(dirname(SCRIPT), 'bun-version'), join(repo, 'migration', 'v4-to-v5', 'bun-version'));
+  await mkdir(join(repo, 'migration/v4-to-v5/src'), { recursive: true });
+  for (const helper of ['cutover-lease.ts', 'recovery-copy.ts'])
+    await cp(join(import.meta.dir, '../../src', helper), join(repo, 'migration/v4-to-v5/src', helper));
   await writeFile(join(repo, '.gitignore'), 'node_modules\n');
   await git(repo, 'init', '-q', '-b', 'main');
   await git(repo, 'add', '-A');
@@ -321,6 +324,17 @@ export async function makeSandbox(options: SandboxOptions = {}): Promise<Sandbox
       return text.split('\n').sort().join('\n');
     },
     async cleanup() {
+      const lease = join(home, 'v4-v5-lease-2026-11-13-1200');
+      try {
+        await fetch('http://localhost/release', {
+          unix: join(lease, 'lease.sock'),
+          method: 'POST',
+          signal: AbortSignal.timeout(500),
+        });
+        await Bun.sleep(75);
+      } catch {
+        /* no lease, or already released */
+      }
       await killFixtures();
       listener?.stop(true);
       await rm(root, { recursive: true, force: true });
@@ -390,6 +404,8 @@ async function installDefaults(sb: Sandbox): Promise<void> {
   ]);
   await sb.fake('xattr', [{ match: '-p com.apple.quarantine *', code: 1 }, { match: '-d com.apple.quarantine *' }]);
   await sb.fake('bun', [
+    { match: 'src/cutover-lease.ts*', run: `exec ${quote(process.execPath)} "$@"` },
+    { match: 'src/recovery-copy.ts*', run: `exec ${quote(process.execPath)} "$@"` },
     { match: '--version', run: `cat ${D}/bun.version` },
     { match: 'install --frozen-lockfile' },
     {

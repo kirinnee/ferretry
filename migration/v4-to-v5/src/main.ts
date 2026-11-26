@@ -6,7 +6,7 @@
  * Settings step pending, so the ferrets on those profiles may be LESS restricted than in v4. Each is named in the report.
  *
  * Exit 0: complete (home.json written). 3: ran, but some step is pending or failed (no home.json; v5 refuses the
- * folder). 2: refused before writing anything. 64: usage. A dry run writes nothing (its report says `complete: false`)
+ * folder). 2: refused before writing anything. 64: usage. A dry run writes only its report (`complete: false`)
  * and exits 0 when every step WOULD convert, 3 when one would not.
  */
 import { homedir } from 'node:os';
@@ -14,6 +14,7 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { convert } from './convert.ts';
 import { hostLockProbe } from './preflight.ts';
+import { checkLease } from './cutover-lease.ts';
 import { resolveReport, writeReportFile } from './report-file.ts';
 import { summarise } from './report.ts';
 import { clearYamlLogSwitches } from '@ferretry/std/yaml';
@@ -22,7 +23,15 @@ const USAGE =
   'usage: bun src/main.ts --from <stopped v4 home> --to <new v5 home> [--report <file>] [--dry-run] [--drop-uncarried]';
 
 async function main(argv: readonly string[]): Promise<number> {
-  let values: { from?: string; to?: string; report?: string; 'dry-run'?: boolean; 'drop-uncarried'?: boolean };
+  let values: {
+    from?: string;
+    to?: string;
+    report?: string;
+    'dry-run'?: boolean;
+    'drop-uncarried'?: boolean;
+    'original-home'?: string;
+    'cutover-lease'?: string;
+  };
   try {
     ({ values } = parseArgs({
       args: [...argv],
@@ -30,6 +39,8 @@ async function main(argv: readonly string[]): Promise<number> {
         from: { type: 'string' },
         to: { type: 'string' },
         report: { type: 'string' },
+        'original-home': { type: 'string' },
+        'cutover-lease': { type: 'string' },
         'dry-run': { type: 'boolean', default: false },
         'drop-uncarried': { type: 'boolean', default: false },
       },
@@ -59,7 +70,13 @@ async function main(argv: readonly string[]): Promise<number> {
     from,
     to,
     dryRun,
-    lock: hostLockProbe(),
+    lock:
+      values['cutover-lease'] === undefined
+        ? hostLockProbe()
+        : {
+            held: async path => ((await checkLease(values['cutover-lease']!, path)) ? false : undefined),
+          },
+    ...(values['original-home'] === undefined ? {} : { originalV4Home: resolve(values['original-home']) }),
     now: () => new Date(),
     ...(values['drop-uncarried'] === true ? { dropUncarried: true } : {}),
     host: {
