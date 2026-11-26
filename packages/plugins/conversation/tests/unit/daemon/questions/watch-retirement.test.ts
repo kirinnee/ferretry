@@ -105,7 +105,7 @@ describe('a stored Codex question is retired by its exact result, wherever the t
   it('releases only the stored question: another question’s result in the tail is not its release', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
-    w.state.events = [resultEvent('someone-else'), ...filler(10)];
+    w.state.events = [callEvent('q1'), resultEvent('someone-else'), ...filler(10)];
     await w.watch.sweep();
     expect(w.cleared).toEqual([]);
     expect(w.state.current?.toolUseId).toBe('q1');
@@ -121,15 +121,24 @@ describe('a stored Codex question is retired by its exact result, wherever the t
     expect(w.limits.every(limit => limit === undefined)).toBe(true);
   });
 
-  it('decides nothing from a short tail that names neither call nor result (the transcript simply does not say)', async () => {
+  it('retires it when the whole transcript is short and holds neither call nor result: the conversation changed (D-02)', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
     w.state.events = filler(5);
     await w.watch.sweep();
+    expect(w.cleared).toEqual(['q1']);
+    expect(w.answered).toEqual(['q1']);
+    expect(w.state.current).toBeUndefined();
+    expect(w.limits.every(limit => limit === undefined)).toBe(true);
+  });
+
+  it('decides nothing from an empty read (a transcript still being written is not a changed conversation)', async () => {
+    const w = world([callEvent('q1')]);
+    await w.watch.sweep();
+    w.state.events = [];
     await w.watch.sweep();
     expect(w.cleared).toEqual([]);
     expect(w.state.current?.toolUseId).toBe('q1');
-    expect(w.limits.every(limit => limit === undefined)).toBe(true);
   });
 });
 
@@ -166,14 +175,14 @@ describe('positive release recovery when both the call and the result left the n
     expect(w.answered).toEqual(['q1']);
   });
 
-  it('does not release on a wider read that is not full and names neither (not positive evidence)', async () => {
+  it('releases on a wider read that is not full and names neither: the whole transcript is in view and lacks it (D-02)', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
     w.state.events = full();
     w.state.wide = filler(QUESTION_TAIL_EVENTS + 50);
     await w.watch.sweep();
-    expect(w.cleared).toEqual([]);
-    expect(w.state.current?.toolUseId).toBe('q1');
+    expect(w.cleared).toEqual(['q1']);
+    expect(w.state.current).toBeUndefined();
   });
 
   it('never releases on an unreadable wider read, and releases once it can be read', async () => {

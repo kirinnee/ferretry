@@ -211,7 +211,7 @@ export class QuestionWatch {
 
   /** The question Claude's hook recorded, for a ferret launched with the hook (older launches; a new one writes none). */
   async #hookFile(ferret: string, harness: WatchedHarness): Promise<void> {
-    const open = await this.deps.current(ferret);
+    let open = await this.deps.current(ferret);
     // Read before the file, so a stamp written in between can only make a question over, never bring one back.
     const stamped = await this.deps.lastAnswered(ferret);
     if (
@@ -221,6 +221,7 @@ export class QuestionWatch {
     ) {
       await this.deps.clear(ferret, open.toolUseId);
       await this.deps.answered(ferret, open.toolUseId);
+      open = undefined;
     }
     const file = await harness.askedQuestion?.();
     if (file === undefined || this.#seen.get(ferret) === file.payload) return;
@@ -247,6 +248,8 @@ export class QuestionWatch {
       const stored = await this.deps.write(ferret, file.payload, file.writtenAt, file.transcript);
       this.#seen.set(ferret, file.payload);
       this.#failed.delete(ferret);
+      // The write replaces the file whole: the question it held is gone, and its card goes with it.
+      if (open !== undefined && stored?.toolUseId !== open.toolUseId) await this.deps.answered(ferret, open.toolUseId);
       if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
     } catch (error) {
       if (this.#seen.get(ferret) === file.payload) throw error;
@@ -395,22 +398,25 @@ export class QuestionWatch {
    *
    * 1. its exact tool-result is among the events: released;
    * 2. its exact call is among them with no result: still open (a turn event is never release evidence);
-   * 3. neither, and the tail is not full: the transcript simply does not say, so nothing is decided;
+   * 3. neither, and the tail is not full: the whole transcript is in view and the call is not in it, so the
+   *    conversation is not the one that asked (a new, cleared or resumed conversation): released. An EMPTY read
+   *    decides nothing (a transcript still being written);
    * 4. neither, and the tail is full: a wider read looks for the same ids; a result there releases, a call there keeps
-   *    it, and a FULL wide read holding neither means the call is more than {@link QUESTION_DEEP_EVENTS} events old.
-   *    An open form writes no such run of events, so that too is a positive release.
+   *    it, and any other wide read holding neither (full: the call is more than {@link QUESTION_DEEP_EVENTS} events
+   *    old, which an open form never writes; short: the whole transcript lacks it) is a positive release.
    *
    * An unreadable wide read decides nothing.
    */
   async #codexReleased(ferret: string, toolUseId: string, events: readonly TranscriptEvent[]): Promise<boolean> {
     if (events.some(event => resultsTool(event, toolUseId))) return true;
     if (events.some(event => callsTool(event, toolUseId))) return false;
-    if (events.length < QUESTION_TAIL_EVENTS) return false;
+    if (events.length === 0) return false;
+    if (events.length < QUESTION_TAIL_EVENTS) return true;
     const wide = await this.deps.transcriptEvents?.(ferret, QUESTION_DEEP_EVENTS);
     if (wide === undefined || wide === 'unreadable') return false;
     if (wide.some(event => resultsTool(event, toolUseId))) return true;
     if (wide.some(event => callsTool(event, toolUseId))) return false;
-    return wide.length >= QUESTION_DEEP_EVENTS;
+    return wide.length > 0;
   }
 
   /** `true` the question is over, `false` still open, `undefined` the transcript could not be read. */

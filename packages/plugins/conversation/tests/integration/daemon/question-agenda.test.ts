@@ -306,6 +306,21 @@ describe('a stored question reaches the Agenda as one Asks obligation', () => {
     ]);
   });
 
+  test('a conversation that changed under a stored question (a short history without its call) closes the card (D-02)', async () => {
+    const w = world();
+    const d = w.boot();
+    w.events.current = [callEvent('call_1')];
+    await d.tick();
+    expect(w.asks.open()).toHaveLength(1);
+    // A new conversation: its whole, short history does not hold the call that was asked.
+    w.events.current = [resultEvent('call_unrelated')];
+    await d.tick();
+    expect(w.asks.items.map(item => [item.draft.entry, item.state, item.reason])).toEqual([
+      ['cody:call_1', 'closed', 'answered'],
+    ]);
+    expect(d.stored()).toBeUndefined();
+  });
+
   test('a withdrawal (the ferret stopped) resolves the item as withdrawn', async () => {
     const w = world();
     const d = w.boot();
