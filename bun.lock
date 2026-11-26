@@ -607,6 +607,17 @@
         "react-test-renderer": "^19.0.0",
       },
     },
+    "packages/plugins/opencode": {
+      "name": "@ferretry/plugin-opencode",
+      "version": "5.0.0",
+      "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-logins": "workspace:*",
+        "@ferretry/std": "workspace:*",
+        "zod": "4.4.3",
+      },
+    },
     "packages/plugins/packs": {
       "name": "@ferretry/plugin-packs",
       "version": "5.0.0",
@@ -1037,6 +1048,8 @@
     "@ferretry/plugin-mcp": ["@ferretry/plugin-mcp@workspace:packages/plugins/mcp"],
 
     "@ferretry/plugin-onboarding": ["@ferretry/plugin-onboarding@workspace:packages/plugins/onboarding"],
+
+    "@ferretry/plugin-opencode": ["@ferretry/plugin-opencode@workspace:packages/plugins/opencode"],
 
     "@ferretry/plugin-packs": ["@ferretry/plugin-packs@workspace:packages/plugins/packs"],
 

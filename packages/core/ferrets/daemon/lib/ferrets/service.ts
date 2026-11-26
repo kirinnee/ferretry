@@ -98,6 +98,7 @@ import {
 import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
 import { launchMode } from '../session/peers/fleet.ts';
 import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
+import { defaultHarnessKey } from './default-harness.ts';
 import { runnerRefusal } from './runner-refusal.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
@@ -1153,15 +1154,14 @@ export class FerretsService implements FerretsApi {
       const fenced = await this.stateHomeRefusal(folder.value);
       if (fenced !== undefined) return fenced;
     }
-    // A start that names a runtime launches with THAT runtime's harness and login (Runtimes answers); resolved before
-    // anything is written, so a runtime that cannot serve refuses here and is never launched signed out.
-    // A start that names no runtime, login or harness is a start on the machine's DEFAULT runtime (v4 parity): it is
-    // recorded with it, and the same login gate refuses it when that login needs signing in.
+    // A start naming a runtime launches with THAT runtime's harness and login (Runtimes answers), resolved before any write:
+    // a runtime that cannot serve refuses here, never launched signed out. A start naming no runtime, login or harness is on
+    // the machine's DEFAULT runtime (v4 parity) and its login gate; with none, `defaultHarnessKey` picks the harness.
     const runtimeName = request.runtime ?? (await this.defaultRuntimeFor(request));
     const resolved = await this.resolveRuntime(runtimeName, { harness: request.harness, login: request.login });
     if (!resolved.ok) return resolved;
     const login = resolved.value?.login ?? request.login;
-    const harnessKey = resolved.value?.harness ?? request.harness ?? this.ports.harnessKeys()[0];
+    const harnessKey = resolved.value?.harness ?? request.harness ?? defaultHarnessKey(this.ports.harnessKeys());
     if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');
     if (this.ports.harness(harnessKey) === undefined)
       return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);

@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+composition	daemon/index.ts	-	-	the OpenCode daemon assembles its harness and preflight login guard
