@@ -16,7 +16,10 @@ import {
   SendPaneNotReady,
   type SendPaneObservation,
   type SendQueueOutcome,
+  type SendSenderKind,
   type SendTerminal,
+  TYPING_HELD_SENTENCE,
+  yieldToTyping,
 } from '../contract/index.ts';
 import {
   deliveryAnswer,
@@ -43,6 +46,7 @@ const observed = (seen: RunnerPaneObservation): SendPaneObservation => ({
   ...(seen.startupParked === undefined ? {} : { startupParked: seen.startupParked }),
   ...(seen.blockingPrompt === undefined ? {} : { blockingPrompt: seen.blockingPrompt }),
   ...(seen.draft === undefined ? {} : { draft: seen.draft }),
+  ...(seen.typing === true ? { typing: true } : {}),
 });
 
 /**
@@ -78,6 +82,17 @@ export function harnessSendTerminal(ferrets: Pick<FerretsApi, 'harness'>): SendT
         return deliveryAnswer(ferret, failure);
     }
   };
+  /**
+   * The typing hold, at the write boundary of the daemon's own writes: a write told whose it is (`by`) looks once more
+   * immediately before its first key, and a person typing is the pane `busy` — nothing typed, the same write goes again.
+   */
+  const yielding = async (harness: FerretHarness, by: SendSenderKind | undefined): Promise<void> => {
+    const look = async (): Promise<SendPaneObservation | undefined> => {
+      const seen = await harness.observe?.().catch(() => undefined);
+      return seen?.ok === true ? observed(seen.value) : undefined;
+    };
+    if (by !== undefined) await yieldToTyping(look, by, () => new SendPaneNotReady(TYPING_HELD_SENTENCE, 'busy'));
+  };
   return {
     observe: async ferret => {
       const seen = await (await open(ferret)).observe?.();
@@ -91,12 +106,15 @@ export function harnessSendTerminal(ferrets: Pick<FerretsApi, 'harness'>): SendT
     // THE TRACKER'S RETYPE (a send proven absent is typed again under its own id): the same two harness acts a first send
     // makes, with the failures the send service reads (`SendPaneNotReady`, `SendComposerOccupied`, …). A first send is
     // `typeMessage`'s, with its own answers; these two are reached only through `SessionSendService.reattempt`.
-    deliver: async (ferret, text) => {
-      const delivered = await (await open(ferret)).deliver({ text });
+    deliver: async (ferret, text, by) => {
+      const harness = await open(ferret);
+      const delivered = await harness.deliver({ text, beforeWrite: async () => await yielding(harness, by) });
       if (!delivered.ok) throw typingFailure(ferret, delivered.error);
     },
-    queue: async (ferret, text): Promise<SendQueueOutcome> => {
-      const queued = await (await open(ferret)).queue(text);
+    queue: async (ferret, text, by): Promise<SendQueueOutcome> => {
+      const harness = await open(ferret);
+      await yielding(harness, by);
+      const queued = await harness.queue(text);
       if (!queued.ok) throw typingFailure(ferret, queued.error);
       // Still in the composer after the submit and queue keys: the TUI will not send it at the turn's end by itself.
       if (queued.value === 'typed') throw new SendLandingUnconfirmed(STRANDED_SENTENCE);
@@ -120,8 +138,10 @@ export function harnessSendTerminal(ferrets: Pick<FerretsApi, 'harness'>): SendT
       if (!cleared.ok) throw deliveryAnswer(ferret, cleared.error);
       return cleared.value;
     },
-    submitComposer: async (ferret, text, strict): Promise<ComposerSubmitOutcome> => {
-      const submitted = await (await open(ferret)).submitComposer?.(text, strict);
+    submitComposer: async (ferret, text, strict, by): Promise<ComposerSubmitOutcome> => {
+      const harness = await open(ferret);
+      await yielding(harness, by);
+      const submitted = await harness.submitComposer?.(text, strict);
       if (submitted === undefined) return off();
       if (!submitted.ok) throw deliveryAnswer(ferret, submitted.error);
       return submitted.value;

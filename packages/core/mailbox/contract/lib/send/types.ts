@@ -79,6 +79,8 @@ export interface SendPaneObservation {
    * joined to it, so a send refuses rather than type.
    */
   readonly draft?: string | undefined;
+  /** A person pressed a key in this pane a moment ago: the daemon's own writes wait until they stop (the owner's idea A563). */
+  readonly typing?: boolean | undefined;
 }
 
 /** One session, as everything in this slice reads it. */
@@ -208,16 +210,19 @@ export type ComposerClearOutcome = 'cleared' | 'absent' | 'foreign' | 'stuck';
 /** What one Enter for a stranded payload did: it left the composer, stayed, or was not there to send. */
 export type ComposerSubmitOutcome = 'submitted' | 'holding' | 'absent';
 
-/** The terminal side of a send. Every address goes through the daemon's own isolated tmux socket. */
+/**
+ * The terminal side of a send. Every address goes through the daemon's own isolated tmux socket. A write that names whose
+ * it is (`by`) waits out a person typing in the pane, checked immediately before its first key (the typing hold).
+ */
 export interface SendTerminal {
   observe(id: SessionId): Promise<SendPaneObservation>;
   /**
    * Types into a prompt-ready composer and submits, proving the payload left the composer. Throws
    * `SendLandingUnconfirmed` when the payload was typed and no frame proved it landed.
    */
-  deliver(id: SessionId, text: string): Promise<void>;
+  deliver(id: SessionId, text: string, by?: SendSenderKind): Promise<void>;
   /** Types into a BUSY composer so the harness holds it until the turn boundary. Throws as `deliver` does. */
-  queue(id: SessionId, text: string): Promise<SendQueueOutcome>;
+  queue(id: SessionId, text: string, by?: SendSenderKind): Promise<SendQueueOutcome>;
   /** Sends the safe stop key, waits for the turn to wind down, and re-reads the pane. */
   stopActiveTurn(id: SessionId): Promise<SendPaneObservation>;
   /**
@@ -235,7 +240,7 @@ export interface SendTerminal {
    * Presses Enter once, ONLY when the composer holds exactly `text`, and reports where it went. `strict` (&B153) also
    * refuses a clipped drawing of it (`…`): the composer must be the whole text, re-wrapped at most.
    */
-  submitComposer(id: SessionId, text: string, strict?: boolean): Promise<ComposerSubmitOutcome>;
+  submitComposer(id: SessionId, text: string, strict?: boolean, by?: SendSenderKind): Promise<ComposerSubmitOutcome>;
 }
 
 /** Where a send's fate is decided, told each time a transport finishes so it can look. */

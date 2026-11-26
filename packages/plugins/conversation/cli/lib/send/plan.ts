@@ -120,6 +120,7 @@ const WAIT_REASON_NOTES: Readonly<Record<QueueWaitReason, string>> = {
   unreadable: 'its screen cannot be read',
   stopped: 'it is not running',
   compacting: 'the agent is compacting its context',
+  typing: 'a person is typing in its terminal',
 };
 
 /**
