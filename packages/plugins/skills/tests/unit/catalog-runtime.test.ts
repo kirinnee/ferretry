@@ -45,6 +45,7 @@ function fixture(
     list: async () => [
       { id: 'claude-default', profile: 'work', harness: 'claude-code' },
       { id: 'codex-main', profile: 'work', harness: 'codex' },
+      { id: 'third-main', profile: 'work', harness: 'a-third-harness' },
     ],
     profiles: async () => profiles,
     changeProfileLayers: async (change: ProfileLayerChange) => {
@@ -103,12 +104,13 @@ const refusal = async (run: () => Promise<unknown>): Promise<CatalogItemRefusal>
 };
 
 describe('what Skills offers a catalog to install into', () => {
-  test('runtimes carry their profile and a harness of claude or codex; profiles carry their names', async () => {
+  test('runtimes carry their profile and their harness plugin key, a third included; profiles carry their names', async () => {
     const { installer } = fixture();
     expect(await installer.runtimes()).toEqual({
       runtimes: [
-        { id: 'claude-default', name: 'claude-default', profile: 'work', harness: 'claude' },
+        { id: 'claude-default', name: 'claude-default', profile: 'work', harness: 'claude-code' },
         { id: 'codex-main', name: 'codex-main', profile: 'work', harness: 'codex' },
+        { id: 'third-main', name: 'third-main', profile: 'work', harness: 'a-third-harness' },
       ],
     });
     expect(await installer.profiles()).toEqual({ profiles: [{ name: 'work' }] });

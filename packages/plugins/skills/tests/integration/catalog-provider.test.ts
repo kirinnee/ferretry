@@ -384,7 +384,7 @@ describe('installing a catalog skill into a runtime', () => {
   test('writes the files, the item and the profile layer, and answers the component exactly as it is stored', async () => {
     const w = runtimeWorld();
     expect(await w.runtime.runtimes()).toEqual({
-      runtimes: [{ id: 'claude-default', name: 'claude-default', profile: 'default', harness: 'claude' }],
+      runtimes: [{ id: 'claude-default', name: 'claude-default', profile: 'default', harness: 'claude-code' }],
     });
     expect(await w.runtime.profiles()).toEqual({ profiles: [{ name: 'default' }] });
     const stored = await w.runtime.installCatalogItem(CHANGE, undefined);

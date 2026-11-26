@@ -107,7 +107,7 @@ export function createMemoryHostFs(clock: () => number = () => 0): MemoryHostFs 
         if (isCompleteRecord(encoder.encode(current.slice(start)))) prefix = '\n';
         else current = current.slice(0, start);
       }
-      put(path, `${current}${prefix}${line}\n`, existing?.mode ?? mode);
+      put(path, `${current}${prefix}${line}\n`, existing === undefined ? mode : existing.mode & mode);
     },
     async ensureDirectory(path, mode) {
       if (!directories.has(path)) directories.set(path, mode);

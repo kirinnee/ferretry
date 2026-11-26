@@ -216,7 +216,7 @@ export interface CatalogsFixtureOptions {
   readonly config?: Readonly<Record<string, unknown>>;
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** The runtimes the MCP item provider names as install targets (with `mcp`); absent = none. */
-  readonly runtimes?: readonly { id: string; name: string; profile: string; harness: 'claude' | 'codex' }[];
+  readonly runtimes?: readonly { id: string; name: string; profile: string; harness: string }[];
   /** MCP servers the MCP item provider lists; absent = MCP is off. */
   readonly mcp?: McpSourceServer[];
   /** The sealed-documents port Catalogs is given; absent = Vault's fake. */
@@ -231,7 +231,7 @@ export interface CatalogsFixtureOptions {
  */
 function mcpItems(
   servers: McpSourceServer[],
-  runtimes: readonly { id: string; name: string; profile: string; harness: 'claude' | 'codex' }[] = [],
+  runtimes: readonly { id: string; name: string; profile: string; harness: string }[] = [],
 ) {
   const refuse = async (): Promise<never> => {
     throw new Error('the test MCP provider installs nothing');

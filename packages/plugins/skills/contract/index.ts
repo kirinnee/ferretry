@@ -13,6 +13,7 @@ import {
   SkillsItemSchema,
 } from './wire.ts';
 
+export * from './harness-layout.ts';
 export * from './slots.ts';
 export * from './wire.ts';
 

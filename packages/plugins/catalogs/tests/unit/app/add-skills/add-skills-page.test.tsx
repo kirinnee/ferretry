@@ -2,6 +2,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test
 import { interact, mount, must } from '@ferretry/app/testing';
 import { AddSkillsPage, type AddSkillsPageProps } from '../../../../app/features/add-skills/add-skills-page.tsx';
 import type { RuntimeChoice } from '../../../../app/features/add-skills/add-skills-model.ts';
+import { CHOOSE_PLACEHOLDER } from '../../../../app/features/catalogs/catalog-install-model.ts';
+import { readPlace } from '../../../../app/lib/add-skills-address.ts';
 import { CatalogClientProvider } from '../../../../app/lib/client-context.tsx';
 import { daemonConnection } from '../../../../app/lib/machine.ts';
 import type { MemberSubscription } from '../../../../app/lib/member-keys.ts';
@@ -9,6 +11,7 @@ import { fakeClient } from '../support/catalog-client.ts';
 import { INSTALL_ID, installPreview, installRecord } from '../support/catalog-views.ts';
 import { click, settle, typeInto } from '../support/dom-form.ts';
 import { testSubscription } from '../support/member-keys.ts';
+import { labelsOf, shownBy } from '../support/select-box.ts';
 import {
   deferred,
   failedAttempt,
@@ -45,7 +48,7 @@ beforeAll(async () => {
 const noInstalls = { 'GET /v1/catalog-installs': () => ({ installs: [] }) };
 const place = { cwd: '/work/app', harness: 'claude' as const, runtime: 'box', scopes: ['user'] };
 const projects = [{ name: 'app', path: '/work/app' }];
-const runtimes: readonly RuntimeChoice[] = [{ id: 'box', wrapper: 'box', profile: 'default' }];
+const runtimes: readonly RuntimeChoice[] = [{ id: 'box', wrapper: 'box', profile: 'default', harness: 'claude-code' }];
 
 interface Opened {
   readonly fake: ReturnType<typeof fakeClient>;
@@ -450,6 +453,68 @@ describe('S-0262 each publisher says in one line what it could not list', () => 
         sub.daemonId === loftId ? failedAttempt('gone', 'It is gone.') : okAttempt(shared.browse),
     });
     expect(q(`[data-add-skills-publisher="${loftId}"]`)?.textContent).toContain('It is gone.');
+    await view.unmount();
+  });
+});
+
+describe('G1 #2570 the agent an install is for comes from what the machine runs', () => {
+  const claudeOnly: readonly RuntimeChoice[] = [
+    { id: 'box', wrapper: 'box', profile: 'default', harness: 'claude-code' },
+  ];
+  const both: readonly RuntimeChoice[] = [
+    ...claudeOnly,
+    { id: 'cx', wrapper: 'cx', profile: 'default', harness: 'codex' },
+  ];
+  const named = (choices: readonly RuntimeChoice[]) =>
+    choices.map(choice => ({ runtime: choice.id, profiles: [choice.profile], harness: choice.harness }));
+
+  /** Opens the sheet from Install on a ferret whose address names no harness, over a machine running `choices`. */
+  async function sheet(choices: readonly RuntimeChoice[], extra: Partial<AddSkillsPageProps> = {}) {
+    const opened = await open(
+      {
+        list: async () => [studio],
+        browse: browseOk,
+        openItem: async () => okAttempt({ item: shared.skill, opened: shared.opened, entry: shared.entries[0]! }),
+      },
+      noInstalls,
+      {
+        place: { cwd: '/work/app', harness: undefined, runtime: undefined, scopes: [] },
+        runtimes: choices,
+        install: { createClient: fakeClient(noInstalls).factory as never, projects, runtimes: named(choices) },
+        ...extra,
+      },
+    );
+    await click(q('[data-add-skills-install]'));
+    await settle();
+    await click(q('[data-shared-install-button]'));
+    await settle();
+    return opened;
+  }
+  const agent = (): HTMLElement => must(q('[data-catalog-harness]'), 'the agent picker');
+
+  it('picks Claude for a Claude-only machine and offers nothing else', async () => {
+    const { view } = await sheet(claudeOnly);
+    expect(shownBy(agent())).toBe('Claude');
+    expect(await labelsOf(agent())).toEqual([CHOOSE_PLACEHOLDER, 'Claude']);
+    await view.unmount();
+  });
+
+  it('asks which agent when the machine runs both, offering both', async () => {
+    const { view } = await sheet(both);
+    expect(shownBy(agent())).toBe(CHOOSE_PLACEHOLDER);
+    expect(await labelsOf(agent())).toEqual([CHOOSE_PLACEHOLDER, 'Claude', 'Codex']);
+    await view.unmount();
+  });
+
+  it('refuses a ferret on a harness a catalog cannot install into: no Install, and it says why', async () => {
+    const { view } = await open({ list: async () => [studio], browse: browseOk }, noInstalls, {
+      place: readPlace('?folder=/work/app&harness=fake-third'),
+      runtimes: claudeOnly,
+    });
+    expect(q('[data-add-skills-scope]')?.textContent).toBe(
+      'fake-third is not a harness a catalog can install into yet.',
+    );
+    expect((q('[data-add-skills-install]') as HTMLButtonElement).disabled).toBe(true);
     await view.unmount();
   });
 });

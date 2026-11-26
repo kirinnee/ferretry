@@ -7,7 +7,13 @@
  * every secret and a fresh passkey.
  */
 
-import { type CatalogInstallPreview, type CatalogInstalled, revealHidden } from '../../../contract/wire/index.ts';
+import {
+  type CatalogInstallPreview,
+  type CatalogInstalled,
+  installHarnessFacts,
+  isInstallHarness,
+  revealHidden,
+} from '../../../contract/wire/index.ts';
 import { WebCryptoRelayCrypto, type RelayCrypto } from '@ferretry/app';
 import { CircleCheck, FileUp } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -31,6 +37,7 @@ import {
   fileItemRows,
   fileSizeProblem,
   fileSummary,
+  harnessChoices,
   heldHint,
   INSTALL_BUTTON,
   type InstallRefusal,
@@ -156,7 +163,11 @@ function useTargetRuntimes(
           if (live)
             setFetched({
               daemonId,
-              runtimes: targets.runtimes.map(item => ({ runtime: item.id, profiles: [item.profile] })),
+              runtimes: targets.runtimes.map(item => ({
+                runtime: item.id,
+                profiles: [item.profile],
+                harness: item.harness,
+              })),
             });
         },
         () => {
@@ -620,14 +631,16 @@ function TargetPicker({
                   onDraft({
                     scope: 'project',
                     ...(kept === undefined ? {} : { projectRoot: kept }),
-                    ...(next === 'claude' || next === 'codex' ? { harness: next } : {}),
+                    ...(isInstallHarness(next) ? { harness: next } : {}),
                   });
                 }}
                 disabled={busy}
                 options={[
                   { value: '', label: CHOOSE_PLACEHOLDER },
-                  { value: 'claude', label: 'Claude' },
-                  { value: 'codex', label: 'Codex' },
+                  ...harnessChoices(options.runtimes, draft.harness).map(word => ({
+                    value: word,
+                    label: installHarnessFacts(word).short,
+                  })),
                 ]}
               />
             </div>

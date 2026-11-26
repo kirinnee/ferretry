@@ -5,8 +5,9 @@
  */
 import { MachineSkillsInventorySchema } from '@ferretry/plugin-skills/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { type InstallHarness, installHarnessOfKey } from '../../contract/wire/index.ts';
 
-type Harness = 'claude' | 'codex' | 'generic';
+type Harness = InstallHarness | 'generic';
 
 /** One skill as Skills' inventory lists it (the fields the picker reads). */
 export interface SkillEntry {
@@ -41,23 +42,30 @@ export const fetchMachineSkillEntries = async (
   const inventory = MachineSkillsInventorySchema.parse(
     await client.call('GET /v1/skills', signal === undefined ? {} : { signal }),
   );
+  // A skill of a harness Catalogs has no layout for cannot be published from here: it is left out, never labelled as another harness.
   const entry = (
     skill: (typeof inventory.homes)[number]['skills'][number],
     project?: SkillEntry['project'],
-  ): SkillEntry => ({
-    name: skill.name,
-    description: skill.description,
-    harness: skill.harness === 'claude-code' ? 'claude' : skill.harness,
-    scope: skill.scope,
-    path: skill.path,
-    runtimes: skill.runtimes,
-    ...(project === undefined ? {} : { project }),
-    ...(skill.shadowedBy === undefined ? {} : { shadowedBy: skill.shadowedBy }),
-  });
+  ): readonly SkillEntry[] => {
+    const harness = installHarnessOfKey(skill.harness);
+    if (harness === undefined) return [];
+    return [
+      {
+        name: skill.name,
+        description: skill.description,
+        harness,
+        scope: skill.scope,
+        path: skill.path,
+        runtimes: skill.runtimes,
+        ...(project === undefined ? {} : { project }),
+        ...(skill.shadowedBy === undefined ? {} : { shadowedBy: skill.shadowedBy }),
+      },
+    ];
+  };
   return [
-    ...inventory.homes.flatMap(home => home.skills.map(skill => entry(skill))),
+    ...inventory.homes.flatMap(home => home.skills.flatMap(skill => entry(skill))),
     ...inventory.projects.flatMap(project =>
-      project.skills.map(skill => entry(skill, { name: project.name, root: project.root })),
+      project.skills.flatMap(skill => entry(skill, { name: project.name, root: project.root })),
     ),
   ];
 };

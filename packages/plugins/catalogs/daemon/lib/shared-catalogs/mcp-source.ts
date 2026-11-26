@@ -17,6 +17,7 @@
 import {
   CatalogItemNameSchema,
   type CatalogHarness,
+  type InstallHarness,
   type CatalogMcpSetup,
   CatalogMcpSetupSchema,
   type CatalogSourceProblem,
@@ -46,7 +47,7 @@ export interface McpSourceServer {
   readonly id: string;
   readonly name: string;
   readonly scope: McpScope;
-  readonly harness: 'claude' | 'codex';
+  readonly harness: InstallHarness;
   /** The file that declares it, when it has one. */
   readonly source?: string | undefined;
   readonly declaration: McpDeclaration | null;

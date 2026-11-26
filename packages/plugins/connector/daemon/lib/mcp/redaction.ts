@@ -75,6 +75,19 @@ const RULES: readonly Rule[] = [
   },
 ];
 
+/**
+ * The host's own tokens (admin, warden) are 32 random bytes in unpadded base64url: exactly 43 characters of
+ * `[A-Za-z0-9_-]`. The kernel masks their LITERALS in what comes back, but only the kernel holds them, so a value the
+ * caller supplied reaches the plugin unmasked. This is the shape of that literal, applied where a value the CALLER
+ * chose is about to be written down (the calls log), never to text that came back from the machine.
+ */
+const HOST_TOKEN_SHAPE = /(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/gu;
+
+/** Masks every host-token-shaped run inside a text a caller supplied. Pure and synchronous. */
+export function redactHostTokenShapes(text: string): string {
+  return text.replace(HOST_TOKEN_SHAPE, REDACTED);
+}
+
 /** Masks the SHAPES of common credentials. Pure and synchronous; may throw only on a pathological input. */
 export function redactCredentialPatterns(text: string): string {
   let result = text;

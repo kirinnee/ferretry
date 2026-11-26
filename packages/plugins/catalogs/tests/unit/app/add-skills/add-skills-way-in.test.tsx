@@ -48,7 +48,8 @@ describe('S-0304 the way in carries where the ferret is', () => {
       runtime: undefined,
       scopes: [],
     });
-    expect(readPlace('')).toEqual({ cwd: undefined, harness: 'claude', runtime: undefined, scopes: [] });
+    // A place that names no harness is no harness: the page asks which agent, never assumes Claude (U4b part 4a).
+    expect(readPlace('')).toEqual({ cwd: undefined, harness: undefined, runtime: undefined, scopes: [] });
   });
 
   it('draws “+ Add skills” in the slot and goes to the page with the place', async () => {

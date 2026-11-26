@@ -40,7 +40,7 @@ describe('S-0010 where the Add skills page puts a skill, and how it says so', ()
   it('prefers this project, then this account, and otherwise asks', () => {
     expect(installPlan(place, projects, []).scope).toBe('project');
     const account = installPlan({ ...place, cwd: '/elsewhere' }, projects, [
-      { id: 'r1', wrapper: 'box', profile: 'p' },
+      { id: 'r1', wrapper: 'box', profile: 'p', harness: 'claude-code' },
     ]);
     expect(account).toMatchObject({ scope: 'runtime', runtimeId: 'r1', sentence: accountSentence('box') });
     expect(scopeLine(account)).toContain('this account');

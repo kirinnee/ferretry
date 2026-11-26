@@ -40,7 +40,10 @@ import {
   catalogItemReview,
   catalogItemWarnings,
   catalogSecretPlaceholders,
+  installHarnessFacts,
+  installHarnessOfKey,
   newDiffBudget,
+  unsupportedInstallHarnessSentence,
   type FleetComponentInput,
   mcpServerRefusal,
   type SessionMcpServer,
@@ -657,10 +660,11 @@ export class CatalogInstallService {
         `${item.name} is an artifact. An artifact is opened from the catalog, not installed.`,
       );
     if (item.kind === 'mcp' && target.scope === 'project') {
-      if (target.harness === 'codex')
+      const facts = installHarnessFacts(target.harness);
+      if (!facts.readsProjectMcp)
         refuse(
           'catalog_not_installable',
-          'Codex does not read .mcp.json, so a project server would never reach it. Install it into a runtime instead.',
+          `${facts.name} does not read .mcp.json, so a project server would never reach it. Install it into a runtime instead.`,
         );
       const probe: SessionMcpServer =
         item.mcp.transport === 'url'
@@ -687,7 +691,7 @@ export class CatalogInstallService {
     )
       refuse(
         'catalog_not_installable',
-        `${item.name} is written for ${item.harness === 'claude' ? 'Claude Code' : 'Codex'}, not for ${target.harness}.`,
+        `${item.name} is written for ${installHarnessFacts(item.harness).name}, not for ${target.harness}.`,
       );
   }
 
@@ -709,7 +713,7 @@ export class CatalogInstallService {
             words: `the server ${item.name} in ${wanted}/${PROJECT_MCP_FILE}`,
           },
         };
-      const folder = `${target.harness === 'claude' ? '.claude' : '.agents'}/skills/${item.name}`;
+      const folder = `${installHarnessFacts(target.harness).projectFolder}/skills/${item.name}`;
       const count = item.kind === 'skill' ? item.skill.files.length : 0;
       return {
         root: wanted,
@@ -733,10 +737,18 @@ export class CatalogInstallService {
         'catalog_target_unknown',
         `${runtime.name} launches with the profile ${runtime.profile}, not ${profile.name}, so installing there would not reach it.`,
       );
-    if (item.harness !== undefined && item.harness !== 'generic' && item.harness !== runtime.harness)
+    // A runtime is judged by its harness PLUGIN KEY, exactly: a key Catalogs has no layout for (a third plugin registered under
+    // the word `claude` included) is refused by name, whatever the item says, never read as Claude or Codex.
+    const harness = installHarnessOfKey(runtime.harness);
+    if (harness === undefined)
       return refuse(
         'catalog_not_installable',
-        `${item.name} is written for ${item.harness === 'claude' ? 'Claude Code' : 'Codex'}, and ${runtime.name} runs ${runtime.harness}.`,
+        `${runtime.name}: ${unsupportedInstallHarnessSentence(runtime.harness)}.`,
+      );
+    if (item.harness !== undefined && item.harness !== 'generic' && item.harness !== harness)
+      return refuse(
+        'catalog_not_installable',
+        `${item.name} is written for ${installHarnessFacts(item.harness).name}, and ${runtime.name} runs ${harness}.`,
       );
     const word = item.kind === 'mcp' ? 'the MCP server' : 'the skill';
     return {

@@ -186,6 +186,14 @@ describe('/mcp — rate limits', () => {
     should((await post(r.endpoint, callTool('list_ferrets', {})))?.status).equal(200);
   });
 
+  it('counts an unknown tool name against the 60 calls a minute, so guessing names is not free', async () => {
+    const r = rig();
+    r.delegate.on(ferretsRoute());
+    for (let n = 0; n < 60; n += 1) should((await post(r.endpoint, callTool('no_such_tool', {})))?.status).equal(200);
+    should((await post(r.endpoint, callTool('no_such_tool', {})))?.status).equal(429);
+    should((await post(r.endpoint, callTool('list_ferrets', {})))?.status).equal(429);
+  });
+
   it('429s the 11th write in a minute but lets reads through; initialize and list are free', async () => {
     const r = rig();
     r.delegate
