@@ -8,6 +8,8 @@
  *   ?theme=<family>-<mode>
  *   &connection=<connected|connecting|disconnected|detached>   the display link the status row speaks of (default connected)
  *   &actor=none   a browser nobody has driven yet (the "No input yet" chip)
+ *   &text=larger   the Larger text size (the factor the Text size setting publishes on the root)
+ *   &loading=1    the page starts out loading (the "Loading page…" label)
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
@@ -35,6 +37,11 @@ document.documentElement.dataset.palette = PALETTE[style] ?? 'studio';
 document.documentElement.dataset.mode = mode;
 const connection = (params.get('connection') ?? 'connected') as RemoteBrowserConnection;
 const driven = params.get('actor') !== 'none';
+if (params.get('text') === 'larger') {
+  document.documentElement.dataset.textScale = 'larger';
+  document.documentElement.style.setProperty('--fy-text-scale', '1.25');
+}
+const startsLoading = params.get('loading') === '1';
 
 declare global {
   interface Window {
@@ -70,7 +77,7 @@ const status = (loading: boolean): BrowserStatus =>
 
 function StandInPane({ onStateChange }: RemoteBrowserPaneProps) {
   const [busy, setBusy] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(startsLoading);
   const runAction = useCallback((_action: BrowserAction) => undefined, []);
   const current = useMemo(() => status(loading), [loading]);
 

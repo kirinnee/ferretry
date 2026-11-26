@@ -183,3 +183,88 @@ describe('the status row stays readable at its longest', () => {
           }
         });
 });
+
+/** Every word the row speaks, at the phone widths people really hold (320 is the narrowest), at the Larger text size. */
+const NARROW = [320, 390, 430] as const;
+/** The two states that speak the longest labels: the display link down, and a page loading over a down link. */
+const LONGEST = {
+  disconnected: WORST,
+  loading: `${WORST}&loading=1`,
+} as const;
+
+/**
+ * The words the row cut, read from the TEXT itself rather than from the row's children: every text node must sit whole inside
+ * the row and inside every box between it and the row that clips (a truncating label, a chip). A label may wrap onto a second
+ * line; it may never be clipped, ellipsised or pushed out of the row.
+ */
+const cutWords = (tab: Page): Promise<string[]> =>
+  tab.evaluate(() => {
+    const row = document.querySelector<HTMLElement>('[data-browser-status-row]') as HTMLElement;
+    const cut: string[] = [];
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const text = (node.textContent ?? '').trim();
+      if (text === '') continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const word = range.getBoundingClientRect();
+      for (let box = node.parentElement; box !== null && box !== row.parentElement; box = box.parentElement) {
+        const style = getComputedStyle(box);
+        const clips = style.overflowX !== 'visible' || style.overflowY !== 'visible';
+        if (!clips) continue;
+        const edge = box.getBoundingClientRect();
+        const outside =
+          word.right > edge.right + 0.5 ||
+          word.left < edge.left - 0.5 ||
+          word.bottom > edge.bottom + 0.5 ||
+          word.top < edge.top - 0.5 ||
+          box.scrollWidth > box.clientWidth + 1;
+        if (outside) {
+          cut.push(text);
+          break;
+        }
+      }
+    }
+    return cut;
+  });
+
+describe('the status row stays whole at the Larger text size on a phone', () => {
+  for (const width of NARROW)
+    for (const family of ['studio', 'genz', 'neumorphism'] as const)
+      for (const [state, query] of Object.entries(LONGEST))
+        it(`cuts no word of a nested label (${width}px, ${family}, ${state})`, async () => {
+          const context = await sceneContext(browser, served.origin, { width, height: 844 }, 'light');
+          try {
+            const tab = await context.newPage();
+            await tab.goto(`${served.origin}/?theme=${family}-light&text=larger&${query}`);
+            await tab.waitForSelector('[data-browser-status-row]');
+            if (state === 'loading') await labelIs(tab, 'Loading page…', 3_000);
+            await pause(200);
+            expect(await cutWords(tab)).toEqual([]);
+            // The label's slot is held: it speaking and falling silent leaves the row as tall as it was and the toolbar the same
+            // distance beneath it. (The row, not the bar above it: that bar's own state chip is not this row's business.)
+            const rowShape = (): Promise<{ height: number; gap: number }> =>
+              tab.evaluate(() => {
+                const row = (
+                  document.querySelector('[data-browser-status-row]') as HTMLElement
+                ).getBoundingClientRect();
+                const controls = (document.querySelector('[data-controls]') as HTMLElement).getBoundingClientRect();
+                return {
+                  height: Math.round(row.height * 100) / 100,
+                  gap: Math.round((controls.top - row.bottom) * 100) / 100,
+                };
+              });
+            const before = await rowShape();
+            await tab.evaluate(on => window.__setLoading(on), state !== 'loading');
+            await labelIs(tab, state === 'loading' ? '' : 'Loading page…', 3_000);
+            await pause(200);
+            expect(await rowShape()).toEqual(before);
+            const overflow = await tab.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+            expect(overflow).toBeLessThanOrEqual(0);
+            if (shotsDir !== '')
+              await tab.screenshot({ path: join(shotsDir, `browser-larger-${state}-${family}-${width}.png`) });
+          } finally {
+            await context.close();
+          }
+        });
+});

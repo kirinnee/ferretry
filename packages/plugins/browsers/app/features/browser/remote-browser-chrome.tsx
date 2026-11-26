@@ -97,15 +97,18 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
           via proxy
         </Badge>
       ) : null}
-      <div className="flex min-w-0 flex-1 basis-[16rem] items-center gap-xs">
+      {/* Words wrap, they are never cut: at a narrow width or a larger text size the display status drops under the
+          activity label. The label slot is as wide as its longest words (ch scales with the text) and as tall as one
+          line, so it holds its place whether or not it is speaking. */}
+      <div className="flex min-w-0 flex-1 basis-[16rem] flex-wrap items-center gap-x-xs gap-y-1">
         <span
-          className={`min-w-[5.5rem] flex-1 truncate text-meta text-muted transition-opacity ${activity === '' ? 'opacity-0' : 'opacity-100'}`}
+          className={`min-h-[1lh] min-w-[14ch] shrink-0 text-meta text-muted transition-opacity ${activity === '' ? 'opacity-0' : 'opacity-100'}`}
           aria-live="polite"
           data-browser-activity=""
         >
           {activity}
         </span>
-        <span className="ml-auto min-w-0 truncate text-meta text-muted">
+        <span className="ml-auto min-w-0 max-w-full text-meta text-muted">
           {connection === 'connected'
             ? 'Live'
             : connection === 'connecting'
