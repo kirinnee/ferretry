@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { ManagedWorktreeView, WorktreeRemovalRequest } from '../../../../contract/index.ts';
 import should from 'should';
+import { verifyWorktreeOccupancy } from '../../../../daemon/lib/worktrees/occupancy.ts';
 import {
   type CheckManagedWorktreeRemovalInput,
   type CreatedManagedWorktree,
@@ -47,6 +48,34 @@ const session = (overrides: Partial<WorktreeSessionFact> = {}): WorktreeSessionF
   cwd: '/work/ferretry',
   status: 'running',
   ...overrides,
+});
+
+describe('occupancy at the destructive boundary', () => {
+  const context = (overrides: Partial<Parameters<typeof managedWorktreeRemovalContext>[0]> = {}) =>
+    managedWorktreeRemovalContext({
+      managed: record(),
+      managedRoot: MANAGED_ROOT,
+      sessions: [],
+      terminalRoots: [],
+      ...overrides,
+    });
+
+  it('should allow unchanged empty occupancy, including a caller with fixed evidence', async () => {
+    await verifyWorktreeOccupancy(context(), async () => context());
+    await verifyWorktreeOccupancy(context(), undefined);
+  });
+
+  it.each([
+    { label: 'late terminal', change: { terminalRoots: ['/managed/repo/feat-one/src'] } },
+    { label: 'late other ferret', change: { sessions: [session({ id: 'other', cwd: '/managed/repo/feat-one' })] } },
+    { label: 'owner resumed', change: { sessions: [session()] } },
+    { label: 'terminal endpoint became unreadable', change: { terminalRoots: undefined } },
+    { label: 'session directory became unreadable', change: { sessions: undefined } },
+  ])('should refuse when $label appears after the Git preflight and pin', async ({ change }) => {
+    await should(verifyWorktreeOccupancy(context(), async () => context(change))).be.rejectedWith(
+      WorktreeRemovalRefusal,
+    );
+  });
 });
 
 const inspection = (overrides: Partial<ManagedWorktreeInspection> = {}): ManagedWorktreeInspection => ({
