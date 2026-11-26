@@ -363,3 +363,85 @@ describe('older messages on the queue page', () => {
     expect(text(mounted.root.findByProps({ 'data-queue-older': '' }))).toBe('Show older messages');
   });
 });
+
+describe('QueuePageView search (G6 · W-05)', () => {
+  const box = () => mounted!.root.findByProps({ 'data-queue-search': '' });
+  const type = (value: string) => run(() => box().props.onChange({ target: { value } }));
+  const shown = () =>
+    mounted!.root.findAll(n => n.props['data-queue-row'] !== undefined).map(n => n.props['data-queue-row']);
+
+  test('a labelled search box sits above the messages, native so the keyboard reaches it', () => {
+    mounted = view();
+    expect(box().type).toBe('input');
+    expect(box().props.type).toBe('search');
+    expect(box().props['aria-label']).toBe('Search messages');
+    expect(shown()).toEqual(['o1', 'q1', 'q22', 'q333']);
+  });
+
+  test('filters the waiting rows and the finished ones by their words, case-insensitively', () => {
+    mounted = view();
+    type('THANK');
+    expect(shown()).toEqual(['o1']);
+    type('text q22');
+    expect(shown()).toEqual(['q22']);
+  });
+
+  test('also finds a message by who sent it', () => {
+    mounted = view();
+    type('mira');
+    expect(shown()).toEqual(['q333']);
+  });
+
+  test('the next-up mark and the waiting count do not move with the filter', () => {
+    mounted = view({ now: Date.parse('2026-10-30T10:15:00.000Z') });
+    const before = JSON.stringify(mounted.toJSON());
+    expect(before).toContain('3 messages are waiting');
+    type('text q1');
+    expect(shown()).toEqual(['q1']);
+    expect(JSON.stringify(mounted.toJSON())).toContain('3 messages are waiting');
+  });
+
+  test('says what matched nothing, and the Clear button brings every message back', () => {
+    mounted = view();
+    type('zebra');
+    expect(shown()).toEqual([]);
+    const empty = mounted.root.findByProps({ 'data-queue-no-match': '' });
+    expect(text(empty)).toContain('No message matched “zebra”');
+    run(() => buttons(empty, 'Clear search')[0]?.props.onClick());
+    expect(shown()).toEqual(['o1', 'q1', 'q22', 'q333']);
+    expect(box().props.value).toBe('');
+  });
+
+  test('Escape in the box clears it', () => {
+    mounted = view();
+    type('mira');
+    run(() => box().props.onKeyDown({ key: 'Escape', preventDefault: () => undefined }));
+    expect(box().props.value).toBe('');
+    expect(shown()).toHaveLength(4);
+  });
+
+  test('a ferret with no match loses its card while it filters, and the empty state is not "Nothing is waiting"', () => {
+    mounted = view({
+      groups: [
+        group([queued('a1', 'queued')]),
+        { ...group([queued('b1', 'queued')], 'd1/s2'), ferret: 'Mira', ferretId: 's2' },
+      ],
+    });
+    type('text b1');
+    expect(
+      mounted.root.findAll(n => n.props['data-queue-group'] !== undefined).map(n => n.props['data-queue-group']),
+    ).toEqual(['d1/s2']);
+    type('nope');
+    expect(JSON.stringify(mounted.toJSON())).not.toContain('Nothing is waiting');
+  });
+
+  test('no box while nothing is waiting or reading, and "Show older" stays reachable while filtering', () => {
+    mounted = view({ groups: [] });
+    expect(mounted.root.findAllByProps({ 'data-queue-search': '' })).toHaveLength(0);
+    mounted.unmount();
+    mounted = view({ olderKeys: new Set(['d1/s1']), onLoadOlder: () => undefined });
+    type('zebra');
+    expect(mounted.root.findAllByProps({ 'data-queue-older': '' }).length).toBeGreaterThan(0);
+    expect(text(mounted.root.findByProps({ 'data-queue-no-match': '' }))).toContain('older messages');
+  });
+});

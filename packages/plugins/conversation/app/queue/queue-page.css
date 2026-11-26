@@ -264,3 +264,20 @@
   padding: 14px 0;
   border-bottom: var(--divider-width, 1px) solid var(--border-soft);
 }
+/* The search box (G6): one row above the messages, the field takes the room and the button sits beside it. */
+.fy-queue-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fy-queue-search-input {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+@media (max-width: 640px) {
+  .fy-queue-search .kt-btn,
+  .fy-queue-search-input {
+    min-height: 44px;
+  }
+}

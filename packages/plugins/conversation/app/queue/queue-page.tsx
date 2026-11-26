@@ -19,6 +19,7 @@ import {
   fromLabel,
   groupNextSend,
   isWaitingRow,
+  matchingRows,
   needsClamp,
   nextRowId,
   queuedAgo,
@@ -26,6 +27,7 @@ import {
   type QueueRow,
   type RowSend,
   rowSend,
+  searchTerm,
   TURN_ENDS_COPY,
   waitingCountLine,
 } from './queue-view.ts';
@@ -40,6 +42,7 @@ import {
   refreshQueueHistory,
 } from './send-queue.ts';
 import { QueueProse } from './queue-prose.tsx';
+import { QueueNoMatch, QueueSearch } from './queue-search.tsx';
 import './queue-page.css';
 
 /** Where a message is, in words; a queued one is on the machine's queue, which is what this page is. */
@@ -289,12 +292,18 @@ export function QueuePageView({
   onLoadOlder,
   error,
 }: QueuePageViewProps) {
+  // The search box filters what is drawn; the counts, "Next up" and "next send" read every message, so a search never moves them.
+  const [query, setQuery] = useState('');
+  const searching = searchTerm(query) !== '';
+  const rowsOf = (group: QueueGroup): readonly QueueRow[] => (searching ? matchingRows(group.rows, query) : group.rows);
   // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all. One
   // whose newest window shows nothing (every message in it cancelled) but whose machine holds older messages keeps its
   // card, because "Show older messages" lives there and would otherwise be unreachable.
   const hasOlder = (group: QueueGroup): boolean => onLoadOlder !== undefined && olderKeys?.has(group.key) === true;
   // A ferret whose queue could not be read keeps its card too: it is not empty, it is unknown.
-  const shown = groups.filter(group => group.rows.length > 0 || group.unread !== undefined || hasOlder(group));
+  const shown = groups.filter(group => rowsOf(group).length > 0 || group.unread !== undefined || hasOlder(group));
+  const matched = shown.some(group => rowsOf(group).length > 0);
+  const canSearch = groups.some(group => group.rows.length > 0);
   const loadOlder = onLoadOlder;
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
   const incomplete = error !== undefined || groups.some(group => group.unread !== undefined);
@@ -322,7 +331,11 @@ export function QueuePageView({
             {error}
           </p>
         ) : null}
-        {shown.length === 0 && !loading && !incomplete ? (
+        {canSearch ? <QueueSearch onChange={setQuery} query={query} /> : null}
+        {searching && !matched && !loading ? (
+          <QueueNoMatch olderUnread={groups.some(hasOlder)} onClear={() => setQuery('')} query={query} />
+        ) : null}
+        {shown.length === 0 && !searching && !loading && !incomplete ? (
           <div className="fy-queue-empty kt-panel" data-queue-empty="">
             <p className="fy-queue-empty-title">Nothing is waiting</p>
             <p className="fy-queue-empty-hint">
@@ -338,7 +351,8 @@ export function QueuePageView({
         {shown.map(group => {
           const next = nextRowId(group.rows, now);
           // The older messages belong where they will appear: just above the finished ones, below what still waits.
-          const olderBefore = group.rows.find(row => !isWaitingRow(row))?.id;
+          const rows = rowsOf(group);
+          const olderBefore = rows.find(row => !isWaitingRow(row))?.id;
           const older =
             loadOlder !== undefined && hasOlder(group) ? (
               <li className="fy-queue-older" key="older">
@@ -379,7 +393,7 @@ export function QueuePageView({
                     </p>
                   )}
                   <ul className="fy-queue-list">
-                    {group.rows.map(row => (
+                    {rows.map(row => (
                       <Fragment key={row.id}>
                         {row.id === olderBefore ? older : null}
                         <QueueRowView handlers={handlers} next={row.id === next} now={now} row={row} />

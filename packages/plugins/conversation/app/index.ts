@@ -15,6 +15,7 @@ import { clearAttachmentCaches } from './composer/attachment-blob-cache.ts';
 import { deviceOutboxFor } from './composer/device-outbox-hook.ts';
 import { documentDraftStore, documentRestoreStore } from './composer/drafts.ts';
 import { lazyComponent } from './lazy.ts';
+import { queueCommands } from './queue/queue-commands.ts';
 import { workSearchCommandSource } from './search/work-search-commands.ts';
 
 type Surfaces = {
@@ -104,9 +105,9 @@ export default provideToShell(
       };
     },
   }),
-  // Lead decision Q10: the shell's command bar lists the cards and asks the daemon's work search finds.
+  // Lead decision Q10: the shell's command bar lists the cards and asks the daemon's work search finds, and (G6) a "Queue" place that opens All queues.
   {
-    commands: context => [workSearchCommandSource(context)],
+    commands: context => [workSearchCommandSource(context), queueCommands(context)],
     // S15: the shared "Add to chat" any surface calls (Board's cards today), over this plugin's own daemon.
     hooks: {
       [CONVERSATION_ADD_TO_CHAT_HOOK]: ({ daemon }) => addToChatFor(daemon),

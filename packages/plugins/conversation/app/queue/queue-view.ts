@@ -255,3 +255,16 @@ export const groupNextSend = (group: QueueGroup, nowMs: number): RowSend | undef
   }
   return earliest !== undefined ? { at: earliest.at } : turn ? { turn: true } : undefined;
 };
+
+/** What a person typed into the search box, as the words to look for: trimmed, one case; empty means "no filter". */
+export const searchTerm = (query: string): string => query.trim().toLowerCase();
+
+/**
+ * The rows whose words, sender or ferret name hold what was typed, case-insensitively. Waiting and finished rows are
+ * judged alike; the order is kept; an empty term keeps every row.
+ */
+export const matchingRows = (rows: readonly QueueRow[], query: string): readonly QueueRow[] => {
+  const term = searchTerm(query);
+  if (term === '') return rows;
+  return rows.filter(row => [row.text, row.sender ?? '', row.ferret].some(field => field.toLowerCase().includes(term)));
+};
