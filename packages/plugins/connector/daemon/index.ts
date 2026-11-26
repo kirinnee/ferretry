@@ -3,7 +3,11 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { doorRoute } from './routes/door.ts';
 import { ownerRoutes } from './routes/owner.ts';
+import { ConnectorMcpEndpoint } from './adapters/mcp/mcp-endpoint.ts';
 import { GateConnectorAudit } from './lib/audit.ts';
+import { KernelConnectorCallsLog } from './lib/mcp/calls-log.ts';
+import { ConnectorTextGuard } from './lib/mcp/redaction.ts';
+import { ConnectorToolbox } from './lib/mcp/toolbox.ts';
 import { ConnectorService } from './lib/service.ts';
 
 /**
@@ -12,19 +16,37 @@ import { ConnectorService } from './lib/service.ts';
  * thin: a door route asks the service whether it serves the arrival and hands the request to the handlers, an owner route
  * is a person's act over the authority.
  *
- * SEAMS NOT BOUND HERE (declared GAPS): `/mcp` answers `401`/`501` until the tools unit; the 'connector off' page is a bare
- * 404 (the same as an unrouted path), as in v4.
+ * The connector's tools act through `kernel.delegate`, the kernel's delegated dispatch: the REAL route table and Gate on
+ * every call, as the grant's connector principal, never a second control path. SEAM NOT BOUND HERE (declared GAP): the
+ * 'connector off' page is a bare 404 (the same as an unrouted path), as in v4.
  */
 export default implementDaemon(manifest, {
   build(ctx) {
     const { kernel } = ctx;
     const { connections } = ctx.uses;
+    const audit = new GateConnectorAudit(ctx.needs.gate);
+    const clock = { now: () => kernel.clock.nowMs() };
     const service = new ConnectorService({
       config: kernel.config,
       state: kernel.state,
+      mcp: wiring =>
+        new ConnectorMcpEndpoint({
+          ...wiring,
+          delegate: kernel.delegate,
+          toolbox: new ConnectorToolbox({
+            daemonGrants: () => ctx.needs.gate.policy()?.grants,
+            guard: new ConnectorTextGuard(async text => await kernel.redaction.read(scope => scope.text(text))),
+            callsLog: new KernelConnectorCallsLog(kernel.state),
+            audit,
+            now: clock.now,
+          }),
+          now: clock.now,
+          newRequestId: () => `mcp-${crypto.randomUUID()}`,
+          serverVersion: manifest.version,
+        }),
       publicDoor: kernel.publicDoor,
-      audit: new GateConnectorAudit(ctx.needs.gate),
-      clock: { now: () => kernel.clock.nowMs() },
+      audit,
+      clock,
       tunnelOrigin: () => {
         const carrier = connections
           .current()
