@@ -1,7 +1,12 @@
 /** The connect card's pure parts: failure words, the countdown, the link it may open, the two marks of the consent words. */
 import { describe, expect, it } from 'bun:test';
-import { GIT_ACCOUNT_CODES, GITHUB_SCOPES } from '../../../contract/index.ts';
-import { CONSENT_ITEMS, CONSENT_LIMIT, CONSENT_MEANING } from '../../../app/features/connect/consent-words.ts';
+import { GIT_ACCOUNT_CODES, GITHUB_SCOPES, githubScopes } from '../../../contract/index.ts';
+import {
+  CONSENT_ITEMS,
+  CONSENT_LIMIT,
+  CONSENT_MEANING,
+  GPG_CONSENT_ITEM,
+} from '../../../app/features/connect/consent-words.ts';
 import { explainFailure, formatRemaining, remainingMs, safeVerificationUri } from '../../../app/lib/connect-state.ts';
 import { richParts } from '../../../app/lib/rich.ts';
 
@@ -9,6 +14,7 @@ describe('the consent words', () => {
   it('name every scope the daemon asks GitHub for, and no other', () => {
     const named = CONSENT_ITEMS.flatMap(item => item.scopes);
     expect([...named].sort()).toEqual([...GITHUB_SCOPES].sort());
+    expect([...named, ...GPG_CONSENT_ITEM.scopes].sort()).toEqual([...githubScopes('gpg')].sort());
   });
 
   it('say that the access can act as the person, can be used and never read, and how to revoke it', () => {

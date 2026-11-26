@@ -27,7 +27,7 @@ export function ConnectPanel({ client, onConnected, pollDelay, now, connected, i
     ...(now === undefined ? {} : { now }),
   });
 
-  if (state.step === 'consent') return <ConsentCard onContinue={() => void proceed()} onCancel={cancel} />;
+  if (state.step === 'consent') return <ConsentCard onContinue={format => void proceed(format)} onCancel={cancel} />;
   if (state.step === 'starting')
     return (
       <p role="status" className="m-0 text-cell text-muted" data-testid="git-starting">

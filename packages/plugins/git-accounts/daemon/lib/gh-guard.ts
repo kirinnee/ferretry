@@ -160,7 +160,19 @@ function checkApi(args: readonly string[]): void {
     if (!API_ENDPOINT.test(arg) || arg.includes('..') || arg.slice(8).includes('//') || arg.startsWith('//'))
       refuse('an endpoint that is not on api.github.com');
   }
-  if (endpoint === undefined) refuse('gh api needs an endpoint');
+  const selected = endpoint ?? refuse('gh api needs an endpoint');
+  const resource =
+    selected
+      .replace(/^https:\/\/api\.github\.com\//u, '')
+      .replace(/^\//u, '')
+      .split('?')[0] ?? '';
+  // The owner-only key routes retain the admin GPG scope. gh never receives a command that can use it, including
+  // alternate percent encodings or a raw GraphQL mutation. Repository commands build their own narrowed requests.
+  if (resource.includes('%') || resource.includes(';')) refuse('an encoded API resource');
+  if (/^user\/(?:gpg_keys|keys|ssh_signing_keys)(?:\/|$)/u.test(resource))
+    refuse('account keys are managed by the person on the Git accounts page');
+  if (resource === 'graphql' && (selected.includes('?') || args.some(arg => /\bmutation\b/u.test(arg))))
+    refuse('raw GraphQL mutations are not run as an account; use a repository command');
 }
 
 function checkCommand(command: string, args: readonly string[]): void {

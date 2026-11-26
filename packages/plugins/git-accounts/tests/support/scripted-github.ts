@@ -49,6 +49,7 @@ export interface ScriptOptions {
   /** A route that throws this. */
   failures?: Record<string, unknown>;
   keysLeftOnProvider?: string[];
+  gpgUploadsToCheck?: string[];
   /**
    * Per-action confirmation: a poll nobody pressed for is refused for want of the passkey step-up (403
    * `grant_step_up_required`), as the daemon client answers an unattended read once the proof is spent; a poll sent
@@ -118,8 +119,34 @@ export function scriptedGithub(options: ScriptOptions = {}) {
           id: init?.params?.id,
           removed: true,
           keysLeftOnProvider: options.keysLeftOnProvider ?? [],
+          gpgUploadsToCheck: options.gpgUploadsToCheck ?? [],
           revokeAt: 'https://github.com/settings/applications',
         };
+      }
+      if (route === 'POST /v1/git-accounts/:id/keys') {
+        const account = accounts.find(each => each.id === init?.params?.id);
+        if (account === undefined) throw new Error('no synthetic account');
+        const format = (init?.body as { format?: string } | undefined)?.format ?? 'ssh';
+        const fingerprint = format === 'gpg' ? 'A'.repeat(40) : `SHA256:${'A'.repeat(43)}`;
+        account.keys.signing = {
+          title: 'Ferretry test',
+          format: format as 'ssh' | 'gpg',
+          source: 'generated',
+          ...(format === 'gpg' ? { openpgpFingerprint: fingerprint } : { fingerprint }),
+        };
+        return {
+          ...(format === 'gpg' ? { format: 'gpg' } : {}),
+          fingerprint,
+          registered: ['signing'],
+          source: 'generated',
+          publicKey: format === 'gpg' ? 'synthetic public block' : 'ssh-ed25519 AAAA',
+        };
+      }
+      if (route === 'DELETE /v1/git-accounts/:id/keys/:purpose') {
+        const account = accounts.find(each => each.id === init?.params?.id);
+        if (account === undefined) throw new Error('no synthetic account');
+        delete account.keys.signing;
+        return { id: account.id, purpose: 'signing', removed: true };
       }
       throw new Error(`unexpected ${route}`);
     },
