@@ -94,7 +94,18 @@ export function buildStartBody(draft: NewFerretDraft): StartBody {
   });
 }
 
-const StartedSchema = z.object({ id: z.string().min(1) });
+const StartedSchema = z.object({ id: z.string().min(1), notice: z.string().min(1).optional() });
+
+/** A started ferret: its id, and the daemon's one sentence when it went on without something the start asked for. */
+export interface StartedFerret {
+  readonly id: string;
+  readonly notice?: string;
+}
+
+const startedOf = (answer: unknown): StartedFerret => {
+  const { id, notice } = StartedSchema.parse(answer);
+  return notice === undefined ? { id } : { id, notice };
+};
 
 /**
  * ONE ATTEMPT AT A START: the request id and the exact body text it was sent with. A start is idempotent on its request id
@@ -130,7 +141,8 @@ const sha256Hex = async (text: string): Promise<string | undefined> => {
 };
 
 /**
- * Starts the ferret the draft describes and answers its id. A refusal throws with the daemon's sentence.
+ * Starts the ferret the draft describes and answers its id (and the daemon's notice, when it started without Fast).
+ * A refusal throws with the daemon's sentence.
  *
  * A start is idempotent on its request id (the daemon answers 400 `missing_request_id` to one with none), so the call carries
  * one: the attempt's, or a fresh one. If the answer was lost the start may well have succeeded, so the same POST is sent
@@ -141,20 +153,20 @@ export async function startFerret(
   client: FerretsClient,
   draft: NewFerretDraft,
   attempt: StartAttempt | string = crypto.randomUUID(),
-): Promise<string> {
+): Promise<StartedFerret> {
   const payload = typeof attempt === 'string' ? JSON.stringify(buildStartBody(draft)) : attempt.payload;
   const requestId = typeof attempt === 'string' ? attempt : attempt.requestId;
   // One body snapshot for both POSTs and the digest: the bytes the daemon hashes are the bytes sent.
   const init = { body: JSON.parse(payload) as unknown, headers: { 'x-fy-request-id': requestId } };
   let original: unknown;
   try {
-    return StartedSchema.parse(await client.call('POST /v1/ferrets', init)).id;
+    return startedOf(await client.call('POST /v1/ferrets', init));
   } catch (error) {
     if (!lostAnswer(error)) throw error;
     original = error;
   }
   try {
-    return StartedSchema.parse(await client.call('POST /v1/ferrets', init)).id;
+    return startedOf(await client.call('POST /v1/ferrets', init));
   } catch (error) {
     if (!lostAnswer(error)) throw error;
   }
@@ -164,7 +176,7 @@ export async function startFerret(
       ? undefined
       : await client
           .call('GET /v1/ferrets/by-request/:requestId', { params: { requestId }, query: { payload: digest } })
-          .then(answer => StartedSchema.parse(answer).id)
+          .then(startedOf)
           .catch(() => undefined);
   if (recovered === undefined) throw original;
   return recovered;

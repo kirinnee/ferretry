@@ -316,6 +316,32 @@ describe('fy start', () => {
     expect(io.err).toEqual(['note: lead is still starting — watch it with `fy ps` or `fy status lead`']);
   });
 
+  test('E-266 prints the daemon’s "Started without Fast" sentence on its own line after the ferret, and stays quiet without one', async () => {
+    const notice = 'Started without Fast: Codex’s model list is still loading; try again in a few seconds';
+    const noisy = capturedPresenter();
+    await new StartSessionController(
+      new RecordingApi({ get: fleet[0], startNotice: notice }),
+      noisy.presenter,
+      { cwd: '/w' },
+      'fy',
+    ).execute({
+      mode: 'auto',
+      prompt: 'go',
+      fast: true,
+    });
+    expect(noisy.io.err).toEqual([notice]);
+    expect(noisy.io.out.join('\n')).not.toContain('Started without Fast');
+
+    const quiet = capturedPresenter();
+    await new StartSessionController(new RecordingApi({ get: fleet[0] }), quiet.presenter, { cwd: '/w' }, 'fy').execute(
+      {
+        mode: 'auto',
+        prompt: 'go',
+      },
+    );
+    expect(quiet.io.err).toEqual([]);
+  });
+
   test('V-0443 sends today’s start fields with today’s wire names, and a short --turn-timeout earns a note', async () => {
     const api = new RecordingApi({ get: fleet[0] });
     const { io, presenter } = capturedPresenter();

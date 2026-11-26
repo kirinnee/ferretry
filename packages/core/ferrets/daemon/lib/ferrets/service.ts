@@ -6,7 +6,15 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { openHarness } from './harness-facade.ts';
-import { type DecidedFast, decideResume, launchFastOf, launchOptions, movedLaunchOptions } from './launch-options.ts';
+import {
+  type DecidedFast,
+  decideResume,
+  decideStart,
+  launchDetails,
+  launchFastOf,
+  launchOptions,
+  movedLaunchOptions,
+} from './launch-options.ts';
 import { collectLaunchParts, prepareLaunchHome, type PreparedLaunch } from './launch-preparation.ts';
 import type { FerretsCore } from './core.ts';
 import { compactAt, setCompactAt } from './compact-at.ts';
@@ -604,7 +612,7 @@ const failed = (code: StartFailure['code'], reason: string): Result<never, Start
  */
 const refusedBy = (decision: { readonly reason: string; readonly code?: string }): Result<never, StartFailure> => {
   const code = StartRefusalCodeSchema.safeParse(decision.code);
-  return failed(code.success ? code.data : 'refused', decision.reason);
+  return failed(code.success && code.data !== 'fast_unverified' ? code.data : 'refused', decision.reason);
 };
 
 /** Every code unit is ASCII, so no Unicode normalization form can make two spellings name one folder. */
@@ -1172,26 +1180,31 @@ export class FerretsService implements FerretsApi {
     // ONE RULE: a ferret with a parent is never a lead (v4 derived the role from the parent alone). A start that POSTs
     // `role: lead` beside a parent is recorded as a helper, so lead-only instruction sections never reach a sub-ferret.
     const role = request.parent !== undefined ? 'helper' : (request.role ?? 'lead');
-    const decision = await this.ports.decide({
-      ferret: id,
-      name,
-      role,
-      ...(request.parent === undefined ? {} : { parent: request.parent }),
-      ...(request.pack === undefined ? {} : { pack: request.pack }),
-      harness: harnessKey,
-      ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
-      ...(login === undefined ? {} : { login }),
-      folder: folder.value,
-      ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
-      by: request.by,
-      ...(request.options?.model === undefined ? {} : { model: request.options.model }),
-      ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
-      // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
-      ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
-      ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
-    });
+    const decided = await decideStart(
+      this.ports.decide.bind(this.ports),
+      {
+        ferret: id,
+        name,
+        role,
+        ...(request.parent === undefined ? {} : { parent: request.parent }),
+        ...(request.pack === undefined ? {} : { pack: request.pack }),
+        harness: harnessKey,
+        ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
+        ...(login === undefined ? {} : { login }),
+        folder: folder.value,
+        ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
+        by: request.by,
+        ...(request.options?.model === undefined ? {} : { model: request.options.model }),
+        ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
+        // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
+        ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
+        ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
+      },
+      request,
+    );
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
-    if (!decision.allow) return refusedBy(decision);
+    if (!decided.decision.allow) return refusedBy(decided.decision);
+    request = decided.request;
     // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
     const staged = await this.stageConversation(harnessKey, request.harnessConversation, request.by);
     if (!staged.ok) return staged;
@@ -1202,6 +1215,7 @@ export class FerretsService implements FerretsApi {
       // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
       const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
       await this.saveDetails(id, {
+        ...(decided.notice === undefined ? {} : { notice: decided.notice }),
         ...(Object.keys(options).length === 0 ? {} : { options }),
         ...(title === undefined ? {} : { title, titleSource: 'owner' as const }),
       });
@@ -1618,7 +1632,7 @@ export class FerretsService implements FerretsApi {
     // this binding held, which a folder already swapped into the state home satisfies.
     const bound = await this.bindLaunchFolder(retargeted.folder, options.origin, found.birth);
     if (!bound.ok) return bound;
-    const { decision, fast } = await decideResume(
+    const { decision, fast, notice } = await decideResume(
       input => this.ports.decide(input),
       {
         ferret,
@@ -1670,6 +1684,7 @@ export class FerretsService implements FerretsApi {
     // fast mode is dropped as the move drops it). They are written with the target, and a failed launch leaves them with
     // it, as the moves module leaves its own document: a plain resume or Restart relaunches on the target.
     if (target !== undefined) await this.moveOptions(ferret, target);
+    await this.updateDetails(ferret, current => launchDetails(current, fast, notice));
     await this.write(starting, settled.state, 'state');
     // Said once the relaunch is committed (the record is `starting`), still under this ferret's queue: the message, if
     // any, is the relaunch's own turn from here on.

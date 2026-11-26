@@ -72,6 +72,12 @@ export interface SignalAnswer {
  * The daemon operations the ferret verbs need, and nothing else: each is one Ferrets route (`/v1/ferrets/…`). The
  * controllers stay independent of the shell's client and testable with a hand-written double.
  */
+/** What a start answers: the ferret, and a sentence when it went on without something it asked for (fast mode). */
+export interface StartAnswer {
+  readonly id: string;
+  readonly notice?: string;
+}
+
 export interface ISessionApi {
   list(): Promise<readonly FerretSummary[]>;
   /** One ferret, by id or name; the daemon resolves the name. */
@@ -82,7 +88,7 @@ export interface ISessionApi {
   live?(reference: string): Promise<FerretLiveRead | undefined>;
   suggestNames(count: number): Promise<string[]>;
   /** `requestId` is the caller's idempotency key (`--request-id`); omitted, the start mints its own. */
-  start(body: StartBody, requestId?: string): Promise<{ readonly id: string }>;
+  start(body: StartBody, requestId?: string): Promise<StartAnswer>;
   /** Stops one ferret; `reason` is recorded in its history. */
   stop(
     reference: string,
@@ -90,7 +96,7 @@ export interface ISessionApi {
     how?: 'now' | 'polite',
   ): Promise<{ readonly id: string; readonly state?: string }>;
   /** Revives one ferret; `message` is recorded with the revival. */
-  resume(reference: string, message?: string): Promise<{ readonly id: string }>;
+  resume(reference: string, message?: string): Promise<StartAnswer>;
   /** A new first name, a new task title, or both. */
   rename(reference: string, change: RenameChange): Promise<FerretSummary>;
   signal(reference: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SignalAnswer>;

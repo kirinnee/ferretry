@@ -11,6 +11,7 @@ import type { FerretsClient } from '../../lib/client.ts';
 import { StatusMark, statusMark } from '../../lib/status-mark.tsx';
 import { resumeFerret, stopFerret } from './ferret-operations.ts';
 import { reviveOffer } from './revive-offer.ts';
+import { ActionToast } from './action-toast.tsx';
 
 /** The word for a mark: its class and detail, the person's words rather than the daemon's. */
 const statusWord = (ferret: FerretSummary): string => {
@@ -67,15 +68,20 @@ export function FerretLifecycle({
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const resumable = reviveOffer(ferret, canControl).offered;
   const stoppable = canControl && !compact && ferret.state !== 'stopped';
-  if (!resumable && !stoppable) return null;
+  const toast = <ActionToast notice={notice} onDismiss={() => setNotice(null)} />;
+  if (!resumable && !stoppable) return toast;
 
-  const run = (work: () => Promise<void>, what: string): void => {
+  const run = (work: () => Promise<void | { readonly notice?: string }>, what: string): void => {
     setBusy(true);
     setFailure(null);
     void work()
-      .then(() => reload())
+      .then(answer => {
+        setNotice(answer?.notice ?? null);
+        return reload();
+      })
       .catch((reason: unknown) =>
         setFailure(`${what} failed: ${reason instanceof Error ? reason.message : String(reason)}`),
       )
@@ -86,52 +92,55 @@ export function FerretLifecycle({
   };
 
   return (
-    <span className="fy-ferret-lifecycle" data-ferret-lifecycle="">
-      {resumable ? (
-        <button
-          className="fy-ferret-lifecycle__btn fy-ferret-lifecycle__btn--start"
-          data-ferret-start=""
-          disabled={busy}
-          onClick={() => run(() => resumeFerret(client, ferret.id), 'Resume')}
-          title={reviveOffer(ferret, canControl).reason}
-          type="button"
-        >
-          <Play aria-hidden="true" size={14} />
-          Resume
-        </button>
-      ) : asking ? (
-        <>
+    <>
+      {toast}
+      <span className="fy-ferret-lifecycle" data-ferret-lifecycle="">
+        {resumable ? (
           <button
-            className="fy-ferret-lifecycle__btn fy-ferret-lifecycle__btn--danger"
-            data-ferret-stop-confirm=""
+            className="fy-ferret-lifecycle__btn fy-ferret-lifecycle__btn--start"
+            data-ferret-start=""
             disabled={busy}
-            onClick={() => run(() => stopFerret(client, ferret.id), 'Stop')}
-            title="The CLI exits; the transcript stays."
+            onClick={() => run(() => resumeFerret(client, ferret.id), 'Resume')}
+            title={reviveOffer(ferret, canControl).reason}
             type="button"
           >
-            Yes, stop
+            <Play aria-hidden="true" size={14} />
+            Resume
           </button>
-          <button className="fy-ferret-lifecycle__btn" onClick={() => setAsking(false)} type="button">
-            Keep running
+        ) : asking ? (
+          <>
+            <button
+              className="fy-ferret-lifecycle__btn fy-ferret-lifecycle__btn--danger"
+              data-ferret-stop-confirm=""
+              disabled={busy}
+              onClick={() => run(() => stopFerret(client, ferret.id), 'Stop')}
+              title="The CLI exits; the transcript stays."
+              type="button"
+            >
+              Yes, stop
+            </button>
+            <button className="fy-ferret-lifecycle__btn" onClick={() => setAsking(false)} type="button">
+              Keep running
+            </button>
+          </>
+        ) : (
+          <button
+            className="fy-ferret-lifecycle__btn"
+            data-ferret-stop=""
+            onClick={() => setAsking(true)}
+            title="Stop this ferret: the CLI exits, the transcript stays."
+            type="button"
+          >
+            <Square aria-hidden="true" size={12} />
+            Stop
           </button>
-        </>
-      ) : (
-        <button
-          className="fy-ferret-lifecycle__btn"
-          data-ferret-stop=""
-          onClick={() => setAsking(true)}
-          title="Stop this ferret: the CLI exits, the transcript stays."
-          type="button"
-        >
-          <Square aria-hidden="true" size={12} />
-          Stop
-        </button>
-      )}
-      {failure === null ? null : (
-        <span className="fy-ferret-lifecycle__failure" data-ferret-lifecycle-failure="" role="alert">
-          {failure}
-        </span>
-      )}
-    </span>
+        )}
+        {failure === null ? null : (
+          <span className="fy-ferret-lifecycle__failure" data-ferret-lifecycle-failure="" role="alert">
+            {failure}
+          </span>
+        )}
+      </span>
+    </>
   );
 }

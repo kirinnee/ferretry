@@ -1,6 +1,6 @@
 import { type ApiResponse, ApiError, type CallContext } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import { RestartQueueEntrySchema, RestartsFile } from '../../contract/index.ts';
+import { type FerretId, RestartQueueEntrySchema, RestartsFile } from '../../contract/index.ts';
 import { FerretRestarts, restartService } from '../lib/ferrets/restarts.ts';
 import { sessionRestartRoutes } from '../lib/runtime/mounts/session-restart.ts';
 import { callerFerret } from './caller.ts';
@@ -40,7 +40,21 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     }),
     { resolve: resolveFerret, mayTouch: (caller, target) => registry.mayTouch(caller, target) },
   );
-  const restartRoutes = sessionRestartRoutes(restartSubsystem);
+  const restartRoutes = sessionRestartRoutes({
+    restart: async (...args) => {
+      const result = await restartSubsystem.restart(...args);
+      return {
+        ...result,
+        restarted: result.restarted.map(entry => {
+          const notice = registry.detailsOf(entry.id as FerretId)?.notice;
+          return { ...entry, ...(notice === undefined ? {} : { notice }) };
+        }),
+      };
+    },
+    status: async () => await restartSubsystem.status(),
+    cancel: async () => await restartSubsystem.cancel(),
+    drain: async () => await restartSubsystem.drain(),
+  });
   const restarts = {
     ...restartRoutes,
     // Clearing the queue clears every ferret's waiting restart: a person's act.

@@ -43,9 +43,8 @@ export const stopFerret = async (client: FerretsClient, ferret: string): Promise
   await client.call('POST /v1/ferrets/:ferretId/stop', { params: params(ferret), body: {} });
 };
 
-export const resumeFerret = async (client: FerretsClient, ferret: string): Promise<void> => {
+export const resumeFerret = async (client: FerretsClient, ferret: string): Promise<{ readonly notice?: string }> =>
   await client.call('POST /v1/ferrets/:ferretId/resume', { params: params(ferret), body: {} });
-};
 
 /** Pins or unpins the ferret to the top of the sidebar: a person's act (the route refuses an agent). */
 export const setFerretPinned = async (client: FerretsClient, ferret: string, pinned: boolean): Promise<void> => {
