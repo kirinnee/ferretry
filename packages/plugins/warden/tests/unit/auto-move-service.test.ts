@@ -10,6 +10,7 @@ import {
   waitingFerrets,
 } from '../../daemon/lib/auto-move.ts';
 import { moveNote, type StoppedAgentJobs, WardenAutoMoveService } from '../../daemon/lib/auto-move-service.ts';
+import { FactsUnavailableError } from '../../daemon/lib/facts-unavailable.ts';
 import type { WardenSessionView } from '../../daemon/lib/types.ts';
 import { credential, facts, runtime, tool } from '../support/pack.ts';
 
@@ -70,6 +71,8 @@ function subject(
     readonly move?: () => Promise<void> | void;
     readonly facts?: () => Promise<typeof fleetFacts>;
     readonly ledger?: unknown;
+    /** What the mover is told when the facts cannot be read, for a provider outage a test can end. */
+    readonly failed?: (sessionId: string, detail: string) => void;
     readonly resume?: () => Promise<void> | void;
     /** Throws from this call of `agentOf` on (1-based), for a read that fails mid-run. */
     readonly agentOfThrowsFrom?: number;
@@ -131,6 +134,7 @@ function subject(
       recorded.events.push({ sessionId, type, data });
     },
     journal: { record: type => void recorded.journal.push(type) },
+    failed: async (sessionId, detail) => void options.failed?.(sessionId, detail),
   });
   const ledger = (): AutoMoveMemory => (recorded.ledger ?? EMPTY_AUTO_MOVE_MEMORY) as AutoMoveMemory;
   const sweep = async (
@@ -542,6 +546,37 @@ describe('WardenAutoMoveService when a port fails', () => {
     should(recorded.journal).deepEqual(['fleet.warden_auto_move_failed']);
     should(second.actions).deepEqual([]);
     should(looks).equal(1);
+  });
+});
+
+describe('WardenAutoMoveService when a provider is down', () => {
+  it('C-110 holds the ferret once, lists it once, and moves it on the sweep after the provider is back', async () => {
+    // Arrange
+    let down = true;
+    const listed: string[] = [];
+    const { recorded, sweep } = subject({
+      facts: async () => {
+        if (down) throw new FactsUnavailableError('the logins could not be read, so no login can be chosen');
+        return fleetFacts;
+      },
+      failed: (_session, detail) => void listed.push(detail),
+    });
+
+    // Act
+    const first = await sweep();
+    const second = await sweep(NOW + MINUTE);
+    down = false;
+    const third = await sweep(NOW + 2 * MINUTE);
+
+    // Assert: a retryable hold, never the terminal error; recorded and listed once; moved after recovery.
+    should(first.actions.map(action => action.outcome)).deepEqual(['held']);
+    should(first.actions[0]?.detail).containEql('the logins could not be read');
+    should(first.actions[0]?.detail).containEql('tries again on the next sweep');
+    should(second.actions).deepEqual([]);
+    should(listed).have.length(1);
+    should(recorded.journal).deepEqual(['fleet.warden_auto_move_unavailable', 'fleet.warden_auto_moved']);
+    should(third.moved.has('s1')).be.true();
+    should(recorded.moves).have.length(1);
   });
 });
 
