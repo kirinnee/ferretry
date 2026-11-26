@@ -10,7 +10,15 @@
  * `styles/themes.css` says where every token lives; `tests/unit/theme-axes.test.ts` pins that the files, this list and
  * `public/pre-paint.js` agree.
  */
-import { PALETTE_IDS, type PaletteId, STYLE_IDS, type StyleId } from '@ferretry/plugin-layouts/contract';
+import {
+  currentPaletteId,
+  currentStyleId,
+  PALETTE_IDS,
+  type PaletteId,
+  STYLE_IDS,
+  THEME_FAMILY_IDS,
+  type StyleId,
+} from '@ferretry/plugin-layouts/contract';
 import { PALETTE_NAMES } from './palette-names.ts';
 
 export { PALETTE_IDS, type PaletteId, STYLE_IDS, type StyleId };
@@ -145,7 +153,7 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
 
 /**
  * Order is the order shown. A palette's display name lives in `palette-names.ts` (the one map; never a style's name); the
- * ids are the ones a device stores.
+ * ids stay what they were so nothing a device stored has to migrate, except the removed ones (`REMOVED_PALETTE_IDS`).
  * High contrast is a palette: it must pass on every style. Mesh, Aurora, Afterglow and Briefing paint a gradient mesh behind the page (`--surface-mesh`).
  */
 export const PALETTES: readonly PaletteEntry[] = Object.freeze([
@@ -172,8 +180,15 @@ export const DEFAULT_PALETTE: PaletteId = 'studio';
 
 export const isPaletteId = (value: unknown): value is PaletteId =>
   typeof value === 'string' && (PALETTE_IDS as readonly string[]).includes(value);
-export const isStyleId = (value: unknown): value is StyleId =>
-  typeof value === 'string' && (STYLE_IDS as readonly string[]).includes(value);
+export const isFamilyId = (value: unknown): value is ThemeFamilyId =>
+  typeof value === 'string' && (THEME_FAMILY_IDS as readonly string[]).includes(value);
+
+/** A stored `family` (pre-split), read on the new axes: the kept palette it names. `undefined` when it names none. */
+export const paletteOfFamily = (family: unknown): PaletteId | undefined =>
+  isFamilyId(family) ? currentPaletteId(family) : undefined;
+
+/** The stored style id, read on the current axes (the removed `contrast` style is Studio, in the High contrast palette). */
+export { currentPaletteId, currentStyleId };
 
 /** What picking a style brings: its default palette. */
 export const defaultPaletteOf = (style: StyleId): PaletteId =>

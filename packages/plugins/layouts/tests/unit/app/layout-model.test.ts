@@ -64,6 +64,16 @@ describe('the layout settings', () => {
     expect(changesFor('density', 'compact')).toEqual([{ path: 'density', value: 'compact' }]);
   });
 
+  test('a saved word that is no longer offered reads as the form the shell draws it as', () => {
+    expect(choiceOf(DEFAULT_LAYOUT, 'nav.form')).toBe('dock-icons');
+    // Stored `right`/`top` sides and the `bar` style draw as the default: the places docked at the side bar's foot.
+    const old = { ...DEFAULT_LAYOUT, nav: { ...DEFAULT_LAYOUT.nav, side: 'right' as const, style: 'bar' as const } };
+    expect(choiceOf(old, 'nav.form')).toBe('dock-icons');
+    expect(choiceOf({ ...old, nav: { ...old.nav, labels: 'words' } }, 'nav.form')).toBe('dock-words');
+    expect(choiceOf({ ...old, phone: { nav: { side: 'top' } } }, 'phone.nav.side')).toBe('left');
+    expect(choiceOf(COMPACT_LAYOUT, 'nav.form')).toBe('list'); // a rail is the list on a side bar that starts slim
+  });
+
   test('a choice and a list are read from the layout they are asked of', () => {
     expect(choiceOf(DEFAULT_LAYOUT, 'density')).toBe('comfortable');
     expect(choiceOf(COMPACT_LAYOUT, 'density')).toBe('compact');
@@ -97,7 +107,7 @@ describe('the layout settings', () => {
       'insights',
       'settings',
     ]);
-    const bare = LayoutSchema.parse({ id: 'bare', nav: { side: 'left', items: ['agenda'] } });
+    const bare = LayoutSchema.parse({ id: 'bare', nav: { side: 'right', style: 'bar', items: ['agenda'] } });
     expect(choiceOf(bare, 'phone.nav.side')).toBe('left');
     expect(choiceOf(bare, 'phone.side.show')).toBe('never');
     expect(choiceOf(bare, 'phone.density')).toBe('comfortable');

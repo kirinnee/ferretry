@@ -34,12 +34,23 @@ export interface ResolvedLayout {
   readonly density: Layout['density'];
 }
 
+/**
+ * The nav a layout stored in an older spelling draws as: the shell draws the places in the side bar (at its foot, as a list at
+ * its top, or in a bottom bar), so a stored side of `top` or `right` and a style of `bar` (which drew nothing different from
+ * the default) read as the default: the side bar, with its places docked at the foot. No migration.
+ */
+function currentNav<N extends Layout['nav']>(nav: N): N {
+  const side = nav.side === 'top' || nav.side === 'right' ? 'left' : nav.side;
+  const style = nav.style === 'bar' ? 'dock' : nav.style;
+  return side === nav.side && style === nav.style ? nav : { ...nav, side, style };
+}
+
 export function resolveLayout(layout: Layout, viewport: Viewport): ResolvedLayout {
   const panels: Record<string, readonly string[]> = { ...layout.panels };
   if (layout['composer.tools'] !== undefined) panels['composer.tools'] = layout['composer.tools'];
   const base: ResolvedLayout = {
     id: layout.id,
-    nav: layout.nav,
+    nav: currentNav(layout.nav),
     side: layout.side,
     top: layout.top,
     panels,
@@ -49,7 +60,7 @@ export function resolveLayout(layout: Layout, viewport: Viewport): ResolvedLayou
   const phone = layout.phone;
   return {
     ...base,
-    nav: { ...base.nav, ...phone.nav },
+    nav: currentNav({ ...base.nav, ...phone.nav }),
     side: { ...base.side, ...phone.side },
     top: phone.top ?? base.top,
     density: phone.density ?? base.density,

@@ -57,7 +57,7 @@ export function DrawerNav({ daemon, rail }: { readonly daemon: string | undefine
   const { plan } = useShell();
   const targets = useNavTargets(daemon);
   const form: NavForm = rail ? 'rail' : 'column';
-  const panels = plan.nav.side === 'left';
+  const panels = plan.nav.side === 'left' || plan.nav.side === 'right';
   return (
     <nav className={`fy-nav fy-nav--drawer fy-nav--${rail ? 'rail' : 'column'}`} data-slot="nav" aria-label="Places">
       {targets.map(target => (

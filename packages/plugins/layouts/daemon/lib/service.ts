@@ -25,7 +25,7 @@ import {
   type ThemeList,
   ThemeSchema,
 } from '../../contract/index.ts';
-import { applyOverrides, resolveCurrent, setPaths } from './overrides.ts';
+import { applyOverrides, normalizeNav, resolveCurrent, setPaths } from './overrides.ts';
 
 /** Why a change did not happen. The route turns it into a status and a code. */
 export type Refusal =
@@ -181,7 +181,7 @@ export function createLayoutsService(config: ConfigPort): LayoutsService {
           code: LAYOUT_CODES.exists,
           sentence: `there is already a layout called ${id}`,
         });
-      const saved: Layout = { ...current().layout, id };
+      const saved: Layout = { ...normalizeNav(current().layout), id };
       const refusal = await written(config.write(LAYOUTS_ITEMS, id, Bun.YAML.stringify(saved, null, 2)));
       return refusal === undefined ? done({ id, origin: 'saved' as const }) : refuse(refusal);
     },

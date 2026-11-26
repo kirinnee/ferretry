@@ -45,10 +45,10 @@ describe('layouts routes', () => {
 
   test('PATCH /v1/layouts/current applies the change and answers the layout now in force', async () => {
     const { routes: r, tree } = routes();
-    const response = await r['PATCH /v1/layouts/current'](call({ changes: [{ path: 'nav.side', value: 'bottom' }] }));
+    const response = await r['PATCH /v1/layouts/current'](call({ changes: [{ path: 'nav.side', value: 'right' }] }));
     expect(response.status).toBe(200);
-    expect(json(response).current.nav.side).toBe('bottom');
-    expect(tree.documents.get('layout.yaml')).toEqual({ overrides: { nav: { side: 'bottom' } } });
+    expect(json(response).current.nav.side).toBe('right');
+    expect(tree.documents.get('layout.yaml')).toEqual({ overrides: { nav: { side: 'right' } } });
   });
 
   test('a change that cannot be a layout is 422 layout_invalid with the issues, and writes nothing', async () => {
@@ -159,7 +159,7 @@ describe('layouts on the test host', () => {
   test('any change to the layout files, ours or a hand edit, tells every open app once per change', async () => {
     const host = await testHost({ plugins: [daemon] });
     host.setConfig('layout.yaml', { layout: 'compact' });
-    host.setConfig('themes', { dusk: { id: 'dusk', label: 'Dusk', style: 'neo' } });
+    host.setConfig('themes', { dusk: { id: 'dusk', label: 'Dusk', base: 'neo' } });
     await host.settle();
     expect(host.published.map(event => [event.event, event.payload])).toEqual([
       ['layouts.changed', { layout: 'compact' }],

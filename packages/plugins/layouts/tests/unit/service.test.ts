@@ -26,12 +26,12 @@ describe('layouts service', () => {
 
   test('fy layout set writes only the changed keys to config/layout.yaml and serves the result', async () => {
     const { service, tree } = make();
-    const result = await service.set([{ path: 'nav.side', value: 'bottom' }]);
-    expect(result.ok && result.value.nav.side).toBe('bottom');
+    const result = await service.set([{ path: 'nav.side', value: 'right' }]);
+    expect(result.ok && result.value.nav.side).toBe('right');
     expect(tree.calls).toEqual([
-      { op: 'write', where: 'layout.yaml', edit: { patch: { overrides: { nav: { side: 'bottom' } } } } },
+      { op: 'write', where: 'layout.yaml', edit: { patch: { overrides: { nav: { side: 'right' } } } } },
     ]);
-    expect(service.current().layout.nav.side).toBe('bottom');
+    expect(service.current().layout.nav.side).toBe('right');
     expect(service.current().layout.nav.items).toEqual(DEFAULT_LAYOUT.nav.items);
   });
 
@@ -70,11 +70,11 @@ describe('layouts service', () => {
   });
 
   test('fy theme use refuses a theme that is not installed and switches to one that is', async () => {
-    const { service, tree } = make({ 'themes/dusk': { id: 'dusk', label: 'Dusk', style: 'neo', light: {}, dark: {} } });
+    const { service, tree } = make({ 'themes/dusk': { id: 'dusk', label: 'Dusk', base: 'neo', light: {}, dark: {} } });
     expect((await service.useTheme('nope')).ok).toBe(false);
     expect((await service.useTheme('dusk')).ok).toBe(true);
     expect(tree.documents.get('layout.yaml')).toEqual({ theme: 'dusk' });
-    expect(service.current().theme.style).toBe('neo');
+    expect(service.current().theme.base).toBe('neo');
     expect(service.themes()).toEqual({
       themes: [
         { id: 'dusk', origin: 'saved' },
@@ -102,6 +102,27 @@ describe('layouts service', () => {
     const saved = LayoutSchema.parse(Bun.YAML.parse(call?.edit as string));
     expect(saved.id).toBe('mine');
     expect(saved.nav.side).toBe('bottom');
+  });
+
+  test('save reads a navigation word the shell does not draw as the default (a bar is the dock), and keeps the order', async () => {
+    const items = ['settings', 'agenda', 'ferrets'];
+    const { service, tree } = make({
+      'layout.yaml': {
+        overrides: { nav: { side: 'right', style: 'bar', items }, phone: { nav: { side: 'top', style: 'bar' } } },
+      },
+    });
+    expect((await service.save('mine')).ok).toBe(true);
+    const saved = LayoutSchema.parse(Bun.YAML.parse(tree.calls[0]?.edit as string));
+    expect([saved.nav.side, saved.nav.style, saved.nav.items]).toEqual(['left', 'dock', items]);
+    expect([saved.phone?.nav?.side, saved.phone?.nav?.style]).toEqual(['left', 'dock']);
+    // The round trip: the saved copy, read back and used, shows the default words with the order intact.
+    const again = make({
+      'layouts/mine': Bun.YAML.parse(tree.calls[0]?.edit as string) as Record<string, unknown>,
+      'layout.yaml': { layout: 'mine' },
+    });
+    const now = again.service.current().layout;
+    expect([now.nav.side, now.nav.style, now.nav.items]).toEqual(['left', 'dock', items]);
+    expect([now.phone?.nav?.side, now.phone?.nav?.style]).toEqual(['left', 'dock']);
   });
 
   test('save keeps a drawn phone side, a phone with no nav, and a layout with no phone', async () => {
@@ -218,7 +239,7 @@ test('selecting a saved theme the app cannot read is refused before changing the
     // Even if a port hands the service an unchecked item, selection still checks the wire contract.
     const port: import('@ferretry/kernel/contract').ConfigPort = {
       ...tree.port,
-      collection: () => new Map([['dusk', { id: 'dusk', label: 'Dusk', style: 'neo', light, dark: {} }]]) as never,
+      collection: () => new Map([['dusk', { id: 'dusk', label: 'Dusk', base: 'neo', light, dark: {} }]]) as never,
     };
     const service = createLayoutsService(port);
     // biome-ignore lint/correctness/useHookAtTopLevel: `useTheme` is the Layouts service's own method (select a saved theme), not a React hook

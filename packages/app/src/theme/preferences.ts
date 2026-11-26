@@ -12,9 +12,11 @@
  * element carrying `data-swatch`, so a preview can render in the theme it advertises. Nothing here may hardcode a
  * colour. A theme ITEM (data, `./tokens.ts`) overrides tokens on top of the theme in force.
  *
- * STORAGE. The record is `{ format: 1, value }` (`storage/records.ts` knows one format) and the VALUE is
- * `{ style, palette, keepPalette, mode, textScale }` (`keepPalette` absent reads as false). A field this build does not
- * know reads as its default.
+ * STORAGE. The record stays `{ format: 1, value }` (`storage/records.ts` knows one format); the VALUE moved from
+ * `{ family, mode, textScale }` to `{ style, palette, mode, textScale }` and gained `keepPalette` (absent reads as
+ * false). A stored `family` is read through the palette it names; a REMOVED palette id and the removed `contrast` style
+ * read through `REMOVED_PALETTE_IDS` / `currentStyleId` (the tables `public/pre-paint.js` restates) and are rewritten
+ * in the current shape on the next change.
  *
  * STYLE → PALETTE. Picking a style also sets that style's `defaultPalette`, unless `keepPalette` is on ("Don't change my
  * colours when I change style"). Picking a palette never touches the style, and turns `keepPalette` on: a style's default
@@ -29,13 +31,14 @@ import { z } from 'zod';
 import { APP_STORAGE } from '../storage/names.ts';
 import { type KeyValueStore, readRecord, writeRecord } from '../storage/records.ts';
 import {
+  currentPaletteId,
+  currentStyleId,
   DEFAULT_PALETTE,
   DEFAULT_STYLE,
   defaultPaletteOf,
-  isPaletteId,
-  isStyleId,
   lookOfFamily,
   PALETTES,
+  paletteOfFamily,
   type PaletteId,
   type StyleId,
   type ThemeFamilyId,
@@ -120,10 +123,14 @@ const isTextScale = (value: unknown): value is TextScale =>
   typeof value === 'string' && (TEXT_SCALES as readonly string[]).includes(value);
 
 /**
- * The stored preference (inside `{ format: 1, value }`). Each field falls back on its own.
+ * The stored preference (inside `{ format: 1, value }`). Each field falls back on its own. A pre-split value carries
+ * `family` instead of `style` + `palette`: it is read through the palette it names, and an explicit `style` / `palette`
+ * beside it wins. A removed palette id reads as its kept one; the removed `contrast` style reads as Studio in the High
+ * contrast palette (always: the style WAS the accessibility choice).
  */
 export const ThemePreferenceSchema = z
   .looseObject({
+    family: z.unknown().optional(),
     style: z.unknown().optional(),
     palette: z.unknown().optional(),
     keepPalette: z.unknown().optional(),
@@ -131,9 +138,13 @@ export const ThemePreferenceSchema = z
     textScale: z.string().transform(value => (isTextScale(value) ? value : DEFAULT_THEME_PREFERENCE.textScale)),
   })
   .transform((value): StoredThemePreference => {
+    const fromFamily = paletteOfFamily(value.family);
+    const familyLook = fromFamily === undefined ? undefined : lookOfFamily(fromFamily);
+    const style = currentStyleId(value.style);
+    const palette = style?.palette ?? currentPaletteId(value.palette) ?? familyLook?.palette ?? DEFAULT_PALETTE;
     return {
-      style: isStyleId(value.style) ? value.style : DEFAULT_STYLE,
-      palette: isPaletteId(value.palette) ? value.palette : DEFAULT_PALETTE,
+      style: style?.style ?? familyLook?.style ?? DEFAULT_STYLE,
+      palette,
       keepPalette: value.keepPalette === true,
       mode: value.mode,
       textScale: value.textScale,
