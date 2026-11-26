@@ -344,6 +344,9 @@ export class ManagedWorktreeAdapter {
       !checkout.repo ||
       checkout.kind !== 'linked_worktree' ||
       checkout.gitDir === undefined ||
+      (intent.gitDir !== undefined && checkout.gitDir !== intent.gitDir) ||
+      checkout.worktreeRoot !== intent.path ||
+      checkout.repositoryRoot !== intent.repositoryRoot ||
       checkout.commonDir !== intent.commonDir ||
       checkout.branch !== intent.branch ||
       checkout.detached === true
@@ -358,6 +361,8 @@ export class ManagedWorktreeAdapter {
       kind: 'adopted',
       managed: {
         version: 1,
+        ...(intent.origin === undefined ? {} : { origin: intent.origin }),
+        ...(intent.adoptionIdentity === undefined ? {} : { adoptionIdentity: intent.adoptionIdentity }),
         path: intent.path,
         branch: intent.branch,
         repositoryRoot: intent.repositoryRoot,
@@ -534,6 +539,7 @@ export class ManagedWorktreeAdapter {
     undetermined.push(...(input.undeterminedEvidence ?? []), ...gitErrors);
 
     const decision = assessWorktreeRemoval({
+      ...(input.managed.origin === undefined ? {} : { origin: input.managed.origin }),
       recordedPath: input.managed.path,
       managedRoot: input.managedRoot,
       resolvedManagedRoot,

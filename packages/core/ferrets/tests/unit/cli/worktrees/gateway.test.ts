@@ -20,6 +20,16 @@ function fakeClient(payload: unknown, calls: Call[] = []): PluginClient {
 }
 
 describe('client worktree gateway', () => {
+  it('should adopt with a validated body and preserve the origin in its response', async () => {
+    const calls: Call[] = [];
+    const payload = created();
+    payload.worktree.origin = 'adopted';
+    const gateway = new ClientWorktreeGateway(fakeClient(payload, calls));
+    const actual = await gateway.adopt({ path: WORKTREE_PATH });
+    should(actual.worktree.origin).equal('adopted');
+    should(calls).eql([{ route: 'POST /v1/worktrees/adopt', init: { body: { path: WORKTREE_PATH } } }]);
+    await should(gateway.adopt({ path: '' })).be.rejected();
+  });
   it('V-0502 should read the list with a plain GET', async () => {
     const calls: Call[] = [];
     const actual = await new ClientWorktreeGateway(fakeClient(listResponse(), calls)).list();

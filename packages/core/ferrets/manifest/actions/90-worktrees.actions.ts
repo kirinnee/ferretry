@@ -5,6 +5,14 @@ import { fragment } from '../kit.ts';
 
 export default fragment({
   routes: [
+    route('POST /v1/worktrees/adopt', {
+      minimum: 'operator',
+      caller: 'any',
+      capability: { capability: CAPABILITIES.filesystem, axis: 'configure' },
+      noStore: true,
+      audit: { skip: 'adopting files ownership in the worktree registry, as creating a checkout does' },
+      guard: { none: 'answers the adopted checkout and its removal verdict, no file contents' },
+    }),
     // Managed worktrees (today's `mounts/worktrees.ts`); the removal check is a deeper literal than the collection.
     // The whole repository, hand-made worktrees included: the caller names ANY repository's common directory, so this maps
     // the disk the way an outside-home folder read does, and asks the same axis (docs/grants.md).
@@ -54,6 +62,11 @@ export default fragment({
     }),
   ],
   cli: [
+    verb('worktree adopt <path>', {
+      summary: 'track an existing linked checkout in place so it can be safely removed later',
+      args: [{ name: 'path', help: 'the existing linked worktree root' }],
+      options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
+    }),
     verb('worktree', {
       summary: 'inspect and remove the checkouts the daemon created for ferrets',
       args: [],

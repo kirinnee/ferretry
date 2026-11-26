@@ -1,4 +1,5 @@
 import { WorktreeController } from '../lib/worktrees/controller.ts';
+import { resolve } from 'node:path';
 import { ClientWorktreeGateway } from '../lib/worktrees/gateway.ts';
 import { PROJECTS_ROUTE, resolveProjectGroup } from '../lib/worktrees/project-group.ts';
 import { on, text } from '../lib/verb-io.ts';
@@ -50,6 +51,16 @@ export default defineVerbs(({ client, environment, verb, json, first }) => {
     });
   });
   return {
+    'worktree adopt <path>': verb(async (invocation, _presenter, io) => {
+      const adopted = await new ClientWorktreeGateway(client).adopt({
+        path: resolve(environment.cwd ?? '/', first(invocation, 'worktree path')),
+      });
+      io.success(
+        json(invocation).json
+          ? JSON.stringify(adopted, null, 2)
+          : `Adopted ${adopted.worktree.path} (branch ${adopted.worktree.branch}).`,
+      );
+    }),
     worktree: list,
     worktrees: list,
     'worktree ls': list,
