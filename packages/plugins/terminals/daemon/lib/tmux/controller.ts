@@ -23,6 +23,7 @@ import {
 } from './commands.ts';
 import type { PaneActivity, PaneState, TmuxCommandPort, TmuxCommandResult, TmuxLaunch } from './contracts.ts';
 import type { TmuxLaunchGuard } from './harness-guard.ts';
+import type { HarnessScreenReader, HarnessScreenReading } from '@ferretry/core-ferrets/contract';
 import {
   type PaneIdentity,
   paneStateFrom,
@@ -46,6 +47,7 @@ export class TmuxController {
   constructor(
     private readonly commands: TmuxCommandPort,
     private readonly guard?: TmuxLaunchGuard,
+    private readonly screenReader?: HarnessScreenReader,
   ) {}
 
   async alive(session: string): Promise<boolean> {
@@ -79,11 +81,30 @@ export class TmuxController {
       this.commands.execute(capturePaneArguments(session, false)),
     ]);
     const metadata = parsePaneMetadata(metadataResult.code === 0 ? metadataResult.stdout : '1|||||');
-    return paneStateFrom(
+    const state = paneStateFrom(
       metadata,
       visibleResult.code === 0 ? visibleResult.stdout : '',
       historyResult?.code === 0 ? historyResult.stdout : '',
     );
+    if (this.screenReader === undefined) return state;
+    const attributed = await this.rows(session, 0, Math.max(0, (metadata.height ?? 1) - 1));
+    let screen: HarnessScreenReading;
+    try {
+      screen = this.screenReader.read({
+        visible: state.visible,
+        attributed,
+        cursorX: state.cursorX,
+        cursorY: state.cursorY,
+      });
+    } catch {
+      screen = { working: true, atPrompt: false, composer: null };
+    }
+    return {
+      ...state,
+      screen,
+      promptReady:
+        !state.dead && screen.atPrompt && (screen.composer?.text === '' || screen.composer?.placeholder === true),
+    };
   }
 
   /**

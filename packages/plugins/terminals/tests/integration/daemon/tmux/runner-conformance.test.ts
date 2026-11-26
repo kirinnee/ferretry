@@ -171,6 +171,55 @@ function tmuxWorld() {
 
 runnerConformance('TmuxRunner (in-memory tmux server)', tmuxWorld);
 
+describe('registered plugin screen reader through the guarded runner', () => {
+  it('delivers once using the registered reader, and refuses unsupported native queue keys', async () => {
+    const world = tmuxWorld();
+    let server: FakeTmuxServer | undefined;
+    const started = await world.runner.start({
+      ...world.spec,
+      harness: 'opencode',
+      execChain: ['harness'],
+      screenReader: {
+        key: 'opencode',
+        read: () => ({
+          working: server?.working ?? false,
+          atPrompt: !server?.working,
+          composer: { text: server?.composer ?? '', placeholder: false, pasted: false },
+        }),
+      },
+    });
+    if (!started.ok) throw new Error('fixture launch refused');
+    const pane = world.paneOf(started.value.handle);
+    server = pane.server;
+    expect(await world.runner.deliver(started.value.handle, { text: 'hello' })).toBe('turn-started');
+    expect(server.submitted).toEqual(['hello']);
+    const writes = pane.writes;
+    await expect(world.runner.queue(started.value.handle, 'next')).rejects.toThrow('no native queue');
+    expect(pane.writes).toBe(writes);
+  });
+
+  it('a mismatched reader is never called and legacy-looking text sends no payload keys', async () => {
+    const world = tmuxWorld();
+    let reads = 0;
+    const started = await world.runner.start({
+      ...world.spec,
+      harness: 'opencode',
+      execChain: ['harness'],
+      screenReader: {
+        key: 'codex',
+        read: () => {
+          reads++;
+          return { working: false, atPrompt: true, composer: { text: '', placeholder: false, pasted: false } };
+        },
+      },
+    });
+    if (!started.ok) throw new Error('fixture launch refused');
+    await expect(world.runner.deliver(started.value.handle, { text: 'hello' })).rejects.toThrow();
+    expect(reads).toBe(0);
+    expect(world.paneOf(started.value.handle).writes).toBe(0);
+  });
+});
+
 /** The spec of a Codex launch: it execs `env`, the interpreter its installed script runs on, then the harness. */
 const codexSpec = (spec: RunSpec): RunSpec => ({ ...spec, execChain: ['env', 'bash', 'sh', 'node', 'harness'] });
 

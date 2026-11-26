@@ -20,9 +20,11 @@ import { composerContains, readComposer, showsPayload } from './composer-screen.
 import { paneShowsActiveWork, paneShowsStartupWait } from './pane.ts';
 import type { StartupDialogAction, StartupDialogOptions } from './startup.ts';
 import { startupDialogAction } from './startup.ts';
+import type { HarnessScreenReading } from '@ferretry/core-ferrets/contract';
 
 /** One observation of a pane: what tmux said about it and what it is showing. */
 export interface DeliveryFrame {
+  readonly screen?: HarnessScreenReading;
   readonly alive: boolean;
   readonly dead: boolean;
   readonly promptReady: boolean;
@@ -45,7 +47,12 @@ export interface DeliveryFrame {
 
 /** What a frame says about its composer beside the text: the cursor, and the ink when it was read. */
 export function frameCursor(frame: DeliveryFrame): ComposerCursor {
-  return { x: frame.cursorX, y: frame.cursorY, ink: frame.composerInk };
+  return {
+    x: frame.cursorX,
+    y: frame.cursorY,
+    ink: frame.composerInk,
+    ...(frame.screen === undefined ? {} : { reading: frame.screen.composer }),
+  };
 }
 
 /**
@@ -122,7 +129,7 @@ export function nextReadinessStep(
   if (!frame.alive || frame.dead) {
     return { kind: 'exited', reason: harnessExitReason(frame) };
   }
-  const action = startupDialogAction(frame.visible, options);
+  const action = frame.screen === undefined ? startupDialogAction(frame.visible, options) : undefined;
   if (action !== undefined) {
     const attempt = (attemptsByKind.get(action.kind) ?? 0) + 1;
     return attempt > maxAttempts
@@ -154,7 +161,7 @@ export type StartupSettleStep =
  */
 export function startupSettleStep(frame: DeliveryFrame): StartupSettleStep {
   if (!frame.alive || frame.dead) return { kind: 'exited', reason: harnessExitReason(frame) };
-  return paneShowsStartupWait(frame.visible) ? { kind: 'wait' } : { kind: 'settled' };
+  return frame.screen === undefined && paneShowsStartupWait(frame.visible) ? { kind: 'wait' } : { kind: 'settled' };
 }
 
 /**
@@ -182,7 +189,7 @@ export type SubmitStep =
  */
 export function classifySubmit(frame: DeliveryFrame, text: string, evidence: LandingEvidence): SubmitStep {
   // A pane that died or started working took the payload with it either way.
-  if (!frame.alive || frame.dead || paneShowsActiveWork(frame.visible))
+  if (!frame.alive || frame.dead || (frame.screen?.working ?? paneShowsActiveWork(frame.visible)))
     return { kind: 'delivered', outcome: 'turn-started' };
   // Codex took the submission and parked it until its startup ends (`paneShowsStartupWait`). The
   // payload is still DRAWN in the composer, so the composer reading below would call it held and press
@@ -196,7 +203,7 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
   // parked `/model` that never ran — Codex exiting on its startup timeout, or the picker never opening
   // within the drive's budget. The same goes for a live control on a session that is still starting,
   // which is rare. Reporting handled-local here only stops THIS delivery pressing Enter again.
-  if (paneShowsStartupWait(frame.visible))
+  if (frame.screen === undefined && paneShowsStartupWait(frame.visible))
     return { kind: 'delivered', outcome: text.trimStart().startsWith('/') ? 'handled-local' : 'turn-started' };
   // Exact `/model` opens Codex's native picker. The pane often keeps `› /model` above it, which
   // `composerHolds` cannot tell from an occupied composer — an OPEN picker proves the first Enter
@@ -206,7 +213,7 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
   // rather than of a local regex holding a partial copy of it. That copy knew two of the five
   // titles and missed the quick picker's bare `Select Model` entirely, so the commonest `/model`
   // outcome was reported here as a started turn.
-  if (text.trim() === '/model' && paneShowsOpenPicker(frame.visible))
+  if (frame.screen === undefined && text.trim() === '/model' && paneShowsOpenPicker(frame.visible))
     return { kind: 'delivered', outcome: 'handled-local' };
   // A ready prompt is positive evidence that the cursor is back at an EMPTY composer. It is checked
   // before the pane-text probe because local output routinely echoes the command into scrollback.
@@ -227,7 +234,8 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
  */
 function stillComposed(frame: DeliveryFrame, text: string, evidence: LandingEvidence): boolean {
   const composer = readComposer(frame.visible, frameCursor(frame));
-  if (composer === undefined || composer.placeholder === undefined) return composerHolds(frame.visible, text, evidence);
+  if (composer === undefined || composer.placeholder === undefined)
+    return frame.screen === undefined && composerHolds(frame.visible, text, evidence);
   if (composer.placeholder) return false;
   return evidence === 'placeholder' ? composer.pasted : composerContains(composer.text, text);
 }
@@ -273,7 +281,7 @@ export function occupiedComposer(frame: DeliveryFrame): string | undefined {
  * submission Codex already accepted and will send when startup ends, so the wait just goes on.
  */
 export function draftBlockingReadiness(frame: DeliveryFrame): string | undefined {
-  return paneShowsStartupWait(frame.visible) ? undefined : occupiedComposer(frame);
+  return frame.screen === undefined && paneShowsStartupWait(frame.visible) ? undefined : occupiedComposer(frame);
 }
 
 /**

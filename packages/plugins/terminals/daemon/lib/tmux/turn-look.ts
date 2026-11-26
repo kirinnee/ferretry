@@ -21,6 +21,14 @@ export function statusLinesOf(visible: string): string | undefined {
  * dialog's words, a permission prompt's command — is masked too. Pure: values in, a value out.
  */
 export function turnLookOf(pane: PaneState, digest: FrameDigest): RunnerLook {
+  if (pane.screen !== undefined)
+    return {
+      frame: digest(pane.visible),
+      working: pane.screen.working,
+      atPrompt: !pane.dead && pane.screen.atPrompt,
+      permission: false,
+      ...(statusLinesOf(pane.visible) === undefined ? {} : { status: statusLinesOf(pane.visible) }),
+    };
   const request = parsePermissionPrompt(pane.visible);
   const work = paneActiveWork(pane.visible);
   const prompt = paneBlockingPrompt(pane.visible);

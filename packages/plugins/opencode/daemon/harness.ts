@@ -11,6 +11,7 @@ import { HarnessConfigSchema, type HarnessConfig } from '../contract/index.ts';
 import { isolatedCommand, isolatedEnvironment } from './lib/environment.ts';
 import { OPENCODE_FACTS, opencodeHomes } from './lib/home.ts';
 import { sessionStore } from './adapters/session-store.ts';
+import { opencodeScreen } from './lib/screen.ts';
 
 export function opencodeHarness(kernel: KernelPorts, config: () => HarnessConfig): Harness {
   const homes = opencodeHomes(kernel);
@@ -67,6 +68,7 @@ export function opencodeHarness(kernel: KernelPorts, config: () => HarnessConfig
       cwd: spec.folder,
       env,
       harness: 'opencode',
+      screenReader: opencodeScreen,
       execChain: ['env', 'opencode'],
     };
     await sessions.bind(spec.ferret, session);
