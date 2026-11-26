@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { generateKeyPairSync } from 'node:crypto';
 
 const GLOBAL = '__FY_HOSTED_APP_RELEASE_KEY__';
-const PREVIEW_KEY =
-  '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAPREVIEWKEYPREVIEWKEYPREVIEWKEYPREVIEWKEY=\n-----END PUBLIC KEY-----\n';
+const PREVIEW_KEY = generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
 
 /** Load the module afresh under a build-time value, as a build that defines the constant would. */
 async function loadWith(value: unknown): Promise<string> {
@@ -30,9 +30,16 @@ describe('the hosted app’s release key', () => {
     expect(await loadWith(PREVIEW_KEY)).toBe(PREVIEW_KEY);
   });
 
-  it('should fall back to the production key when the build’s value is not a PEM public key', async () => {
-    const production = await loadWith(undefined);
-    expect(await loadWith('not a key')).toBe(production);
-    expect(await loadWith(42)).toBe(production);
+  it('should refuse a malformed supplied key without falling back to production or quoting the value', async () => {
+    for (const value of ['not a key', '', 42, PREVIEW_KEY.replace('MCow', 'broken')]) {
+      await expect(loadWith(value)).rejects.toThrow('The hosted app release key must be an Ed25519 public key.');
+    }
+  });
+
+  it('should refuse a valid PEM key for the wrong signing algorithm', async () => {
+    const key = generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
+      .publicKey.export({ type: 'spki', format: 'pem' })
+      .toString();
+    await expect(loadWith(key)).rejects.toThrow('The hosted app release key must be an Ed25519 public key.');
   });
 });
