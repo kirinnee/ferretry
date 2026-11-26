@@ -7,7 +7,6 @@ import {
   type RepoWorktreeRow,
   type WorktreeLiveState,
 } from '../../../contract/index.ts';
-import { bounded } from '../moves/bounded.ts';
 import { WorktreeError } from './errors.ts';
 import { isWithinDirectory } from './policy.ts';
 import { isWorktreeSessionActive, type WorktreeSessionFact } from './service.ts';
@@ -41,9 +40,9 @@ const REPO_INSPECT_PARALLEL = 4;
 /** What the listing is built from. Every member answers from the live host or the registry; none is cached. */
 export interface RepoWorktreeEvidence {
   /** `git worktree list` of the repository this directory is the common directory of, refusing anything that is not one. */
-  rows(commonDirectory: string): Promise<readonly WorktreeListEntry[]>;
+  rows(commonDirectory: string, signal?: AbortSignal): Promise<readonly WorktreeListEntry[]>;
   /** The managed list's own inspection (live state), so a row here and a row there never disagree. */
-  examine(input: CheckManagedWorktreeRemovalInput): Promise<ManagedWorktreeInspection>;
+  examine(input: CheckManagedWorktreeRemovalInput, signal?: AbortSignal): Promise<ManagedWorktreeInspection>;
   /** The registry's durable facts. */
   records(): Promise<readonly ManagedWorktreeSummary[]>;
   /** Which ferrets stand in which folders; `undefined` when the fleet could not be read. */
@@ -52,7 +51,7 @@ export interface RepoWorktreeEvidence {
   readonly managedRoot: string;
   readonly clock: {
     nowMs(): number;
-    sleep(ms: number): Promise<void>;
+    sleep(ms: number, signal?: AbortSignal): Promise<void>;
   };
 }
 
@@ -98,6 +97,7 @@ function gitFacts(entry: WorktreeListEntry, undetermined: readonly string[]): Wo
 function overlaid(live: WorktreeLiveState, entry: WorktreeListEntry): WorktreeLiveState {
   return {
     ...live,
+    detached: live.head === undefined && live.branch === undefined ? entry.detached : live.detached,
     ...(live.head === undefined && entry.head !== undefined ? { head: entry.head } : {}),
     ...(live.branch === undefined && entry.branch !== undefined ? { branch: entry.branch } : {}),
     ...(live.locked === undefined && entry.locked !== undefined ? { locked: entry.locked } : {}),
@@ -137,7 +137,36 @@ export class RepoWorktreeLister {
         'commonDir must be an absolute path to a git common directory',
       );
     }
-    const entries = await this.evidence.rows(commonDirectory);
+    const controller = new AbortController();
+    const timer = new AbortController();
+    const started = this.evidence.clock.nowMs();
+    let inspecting = false;
+    const work = this.#list(commonDirectory, started, controller.signal, () => {
+      inspecting = true;
+    });
+    const late = this.evidence.clock.sleep(REPO_LIST_BUDGET_MS, timer.signal).then(async () => {
+      const error = new WorktreeError('verification_failed', 'the time allowed for this list ran out');
+      controller.abort(error);
+      // Once initial evidence is known, cancelled rows keep Git's facts and explain their missing live state.
+      if (inspecting) return await work;
+      throw error;
+    });
+    try {
+      return await Promise.race([work, late]);
+    } finally {
+      controller.abort();
+      timer.abort();
+    }
+  }
+
+  async #list(
+    commonDirectory: string,
+    started: number,
+    signal: AbortSignal,
+    ready: () => void,
+  ): Promise<RepoWorktreeListResponse> {
+    const entries = await this.evidence.rows(commonDirectory, signal);
+    signal.throwIfAborted();
     const listed = entries.slice(0, REPO_WORKTREE_LIMIT);
     const mainPath = listed[0]?.path ?? '';
     const [records, sessions] = await Promise.all([
@@ -146,16 +175,32 @@ export class RepoWorktreeLister {
     ]);
     const tracked = new Set(
       (records ?? [])
-        .filter(record => record.removedAt === undefined && record.unresolved === undefined)
+        .filter(
+          record =>
+            record.removedAt === undefined &&
+            record.unresolved === undefined &&
+            path.resolve(record.commonDirectory) === path.resolve(commonDirectory),
+        )
         .map(record => path.resolve(record.path)),
     );
     const standing = sessions === undefined ? undefined : ferretsByRow(listed, sessions);
-    const lives = await this.#inspect(listed, commonDirectory, mainPath, records === undefined);
+    signal.throwIfAborted();
+    const verified = new Set<string>();
+    ready();
+    const lives = await this.#inspect(
+      listed,
+      commonDirectory,
+      mainPath,
+      records === undefined,
+      started,
+      signal,
+      verified,
+    );
     const worktrees: RepoWorktreeRow[] = listed.map((entry, index) => ({
       path: entry.path,
       main: index === 0,
       bare: entry.bare,
-      tracked: tracked.has(path.resolve(entry.path)) ? 'managed' : 'none',
+      tracked: tracked.has(path.resolve(entry.path)) && verified.has(entry.path) ? 'managed' : 'none',
       live: lives[index] ?? gitFacts(entry, ['this row was not inspected']),
       ...(standing === undefined ? {} : { ferrets: [...(standing.get(index) ?? [])] }),
     }));
@@ -173,9 +218,10 @@ export class RepoWorktreeLister {
     commonDirectory: string,
     mainPath: string,
     registryUnread: boolean,
+    started: number,
+    signal: AbortSignal,
+    verified: Set<string>,
   ): Promise<readonly WorktreeLiveState[]> {
-    const { clock } = this.evidence;
-    const started = clock.nowMs();
     const lives: WorktreeLiveState[] = [];
     const note = registryUnread ? ['the registry could not be read, so which worktrees Ferretry made is unknown'] : [];
     let next = 0;
@@ -183,7 +229,7 @@ export class RepoWorktreeLister {
       for (let index = next++; index < rows.length; index = next++) {
         const entry = rows[index];
         if (entry === undefined) continue;
-        lives[index] = await this.#liveOf(entry, commonDirectory, mainPath, started, note);
+        lives[index] = await this.#liveOf(entry, commonDirectory, mainPath, started, note, signal, verified);
       }
     };
     await Promise.all(Array.from({ length: Math.min(REPO_INSPECT_PARALLEL, rows.length) }, worker));
@@ -196,27 +242,45 @@ export class RepoWorktreeLister {
     mainPath: string,
     started: number,
     note: readonly string[],
+    signal: AbortSignal,
+    verified: Set<string>,
   ): Promise<WorktreeLiveState> {
     // A bare repository has no files to read.
     if (entry.bare) return gitFacts(entry, note);
     const { clock } = this.evidence;
-    if (clock.nowMs() - started > REPO_LIST_BUDGET_MS) {
+    const remaining = REPO_LIST_BUDGET_MS - (clock.nowMs() - started);
+    if (signal.aborted || remaining <= 0) {
       return gitFacts(entry, ['not inspected: the time allowed for this list ran out', ...note]);
     }
+    const controller = new AbortController();
+    const timer = new AbortController();
+    const abort = () => controller.abort(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    const timeout = Math.min(REPO_ROW_TIMEOUT_MS, remaining);
+    const work = this.evidence.examine(
+      {
+        managed: inspectedAs(entry, commonDirectory, mainPath),
+        managedRoot: this.evidence.managedRoot,
+        ownerActive: false,
+      },
+      controller.signal,
+    );
+    const late = clock.sleep(timeout, timer.signal).then((): never => {
+      const error = new Error(`inspecting this worktree did not answer within ${timeout} ms`);
+      controller.abort(error);
+      throw error;
+    });
     try {
-      const inspection = await bounded(
-        this.evidence.examine({
-          managed: inspectedAs(entry, commonDirectory, mainPath),
-          managedRoot: this.evidence.managedRoot,
-          ownerActive: false,
-        }),
-        REPO_ROW_TIMEOUT_MS,
-        'inspecting this worktree',
-        ms => clock.sleep(ms),
-      );
+      const inspection = await Promise.race([work, late]);
+      controller.signal.throwIfAborted();
+      verified.add(entry.path);
       return overlaid({ ...inspection.live, undetermined: [...inspection.live.undetermined, ...note] }, entry);
     } catch (error) {
       return gitFacts(entry, [`could not be inspected: ${message(error)}`, ...note]);
+    } finally {
+      controller.abort();
+      timer.abort();
+      signal.removeEventListener('abort', abort);
     }
   }
 }

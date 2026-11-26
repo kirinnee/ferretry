@@ -96,12 +96,43 @@ function listerOf(setup: Setup = {}) {
       return 'sessions' in setup ? setup.sessions : [];
     },
     managedRoot: '/managed',
-    clock: { nowMs: setup.nowMs ?? (() => 0), sleep: async () => undefined },
+    clock: {
+      nowMs: setup.nowMs ?? (() => 0),
+      sleep: async (ms, signal) =>
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, ms === 15_000 ? 1 : ms);
+          signal?.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        }),
+    },
   };
   return { lister: new RepoWorktreeLister(evidence), asked, examined };
 }
 
 describe('RepoWorktreeLister', () => {
+  it('should join a registry label by repository as well as path', async () => {
+    const { lister } = listerOf({ records: [record(FEATURE, { commonDirectory: '/other/repository/.git' })] });
+    const result = await lister.list(COMMON);
+    should(result.worktrees[1]?.tracked).equal('none');
+  });
+
+  it('should preserve Git detached evidence when inspection cannot establish a checkout', async () => {
+    const { lister } = listerOf({
+      rows: [entry(MAIN, { branch: undefined, detached: true })],
+      examine: async input => ({
+        live: { detached: false, undetermined: ['checkout could not be inspected'] },
+        decision: { removable: false, path: input.managed.path, branch: '', blockers: [] },
+      }),
+    });
+    should((await lister.list(COMMON)).worktrees[0]?.live.detached).equal(true);
+  });
+
   it('should merge the registry into Git rows: recorded is managed, everything else Git lists is none', async () => {
     // Arrange
     const { lister } = listerOf();
@@ -272,7 +303,11 @@ describe('RepoWorktreeLister', () => {
       records: async () => [],
       sessions: async () => [],
       managedRoot: '/managed',
-      clock: { nowMs: () => 0, sleep: async () => undefined },
+      clock: {
+        nowMs: () => 0,
+        sleep: async (_ms, signal) =>
+          await new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve(), { once: true })),
+      },
     };
 
     // Act

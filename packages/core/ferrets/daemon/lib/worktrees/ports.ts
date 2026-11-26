@@ -41,6 +41,7 @@ export interface WorktreeDirectoryPinner {
 }
 
 export interface GitInvocation {
+  readonly signal?: AbortSignal;
   readonly args: readonly string[];
   /**
    * Working directory for the child.

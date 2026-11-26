@@ -1,9 +1,10 @@
 import { afterAll, describe, it } from 'bun:test';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, rm, rename, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
-import type { RepoWorktreeListResponse } from '../../../../contract/index.ts';
+import { WorktreesFile, type RepoWorktreeListResponse } from '../../../../contract/index.ts';
 import { GitRepoWorktreeRows } from '../../../../daemon/adapters/worktrees/repo-git.ts';
+import { KernelGitRunner } from '../../../../daemon/adapters/git/runner.ts';
 import {
   GitWorktreeGateway,
   ManagedWorktreeAdapter,
@@ -23,6 +24,7 @@ import { cleanupTempDirectories, setupGit, tempDirectory, tempRepository } from 
 
 const files = new NodeWorktreeFileSystem();
 const clock = new TestWorktreeClock();
+const readers: GitRepoWorktreeRows[] = [];
 
 const adapter = (): ManagedWorktreeAdapter =>
   new ManagedWorktreeAdapter(
@@ -37,12 +39,139 @@ const rowOf = (listing: RepoWorktreeListResponse, folder: string) => listing.wor
 
 describe('the repository worktree list over real Git', () => {
   afterAll(async () => {
+    for (const reader of readers) await reader.close();
     await cleanupTempDirectories();
+  });
+
+  it('should refuse an unauthorized, redirected or symlinked common directory before Git reads it', async () => {
+    const world = await worktreeRouteWorld('repo-list-boundary');
+    let gitReads = 0;
+    const runBytes = world.io.git.runBytes;
+    world.io.git.runBytes = async (...args) => {
+      gitReads++;
+      return await runBytes(...args);
+    };
+    const other = await tempRepository('repo-list-private');
+    const commonDir = path.join(world.repository.root, '.git');
+    const query = async (value: string) => await world.call('GET /v1/worktrees/repo', { query: { commonDir: value } });
+    should((await query(path.join(other.root, '.git'))).status).equal(422);
+    const link = path.join(world.repository.root, 'linked-metadata');
+    await symlink(path.join(other.root, '.git'), link);
+    should((await query(link)).status).equal(422);
+    await Bun.write(path.join(commonDir, 'commondir'), path.join(other.root, '.git'));
+    should((await query(commonDir)).status).equal(422);
+    should(gitReads).equal(0);
+  });
+
+  it('should never label a replacement checkout from another repo as managed', async () => {
+    const world = await worktreeRouteWorld('repo-list-replaced');
+    const result = await world.call('POST /v1/worktrees', {
+      body: { sourcePath: world.repository.root, branch: 'feature/replaced', sessionId: 'session-1' },
+    });
+    should(result.status).equal(200);
+    const registry = JSON.parse(world.state.raw(WorktreesFile)!);
+    const target = registry.worktrees[0].path as string;
+    await rename(target, `${target}-old`);
+    const other = await tempRepository('repo-list-replacement');
+    const otherRoot = path.join(world.repository.root, 'other-repository');
+    await rename(other.root, otherRoot);
+    await setupGit(otherRoot, 'worktree', 'add', '-b', 'replacement', target);
+    const answer = await world.call('GET /v1/worktrees/repo', {
+      query: { commonDir: path.join(world.repository.root, '.git') },
+    });
+    should(answer.status).equal(200);
+    const row = rowOf(answer.json as RepoWorktreeListResponse, target);
+    should(row?.tracked).equal('none');
+    should(row?.live.status).be.undefined();
+    should(row?.live.undetermined.join(' ')).match(/identity|repository|common|may not reach/u);
+  });
+
+  it('should report undetermined without executing a configured clean filter during status or removal examine', async () => {
+    const world = await worktreeRouteWorld('repo-list-filter');
+    const root = world.repository.root;
+    await Bun.write(path.join(root, '.gitattributes'), 'tracked.txt filter=marker\n');
+    await Bun.write(path.join(root, 'tracked.txt'), 'before\n');
+    await setupGit(root, 'add', '.gitattributes', 'tracked.txt');
+    await setupGit(root, 'commit', '-m', 'tracked fixture');
+    const created = await world.call('POST /v1/worktrees', {
+      body: { sourcePath: root, branch: 'filter/shared-examine', sessionId: 'session-1' },
+    });
+    should(created.status).equal(200);
+    const managedPath = JSON.parse(world.state.raw(WorktreesFile)!).worktrees[0].path as string;
+    const marker = path.join(root, 'filter-executed');
+    await setupGit(root, 'config', 'filter.marker.clean', `touch '${marker}'; cat`);
+    await Bun.write(path.join(root, 'tracked.txt'), 'changed file content\n');
+    await Bun.write(path.join(managedPath, 'tracked.txt'), 'changed managed content\n');
+    const answer = await world.call('GET /v1/worktrees/repo', { query: { commonDir: path.join(root, '.git') } });
+    should(answer.status).equal(200);
+    should(await Bun.file(marker).exists()).equal(false);
+    const row = rowOf(answer.json as RepoWorktreeListResponse, root);
+    should(row?.live.status).be.undefined();
+    should(row?.live.undetermined.join(' ')).match(/filter/u);
+    const managed = await world.built.service.list();
+    should(managed.worktrees[0]?.live?.status).be.undefined();
+    should(managed.worktrees[0]?.live?.undetermined.join(' ')).match(/filter/u);
+    should(await Bun.file(marker).exists()).equal(false);
+  });
+
+  it('should report the status of a detached dirty checkout', async () => {
+    const world = await worktreeRouteWorld('repo-list-detached');
+    const target = path.join(world.repository.root, 'detached');
+    await setupGit(world.repository.root, 'worktree', 'add', '--detach', target);
+    await Bun.write(path.join(target, 'untracked.txt'), 'dirty\n');
+    const answer = await world.call('GET /v1/worktrees/repo', {
+      query: { commonDir: path.join(world.repository.root, '.git') },
+    });
+    should(rowOf(answer.json as RepoWorktreeListResponse, target)?.live).match({
+      detached: true,
+      status: { untracked: true },
+    });
+  });
+
+  it('should fail closed before status could run a filter in an unchecked submodule', async () => {
+    const world = await worktreeRouteWorld('repo-list-submodule-filter');
+    const submodule = await tempRepository('repo-list-submodule');
+    await Bun.write(path.join(submodule.root, '.gitattributes'), 'README.md filter=marker\n');
+    await setupGit(submodule.root, 'add', '.gitattributes');
+    await setupGit(submodule.root, 'commit', '-m', 'submodule filter attribute');
+    const root = world.repository.root;
+    await setupGit(root, '-c', 'protocol.file.allow=always', 'submodule', 'add', submodule.root, 'child');
+    await setupGit(root, 'commit', '-m', 'submodule fixture');
+    const marker = path.join(root, 'submodule-filter-executed');
+    await setupGit(path.join(root, 'child'), 'config', 'filter.marker.clean', `touch '${marker}'; cat`);
+    await Bun.write(path.join(root, 'child', 'README.md'), 'changed content\n');
+    const answer = await world.call('GET /v1/worktrees/repo', { query: { commonDir: path.join(root, '.git') } });
+    should(answer.status).equal(200);
+    should(await Bun.file(marker).exists()).equal(false);
+    const row = rowOf(answer.json as RepoWorktreeListResponse, root);
+    should(row?.live.status).be.undefined();
+    should(row?.live.undetermined.join(' ')).match(/submodule filter safety/u);
+  });
+
+  it('should read a registry snapshot without reconciling unrelated entries or waiting for mutations', async () => {
+    const world = await worktreeRouteWorld('repo-list-snapshot');
+    const created = await world.call('POST /v1/worktrees', {
+      body: { sourcePath: world.repository.root, branch: 'feature/snapshot', sessionId: 'session-1' },
+    });
+    should(created.status).equal(200);
+    const registry = JSON.parse(world.state.raw(WorktreesFile)!);
+    await rm(registry.worktrees[0].path, { recursive: true, force: true });
+    registry.worktrees[0].removalStartedAt = '2026-11-16T00:00:00.000Z';
+    world.state.plant(WorktreesFile, JSON.stringify(registry));
+    const before = world.state.raw(WorktreesFile);
+    const answer = await world.call('GET /v1/worktrees/repo', {
+      query: { commonDir: path.join(world.repository.root, '.git') },
+    });
+    should(answer.status).equal(200);
+    should(world.state.raw(WorktreesFile)).equal(before);
   });
 
   it('should list managed, hand-made, detached, locked and missing worktrees with live state', async () => {
     // Arrange
-    const repository = await tempRepository('repo-list');
+    const world = await worktreeRouteWorld('repo-list');
+    const repository = world.repository;
+    const reader = new GitRepoWorktreeRows(new KernelGitRunner(world.io.git), world.io.repoAccess);
+    readers.push(reader);
     const managedRoot = path.join(await tempDirectory('repo-list-managed'), 'worktrees');
     const away = await tempDirectory('repo-list-away');
     const created = await adapter().create({
@@ -64,7 +193,7 @@ describe('the repository worktree list over real Git', () => {
     await rm(gone, { recursive: true, force: true });
     await Bun.write(path.join(handMade, 'scratch.txt'), 'untracked\n');
     const lister = new RepoWorktreeLister({
-      rows: async dir => await new GitRepoWorktreeRows(testGitRunner()).rows(dir),
+      rows: async dir => await reader.rows(dir),
       examine: async input => await adapter().examine(input),
       records: async () => [
         {
@@ -107,10 +236,12 @@ describe('the repository worktree list over real Git', () => {
 
   it('should refuse anything that is not an existing git common directory', async () => {
     // Arrange
-    const repository = await tempRepository('repo-list-refuse');
+    const world = await worktreeRouteWorld('repo-list-refuse');
+    const repository = world.repository;
     const away = await tempDirectory('repo-list-refuse-away');
     await setupGit(repository.root, 'worktree', 'add', '-b', 'linked', path.join(away, 'linked'));
-    const rows = new GitRepoWorktreeRows(testGitRunner());
+    const rows = new GitRepoWorktreeRows(new KernelGitRunner(world.io.git), world.io.repoAccess);
+    readers.push(rows);
     const plain = await tempDirectory('repo-list-plain');
     const linkedGitDir = path.join(repository.root, '.git', 'worktrees', 'linked');
 
@@ -134,8 +265,10 @@ describe('the repository worktree list over real Git', () => {
 
   it('should accept the common directory of a repository from outside any of its folders', async () => {
     // Arrange
-    const repository = await tempRepository('repo-list-ok');
-    const rows = new GitRepoWorktreeRows(testGitRunner());
+    const world = await worktreeRouteWorld('repo-list-ok');
+    const repository = world.repository;
+    const rows = new GitRepoWorktreeRows(new KernelGitRunner(world.io.git), world.io.repoAccess);
+    readers.push(rows);
 
     // Act
     const actual = await rows.rows(path.join(repository.root, '.git'));

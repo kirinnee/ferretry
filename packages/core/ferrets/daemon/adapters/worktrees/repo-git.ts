@@ -4,6 +4,7 @@ import { parseWorktreeList } from '../../lib/worktrees/parser.ts';
 import type { GitRunner } from '../../lib/worktrees/ports.ts';
 import type { WorktreeListEntry } from '../../lib/worktrees/types.ts';
 import { decodeGitOutput, stripFinalLineFeed } from '../git/result.ts';
+import type { RepoDirectoryPin, RepoWorktreeAccess } from './repo-access.ts';
 
 /** `git worktree list` is a few hundred bytes a row; this holds thousands before it would call the output truncated. */
 const LIST_OUTPUT_LIMIT = 8 * 1024 * 1024;
@@ -11,34 +12,100 @@ const LIST_OUTPUT_LIMIT = 8 * 1024 * 1024;
 /**
  * The worktrees Git lists for a repository named by its common directory.
  *
- * THE REPOSITORY IS NAMED, NOT ENTERED. Every command takes `--git-dir=<common directory>` and runs in no folder, so a
- * repository no ferret stands in is still listable and nothing here reaches into a folder by name. The caller's path is
- * proven to be a COMMON directory by Git itself — its own git directory and its common directory are one and the same
- * (a linked worktree's git directory names a different common one, a worktree folder or a subfolder of .git is not a git
- * directory at all) — and anything else is refused in one sentence that echoes no Git output.
+ * The host authorizes and pins the common directory before Git reads it. Git runs inside that held object with
+ * `--git-dir=.`; its absolute git directory and common directory must both equal the authorized directory. Each row
+ * must independently prove its checkout and metadata still belong to that same held repository before any Git read.
  */
 export class GitRepoWorktreeRows {
-  constructor(private readonly runner: GitRunner) {}
+  private repository: RepoDirectoryPin | undefined;
+  constructor(
+    private readonly runner: GitRunner,
+    private readonly access: RepoWorktreeAccess,
+  ) {}
 
-  async rows(commonDirectory: string): Promise<readonly WorktreeListEntry[]> {
+  async rows(commonDirectory: string, signal?: AbortSignal): Promise<readonly WorktreeListEntry[]> {
     if (!isListableCommonDirectory(commonDirectory)) throw notACommonDirectory();
-    const named = [`--git-dir=${commonDirectory}`];
+    signal?.throwIfAborted();
+    const repository = await this.access.repository(commonDirectory);
+    if (signal?.aborted === true) {
+      await repository.close();
+      signal.throwIfAborted();
+    }
+    try {
+      const entries = await this.#read(repository, signal);
+      signal?.throwIfAborted();
+      this.repository = repository;
+      return entries;
+    } catch (error) {
+      await repository.close();
+      throw error;
+    }
+  }
+
+  async #read(repository: RepoDirectoryPin, signal?: AbortSignal): Promise<readonly WorktreeListEntry[]> {
+    const named = ['--git-dir=.'];
+    await repository.verify();
     const proof = await this.runner.run({
+      cwd: repository.cwd,
+      signal,
       args: [...named, 'rev-parse', '--path-format=absolute', '--absolute-git-dir', '--git-common-dir'],
     });
     if (proof.timedOut) throw new WorktreeError('verification_failed', 'Git did not answer in time');
     const [gitDir, commonDir] = stripFinalLineFeed(decodeGitOutput(proof)).split('\n');
-    if (proof.exitCode !== 0 || gitDir === undefined || gitDir === '' || gitDir !== commonDir)
+    if (proof.exitCode !== 0 || proof.stdoutTruncated || gitDir !== repository.rootReal || gitDir !== commonDir)
       throw notACommonDirectory();
 
+    signal?.throwIfAborted();
+    await repository.verify();
     const listing = await this.runner.run({
+      cwd: repository.cwd,
+      signal,
       args: [...named, 'worktree', 'list', '--porcelain', '-z'],
       maxStdoutBytes: LIST_OUTPUT_LIMIT,
     });
+    await repository.verify();
     if (listing.timedOut || listing.exitCode !== 0 || listing.stdoutTruncated) {
       throw new WorktreeError('verification_failed', 'Git could not list the worktrees of this repository');
     }
     return parseWorktreeList(decodeGitOutput(listing));
+  }
+
+  /** Every read uses the held checkout, after proving its metadata belongs to the held common directory. */
+  async inCheckout<T>(
+    folder: string,
+    signal: AbortSignal | undefined,
+    read: (runner: GitRunner) => Promise<T>,
+  ): Promise<T> {
+    const repository = this.repository;
+    if (repository === undefined) throw notACommonDirectory();
+    signal?.throwIfAborted();
+    const checkout = await this.access.checkout(folder, repository);
+    try {
+      signal?.throwIfAborted();
+      return await read({
+        run: async invocation => {
+          signal?.throwIfAborted();
+          await checkout.verify();
+          signal?.throwIfAborted();
+          const result = await this.runner.run({
+            ...invocation,
+            cwd: checkout.cwd,
+            signal,
+            args: [`--git-dir=${checkout.gitDirectory}`, ...invocation.args],
+          });
+          signal?.throwIfAborted();
+          await checkout.verify();
+          return result;
+        },
+      });
+    } finally {
+      await checkout.close();
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.repository?.close();
+    this.repository = undefined;
   }
 }
 

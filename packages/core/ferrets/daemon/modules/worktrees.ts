@@ -19,6 +19,7 @@ import { RepoWorktreeLister } from '../lib/worktrees/repo-list.ts';
 import type { WorktreeDirectoryPinner, WorktreeFileSystem } from '../lib/worktrees/ports.ts';
 import { GitRepoWorktreeRows } from '../adapters/worktrees/repo-git.ts';
 import type { RepoWorktreeListResponse } from '../../contract/index.ts';
+import type { RepoWorktreeAccess } from '../adapters/worktrees/repo-access.ts';
 
 /**
  * Managed worktrees: the checkouts this daemon creates and removes (`/v1/worktrees`), and the evidence a removal is
@@ -33,6 +34,7 @@ import type { RepoWorktreeListResponse } from '../../contract/index.ts';
  * exactly as today's daemon did without a managed root.
  */
 interface WorktreeHostIo {
+  readonly repoAccess: RepoWorktreeAccess;
   readonly git: GitByteSpawn;
   readonly fileSystem: WorktreeFileSystem;
   readonly pinner: WorktreeDirectoryPinner;
@@ -97,8 +99,9 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
   // it asked. BOTH READS ANSWER `undefined` RATHER THAN THROWING, and neither swallows the failure: the domain
   // turns an absent answer into an un-forceable refusal, so a read still succeeds and a destructive write still
   // refuses.
+  const registry = new StateManagedWorktreeRegistry(needs.state);
   const service = new ManagedWorktreeService(
-    new StateManagedWorktreeRegistry(needs.state),
+    registry,
     operations,
     { sessions: async () => await needs.sessions().catch(() => undefined) },
     {
@@ -112,20 +115,41 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     io?.managedRoot,
   );
   // The repository listing reads the managed list's own inspection, the registry and the fleet, and writes nothing.
-  const lister =
-    io === undefined || runner === undefined
-      ? undefined
-      : new RepoWorktreeLister({
-          rows: async commonDirectory => await new GitRepoWorktreeRows(runner).rows(commonDirectory),
-          examine: async input => await operations.examine(input),
-          records: async () => await service.records(),
-          sessions: async () => await needs.sessions(),
-          managedRoot: io.managedRoot,
-          clock: { nowMs: () => needs.clock.nowMs(), sleep: async ms => await needs.clock.sleep(milliseconds(ms)) },
-        });
   const listRepo = async (commonDirectory: string): Promise<RepoWorktreeListResponse> => {
-    if (lister === undefined) throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
-    return await lister.list(commonDirectory);
+    if (io === undefined || runner === undefined)
+      throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
+    const reader = new GitRepoWorktreeRows(runner, io.repoAccess);
+    const lister = new RepoWorktreeLister({
+      rows: async (directory, signal) => await reader.rows(directory, signal),
+      examine: async (input, signal) =>
+        await reader.inCheckout(
+          input.managed.path,
+          signal,
+          async scoped =>
+            await new ManagedWorktreeAdapter(
+              new GitWorktreeGateway(scoped, io.fileSystem, clock),
+              io.fileSystem,
+              clock,
+              new WorktreeOperationQueue(),
+              io.pinner,
+            ).examine(input),
+        ),
+      records: async () => {
+        const state = await registry.read();
+        return state.worktrees.map(record => ({ ...record, commonDirectory: record.commonDir }));
+      },
+      sessions: async () => await needs.sessions(),
+      managedRoot: io.managedRoot,
+      clock: {
+        nowMs: () => needs.clock.nowMs(),
+        sleep: async (ms, signal) => await needs.clock.sleep(milliseconds(ms), signal),
+      },
+    });
+    try {
+      return await lister.list(commonDirectory);
+    } finally {
+      await reader.close();
+    }
   };
   const subsystem: WorktreeSubsystem = {
     list: async () => await service.list(),

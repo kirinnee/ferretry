@@ -24,6 +24,31 @@ describe('kernel.spawn runBytes (today’s Git runner capture)', () => {
     expect(slow.exitCode).toBe(-1);
   });
 
+  test('an output flood stops reading and kills the child as soon as the byte cap is exceeded', async () => {
+    const result = await spawn.runBytes('sh', ['-c', 'while :; do printf "%4096s" x; done'], {
+      maxStdoutBytes: 64,
+      timeout: milliseconds(1000),
+    });
+    expect(result.stdout.byteLength).toBe(64);
+    expect(result.stdout.buffer.byteLength).toBe(64);
+    expect(result.stdoutTruncated).toBe(true);
+    expect(result.timedOut).toBe(false);
+  });
+
+  test('cancellation kills even a child that ignores SIGTERM and abandons its pipes', async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 100);
+    try {
+      const result = await spawn.runBytes('sh', ['-c', 'trap "" TERM; while :; do :; done'], {
+        signal: controller.signal,
+        timeout: milliseconds(1000),
+      });
+      expect(result.timedOut).toBe(false);
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
   test('a pinned cwd is installed for the spawn and undone straight after', async () => {
     const dir = await realpath(await mkdtemp(`${tmpdir()}/fy-spawn-`));
     const before = process.cwd();

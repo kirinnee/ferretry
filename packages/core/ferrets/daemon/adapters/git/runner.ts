@@ -39,6 +39,7 @@ export interface GitByteSpawn {
       readonly timeout?: Duration;
       readonly maxStdoutBytes?: number;
       readonly maxStderrBytes?: number;
+      readonly signal?: AbortSignal;
     },
   ): Promise<GitExecution>;
 }
@@ -48,6 +49,7 @@ export class KernelGitRunner implements GitRunner {
   constructor(private readonly spawn: GitByteSpawn) {}
 
   async run(invocation: GitInvocation): Promise<GitExecution> {
+    invocation.signal?.throwIfAborted();
     const timeoutMs = checkedLimit(invocation.timeoutMs, DEFAULT_GIT_TIMEOUT_MS, 'Git timeout');
     const maxStdoutBytes = checkedLimit(invocation.maxStdoutBytes, DEFAULT_GIT_STDOUT_LIMIT, 'Git stdout limit');
     try {
@@ -59,6 +61,7 @@ export class KernelGitRunner implements GitRunner {
         timeout: milliseconds(timeoutMs),
         maxStdoutBytes,
         maxStderrBytes: DEFAULT_GIT_STDERR_LIMIT,
+        signal: invocation.signal,
       });
     } catch (error) {
       if (error instanceof GitProcessError) throw error;
