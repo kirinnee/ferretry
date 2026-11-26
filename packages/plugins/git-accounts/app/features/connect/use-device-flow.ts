@@ -13,7 +13,7 @@
  */
 import { isStepUpRefusal, useDocumentVisible } from '@ferretry/app/ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { GitDeviceFlow, GitDeviceFlowStatus } from '../../../contract/index.ts';
+import type { GitDeviceFlow, GitDeviceFlowStatus, GitKeyFormat } from '../../../contract/index.ts';
 import { pollFlow, startFlow } from '../../lib/accounts-api.ts';
 import { explainFailure, remainingMs } from '../../lib/connect-state.ts';
 import type { GitAccountsClient } from '../../shell.tsx';
@@ -116,15 +116,18 @@ export function useDeviceFlow({ client, onConnected, pollDelay = s => s * SECOND
 
   const ask = useCallback(() => setState({ step: 'consent' }), []);
   const cancel = useCallback(() => setState({ step: 'idle' }), []);
-  const proceed = useCallback(async () => {
-    setState({ step: 'starting' });
-    try {
-      const flow = await startFlow(client);
-      setState({ step: 'waiting', flow, interval: flow.interval, slow: false, needsStepUp: false });
-    } catch (cause) {
-      setState({ step: 'error', message: explainFailure(cause) });
-    }
-  }, [client]);
+  const proceed = useCallback(
+    async (format: GitKeyFormat = 'ssh') => {
+      setState({ step: 'starting' });
+      try {
+        const flow = await startFlow(client, format);
+        setState({ step: 'waiting', flow, interval: flow.interval, slow: false, needsStepUp: false });
+      } catch (cause) {
+        setState({ step: 'error', message: explainFailure(cause) });
+      }
+    },
+    [client],
+  );
 
   /** The person's press: runs the step-up with one pressed poll of the SAME flow, then carries on from its answer. */
   const confirmStepUp = useCallback(

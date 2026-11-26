@@ -16,6 +16,7 @@ import {
   GitDeviceFlowSchema,
   GitDeviceFlowStatusSchema,
   GitFlowIdSchema,
+  GitConnectRequestSchema,
 } from '../contract/index.ts';
 import type { GithubDeviceFlows } from './lib/device-flow.ts';
 import type { GitAccountsService } from './lib/service.ts';
@@ -41,7 +42,18 @@ export function gitAccountRoutes(
   record: (draft: AuditDraft) => Promise<void>,
 ) {
   return {
-    'POST /v1/git-accounts/github/device': async () => jsonResponse(GitDeviceFlowSchema.parse(await flows.start())),
+    'POST /v1/git-accounts/github/device': async (call: CallContext) => {
+      let value: unknown;
+      try {
+        const text = await call.request.text(1024);
+        value = text === '' ? {} : JSON.parse(text);
+      } catch {
+        throw new ApiError(400, 'a connect request names a signing format', GIT_ACCOUNT_CODES.invalidRequest);
+      }
+      const parsed = GitConnectRequestSchema.safeParse(value);
+      if (!parsed.success) throw new ApiError(400, 'a signing format is ssh or gpg', GIT_ACCOUNT_CODES.invalidRequest);
+      return jsonResponse(GitDeviceFlowSchema.parse(await flows.start(parsed.data.signingFormat)));
+    },
     'GET /v1/git-accounts/github/device/:flowId': async (call: CallContext) => {
       const flowId = flowIdOf(call);
       const status = GitDeviceFlowStatusSchema.parse(await flows.poll(flowId));

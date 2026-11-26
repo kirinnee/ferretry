@@ -38,6 +38,12 @@ export const CONSENT_ITEMS: readonly ConsentItem[] = [
   },
 ];
 
+export const GPG_CONSENT_ITEM: ConsentItem = {
+  title: 'Manage GPG keys',
+  scopes: ['admin:gpg_key'],
+  text: 'add the signing key and remove it when you disconnect. GitHub gives this permission over **all** GPG keys on the account; Ferretry only removes keys it registered.',
+};
+
 export const CONSENT_MEANING_HEADING = 'What this means:';
 
 export const CONSENT_MEANING =

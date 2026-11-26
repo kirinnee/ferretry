@@ -263,6 +263,7 @@ describe('listing, removing and the port', () => {
       id: 'gha_4242',
       removed: true,
       keysLeftOnProvider: [],
+      gpgUploadsToCheck: [],
       revokeAt: 'https://github.com/settings/applications',
     });
     const deletes = github.seen.filter(call => call.method === 'DELETE').map(call => new URL(call.url).pathname);
