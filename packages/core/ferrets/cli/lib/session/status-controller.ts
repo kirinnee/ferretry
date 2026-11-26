@@ -16,6 +16,7 @@ export class SessionStatusController {
     // masked again on this read), never from the record. `--json` is the record as the daemon answers it.
     const screen =
       view.state === 'stopped' && endHasLastWords(view.cause) ? await this.api.lastScreen?.(view.id) : undefined;
-    this.presenter.view(view, false, screen === undefined ? undefined : lastWordsOf(screen));
+    const live = await this.api.live?.(view.id);
+    this.presenter.view(view, false, screen === undefined ? undefined : lastWordsOf(screen), live);
   }
 }

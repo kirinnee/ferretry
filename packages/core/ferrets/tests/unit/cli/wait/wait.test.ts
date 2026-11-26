@@ -6,7 +6,7 @@ import { sessionView } from '../session/session-fixtures.ts';
 
 /** Today's `fy wait` (reads/wait.ts, reads/controller.ts) over Ferrets' four states. */
 
-const fresh = { missingMarker: false, declaredWait: false };
+const fresh = { missingMarker: false, declaredWait: false, idle: false };
 const at = (overrides: Partial<FerretSummary>) => sessionView({ id: 'lead', ...overrides });
 const decide = (
   ferret: FerretSummary,
@@ -24,10 +24,20 @@ describe('what a poll decides', () => {
     expect(decide(at({ state: 'stopped' }))).toEqual({ kind: 'ended', state: 'stopped' });
   });
 
-  test('V-wait a working ferret keeps the wait going; an idle one with no declared wait needs a human', () => {
+  test('V-wait a working ferret keeps the wait going, and so does an idle one between turns (C-38)', () => {
     expect(decide(at({ state: 'working' })).kind).toBe('keep-waiting');
     expect(decide(at({ state: 'starting' })).kind).toBe('keep-waiting');
-    expect(decide(at({ state: 'idle' }))).toEqual({ kind: 'needs-attention', state: 'idle' });
+    expect(decide(at({ state: 'idle' })).kind).toBe('keep-waiting');
+    // With a deliverable named, an idle ferret does not end the wait either: the file or the deadline does.
+    expect(decide(at({ state: 'idle' }), { marker: { path: 'out.md', present: false } }).kind).toBe('keep-waiting');
+    expect(decide(at({ state: 'idle' }), { expired: true })).toEqual({ kind: 'timed-out', state: 'idle' });
+  });
+
+  test('V-wait an idle ferret says once that it is between turns, then keeps quiet (C-38)', () => {
+    const idle = at({ state: 'idle' });
+    const first = decideWait({ ferret: idle, expired: false }, fresh);
+    expect(first.outcome).toMatchObject({ kind: 'keep-waiting', note: expect.stringContaining('idle between turns') });
+    expect(decideWait({ ferret: idle, expired: false }, first.notices).outcome).toEqual({ kind: 'keep-waiting' });
   });
 
   test('V-wait a declared wait is not stuck: the daemon wakes the ferret, and the note is said once', () => {
@@ -115,14 +125,15 @@ describe('the wait loop', () => {
     expect(w.slept).toEqual([1_000, 2_000, 1_000]);
   });
 
-  test('V-wait exit codes: ended 1, needs a human 3, timeout 124, daemon lost 69', async () => {
+  test('V-wait exit codes: ended 1, timeout 124, daemon lost 69; an idle ferret is never an exit (C-38)', async () => {
     const ended = world([at({ state: 'stopped' })]);
     await ended.controller.wait('lead', {});
     expect(ended.code()).toBe(1);
     expect(ended.err.join()).toContain('without saying it was done');
-    const idle = world([at({ state: 'idle' })]);
+    const idle = world([at({ state: 'idle' }), at({ state: 'idle' }), at({ state: 'stopped', finishedAt: FINISHED })]);
     await idle.controller.wait('lead', {});
-    expect(idle.code()).toBe(3);
+    expect(idle.code()).toBe(0);
+    expect(idle.err.join()).toContain('idle between turns');
     const slow = world([at({ state: 'working' })]);
     await slow.controller.wait('lead', { timeout: 3, interval: 1 });
     expect(slow.code()).toBe(124);

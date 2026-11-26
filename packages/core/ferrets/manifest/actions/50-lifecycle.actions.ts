@@ -44,9 +44,9 @@ export default fragment({
     }),
   ],
   cli: [
-    verb('stop', {
-      summary: 'stop ferrets in bulk, selected by lineage or pack',
-      args: [],
+    verb('stop [ferret]', {
+      summary: 'stop one ferret by id or callsign (it can resume), or ferrets in bulk with a sub-verb below',
+      args: [{ name: 'ferret', help: 'id or callsign of the one ferret to stop', optional: true }],
       options: [{ flag: '-r, --reason <text>', help: 'reason recorded against every stopped session' }],
     }),
     verb('stop orphan <session>', {

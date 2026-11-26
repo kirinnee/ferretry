@@ -96,7 +96,7 @@ export class WaitController {
     passed: () => boolean,
   ): Promise<void> {
     let rung = 0;
-    let notices: WaitNotices = { missingMarker: false, declaredWait: false };
+    let notices: WaitNotices = { missingMarker: false, declaredWait: false, idle: false };
     let last: FerretSummary | undefined;
     for (;;) {
       if (passed()) {

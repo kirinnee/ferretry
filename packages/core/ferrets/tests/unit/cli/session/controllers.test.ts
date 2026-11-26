@@ -45,7 +45,9 @@ describe('fy ps', () => {
   test('V-0366 lists the running ferrets in a measured table; -a adds the stopped ones', async () => {
     const { io, presenter } = capturedPresenter();
     await new ListSessionsController(new RecordingApi({ list: fleet }), presenter, PLAIN).execute();
-    expect(io.out[0]).toMatch(/^TEAMMATE\s+ID\s+STATE\s+HARNESS\s+RUNTIME\s+ROLE\s+PACK\s+PARENT$/u);
+    expect(io.out[0]).toMatch(
+      /^TEAMMATE\s+ID\s+STATE\s+HARNESS\s+RUNTIME\s+MODEL\s+MODE\s+ROLE\s+PACK\s+PARENT\s+TASK\s+LABEL$/u,
+    );
     expect(io.out.join('\n')).not.toContain('oak');
     expect(io.reported).toEqual(io.out);
 

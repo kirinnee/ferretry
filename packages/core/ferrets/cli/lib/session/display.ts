@@ -1,4 +1,4 @@
-import type { FerretSummary } from '../../../contract/index.ts';
+import type { FerretLiveRead, FerretSummary } from '../../../contract/index.ts';
 import type { ICellColour } from './ports.ts';
 
 /** The one state a ferret leaves only by a resume; `ps` hides it unless asked for everything. */
@@ -61,11 +61,24 @@ function endedWhy(view: FerretSummary): string | undefined {
   }
 }
 
-/** The `ps` STATE cell: the state, and for an end nobody chose, why in a few words. */
+/**
+ * The `ps` STATE cell: the state, and in a few words what sets it apart: an idle ferret that declared a wait is
+ * `waiting`; a stopped one that said `signal done` is `completed`, one whose launch never ran is `failed`, one that
+ * ended by itself says how; an ordinary stop stays bare.
+ */
 function stateCell(view: FerretSummary): string {
   const cause = view.cause;
-  if (endedWhy(view) === undefined || cause === undefined) return view.state;
+  if (view.state === 'idle') return view.waiting === undefined ? view.state : `${view.state} (waiting)`;
+  if (view.state !== 'stopped') return view.state;
+  if (view.finishedAt !== undefined) return `${view.state} (completed)`;
+  if (cause === undefined) return view.state;
   switch (cause.kind) {
+    case 'completed':
+      return `${view.state} (completed)`;
+    case 'start_failed':
+      return `${view.state} (failed)`;
+    case 'stopped':
+      return view.state;
     case 'signal':
       return `${view.state} (signal ${cause.signal})`;
     case 'agent_crashed':
@@ -79,17 +92,69 @@ function stateCell(view: FerretSummary): string {
   }
 }
 
+/** `84000` → `84K`, `1200000` → `1.2M`: how a token count reads in one line. */
+function tokens(count: number): string {
+  if (count >= 1_000_000) return `${Number((count / 1_000_000).toFixed(1))}M`;
+  return count >= 1_000 ? `${Math.round(count / 1_000)}K` : String(count);
+}
+
+/** What `status` says beside the record: the model it runs, how many turns, how full its context is, what it waits on. */
+function detailLines(view: FerretSummary, live: FerretLiveRead | undefined): string[] {
+  const model = view.observedModel ?? view.model;
+  const how = [view.effort === undefined ? '' : `effort ${view.effort}`, view.fast === true ? 'fast' : ''].filter(
+    part => part !== '',
+  );
+  const context =
+    live?.contextPercent === null || live?.contextPercent === undefined
+      ? undefined
+      : `context ${Math.round(live.contextPercent)}%${
+          live.contextTokens === null || live.contextWindow === null
+            ? ''
+            : ` (${tokens(live.contextTokens)} of ${tokens(live.contextWindow)})`
+        }`;
+  const turns = live?.turns === null || live?.turns === undefined ? undefined : `turn ${live.turns}`;
+  const wait = view.waiting;
+  return [
+    ...(model === undefined ? [] : [`  model ${model}${how.length === 0 ? '' : ` (${how.join(', ')})`}`]),
+    ...(turns === undefined && context === undefined ? [] : [`  ${[turns, context].filter(Boolean).join('; ')}`]),
+    ...(wait === undefined
+      ? []
+      : [
+          `  waiting${wait.condition === undefined ? '' : ` on ${wait.condition}`}${
+            wait.peerName === undefined ? '' : ` for ${wait.peerName}`
+          }${wait.until === undefined ? '' : ` until ${wait.until}`}`,
+        ]),
+    ...(view.task === undefined && view.title === undefined
+      ? []
+      : [`  task ${[view.task, view.title].filter(Boolean).join(': ')}`]),
+  ];
+}
+
 /** The single-ferret detail block printed by `status`, `start`, `resume` and `rename --json`-less answers. */
-export function renderFerret(view: FerretSummary, lastWords?: string): string[] {
+export function renderFerret(view: FerretSummary, lastWords?: string, live?: FerretLiveRead): string[] {
   return [
     headline(view),
     `  ${view.folder}`,
     `  ${view.state} since ${view.stateAt}; started ${view.createdAt}`,
+    ...detailLines(view, live),
     ...endedLines(view, lastWords),
   ];
 }
 
-const TABLE_HEADER = ['TEAMMATE', 'ID', 'STATE', 'HARNESS', 'RUNTIME', 'ROLE', 'PACK', 'PARENT'] as const;
+const TABLE_HEADER = [
+  'TEAMMATE',
+  'ID',
+  'STATE',
+  'HARNESS',
+  'RUNTIME',
+  'MODEL',
+  'MODE',
+  'ROLE',
+  'PACK',
+  'PARENT',
+  'TASK',
+  'LABEL',
+] as const;
 
 /** The PIN column's mark: this ferret is pinned to the top of the sidebar. */
 const PINNED_MARK = '*';
@@ -115,9 +180,13 @@ export function renderSessionTable(views: readonly ListedFerret[], colour: ICell
     stateCell(view),
     view.harness,
     view.runtime ?? '-',
+    view.observedModel ?? view.model ?? '-',
+    view.mode ?? '-',
     view.role,
     view.pack ?? '-',
     view.parent ?? '-',
+    view.task ?? '-',
+    view.label ?? '-',
   ]);
   const runtimeColumn = header.indexOf('RUNTIME');
   const widths = header.map((title, column) =>

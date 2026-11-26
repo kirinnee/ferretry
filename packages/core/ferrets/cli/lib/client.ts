@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import {
+  type FerretLiveRead,
+  FerretLiveReadSchema,
   type FerretSummary,
   FerretSummarySchema,
   SubtreeViewSchema,
@@ -32,6 +34,7 @@ export const FERRET_ROUTES = {
   /** The STORED last screen (`FerretsApi.lastSnapshot`): gated, and masked again on every read. */
   lastScreen: 'GET /v1/ferrets/:ferretId/last-screen',
   get: 'GET /v1/ferrets/:ferretId',
+  live: 'GET /v1/ferrets/:ferretId/live',
   start: 'POST /v1/ferrets',
   recoverStart: 'GET /v1/ferrets/by-request/:requestId',
   stop: 'POST /v1/ferrets/:ferretId/stop',
@@ -147,6 +150,15 @@ export class ClientSessionApi
       .catch(() => undefined);
     const parsed = LastScreenSchema.safeParse(answer);
     return parsed.success ? parsed.data.screen : undefined;
+  }
+
+  /** The ferret's turns and context fill, or `undefined` when the daemon cannot say: a detail line is never a failure. */
+  async live(reference: string): Promise<FerretLiveRead | undefined> {
+    const answer = await this.client
+      .call<unknown>(FERRET_ROUTES.live, { ...at(reference), quiet: true })
+      .catch(() => undefined);
+    const parsed = FerretLiveReadSchema.safeParse(answer);
+    return parsed.success ? parsed.data : undefined;
   }
 
   async subtree(reference: string): Promise<SubtreeView> {

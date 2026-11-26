@@ -362,6 +362,10 @@
           "help": "with --teammate: auto-assign a free callsign instead of failing on a collision"
         },
         {
+          "flag": "--parent <id>",
+          "help": "start it as a helper under this ferret (defaults to the ferret that runs this)"
+        },
+        {
           "flag": "--label <label>",
           "help": "ownership label; filter later with `ps --label`"
         },
@@ -454,15 +458,21 @@
       "verb": "new [words...]"
     },
     {
-      "args": [],
+      "args": [
+        {
+          "help": "id or callsign of the one ferret to stop",
+          "name": "ferret",
+          "optional": true
+        }
+      ],
       "options": [
         {
           "flag": "-r, --reason <text>",
           "help": "reason recorded against every stopped session"
         }
       ],
-      "summary": "stop ferrets in bulk, selected by lineage or pack",
-      "verb": "stop"
+      "summary": "stop one ferret by id or callsign (it can resume), or ferrets in bulk with a sub-verb below",
+      "verb": "stop [ferret]"
     },
     {
       "args": [
@@ -938,7 +948,7 @@
           "help": "leave the session running after its result is collected (a settled wait stops it otherwise)"
         }
       ],
-      "summary": "block until a ferret settles; exits 0 finished, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout",
+      "summary": "block until a ferret settles; exits 0 finished, 1 ended, 69 daemon lost, 124 timeout; an idle ferret keeps it waiting",
       "verb": "wait <id>"
     },
     {
