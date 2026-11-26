@@ -60,11 +60,14 @@ export function page(title: string, content: string, options: PageOptions = {}):
   };
 }
 
-/** The Ferretry app's Claude connector panel for this machine; the same deep link the waiting page uses. */
-export function appPanelUrl(endpoints: ConnectorEndpoints): string {
-  const app = new URL('/', endpoints.appOrigin);
-  app.searchParams.set('connector', endpoints.daemonId);
-  app.hash = 'connector';
+/**
+ * The Ferretry app's Settings › Claude connector tab for this machine (`/d/<daemon>/settings/connector`, the 5.0 settings
+ * route). The waiting page adds the sign-in's PUBLIC id (`?request=cr_…`, never its handle or code) so the tab can put
+ * that card first.
+ */
+export function appPanelUrl(endpoints: ConnectorEndpoints, requestId?: string): string {
+  const app = new URL(`/d/${encodeURIComponent(endpoints.daemonId)}/settings/connector`, endpoints.appOrigin);
+  if (requestId !== undefined) app.searchParams.set('request', requestId);
   return app.href;
 }
 

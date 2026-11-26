@@ -8,7 +8,7 @@ import { ConnectorAuthority } from '../../../daemon/lib/oauth/authority.ts';
 import { endpoints, fixture, redirectUri, verifier } from '../../support/oauth-fixture.ts';
 
 const CONNECT = 'Settings &gt; Connectors &gt; Ferretry &gt; Connect';
-const APP = 'https://app.example/?connector=daemon-fixture#connector';
+const APP = 'https://app.example/d/daemon-fixture/settings/connector';
 
 function get(path: string, source?: string): ApiRequest {
   const url = new URL(path, endpoints.issuer);
@@ -205,7 +205,7 @@ describe('connector reconnect pages', () => {
     expect(response?.status).toBe(200);
     expect(body).toContain('<h1>Approve this connection in Ferretry</h1>');
     expect(body).toContain('class="code"');
-    expect(body).toContain(`href="${APP}"`);
+    expect(body).toContain(`href="${APP}?request=cr_`);
     expect(body).toContain('If nothing happens');
     expect(body).toContain(CONNECT);
     expect(body).toContain('prefers-color-scheme:dark');
