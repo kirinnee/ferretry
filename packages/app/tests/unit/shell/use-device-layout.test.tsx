@@ -69,17 +69,17 @@ describe('useDeviceLayout', () => {
 
     let refusal: string | undefined = 'untouched';
     await interact(() => {
-      refusal = seen.current?.set('nav.side', 'right');
+      refusal = seen.current?.set('nav.side', 'bottom');
     });
     expect(refusal).toBeUndefined();
-    expect(seen.current?.overrides).toEqual({ nav: { side: 'right' } });
-    expect(new DeviceLayoutStore(storage).snapshot()).toEqual({ nav: { side: 'right' } });
+    expect(seen.current?.overrides).toEqual({ nav: { side: 'bottom' } });
+    expect(new DeviceLayoutStore(storage).snapshot()).toEqual({ nav: { side: 'bottom' } });
 
     await interact(() => {
       refusal = seen.current?.set('nav.side', 'sideways');
     });
     expect(refusal).toBeString();
-    expect(seen.current?.overrides).toEqual({ nav: { side: 'right' } });
+    expect(seen.current?.overrides).toEqual({ nav: { side: 'bottom' } });
 
     await interact(() => seen.current?.reset());
     expect(seen.current?.overrides).toEqual({});

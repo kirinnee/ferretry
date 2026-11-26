@@ -110,7 +110,7 @@ describe('theme items', () => {
   const item = ThemeItemSchema.parse({
     id: 'dusk',
     label: 'Dusk',
-    base: 'studio',
+    style: 'studio',
     dark: { accent: '#ff8800', 'card-radius': '12px', 'font-body': "'Inter', sans-serif" },
   });
 
@@ -125,10 +125,10 @@ describe('theme items', () => {
 
   test('an unknown token or an unsafe value is refused', () => {
     expect(
-      ThemeItemSchema.safeParse({ id: 'x', label: 'X', base: 'studio', dark: { position: 'fixed' } }).success,
+      ThemeItemSchema.safeParse({ id: 'x', label: 'X', style: 'studio', dark: { position: 'fixed' } }).success,
     ).toBe(false);
     for (const value of ['red; } body { display: none', 'url(https://example.com/x.png)', 'expression(alert(1))']) {
-      expect(ThemeItemSchema.safeParse({ id: 'x', label: 'X', base: 'studio', dark: { accent: value } }).success).toBe(
+      expect(ThemeItemSchema.safeParse({ id: 'x', label: 'X', style: 'studio', dark: { accent: value } }).success).toBe(
         false,
       );
     }
@@ -150,24 +150,24 @@ describe('theme items', () => {
 });
 
 test('the app theme reader uses the authoritative Layouts schema and accepts the same families and tokens', async () => {
-  const { ThemeSchema, THEME_FAMILY_IDS } = await import('@ferretry/plugin-layouts/contract');
+  const { ThemeSchema, PALETTE_IDS } = await import('@ferretry/plugin-layouts/contract');
   expect(ThemeItemSchema).toBe(ThemeSchema);
   expect(
     ThemeItemSchema.safeParse({
       id: 'probe',
       label: 'Probe',
-      base: 'studio',
+      palette: 'studio',
       light: { bg: 'url(https://example.invalid/probe)' },
     }).success,
   ).toBe(false);
-  for (const base of THEME_FAMILY_IDS) {
+  for (const palette of PALETTE_IDS) {
     for (const light of [
       { accent: '#123456', 'font-body': 'sans-serif', 'flow-1': '2rem' },
       { accent: 'red' },
       { unknown: '#123456' },
       { accent: 'url(https://example.com)' },
     ]) {
-      const theme = { id: 'dusk', label: 'Dusk', base, light };
+      const theme = { id: 'dusk', label: 'Dusk', palette, light };
       expect(ThemeItemSchema.safeParse(theme).success).toBe(ThemeSchema.safeParse(theme).success);
     }
   }

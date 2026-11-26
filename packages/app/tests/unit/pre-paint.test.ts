@@ -20,7 +20,6 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REMOVED_PALETTE_IDS, THEME_FAMILY_IDS } from '@ferretry/plugin-layouts/contract';
 import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
 import { memoryStore } from '../../src/storage/records.ts';
 import {
@@ -98,28 +97,13 @@ const STORED_VALUES: readonly (string | null)[] = [
   record({ style: 'neo', palette: 'geist', mode: 'dark', textScale: 'large' }),
   record({ style: 'geist', palette: 'phosphor', mode: 'light', textScale: 'default' }),
   record({ style: 'nope', palette: 'ledger', mode: 'dark', textScale: 'default' }),
-  record({ style: 'mission', palette: 'nope', mode: 'system', textScale: 'larger' }),
-  // The removed `contrast` style is Studio in the High contrast palette; every removed palette reads as its kept one.
   record({ style: 'contrast', palette: 'studio', mode: 'light', textScale: 'default' }),
-  record({ style: 'contrast', palette: 'neo', mode: 'dark', textScale: 'default' }),
-  record({ style: 'contrast', mode: 'dark', textScale: 'default' }),
-  ...Object.keys(REMOVED_PALETTE_IDS).map(palette =>
-    record({ style: 'neo', palette, mode: 'light', textScale: 'default' }),
-  ),
-  ...THEME_FAMILY_IDS.map(family => record({ family, mode: 'dark', textScale: 'default' })),
+  record({ style: 'mission', palette: 'nope', mode: 'system', textScale: 'larger' }),
   // A `keepPalette` the painter has no use for must not disturb it.
   record({ style: 'neo', palette: 'geist', keepPalette: true, mode: 'dark', textScale: 'default' }),
-  // The pre-split record shape: a family is a palette with the style it was drawn for; an explicit axis beside it wins.
-  record({ family: 'phosphor', mode: 'dark', textScale: 'default' }),
-  record({ family: 'ma', mode: 'light', textScale: 'default' }),
-  record({ family: 'neo', style: 'studio', mode: 'light', textScale: 'default' }),
-  record({ family: 'mission', mode: 'dark', textScale: 'large' }),
-  record({ family: 'notebook', mode: 'system', textScale: 'larger' }),
-  record({ family: 'geist', mode: 'light', textScale: 'default' }),
-  record({ family: 'nope', mode: 'dark', textScale: 'huge' }),
   // Another format, or no format: read as absent (clean slate, no converter).
-  record({ family: 'mission', mode: 'dark', textScale: 'large' }, 2),
-  JSON.stringify({ family: 'mission', mode: 'dark' }),
+  record({ style: 'mission', mode: 'dark', textScale: 'large' }, 2),
+  JSON.stringify({ style: 'mission', mode: 'dark' }),
   // Corrupt JSON, and JSON that is not a record.
   '{"format":',
   '{oops}',
@@ -181,17 +165,6 @@ describe('the pre-paint bootstrap and the theme module resolve identically', () 
       const scale = parseThemePreference(raw).textScale;
       expect(attributes['data-text-scale']).toBe(scale);
       expect(properties['--fy-text-scale']).toBe(String(TEXT_SCALE_FACTORS[scale]));
-    }
-  });
-
-  it('restates the removed-palette table the contract owns', () => {
-    for (const [removed, kept] of Object.entries(REMOVED_PALETTE_IDS)) {
-      expect(source).toContain(`${removed}: '${kept}',`);
-      const { attributes } = runBootstrap(
-        record({ style: 'studio', palette: removed, mode: 'light', textScale: 'default' }),
-        false,
-      );
-      expect(attributes['data-palette']).toBe(kept);
     }
   });
 

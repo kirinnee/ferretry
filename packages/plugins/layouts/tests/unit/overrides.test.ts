@@ -3,13 +3,13 @@ import { COMPACT_LAYOUT, DEFAULT_LAYOUT, DEFAULT_THEME, LayoutSelectionSchema } 
 import { applyOverrides, resolveCurrent, setPaths } from '../../daemon/lib/overrides.ts';
 
 describe('fy layout set: one change, checked whole', () => {
-  test('nav.side right moves the sidebar and keeps every other key of the layout', () => {
-    const result = setPaths(DEFAULT_LAYOUT, {}, [{ path: 'nav.side', value: 'right' }]);
+  test('nav.side bottom moves the sidebar and keeps every other key of the layout', () => {
+    const result = setPaths(DEFAULT_LAYOUT, {}, [{ path: 'nav.side', value: 'bottom' }]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.overrides).toEqual({ nav: { side: 'right' } });
+    expect(result.overrides).toEqual({ nav: { side: 'bottom' } });
     const laid = applyOverrides(DEFAULT_LAYOUT, result.overrides);
-    expect(laid.ok && laid.layout.nav).toEqual({ ...DEFAULT_LAYOUT.nav, side: 'right' });
+    expect(laid.ok && laid.layout.nav).toEqual({ ...DEFAULT_LAYOUT.nav, side: 'bottom' });
     expect(laid.ok && laid.layout.density).toBe('comfortable');
   });
 
@@ -46,16 +46,16 @@ describe('fy layout set: one change, checked whole', () => {
   test('composer.tools and phone paths land where the layout keeps them', () => {
     const result = setPaths(DEFAULT_LAYOUT, {}, [
       { path: 'composer.tools', value: 'mic' },
-      { path: 'phone.nav.side', value: 'top' },
+      { path: 'phone.nav.side', value: 'bottom' },
     ]);
-    expect(result.ok && result.overrides).toEqual({ 'composer.tools': ['mic'], phone: { nav: { side: 'top' } } });
+    expect(result.ok && result.overrides).toEqual({ 'composer.tools': ['mic'], phone: { nav: { side: 'bottom' } } });
   });
 
   test('changes pile onto the overrides already made without touching them', () => {
-    const before = { nav: { side: 'right' as const } };
+    const before = { nav: { side: 'bottom' as const } };
     const result = setPaths(DEFAULT_LAYOUT, before, [{ path: 'density', value: 'compact' }]);
-    expect(result.ok && result.overrides).toEqual({ nav: { side: 'right' }, density: 'compact' });
-    expect(before).toEqual({ nav: { side: 'right' } });
+    expect(result.ok && result.overrides).toEqual({ nav: { side: 'bottom' }, density: 'compact' });
+    expect(before).toEqual({ nav: { side: 'bottom' } });
   });
 
   test('a path that is not a layout setting is refused with the ones that are', () => {
@@ -98,12 +98,12 @@ describe('the current layout', () => {
 
   test('the chosen layout wins, with the owner’s overrides over it', () => {
     const current = resolveCurrent(
-      selection({ layout: 'compact', overrides: { nav: { side: 'right' } } }),
+      selection({ layout: 'compact', overrides: { nav: { side: 'bottom' } } }),
       layouts,
       themes,
     );
     expect(current.layout.id).toBe('compact');
-    expect(current.layout.nav.side).toBe('right');
+    expect(current.layout.nav.side).toBe('bottom');
     expect(current.layout.density).toBe('compact');
   });
 

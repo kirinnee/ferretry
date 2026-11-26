@@ -21,7 +21,7 @@ const board: SurfaceEntry = { ...bare, app: implementApp(bare.manifest, { build:
 const layouts = surface('layouts', { routes: ['GET /v1/layouts/current'] });
 const surfaces: SurfaceEntry[] = [...CORE, board, layouts];
 const owner = { ...DEFAULT_LAYOUT, id: 'owner', density: 'compact' as const };
-const theme = { id: 'default', label: 'Default', base: 'studio' };
+const theme = { id: 'default', label: 'Default', style: 'studio' };
 
 const settle = async (): Promise<void> => {
   for (let i = 0; i < 10; i += 1) await new Promise(resolve => setTimeout(resolve, 0));

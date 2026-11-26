@@ -7,22 +7,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  PALETTE_IDS,
-  REMOVED_PALETTE_IDS,
-  STYLE_IDS,
-  ThemeSchema,
-  THEME_FAMILY_IDS,
-} from '@ferretry/plugin-layouts/contract';
+import { PALETTE_IDS, STYLE_IDS, ThemeSchema } from '@ferretry/plugin-layouts/contract';
 import { memoryStore } from '../../src/storage/records.ts';
 import { APP_STORAGE } from '../../src/storage/names.ts';
 import {
   PALETTES,
   STYLES,
-  defaultPaletteOf,
-  isFamilyId,
   isPaletteId,
-  lookOfFamily,
   lookOfPalette,
   swatchAttributes,
   type PaletteId,
@@ -138,11 +129,8 @@ describe('the catalogue, the files and themes.css agree', () => {
   it('lists the same ids in the catalogue as in the Layouts contract, in the same order', () => {
     expect(STYLES.map(entry => entry.id)).toEqual([...STYLE_IDS]);
     expect(PALETTES.map(entry => entry.id)).toEqual([...PALETTE_IDS]);
-    // Every style comes with a palette that exists; the removed ones map onto kept ones.
+    // Every style comes with a palette that exists.
     for (const style of STYLES) expect(PALETTE_IDS).toContain(style.defaultPalette);
-    for (const kept of Object.values(REMOVED_PALETTE_IDS)) expect(PALETTE_IDS).toContain(kept);
-    for (const removed of Object.keys(REMOVED_PALETTE_IDS))
-      expect(PALETTE_IDS as readonly string[]).not.toContain(removed);
     expect(STYLE_IDS as readonly string[]).not.toContain('contrast');
   });
 
@@ -219,126 +207,33 @@ describe('the catalogue, the files and themes.css agree', () => {
   });
 });
 
-describe('a stored pre-split family reads as the palette it names, on the style that comes with it', () => {
-  for (const family of THEME_FAMILY_IDS) {
-    it(`${family}`, () => {
-      const store = memoryStore({
-        [APP_STORAGE.theme]: JSON.stringify({ format: 1, value: { family, mode: 'dark', textScale: 'large' } }),
-      });
-      const read = new ThemePreferenceStore(store).snapshot();
-      expect({ style: read.style, palette: read.palette }).toEqual(
-        lookOfFamily((REMOVED_PALETTE_IDS as Record<string, PaletteId>)[family] ?? (family as PaletteId)),
-      );
-      expect(read.keepPalette).toBe(false);
-      expect(read.mode).toBe('dark');
-      expect(read.textScale).toBe('large');
-    });
-  }
+describe('a stored value this build does not know reads as the default, field by field', () => {
+  const read = (value: Record<string, unknown>) =>
+    new ThemePreferenceStore(memoryStore({ [APP_STORAGE.theme]: JSON.stringify({ format: 1, value }) })).snapshot();
 
-  it('an explicit style or palette beside a family wins, field by field', () => {
-    const store = memoryStore({
-      [APP_STORAGE.theme]: JSON.stringify({
-        format: 1,
-        value: { family: 'phosphor', style: 'neo', palette: 'nope', mode: 'light', textScale: 'default' },
-      }),
+  it('a style or palette id that is not offered is the default; the other axis is kept', () => {
+    expect(read({ style: 'contrast', palette: 'neo', mode: 'light', textScale: 'default' })).toMatchObject({
+      style: 'studio',
+      palette: 'neo',
     });
-    const read = new ThemePreferenceStore(store).snapshot();
-    expect({ style: read.style, palette: read.palette }).toEqual({ style: 'neo', palette: 'hacker' });
-  });
-
-  it('writes the new shape on the next change, so the old one is gone after one write', () => {
-    const store = memoryStore({
-      [APP_STORAGE.theme]: JSON.stringify({
-        format: 1,
-        value: { family: 'ledger', mode: 'dark', textScale: 'default' },
-      }),
-    });
-    new ThemePreferenceStore(store).setMode('light');
-    expect(JSON.parse(store.entries()[APP_STORAGE.theme] ?? '').value).toEqual({
-      style: 'pixel',
-      palette: 'hacker',
-      keepPalette: false,
-      mode: 'light',
-      textScale: 'default',
+    expect(read({ style: 'neo', palette: 'blueprint', mode: 'dark', textScale: 'default' })).toMatchObject({
+      style: 'neo',
+      palette: 'studio',
     });
   });
 
-  it('a single-pick look sets both axes', () => {
-    const themes = new ThemePreferenceStore(memoryStore());
-    themes.setFamily('hacker');
-    expect(themes.snapshot()).toMatchObject({ style: 'pixel', palette: 'hacker', family: 'hacker' });
-    themes.setFamily('contrast');
-    expect(themes.snapshot()).toMatchObject({ style: 'studio', palette: 'contrast' });
-  });
-});
-
-describe('the style → palette direction', () => {
-  it('picking a style brings its default palette; picking a palette leaves the style alone', () => {
-    const themes = new ThemePreferenceStore(memoryStore());
-    themes.setStyle('neo');
-    expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'neo' });
-    themes.setPalette('vintage');
-    expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'vintage' });
-  });
-
-  it('a style default applies only until a palette is picked; a picked palette survives every later style change (C-5)', () => {
-    const store = memoryStore();
-    const themes = new ThemePreferenceStore(store);
-    themes.setStyle('neo');
-    expect(themes.snapshot().palette).toBe(defaultPaletteOf('neo'));
-    themes.setStyle('genz');
-    expect(themes.snapshot().palette).toBe(defaultPaletteOf('genz'));
-    // The owner's pick: Terminal (hacker), then a different style.
-    themes.setPalette('hacker');
-    themes.setStyle('geist');
-    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: 'hacker' });
-    themes.setStyle('neo');
-    expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'hacker' });
-    expect(new ThemePreferenceStore(store).snapshot()).toMatchObject({ style: 'neo', palette: 'hacker' });
-    // Turning the keep switch off hands the colours back to the style.
-    themes.setKeepPalette(false);
-    themes.setStyle('geist');
-    expect(themes.snapshot()).toMatchObject({ style: 'geist', palette: defaultPaletteOf('geist') });
-  });
-
-  it('with keepPalette on, a style change leaves the colours alone, and the flag is stored', () => {
-    const store = memoryStore();
-    const themes = new ThemePreferenceStore(store);
-    themes.setPalette('vintage');
-    themes.setKeepPalette(true);
-    themes.setStyle('neo');
-    expect(themes.snapshot()).toMatchObject({ style: 'neo', palette: 'vintage', keepPalette: true });
-    expect(new ThemePreferenceStore(store).snapshot()).toMatchObject({ palette: 'vintage', keepPalette: true });
-    themes.setKeepPalette(false);
-    themes.setStyle('pixel');
-    expect(themes.snapshot()).toMatchObject({ style: 'pixel', palette: 'hacker', keepPalette: false });
-  });
-
-  it('a stored {style:"contrast"} is Studio in the High contrast palette', () => {
-    const store = memoryStore({
-      [APP_STORAGE.theme]: JSON.stringify({
-        format: 1,
-        value: { style: 'contrast', palette: 'neo', mode: 'light', textScale: 'default' },
-      }),
+  it('a pre-split family is not read', () => {
+    expect(read({ family: 'phosphor', mode: 'dark', textScale: 'large' })).toMatchObject({
+      style: 'studio',
+      palette: 'studio',
+      mode: 'dark',
+      textScale: 'large',
     });
-    expect(new ThemePreferenceStore(store).snapshot()).toMatchObject({ style: 'studio', palette: 'contrast' });
   });
-
-  for (const [removed, kept] of Object.entries(REMOVED_PALETTE_IDS)) {
-    it(`a stored palette "${removed}" reads as "${kept}"`, () => {
-      const store = memoryStore({
-        [APP_STORAGE.theme]: JSON.stringify({
-          format: 1,
-          value: { style: 'neo', palette: removed, mode: 'light', textScale: 'default' },
-        }),
-      });
-      expect(new ThemePreferenceStore(store).snapshot()).toMatchObject({ style: 'neo', palette: kept });
-    });
-  }
 });
 
 describe('a new palette needs no edit outside its own files', () => {
-  // The seam's claim, exercised: register a scratch palette in PALETTE_IDS ALONE (THEME_FAMILY_IDS untouched) and
+  // The seam's claim, exercised: register a scratch palette in PALETTE_IDS ALONE and
   // read it through the theme code. The signatures are pinned at compile time: window colour and the swatch take a
   // PALETTE, so a widened PaletteId typechecks without a frozen family entry.
   const windowColourTakesAPalette: (
@@ -352,12 +247,10 @@ describe('a new palette needs no edit outside its own files', () => {
   beforeAll(() => ids.push(scratch));
   afterAll(() => ids.splice(ids.indexOf(scratch), 1));
 
-  it('is a palette, not a legacy family', () => {
+  it('is a palette', () => {
     expect(windowColourTakesAPalette).toBe(applyWindowColour);
     expect(swatchTakesAnyPalette).toBe(lookOfPalette);
     expect(isPaletteId(scratch)).toBe(true);
-    expect(isFamilyId(scratch)).toBe(false);
-    expect((THEME_FAMILY_IDS as readonly string[]).includes(scratch)).toBe(false);
   });
 
   it('is stored, read back and published on the root as its own palette', () => {
@@ -402,22 +295,17 @@ describe('a swatch wears the three axes', () => {
 });
 
 describe('a theme item may name a style and a palette', () => {
-  it('accepts them, still accepts the legacy `base`, and refuses an unknown id', () => {
+  it('accepts them, and refuses an unknown or removed id and a pre-split `base`', () => {
     const item = { id: 'dusk', label: 'Dusk' };
     expect(ThemeSchema.safeParse({ ...item, style: 'neo', palette: 'vintage' }).success).toBe(true);
-    expect(ThemeSchema.safeParse({ ...item, base: 'neo' }).success).toBe(true);
-    expect(ThemeSchema.safeParse({ ...item, base: 'phosphor' }).success).toBe(true);
     expect(ThemeSchema.safeParse(item).success).toBe(true);
-    expect(ThemeSchema.safeParse({ ...item, style: 'ma' }).success).toBe(false);
-    expect(ThemeSchema.safeParse({ ...item, palette: 'nope' }).success).toBe(false);
-  });
-
-  it('reads a removed palette and the removed contrast style as the ones the migration names', () => {
-    const item = { id: 'dusk', label: 'Dusk' };
-    expect(ThemeSchema.parse({ ...item, palette: 'phosphor' }).palette).toBe('hacker');
-    expect(ThemeSchema.parse({ ...item, palette: 'ma', style: 'contrast' })).toMatchObject({
-      palette: 'vaporwave',
-      style: 'studio',
-    });
+    for (const old of [
+      { base: 'neo' },
+      { style: 'ma' },
+      { style: 'contrast' },
+      { palette: 'phosphor' },
+      { palette: 'nope' },
+    ])
+      expect(ThemeSchema.safeParse({ ...item, ...old }).success).toBe(false);
   });
 });

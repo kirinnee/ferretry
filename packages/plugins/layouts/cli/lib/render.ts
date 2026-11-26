@@ -24,7 +24,7 @@ export function layoutLines(layout: Layout): readonly string[] {
 export function currentLines(current: CurrentLayout): readonly string[] {
   return [
     ...layoutLines(current.layout),
-    // The LIVE axes: a theme item's own style / palette wins for that axis, otherwise the device's pick applies. `base` is ignored.
+    // The LIVE axes: a theme item's own style / palette wins for that axis, otherwise the device's pick applies.
     `theme    ${current.theme.id} (${current.theme.label}, style ${current.theme.style ?? 'this device'}, palette ${current.theme.palette ?? 'this device'})`,
   ];
 }

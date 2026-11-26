@@ -415,7 +415,7 @@ describe('the nav on the "All daemons" route', () => {
       machines: ['d1', 'd2'],
       path: '/',
       arrived: true,
-      storage: deviceLayout({ side: 'top', style: 'list', items: ['inbox'] }),
+      storage: deviceLayout({ side: 'left', style: 'list', items: ['inbox'] }),
     });
     view = app.view;
     await settle();
@@ -502,7 +502,7 @@ describe('the Needs-you nav panel (device-level)', () => {
       surfaces: [inbox],
       machines: ['d1'],
       path: '/d/d1/inbox',
-      storage: deviceLayout({ side: 'top', style: 'bar', items: ['inbox'] }),
+      storage: deviceLayout({ side: 'left', style: 'dock', items: ['inbox'] }),
     });
     view = top.view;
     expect(panels('inbox.needs-you')).toBe(0);

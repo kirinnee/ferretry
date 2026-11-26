@@ -140,9 +140,7 @@ export function routeTable(screens: Iterable<ScreenRef>): RouteTable {
             ...(tabId === undefined ? {} : { tabId }),
           };
         }
-        // The v4 per-daemon Inbox is the Agenda now: its old address (and the `?from=` filter it carried) opens the Agenda, unless a screen of that very name is installed.
-        const found =
-          find(false, rest) ?? (rest.length === 1 && rest[0] === 'inbox' ? find(false, ['agenda']) : undefined);
+        const found = find(false, rest);
         return found === undefined ? { kind: 'not-found', path: pathname } : { kind: 'screen', daemon, ...found };
       }
       const found = find(true, parts);

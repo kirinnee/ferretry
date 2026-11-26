@@ -7,7 +7,7 @@ import { DEFAULT_LAYOUT, layoutCandidates } from '../../../src/layout/layout.ts'
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
 
-const theme = { id: 'default', label: 'Default', base: 'studio' };
+const theme = { id: 'default', label: 'Default', style: 'studio' };
 const owner = { ...DEFAULT_LAYOUT, id: 'owner', density: 'compact' as const };
 
 /** A guarded client for the `layouts` package that answers `GET /v1/layouts/current` from `answer`. */
@@ -55,7 +55,7 @@ describe('the daemon layout channel', () => {
     expect(asked).toEqual([`d1/${LAYOUTS_PLUGIN}`]);
     expect(fake.calls).toEqual(['GET /v1/layouts/current']);
     expect(layouts.current('d1')?.layout.density).toBe('compact');
-    expect(layouts.current('d1')?.theme).toMatchObject({ id: 'default', base: 'studio' });
+    expect(layouts.current('d1')?.theme).toMatchObject({ id: 'default', style: 'studio' });
 
     current = { layout: { ...owner, density: 'comfortable' }, theme };
     fake.wake();
@@ -96,8 +96,8 @@ describe('this device’s layout store', () => {
   test('keeps the --device overrides under fy:app:layout and resets them', () => {
     const storage = memoryStore();
     const store = new DeviceLayoutStore(storage);
-    expect(store.set(DEFAULT_LAYOUT, 'nav.side', 'right')).toBeUndefined();
-    expect(store.snapshot()).toMatchObject({ nav: { side: 'right' } });
+    expect(store.set(DEFAULT_LAYOUT, 'nav.side', 'bottom')).toBeUndefined();
+    expect(store.snapshot()).toMatchObject({ nav: { side: 'bottom' } });
     expect(JSON.parse(storage.entries()[APP_STORAGE.layout] ?? '{}')).toMatchObject({ format: 1 });
     expect(new DeviceLayoutStore(storage).snapshot()).toEqual(store.snapshot());
     expect(store.set(DEFAULT_LAYOUT, 'nav.side', 'middle')).toBeString();
@@ -106,27 +106,17 @@ describe('this device’s layout store', () => {
     expect(storage.entries()[APP_STORAGE.layout]).toBeUndefined();
   });
 
-  // The one-time move: a record saved before the v4-style default has no stamp.
   const drawn = (store: DeviceLayoutStore) => layoutCandidates(undefined, store.snapshot())[0] ?? DEFAULT_LAYOUT;
-  const preV4 = { nav: { side: 'left', style: 'list' }, side: { at: 'right', holds: 'none' } };
 
-  test('a layout saved before the v4 default is replaced by the v4 layout', () => {
+  test('an unstamped record is not read and not rewritten; a change made after it is kept across a reload', () => {
     const storage = memoryStore();
-    // The old shape: the overrides themselves, no stamp.
-    writeRecord(storage, APP_STORAGE.layout, preV4);
+    writeRecord(storage, APP_STORAGE.layout, {
+      nav: { side: 'left', style: 'list' },
+      side: { at: 'right', holds: 'none' },
+    });
     const store = new DeviceLayoutStore(storage);
     expect(store.snapshot()).toEqual({});
-    expect(drawn(store)).toMatchObject({
-      nav: { side: 'left', style: 'dock' },
-      side: { at: 'left', holds: 'ferrets' },
-    });
-    expect(storage.entries()[APP_STORAGE.layout]).toBeUndefined();
-  });
-
-  test('a change made after the move is kept across a reload, and is not moved again', () => {
-    const storage = memoryStore();
-    writeRecord(storage, APP_STORAGE.layout, preV4);
-    const store = new DeviceLayoutStore(storage);
+    expect(storage.entries()[APP_STORAGE.layout]).toBeDefined();
     expect(store.set(DEFAULT_LAYOUT, 'side.at', 'right')).toBeUndefined();
     for (let reload = 0; reload < 2; reload += 1) {
       const again = new DeviceLayoutStore(storage);
@@ -135,10 +125,10 @@ describe('this device’s layout store', () => {
     }
   });
 
-  test('a stamped record is kept as it is, and a fresh browser draws the v4 default', () => {
+  test('a stamped record is kept as it is, and a fresh browser draws the default', () => {
     const storage = memoryStore();
-    writeRecord(storage, APP_STORAGE.layout, storedOverrides({ nav: { side: 'right' } }));
-    expect(new DeviceLayoutStore(storage).snapshot()).toEqual({ nav: { side: 'right' } });
+    writeRecord(storage, APP_STORAGE.layout, storedOverrides({ nav: { side: 'bottom' } }));
+    expect(new DeviceLayoutStore(storage).snapshot()).toEqual({ nav: { side: 'bottom' } });
     const fresh = new DeviceLayoutStore(memoryStore());
     expect(fresh.snapshot()).toEqual({});
     expect(drawn(fresh)).toMatchObject({ nav: { side: 'left', style: 'dock' }, side: { at: 'left' } });
