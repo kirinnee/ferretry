@@ -47,8 +47,8 @@ import { z } from 'zod';
 import type { KeptItem, StepReport } from '../report.ts';
 import { classifyV4ConfigPath, listV4Config, readPlainText, strictYamlMap, V4_SINGLETONS } from '../v4/config.ts';
 import { readV4Json } from '../v4/documents.ts';
-import { configOwner } from '../v5/targets.ts';
-import { UNKNOWN_SOURCE } from '../v5/write.ts';
+import { CONFIG_TARGETS, configOwner } from '../v5/targets.ts';
+import { configPath, UNKNOWN_SOURCE } from '../v5/write.ts';
 import type { Step, StepContext } from './index.ts';
 import { rebuildBudget } from './preview-logins.ts';
 import { MAX_LOGIN_BYTES, PREVIEW_AUTHOR } from './settings.ts';
@@ -501,11 +501,28 @@ export const acceptedConfigStep: Step = {
                   .sort(([a], [b]) => a.localeCompare(b)),
                 true,
               );
+        // v4 loads the connector switch from config/daemon.json on its own: it is in no accepted record, so a damaged
+        // record (or any other reason the enforced conversion is unknown) says nothing about it, and it was ON in v4
+        // whatever that file holds. The validated connector.yaml is recorded as accepted by itself.
+        const connectorFile = configPath(CONFIG_TARGETS.CONNECTOR);
+        const connectorText = ctx.v5.writtenConfigs().get(connectorFile);
+        const connector =
+          enforced.kind === 'unknown' && connectorText !== undefined
+            ? await record([[connectorFile, connectorText]], true)
+            : { recorded: 0, unowned: [] as readonly string[] };
         return {
           ...base,
           status: 'converted',
           kept: [
             ...named,
+            ...(connector.recorded === 0
+              ? []
+              : [
+                  {
+                    what: `${connectorFile} recorded as accepted by itself (v4 reads the connector switch from config/daemon.json, not from the damaged record)`,
+                    count: connector.recorded,
+                  },
+                ]),
             { what: `${V4_HELD_PREFIX}${held.named.join(', ')}`, count: held.named.length },
             ...(enforced.kind === 'ok'
               ? heldCaps(enforced.configs.get(USAGE_FILE), ctx.v5.writtenConfigs().get(USAGE_FILE))

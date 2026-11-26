@@ -74,7 +74,10 @@ export function blockedLine(
     case 'unread':
       return `Checking what this daemon offers…`;
     case 'missing':
-      return `${title} is not available to this device on this daemon.`;
+      // On a daemon OLDER than this app a plugin it does not list is most likely one it predates: the update is the remedy.
+      return remedy === 'update-daemon'
+        ? `${title} is not on this daemon, which is older than this app: run \`${UPDATE_DAEMON_COMMAND}\` on that machine.`
+        : `${title} is not available to this device on this daemon.`;
     case 'off':
       return `${title} is off on this daemon.`;
     case 'unreadable':

@@ -149,7 +149,7 @@ export class ConnectorOAuthHttp implements ConnectorHttpHandler {
         );
         return page(
           'Approve this connection in Ferretry',
-          `<p>${escapeHtml(pending.clientName)} wants to connect.</p><p>${escapeHtml(scopes.join('. '))}</p><p>Match this code in Ferretry:</p><strong class="code">${escapeHtml(pending.matchCode)}</strong><p><a class="button" href="${escapeHtml(appPanelUrl(this.endpoints))}">Open Ferretry</a></p><p>Waiting for your decision. This page refreshes by itself, so you can leave it open.</p><h2>If nothing happens</h2><p>This sign-in expires after 10 minutes. To start again, in Claude open Settings &gt; Connectors &gt; Ferretry &gt; Connect.</p>`,
+          `<p>${escapeHtml(pending.clientName)} wants to connect.</p><p>${escapeHtml(scopes.join('. '))}</p><p>Match this code in Ferretry:</p><strong class="code">${escapeHtml(pending.matchCode)}</strong><p><a class="button" href="${escapeHtml(appPanelUrl(this.endpoints, pending.id))}">Open Ferretry</a></p><p>Waiting for your decision. This page refreshes by itself, so you can leave it open.</p><h2>If nothing happens</h2><p>This sign-in expires after 10 minutes. To start again, in Claude open Settings &gt; Connectors &gt; Ferretry &gt; Connect.</p>`,
           { refresh: true },
         );
       }

@@ -16,11 +16,20 @@
     "./cli": "./cli/index.ts"
   },
   "dependencies": {
+    "@ferretry/app": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
     "@ferretry/plugin-connections": "workspace:*",
     "@ferretry/kernel": "workspace:*",
     "@ferretry/std": "workspace:*",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
     "zod": "4.4.3"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
 }
