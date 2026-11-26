@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-26",
+  "version": "2.4.2",
+  "platform": "linux-x64",
+  "base": "900d0b0fe7",
+  "release": "https://github.com/anomalyco/opencode/releases/download/v2.4.2/opencode-linux-x64.tar.gz",
+  "releaseSha256": "452912288f934d1771bd5bd0d8611ba3a6adc3db3ac3333c37facf373770ba66",
+  "liveCallWrapper": "fy secret use --with DEEPSEEK_API_KEY --timeout 120000 -- <isolated-opencode> run --standalone --auto --model deepseek/deepseek-flash --format json <prompt>",
+  "prompts": 3,
+  "unavailableModelAttempts": 1,
+  "providerSteps": 5,
+  "reportedCostUsd": 0.0016051799999999997,
+  "exportedSessionCostUsd": 0.0016786799999999997,
+  "spendBasis": "OpenCode-reported cost; not a provider balance delta or invoice",
+  "transformations": [
+    "Stable fake session/message/part/tool/project IDs, preserving references",
+    "Scratch absolute paths replaced with /fixture/opencode",
+    "PID placeholders in selected filesystem trace lines",
+    "No tokens, credential files, full database or logs committed"
+  ],
+  "ui": "Captured as terminal text, no screenshot or product UI changes"
+}
