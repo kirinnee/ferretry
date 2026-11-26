@@ -134,8 +134,11 @@ export function voiceStreamAccept(deps: VoiceStreamDeps): SocketAccept {
           leave: ferret => registry.leaveVoice(ferret),
         },
         onEnd: () => {
-          stopWatching?.();
-          slot.release();
+          try {
+            stopWatching?.();
+          } finally {
+            slot.release();
+          }
         },
         log: deps.log,
       });

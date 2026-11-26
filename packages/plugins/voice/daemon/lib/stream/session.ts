@@ -87,7 +87,7 @@ export interface StreamParts {
         sendId: string,
       ) => Promise<{ readonly ok: true } | { readonly ok: false; readonly code: string }>)
     | undefined;
-  /** Live `fleet.use`: required by chat at start, each grant generation and before every send. */
+  /** Live `fleet.use`: checked at start, each grant generation, each tick and before every send. */
   readonly mayChat: () => boolean;
   /** The ferret a name or an id means (the same rule a typed send's path uses); `undefined` when none or several do. */
   readonly resolveFerret: (reference: string) => Promise<string | undefined>;
@@ -95,17 +95,12 @@ export interface StreamParts {
   readonly recordSent: (ferretId: string) => void;
   /** Takes the one voice chat a ferret may have; `undefined` when another stream holds it. Returns the release. */
   readonly claimFerret: (ferretId: string) => (() => void) | undefined;
-  /**
-   * The chat's entry claim, shared by every stream and phone engine of this machine (the registry holds it). `enter` is true
-   * only for the call that finds no live claim: that one sends the entry message. Absent (a suite): every entry sends.
-   */
+  /** Shared entry claim: only `enter: true` sends. Without a registry (a suite), every entry sends. */
   readonly entry?: {
     readonly enter: (ferretId: string) => boolean;
     readonly leave: (ferretId: string) => void;
   };
-  /**
-   * The machine's reply voice. `undefined` only where there is none to ask (a suite): a stream that asks for it is then told
-   * `absent`. A stream that does not ask for it never touches this.
+  /** Machine reply voice: an asking stream gets `absent` without it (a suite); other streams never touch it.
    */
   readonly reply?: ReplySpeakerApi | undefined;
   /** Called once when the stream is over, whatever ended it. */
@@ -604,6 +599,7 @@ export class VoiceStream implements SocketHandler {
   // ─── the loop ──────────────────────────────────────────────────────────────────────────────────────────────────
 
   private tick(): void {
+    this.grantsChanged(); // Bound missed notifications to one loop period; failed reads close too.
     if (this.ended) return;
     const now = this.parts.clock.nowMs();
     if (this.start === undefined && now - this.openedAt > NO_START_MS) {
@@ -974,8 +970,11 @@ export class VoiceStream implements SocketHandler {
   private refuse(code: string): void {
     if (this.ended) return;
     this.fatal = { code, message: sentenceOf(code) };
-    this.emit();
-    this.endWith(CLOSE_FOR[code] ?? STREAM_CLOSES.failed);
+    try {
+      this.emit();
+    } finally {
+      this.endWith(CLOSE_FOR[code] ?? STREAM_CLOSES.failed);
+    }
   }
 
   private endWith(close: { readonly code: number; readonly reason: string }): void {
