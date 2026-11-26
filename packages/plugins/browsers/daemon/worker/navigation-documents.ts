@@ -33,7 +33,8 @@ export function watchNavigationDocuments(page: Page, ledger: NavigationLedger): 
     const document = committedDocumentOf(frame);
     const same = document === undefined || state.document === undefined || document === state.document;
     ledger.commit(state.id, frame.url(), frame === page.mainFrame(), same);
-    if (document !== undefined) state.document = document;
+    // An unreadable loader invalidates the baseline: it may precede a link observed during the gap.
+    state.document = document;
   });
   page.on('frameattached', frame => ledger.attached(stateOf(frame).id));
   page.on('framedetached', frame => {

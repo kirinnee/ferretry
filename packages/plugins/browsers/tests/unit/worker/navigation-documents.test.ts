@@ -45,4 +45,18 @@ describe('D-07 browser-owned document identity', () => {
       expect(f.ledger.evidence().linked).toBe(true);
     }
   });
+
+  test('an unreadable loader invalidates the pre-link baseline until a readable linked document is replaced', () => {
+    for (const unknown of [undefined, null, '', 1, {}]) {
+      const f = fixture();
+      f.navigate('https://unknown.example.test/plain', 'loader-before-link');
+      f.navigate('https://unknown.example.test/plain', unknown);
+      f.navigate('https://unknown.example.test/pair#v1;code=FAKE-PAIR-0000', unknown);
+      expect(f.ledger.evidence().linked).toBe(true);
+      f.navigate('https://unknown.example.test/pair', 'loader-linked');
+      expect(f.ledger.evidence().linked).toBe(true);
+      f.navigate('https://unknown.example.test/plain', 'loader-replacement');
+      expect(f.ledger.evidence().linked).toBe(false);
+    }
+  });
 });
