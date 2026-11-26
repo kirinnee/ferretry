@@ -54,7 +54,7 @@ import { attachHandler } from './lib/runtime/mounts/session-attach.ts';
 import { consoleInputHandler } from './lib/runtime/mounts/session-console-input.ts';
 import { processHandlers } from './lib/runtime/mounts/session-processes.ts';
 import { type RegisteredTerminalPane, SessionAttachService } from './lib/session/attach/index.ts';
-import { SessionConsoleService } from './lib/session/console/index.ts';
+import { SessionConsoleService, type TypingHold } from './lib/session/console/index.ts';
 import { PaneLook } from './lib/session/pane-look.ts';
 import { ProcessHistory } from './lib/session/processes/history.ts';
 import type {
@@ -78,6 +78,8 @@ export interface ProcessesDeps {
   readonly tmux: TmuxCommandPort;
   /** That server's socket (absolute): the attach proof hands it to the person at this machine. */
   readonly socketPath: string;
+  /** Told of every key a person types into a ferret's pane in the Console; the runner reads it for the send path. */
+  readonly typing?: TypingHold;
   readonly ferrets: Pick<FerretsApi, 'get' | 'list'>;
   /** The pane the tmux runner recorded for this ferret, or nothing when it has none (never started, stopped). */
   paneOf(ferret: FerretId): Promise<RunnerPane | undefined>;
@@ -151,7 +153,7 @@ export function buildProcesses(deps: ProcessesDeps): Processes {
     { paneOf: async id => await deps.paneOf(id as FerretId) },
     observer,
   );
-  const console = new SessionConsoleService(attach, deps.tmux);
+  const console = new SessionConsoleService(attach, deps.tmux, deps.typing);
   const provenance = deps.host?.provenance ?? new HarnessProcessProvenance(deps.binaryName, new ProjectMcpServers());
   const processes = new SessionProcessService({
     panes: attach,

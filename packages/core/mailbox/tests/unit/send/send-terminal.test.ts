@@ -190,4 +190,76 @@ describe('send path: the send terminal over the harness seam', () => {
     expect(none).toBeInstanceOf(ApiError);
     expect((none as ApiError).code).toBe('plugin_unavailable');
   });
+
+  describe('the typing hold at the write boundary', () => {
+    const PANE = { alive: true, dead: false, promptReady: true, activeWork: false };
+    /** A harness whose pane is quiet for `quietLooks` looks, then a person types; it records every write that went through. */
+    const typingHarness = (quietLooks: number) => {
+      const writes: string[] = [];
+      let looks = 0;
+      const harness: Partial<FerretHarness> = {
+        observe: async () => ok(++looks > quietLooks ? { ...PANE, typing: true } : PANE),
+        deliver: async ({ text, beforeWrite }) => {
+          // The runner's own order: the readiness wait (the looks above happen in it), then the step, then the key.
+          await beforeWrite?.();
+          writes.push(`deliver:${text}`);
+          return ok('turn-started');
+        },
+        queue: async text => (writes.push(`queue:${text}`), ok('held')),
+        submitComposer: async text => (writes.push(`submit:${text}`), ok('submitted')),
+      };
+      return { terminal: harnessSendTerminal(seamOf(harness)), writes };
+    };
+
+    test("holds the daemon's own deliver, queue and Enter as the pane busy, and types nothing", async () => {
+      for (const by of ['agent', 'daemon'] as const) {
+        const { terminal, writes } = typingHarness(0);
+        for (const write of [
+          terminal.deliver(ID, 'x', by),
+          terminal.queue(ID, 'x', by),
+          terminal.submitComposer(ID, 'x', false, by),
+        ])
+          expect(await rejection(write)).toMatchObject({ why: 'busy' });
+        expect(writes).toEqual([]);
+      }
+    });
+
+    test('looks again at the write, after the readiness wait, so a hold that began during it is not missed', async () => {
+      // One quiet look (a caller's pre-check), then a person types: the write boundary is the second look.
+      const { terminal, writes } = typingHarness(1);
+      expect((await terminal.observe(ID)).typing).toBeUndefined();
+
+      expect(await rejection(terminal.deliver(ID, 'x', 'daemon'))).toBeInstanceOf(SendPaneNotReady);
+      expect(writes).toEqual([]);
+    });
+
+    test("never holds a person's own write, or a write that names no sender", async () => {
+      for (const by of ['human', undefined] as const) {
+        const { terminal, writes } = typingHarness(0);
+        await terminal.deliver(ID, 'a', by);
+        await terminal.queue(ID, 'b', by);
+        await terminal.submitComposer(ID, 'c', false, by);
+        expect(writes).toEqual(['deliver:a', 'queue:b', 'submit:c']);
+      }
+    });
+
+    test('lets the daemon write once the pane is quiet, and a pane that cannot be read decides nothing', async () => {
+      const quiet = harnessSendTerminal(
+        seamOf({
+          observe: async () => ok(PANE),
+          deliver: async ({ beforeWrite }) => (await beforeWrite?.(), ok('turn-started')),
+        }),
+      );
+      await quiet.deliver(ID, 'x', 'daemon');
+      const unreadable = harnessSendTerminal(
+        seamOf({
+          observe: async () => {
+            throw new Error('no pane read');
+          },
+          submitComposer: async () => ok('submitted'),
+        }),
+      );
+      expect(await unreadable.submitComposer(ID, 'x', false, 'daemon')).toBe('submitted');
+    });
+  });
 });
