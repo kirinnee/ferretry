@@ -201,11 +201,12 @@ export interface Runner {
    */
   stop(handle: RunnerHandle, how: 'polite' | 'now', ferret?: FerretId): Promise<void>;
   resume(spec: RunSpec, harnessConversationId: string): Promise<Result<RunningFerret, StartRefusal>>;
-  /** The harness owner supplies the registered reader; the runner cannot invoke another plugin's provider hook. */
+  /** The harness owner supplies the reader. A persisted binding must also prove the pane belongs to `ferret`. */
   attach(
     handle: RunnerHandle,
     harness?: string,
     screenReader?: HarnessScreenReader,
+    ferret?: FerretId,
   ): Promise<Result<RunningFerret, AttachRefusal>>;
   alive(handle: RunnerHandle, ferret?: FerretId): Promise<boolean>;
   /**

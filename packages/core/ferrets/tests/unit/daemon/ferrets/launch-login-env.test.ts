@@ -32,6 +32,7 @@ function fixture(options: {
   const registry = new FerretRegistry([]);
   const tokens = new FerretTokenDirectory();
   const harness = new FakeHarness(options.harness ?? 'claude-code');
+  const runner = new FakeRunner();
   const asked: Env[] = [];
   let next = 0;
   const ports: FerretsPorts = {
@@ -47,7 +48,7 @@ function fixture(options: {
     saveTokens: async () => {},
     harness: key => (key === harness.key ? harness : undefined),
     harnessKeys: () => [harness.key],
-    runner: () => new FakeRunner(),
+    runner: () => runner,
     decide: async () => ({ allow: true }),
     launchParts: () => [{ parts: async () => options.parts ?? [] }],
     sitrepSources: () => [],
@@ -67,7 +68,7 @@ function fixture(options: {
     },
     asks: { open: async () => [] },
   };
-  return { asked, harness, service: new FerretsService(registry, tokens, ports) };
+  return { asked, harness, runner, ports, service: new FerretsService(registry, tokens, ports) };
 }
 
 const env =
@@ -76,6 +77,58 @@ const env =
     ok(values);
 
 describe('a ferret launch carries its login’s environment', () => {
+  test('an owner cutoff after sealed replacement preflight still prevents the replacement from launching', async () => {
+    const f = fixture({ harness: 'opencode' });
+    let cutOff = false;
+    f.ports.cutOffMark = {
+      isCutOff: async () => cutOff,
+      cutOff: async () => {
+        cutOff = true;
+      },
+      restore: async () => {
+        cutOff = false;
+      },
+    };
+    const started = await f.service.start({ folder: '/work', harness: 'opencode', by: 'owner' }, PERSON_ORIGIN);
+    if (!started.ok) throw new Error('fixture must start');
+    const replaced = await f.service.resume(started.value, undefined, {
+      origin: PERSON_ORIGIN,
+      replaceLiveTerminal: true,
+      committed: async () => {
+        await f.ports.cutOffMark?.cutOff(started.value);
+      },
+    });
+    expect(replaced).toMatchObject({ ok: false, error: { code: 'refused' } });
+    if (!replaced.ok) expect(replaced.error.reason).toContain('owner cut off');
+    expect(f.asked).toHaveLength(2);
+    expect(f.harness.launched).toHaveLength(1);
+    expect(f.runner.starts).toBe(1);
+  });
+  test('a permitted OpenCode replacement spends the already checked sealed environment once after releasing the old pane', async () => {
+    const options = { harness: 'opencode', subscriptionRefused: false };
+    const f = fixture(options);
+    const started = await f.service.start({ folder: '/work', harness: 'opencode', by: 'owner' }, PERSON_ORIGIN);
+    if (!started.ok) throw new Error('fixture must start');
+    const before = await f.service.handle(started.value);
+    expect(before).toBeDefined();
+    const prepareHome = f.harness.prepareHome.bind(f.harness);
+    f.harness.prepareHome = async spec => {
+      // A second Vault check would now refuse: the launch must spend exactly the handle it preflighted.
+      options.subscriptionRefused = true;
+      expect(await f.runner.alive(before!)).toBe(false);
+      return await prepareHome(spec);
+    };
+    const replaced = await f.service.resume(started.value, undefined, {
+      origin: PERSON_ORIGIN,
+      replaceLiveTerminal: true,
+    });
+    expect(replaced).toMatchObject({ ok: true });
+    expect(f.asked).toHaveLength(2);
+    expect(f.harness.launched).toHaveLength(2);
+    const after = await f.service.handle(started.value);
+    expect(after).not.toBe(before);
+    expect(await f.runner.alive(after!)).toBe(true);
+  });
   test('the sealed subscription policy returns a typed start refusal without launching a harness', async () => {
     const f = fixture({ harness: 'opencode', subscriptionRefused: true });
     const started = await f.service.start({ folder: '/work', harness: 'opencode', by: 'owner' }, PERSON_ORIGIN);

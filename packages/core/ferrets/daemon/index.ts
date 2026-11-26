@@ -147,12 +147,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         continue;
       }
       // A fresh runner has no launch bindings. Restore the persisted registered key before any pane reads or sends.
-      if (read.value.handle !== undefined)
-        await runnerOf()?.attach(
+      if (read.value.handle !== undefined) {
+        const attached = await runnerOf()?.attach(
           read.value.handle as RunnerHandle,
           read.value.harness,
           harnessOf(read.value.harness)?.screenReader,
+          read.value.id,
         );
+        if (attached !== undefined && !attached.ok)
+          log.warn('a persisted pane could not be attached', { ferret: read.value.id, reason: attached.error });
+      }
       // Its start options and title, kept beside the record so a list or a read stays memory-only.
       const details = await kernel.state.read(FerretDetailsFile, name);
       if (details.ok && details.value !== undefined) registry.putDetails(read.value.id, details.value);

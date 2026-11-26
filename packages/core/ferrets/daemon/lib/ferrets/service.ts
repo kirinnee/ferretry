@@ -6,7 +6,8 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { openHarness } from './harness-facade.ts';
-import { type DecidedFast, decideResume, launchFastOf, launchOptions } from './launch-options.ts';
+import { type DecidedFast, decideResume, launchFastOf, launchOptions, movedLaunchOptions } from './launch-options.ts';
+import { collectLaunchParts, prepareLaunchHome, type PreparedLaunch } from './launch-preparation.ts';
 import type { FerretsCore } from './core.ts';
 import { compactAt, setCompactAt } from './compact-at.ts';
 import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
@@ -510,6 +511,7 @@ export interface BoundLaunchFolder {
 }
 
 interface LaunchExtras {
+  readonly prepared?: PreparedLaunch;
   readonly bound?: BoundLaunchFolder | undefined;
   readonly attached?: readonly OpeningFile[] | undefined;
   readonly carried?: ResumeOptions['onCarried'] | undefined;
@@ -1635,9 +1637,22 @@ export class FerretsService implements FerretsApi {
         : undefined,
     );
     if (!decision.allow) return refusedBy(decision);
+    let prepared: PreparedLaunch | undefined;
     if (replacing) {
       const ready = await this.launchable(retargeted);
       if (!ready.ok) return ready;
+      if (retargeted.harness === 'opencode') {
+        const staged = await this.prepareLaunch(
+          retargeted,
+          undefined,
+          retargeted.harnessConversation,
+          { value: fast },
+          true,
+          target === undefined ? undefined : movedLaunchOptions(this.registry.detailsOf(ferret)?.options, target),
+        );
+        if (!staged.ok) return staged;
+        prepared = staged.value;
+      }
     }
     await options.committed?.();
     const settled = replacing ? await this.releaseLive(found) : found;
@@ -1672,7 +1687,7 @@ export class FerretsService implements FerretsApi {
             mode: launchMode(starting.mode),
             ...(author === undefined ? {} : { by: author }),
           },
-      { carried: options.onCarried, bound: bound.value, fast: { value: fast } },
+      { carried: options.onCarried, bound: bound.value, fast: { value: fast }, prepared },
     );
     if (resumed.ok && options.noTurn !== true) {
       const text = message?.trim();
@@ -1699,9 +1714,9 @@ export class FerretsService implements FerretsApi {
     if (record === undefined) return failed('refused', `no ferret ${ferret}`);
     const runner = this.ports.runner();
     if (runner === undefined) return failed('runner_unavailable', 'no runner plugin is on');
-    const adopted = await runner.attach(handle, record.harness, this.ports.harness(record.harness)?.screenReader);
+    const reader = this.ports.harness(record.harness)?.screenReader;
+    const adopted = await runner.attach(handle, record.harness, reader, ferret);
     if (!adopted.ok) return failed('failed', `the runner would not adopt ${handle}: ${adopted.error}`);
-    // A stopped ferret's end cause goes with the stop: the cause is present only while the state is stopped.
     const { cause: _ended, ...revived } = record;
     const working: FerretRecord = {
       ...revived,
@@ -1858,12 +1873,7 @@ export class FerretsService implements FerretsApi {
    */
   private async moveOptions(ferret: FerretId, target: ResumeTarget): Promise<void> {
     await this.updateDetails(ferret, before => {
-      const { effort: _effort, fast: _fast, ...kept } = before?.options ?? {};
-      const options = {
-        ...kept,
-        ...(target.model === undefined ? {} : { model: target.model }),
-        ...(target.effort === undefined ? {} : { effort: target.effort }),
-      };
+      const options = movedLaunchOptions(before?.options, target);
       if (JSON.stringify(options) === JSON.stringify(before?.options ?? {})) return undefined;
       return { ...before, options };
     });
@@ -2131,7 +2141,7 @@ export class FerretsService implements FerretsApi {
     revive?: ReviveTurnRequest,
     extras: LaunchExtras = {},
   ): Promise<Result<FerretId, StartFailure>> {
-    const { attached = [], carried, notInWardenTree, bound, fast } = extras;
+    const { attached = [], carried, notInWardenTree, bound, fast, prepared } = extras;
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
@@ -2156,7 +2166,7 @@ export class FerretsService implements FerretsApi {
           return typeof value === 'function' ? value.bind(target) : value;
         },
       });
-      const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said, fast);
+      const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said, fast, prepared);
       // A RESUME with no conversation to resume starts a new one just as a missing one does, and is said the same way: a
       // ferret that silently forgot everything (proof run 8, a converted Codex ferret) is the defect this names.
       if (kind === 'resume' && conversation === undefined) said.conversationUnknown = true;
@@ -2245,15 +2255,14 @@ export class FerretsService implements FerretsApi {
     return ok(bound.value);
   }
 
-  private async launchAttempt(
+  private async prepareLaunch(
     record: FerretRecord,
     prompt: string | undefined,
     conversation: string | undefined,
-    runner: Runner,
-    bound: BoundLaunchFolder | undefined,
-    said: LaunchSaid = {},
     decidedFast?: DecidedFast,
-  ): Promise<Result<FerretId, StartFailure>> {
+    staged = false,
+    options?: FerretDetails['options'],
+  ): Promise<Result<PreparedLaunch, StartFailure>> {
     this.requireTokens();
     if (await this.isCutOff(record.id))
       return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
@@ -2261,7 +2270,6 @@ export class FerretsService implements FerretsApi {
     if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);
     const home = await this.home(record, harness);
     if (!home.ok) return home;
-    // Before a token is issued: a login that cannot be read refuses the start with nothing to undo.
     const login = await this.loginEnvironment(record);
     if (!login.ok) return failed('login_unavailable', login.error);
     const signedIn = await this.loginLaunchEnvironment(record);
@@ -2269,10 +2277,11 @@ export class FerretsService implements FerretsApi {
     const credential = await this.loginCredential(record);
     if (!credential.ok) return failed('login_unavailable', credential.error);
     const issued = issueToken(record.id, this.ports.now());
-    this.tokens.add(issued.entry);
-    await this.ports.saveTokens(this.tokens.snapshot());
-    // Today's read allowance for what the ferret is sent (`handoffFolders` → `--allowedTools=Read(…)`): its own session
-    // folder's hand-off folders only. One that cannot be named pre-allows nothing (the agent asks), never more.
+    if (!staged) {
+      this.tokens.add(issued.entry);
+      await this.ports.saveTokens(this.tokens.snapshot());
+    }
+    // Pre-allow only this session's named hand-off folders (`handoffFolders` → `--allowedTools=Read(…)`).
     const readable = (await this.ports.session?.readable?.(record.id).catch(() => undefined)) ?? [];
     // The ferret's own compaction choice: its session config (a later edit) over what its start asked.
     const ownCompactAt =
@@ -2295,7 +2304,7 @@ export class FerretsService implements FerretsApi {
       ...(record.login === undefined ? {} : { login: record.login }),
       // Set from the login only, never by a launch part: the spec field has no other writer.
       ...(credential.value === undefined ? {} : { credential: credential.value }),
-      ...launchOptions(this.registry.detailsOf(record.id)?.options, launchFastOf(decidedFast, liveFast)),
+      ...launchOptions(options ?? this.registry.detailsOf(record.id)?.options, launchFastOf(decidedFast, liveFast)),
       ...(mode === undefined ? {} : { mode }),
       ...(ownCompactAt === undefined ? {} : { compactAt: ownCompactAt }),
       folder: record.folder as FencedPath,
@@ -2307,20 +2316,13 @@ export class FerretsService implements FerretsApi {
     };
     // A `launch.parts` taker is handed the spec WITHOUT the sign-in credential: only the harness asks the kernel to link it.
     const { credential: _kept, ...forTakers } = base;
-    const collected = await this.collectParts(forTakers);
+    const collected = await collectLaunchParts(this.ports.launchParts(), forTakers);
     if (!collected.ok) return collected;
-    const parts = collected.value;
-    const spec: LaunchSpec = { ...base, parts };
-    // Today's order: the home is written (and made private) before the environment is resolved and the runner asked.
-    try {
-      await harness.prepareHome(spec);
-    } catch (error) {
-      return failed(
-        'failed',
-        error instanceof LaunchRefusal
-          ? error.message
-          : `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
-      );
+    const spec: LaunchSpec = { ...base, parts: collected.value };
+    // Ordinary launches keep their order. A live replacement checks its sealed environment before changing the home or token.
+    if (!staged) {
+      const home = await prepareLaunchHome(harness, spec);
+      if (!home.ok) return home;
     }
     const env = await this.environment(
       record.id,
@@ -2328,7 +2330,7 @@ export class FerretsService implements FerretsApi {
       record.role,
       record.parent,
       issued.token,
-      parts,
+      spec.parts,
       login.value,
       signedIn.value,
       record.harness,
@@ -2337,6 +2339,31 @@ export class FerretsService implements FerretsApi {
       return typeof env.error === 'string'
         ? failed('login_unavailable', env.error)
         : failed('refused', 'OpenCode refuses Anthropic subscription credentials; choose an API key or endpoint login');
+    return ok({ harness, spec, env: env.value, issued });
+  }
+
+  private async launchAttempt(
+    record: FerretRecord,
+    prompt: string | undefined,
+    conversation: string | undefined,
+    runner: Runner,
+    bound: BoundLaunchFolder | undefined,
+    said: LaunchSaid = {},
+    decidedFast?: DecidedFast,
+    prepared?: PreparedLaunch,
+  ): Promise<Result<FerretId, StartFailure>> {
+    const ready =
+      prepared === undefined ? await this.prepareLaunch(record, prompt, conversation, decidedFast) : ok(prepared);
+    if (!ready.ok) return ready;
+    const { harness, spec, env, issued } = ready.value;
+    if (prepared !== undefined) {
+      if (await this.isCutOff(record.id))
+        return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
+      this.tokens.add(issued.entry);
+      await this.ports.saveTokens(this.tokens.snapshot());
+      const home = await prepareLaunchHome(harness, spec);
+      if (!home.ok) return home;
+    }
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
     // A conversation the harness PROVES it does not have is not resumed: a real harness asked to would fail the launch
@@ -2360,8 +2387,7 @@ export class FerretsService implements FerretsApi {
       const held = await bound.verify().catch(() => err('the launch folder could not be checked again'));
       if (!held.ok) return failed('refused', held.error);
     }
-    // Before any pane exists: the launch guards are asked (the conversation lease, innermost: a conversation another live
-    // writer holds is refused here, never taken over). One snapshot of the list serves this launch's both phases.
+    // One guard snapshot serves both phases; the innermost conversation lease refuses another live writer's conversation.
     const guards = this.guards();
     const claimed = await beforePane(guards, { record, conversation: resumable });
     if (!claimed.ok) return err(claimed.error);
@@ -2369,8 +2395,8 @@ export class FerretsService implements FerretsApi {
     try {
       started =
         resumable === undefined
-          ? await harness.start(spec, runner, env.value)
-          : await harness.resume(spec, runner, env.value, resumable);
+          ? await harness.start(spec, runner, env)
+          : await harness.resume(spec, runner, env, resumable);
     } catch (error) {
       if (error instanceof LaunchRefusal) return failed('failed', error.message);
       throw error;
@@ -2392,7 +2418,7 @@ export class FerretsService implements FerretsApi {
     // A write that fails leaves no record at all (never the previous launch's), so nothing is compared against it.
     const told = this.ports.launchSections;
     await told
-      ?.write(record.id, sectionDigests(base.instructions))
+      ?.write(record.id, sectionDigests(spec.instructions))
       .catch(async () => await told.forget(record.id))
       .catch(() => undefined);
     // A new conversation in place of a missing one: the old conversation id and the transcript it pointed at are no
@@ -2417,32 +2443,6 @@ export class FerretsService implements FerretsApi {
    */
   private guards(): readonly LaunchGuard[] {
     return [...(this.ports.launchSteps?.guards() ?? []), ...this.builtInGuards];
-  }
-
-  /**
-   * What `launch.parts` takers add. A source that is only an addition and fails is skipped; a REQUIRED one (a login's
-   * pinned environment) that fails refuses the launch, because skipping it would start the ferret without the protection
-   * it exists to give. Nothing is started either way a refusal is returned.
-   */
-  private async collectParts(base: Omit<LaunchSpec, 'parts'>): Promise<Result<readonly LaunchPart[], StartFailure>> {
-    const answers = await Promise.all(
-      this.ports.launchParts().map(async source => {
-        try {
-          return { ok: true as const, parts: await source.parts(base) };
-        } catch (error) {
-          return { ok: false as const, required: source.required === true, error };
-        }
-      }),
-    );
-    const refused = answers.find(answer => !answer.ok && answer.required);
-    if (refused !== undefined && !refused.ok)
-      return failed(
-        'failed',
-        refused.error instanceof LaunchRefusal
-          ? refused.error.message
-          : 'a part of this launch that must be checked could not be read, so the ferret was not started',
-      );
-    return ok(answers.flatMap(answer => (answer.ok ? answer.parts : [])));
   }
 
   /**
