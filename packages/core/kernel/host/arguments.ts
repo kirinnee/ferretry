@@ -80,13 +80,15 @@ export function daemonUsageText(usage: DaemonUsage): string {
     '                        harnesses it could launch, the address and who holds it — then exit',
     '                        without creating, locking or binding anything',
     '      --host <host>     serve on this host for one run, overriding the document',
-    '      --port <port>     serve on this port for one run, overriding the document',
+    '      --port <port>     serve on this port for one run, overriding FY_PORT and the document',
     '      --log-level <l>   one of debug, info, warn, error (default info). `debug` is accepted and',
     '                        currently selects the same records as `info`; this daemon emits none of',
     '                        its own below `info` yet.',
     '',
     'Environment:',
     '  FY_HOME               the state home to own; defaults to ~/.ferretry',
+    "  FY_PORT               the port to serve on; beats the document's direct.port, loses to --port.",
+    '                        0 asks the OS for a free one, which the run record then names',
     `  PATH                  searched for the programs ${usage.daemonName} launches`,
     '',
     'Exit codes:',
@@ -96,8 +98,9 @@ export function daemonUsageText(usage: DaemonUsage): string {
     `  69                    the address is held by something that is not a ${usage.daemonName}`,
     `  78                    another ${usage.daemonName} already owns this address or state home`,
     '',
-    'Everything else — the address, the credentials, the operator settings — lives in',
-    `<FY_HOME>/config/daemon.json. Run \`${usage.daemonName} --print-config\` to see what is in effect.`,
+    'Everything else — the credentials, the operator settings, and the port when no flag or FY_PORT',
+    'names one (direct.port) — lives under <FY_HOME>/config/ (the port in connections.yaml).',
+    `Run \`${usage.daemonName} --print-config\` to see what is in effect.`,
   ].join('\n');
 }
 

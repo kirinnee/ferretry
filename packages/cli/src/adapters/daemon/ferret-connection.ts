@@ -5,7 +5,7 @@
  */
 import { PluginInventorySchema } from '@ferretry/kernel/contract';
 import type { TerminalIo } from '@ferretry/kernel/manifest';
-import { isLocalDaemonUrl, parseDaemonRun, resolveDaemonUrl } from '../../lib/address.ts';
+import { daemonUrlPinned, isLocalDaemonUrl, parseDaemonRun, resolveDaemonUrl } from '../../lib/address.ts';
 import { InventoryCache } from '../../lib/client.ts';
 import { type Environment, ownFerretId } from '../../lib/credential.ts';
 import { DaemonRefusal, ShellError } from '../../lib/errors.ts';
@@ -27,7 +27,7 @@ export interface DaemonAddressing {
 }
 
 export function daemonAddressing(environment: Environment, home: string): DaemonAddressing {
-  const pinned = (environment.FY_URL?.trim() ?? '') !== '';
+  const pinned = daemonUrlPinned(environment);
   const run = async () => parseDaemonRun(await readDaemonRunDocument(daemonRunPath(home)));
   return {
     pinned,

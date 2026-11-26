@@ -49,6 +49,12 @@ export function clearYamlLogSwitches(environment: Record<string, string | undefi
 
 /** The folder the generated JSON Schemas go in (`config/.schema/`); never a config path. The kernel's claims re-export it. */
 export const SCHEMA_FOLDER = '.schema';
+/**
+ * What the daemon has published under {@link SCHEMA_FOLDER}: a JSON array of the schema file names it wrote at its last
+ * start. The folder can also hold a stale name an older build wrote, so a reader that must work with no daemon trusts
+ * only a name this list gives. It starts with a dot, so no schema stem a person can type reaches it.
+ */
+export const SCHEMA_MANIFEST = '.published.json';
 
 /**
  * The most a configuration file may hold, in UTF-8 bytes (today's `CONFIG_FILE_MAX_BYTES`). It is checked BEFORE

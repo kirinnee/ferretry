@@ -88,6 +88,9 @@ describe('positive merged evidence and local safety are both required', () => {
     expect(worktreeVerdict({ ...row, ...change }, pull, removal).removable).toBe(false);
   });
   test('the existing removal check must positively agree; stopped ferrets do not block', () => {
+    expect(
+      worktreeVerdict({ ...row, live: { ...row.live, status: { ...row.live.status!, ignored: true } } }, pull, removal),
+    ).toEqual({ removable: false, reason: 'kept: ignored files present' });
     expect(worktreeVerdict(row, pull, undefined).removable).toBe(false);
     expect(
       worktreeVerdict(row, pull, {

@@ -83,8 +83,14 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
         tone={lastActor?.kind === 'human' ? 'accent' : 'pend'}
         className="inline-flex min-w-[7.5rem] max-w-full shrink items-center gap-1 truncate"
       >
-        {lastActor?.kind === 'human' ? <UserRound size={13} /> : <Bot size={13} />}
-        {lastActor ? `${lastActor.kind === 'human' ? 'You' : 'Agent'} · ${lastActor.action}` : 'No input yet'}
+        {lastActor?.kind === 'human' ? (
+          <UserRound size={13} className="shrink-0" />
+        ) : (
+          <Bot size={13} className="shrink-0" />
+        )}
+        <span className="min-w-0 truncate">
+          {lastActor ? `${lastActor.kind === 'human' ? 'You' : 'Agent'} · ${lastActor.action}` : 'No input yet'}
+        </span>
       </Badge>
       {status?.state === 'running' && status.proxy !== undefined ? (
         <Badge

@@ -29,7 +29,7 @@ export function worktreeVerdict(
   if (status.staged || status.unstaged || status.untracked || status.conflicted || status.dirtySubmodule)
     return keep('The worktree has uncommitted changes');
   // The existing removal path treats ignored files as content too. Never bypass it with a discard override.
-  if (status.ignored) return keep('The worktree contains ignored files');
+  if (status.ignored) return keep('kept: ignored files present');
   if (row.live.upstream === undefined || row.live.ahead === undefined)
     return keep('Could not prove that all commits were pushed');
   if (row.live.ahead !== 0) return keep(`${row.live.ahead} commits have not been pushed`);
