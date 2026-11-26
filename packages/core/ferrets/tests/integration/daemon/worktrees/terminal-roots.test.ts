@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { TerminalRootsSource } from '../../../../contract/index.ts';
 import { liveTerminalRoots } from '../../../../daemon/lib/worktrees/terminal-roots.ts';
 import { worktreeRouteWorld } from '../../../support/daemon/worktree-world.ts';
@@ -87,5 +88,51 @@ describe('worktree removal over the contributed terminal roots', () => {
   test('G3-U1 the roots of every contributor are joined', async () => {
     expect(await liveTerminalRoots([shells('/a'), shells('/b', '/c')])).toEqual(['/a', '/b', '/c']);
     expect(await liveTerminalRoots([])).toEqual([]);
+  });
+
+  test('G3-U1 a real terminal opened during pinning after the final Git preflight refuses removal', async () => {
+    let roots: string[] = [];
+    const world = await worktreeRouteWorld('g3u1-late', async () => roots);
+    const made = await world.call('POST /v1/worktrees', {
+      body: { sourcePath: world.repository.root, branch: 'feat/late', sessionId: 'ses-1' },
+    });
+    const path = (made.json as { worktree: { path: string } }).worktree.path;
+    const socket = join(world.parent, 'private.sock');
+    const tmux = async (...args: string[]) => {
+      const child = Bun.spawn(['tmux', '-S', socket, ...args], {
+        env: { PATH: process.env.PATH ?? '', HOME: world.parent },
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      if (code !== 0) throw new Error(stderr);
+      return stdout;
+    };
+    const pin = world.io.pinner.pin.bind(world.io.pinner);
+    let opened = false;
+    world.io.pinner.pin = async target => {
+      const held = await pin(target);
+      if (target === path && !opened) {
+        opened = true;
+        await tmux('new-session', '-d', '-s', 'late-probe', '-c', path, '/bin/sh');
+        roots = [(await tmux('display-message', '-p', '-t', 'late-probe', '#{pane_current_path}')).trim()];
+      }
+      return held;
+    };
+    try {
+      const removed = await world.call('POST /v1/worktrees/remove', {
+        body: { path, overrides: ['accept_unpushed_commits'], deleteBranch: false, confirmations: [] },
+      });
+      expect(removed.status).toBe(409);
+      expect(opened).toBe(true);
+      expect(await exists(path)).toBe(true);
+    } finally {
+      if (opened) await tmux('kill-server');
+    }
   });
 });

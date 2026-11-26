@@ -31,6 +31,9 @@ class FakeRuntime implements TerminalRuntimePort {
     this.calls.push('list');
     return [...this.records.values()];
   }
+  async roots(): Promise<readonly string[]> {
+    return [...this.records.values()].map(record => record.root);
+  }
   async create(input: Parameters<TerminalRuntimePort['create']>[0]): Promise<TerminalRecord> {
     this.calls.push('create');
     const record = {

@@ -298,9 +298,9 @@ export class ManagedTerminalService {
     return groupTerminalHolders(records, await this.standings(records));
   }
 
-  /** The folder every open shell was started in, across every session. Throws when tmux cannot list them. */
+  /** Every live pane's canonical current folder. Failure is unknown occupancy, never no shells. */
   async roots(): Promise<readonly string[]> {
-    return (await this.runtime.list()).map(record => record.root);
+    return await this.runtime.roots();
   }
 
   /** Who holds the open terminals, across every session. */

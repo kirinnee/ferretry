@@ -12,6 +12,7 @@ import {
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
+import { realpath } from '../host/fs.ts';
 
 const ID_OPTION = '@fy_terminal_id';
 const TITLE_OPTION = '@fy_terminal_title';
@@ -80,6 +81,20 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
      */
     private readonly environment: () => Readonly<Record<string, string>> = () => ({}),
   ) {}
+
+  /** Destructive evidence: never turn an unreachable (possibly moved) socket into an empty server. */
+  async roots(): Promise<readonly string[]> {
+    const result = await this.tmux.execute(['list-panes', '-a', '-F', '#{pane_current_path}']);
+    if (result.code !== 0) throw failure('could not read live pane directories', result.stderr);
+    if (result.stdout === '') return [];
+    const directories = result.stdout.replace(/\n$/u, '').split('\n');
+    return await Promise.all(
+      directories.map(async directory => {
+        if (!directory.startsWith('/')) throw new TerminalRuntimeError('a live pane directory is unreadable');
+        return await realpath(directory);
+      }),
+    );
+  }
 
   async list(): Promise<readonly TerminalRecord[]> {
     const format = [

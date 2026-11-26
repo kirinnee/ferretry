@@ -17,14 +17,14 @@ const held = (id: string, root: string): TerminalRecord => ({
 
 const serviceOver = (list: TerminalRuntimePort['list']) =>
   new ManagedTerminalService(
-    { list } as unknown as TerminalRuntimePort,
+    { roots: async () => (await list()).map(record => record.root) } as unknown as TerminalRuntimePort,
     { resolve: async () => undefined },
     { now: () => 0 },
     { next: () => 'id' },
   );
 
 describe('the folders open shells stand in (what worktree removal asks)', () => {
-  it('should answer the start folder of every open shell', async () => {
+  it('should answer every live pane folder from the runtime', async () => {
     const service = serviceOver(async () => [held('a', '/work/one'), held('b', '/work/two')]);
     should(await service.roots()).deepEqual(['/work/one', '/work/two']);
   });

@@ -268,7 +268,7 @@ export interface ManagedWorktreeInspection {
 export interface RemoveManagedWorktreeInput extends CheckManagedWorktreeRemovalInput {
   readonly overrides: readonly WorktreeRemovalOverride[];
   readonly deleteBranch: boolean;
-  /** Re-read host occupancy inside the repository queue immediately before the final preflight. */
+  /** Re-read host occupancy inside the repository queue, before preflight AND after pinning at the delete boundary. */
   readonly refreshEvidence?: () => Promise<CheckManagedWorktreeRemovalInput>;
 }
 
