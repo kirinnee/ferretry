@@ -253,6 +253,7 @@ class FakeFleet {
           { id: 'rt-claude', name: 'claude-work', profile: 'work', harness: 'claude' },
           { id: 'rt-codex', name: 'codex-work', profile: 'work', harness: 'codex' },
           { id: 'rt-orphan', name: 'orphan', profile: 'gone', harness: 'claude' },
+          { id: 'rt-third', name: 'third-work', profile: 'work', harness: 'fake-third' },
         ],
       }) as unknown as FleetRuntimeCatalog,
     profiles: async () =>

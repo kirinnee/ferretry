@@ -7,7 +7,14 @@
  * every secret and a fresh passkey.
  */
 
-import { type CatalogInstallPreview, type CatalogInstalled, revealHidden } from '../../../contract/wire/index.ts';
+import {
+  type CatalogInstallPreview,
+  type CatalogInstalled,
+  installHarnessFacts,
+  installHarnesses,
+  isInstallHarness,
+  revealHidden,
+} from '../../../contract/wire/index.ts';
 import { WebCryptoRelayCrypto, type RelayCrypto } from '@ferretry/app';
 import { CircleCheck, FileUp } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -620,14 +627,13 @@ function TargetPicker({
                   onDraft({
                     scope: 'project',
                     ...(kept === undefined ? {} : { projectRoot: kept }),
-                    ...(next === 'claude' || next === 'codex' ? { harness: next } : {}),
+                    ...(isInstallHarness(next) ? { harness: next } : {}),
                   });
                 }}
                 disabled={busy}
                 options={[
                   { value: '', label: CHOOSE_PLACEHOLDER },
-                  { value: 'claude', label: 'Claude' },
-                  { value: 'codex', label: 'Codex' },
+                  ...installHarnesses().map(word => ({ value: word, label: installHarnessFacts(word).short })),
                 ]}
               />
             </div>

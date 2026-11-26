@@ -5,6 +5,7 @@
  */
 
 import { FerretSkillsInventorySchema, type SkillsAddSlotProps } from '@ferretry/plugin-skills/contract';
+import { installHarnessOfKey } from '../../contract/wire/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { SessionPlace } from '../features/add-skills/add-skills-model.ts';
 
@@ -20,13 +21,16 @@ export function placeQuery(props: SkillsAddSlotProps): string {
   return `?${query.toString()}`;
 }
 
-/** The place a query names; the slot's `claude-code` is the `claude` an install target names, and anything else reads as it. */
+/**
+ * The place a query names; the slot's harness key (`claude-code`) is the word an install target names (`claude`). A harness
+ * Catalogs has no layout for, or none named, is no harness here: the page asks which agent instead of assuming one.
+ */
 export function readPlace(search: string): AddSkillsPlace {
   const query = new URLSearchParams(search);
   const folder = query.get('folder');
   return {
     cwd: folder === null || folder === '' ? undefined : folder,
-    harness: query.get('harness') === 'codex' ? 'codex' : 'claude',
+    harness: installHarnessOfKey(query.get('harness') ?? ''),
     runtime: query.get('runtime') ?? undefined,
     scopes: (query.get('scopes') ?? '').split(',').filter(scope => scope !== ''),
   };
@@ -36,7 +40,7 @@ const FERRET_INVENTORY_ROUTE = 'GET /v1/ferrets/:ferretId/skills/inventory' as c
 
 /**
  * The query for a ferret whose place nobody handed over (the Actions menu knows the ferret, not where it works): Skills'
- * own read of what that ferret sees. A daemon that will not say leaves the page to its defaults (no folder, `claude`).
+ * own read of what that ferret sees. A daemon that will not say leaves the page to its defaults (no folder, no harness).
  */
 export async function placeQueryOfFerret(client: Pick<PluginClient, 'call'>, ferret: string): Promise<string> {
   try {

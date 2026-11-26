@@ -7,7 +7,12 @@
  * the sentence that says where an install landed and whether the running ferret already sees it.
  */
 
-import { type CatalogInstall, type SharedCatalogManifestEntry } from '../../../contract/wire/index.ts';
+import {
+  type CatalogInstall,
+  type InstallHarness,
+  installHarnessFacts,
+  type SharedCatalogManifestEntry,
+} from '../../../contract/wire/index.ts';
 import { revealHidden } from '../../../contract/wire/shared-catalog-review.ts';
 import { relativeWords } from '../../shell.ts';
 import type { TargetDraft } from '../catalogs/catalog-install-model.ts';
@@ -34,7 +39,8 @@ export const PICK_A_PLACE = 'You will pick where to install it.';
 export interface SessionPlace {
   /** The ferret's working folder. */
   readonly cwd: string | undefined;
-  readonly harness: 'claude' | 'codex';
+  /** The harness an install target names, or `undefined` when the ferret's harness is not one a catalog installs into. */
+  readonly harness: InstallHarness | undefined;
   /** The runtime's wrapper name, as the skills inventory names it. */
   readonly runtime: string | undefined;
 }
@@ -92,7 +98,11 @@ export function installPlan(
   const project = place.cwd === undefined || place.cwd === '' ? undefined : projectHolding(place.cwd, projects);
   if (project !== undefined)
     return {
-      draft: { scope: 'project', projectRoot: project.path, harness: place.harness },
+      draft: {
+        scope: 'project',
+        projectRoot: project.path,
+        ...(place.harness === undefined ? {} : { harness: place.harness }),
+      },
       scope: 'project',
       sentence: PROJECT_SENTENCE,
       projectRoot: project.path,
@@ -244,7 +254,7 @@ const sameFolder = (a: string, b: string): boolean => normalizeProjectPath(a) ==
 export function readsPlace(
   install: Pick<CatalogInstall, 'target'>,
   plan: InstallPlan,
-  harness: 'claude' | 'codex',
+  harness: InstallHarness | undefined,
 ): boolean {
   const { target } = install;
   if (target.scope === 'project')
@@ -278,12 +288,18 @@ export function landedSentence(
   install: CatalogInstall,
   plan: InstallPlan,
   scopes: readonly string[],
-  harness: 'claude' | 'codex',
+  harness: InstallHarness | undefined,
 ): string {
   const name = revealHidden(install.provenance.name);
   if (!readsPlace(install, plan, harness)) return `Installed ${name} on ${placeName(install)}. ${NOT_HERE}`;
   const where = install.target.scope === 'project' ? PROJECT_SENTENCE : plan.sentence;
-  const activation = harness === 'codex' ? CODEX_NEXT : likelyNewFolder(install, scopes) ? CLAUDE_RELOAD : CLAUDE_LIVE;
+  // A harness this page has no layout for says nothing about when the skill becomes active.
+  if (harness === undefined) return `Installed ${name} in ${where}.`;
+  const activation = !installHarnessFacts(harness).skillsActiveInRunningFerret
+    ? CODEX_NEXT
+    : likelyNewFolder(install, scopes)
+      ? CLAUDE_RELOAD
+      : CLAUDE_LIVE;
   return `Installed ${name} in ${where}. ${activation}`;
 }
 

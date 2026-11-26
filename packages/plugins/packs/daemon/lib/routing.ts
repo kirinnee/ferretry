@@ -10,14 +10,14 @@
  *
  * Pure: catalogs, runtimes and the file in, values out.
  */
-import type { RuntimeView } from '@ferretry/plugin-runtimes/contract';
+import { harnessWords, type RuntimeView, supportedHarnessKeys } from '@ferretry/plugin-runtimes/contract';
 import {
   MAX_ROUTING_PROMPT_CHARS,
   type PackFleetModel,
   type RoutingFile,
   type RoutingPromptView,
 } from '../../contract/index.ts';
-import type { ModelCatalogEntryView, ModelCatalogView } from './catalog.ts';
+import { halfOf, type ModelCatalogEntryView, type ModelCatalogView } from './catalog.ts';
 
 type Harness = PackFleetModel['harness'];
 type Tier = ModelCatalogEntryView['tier'];
@@ -46,7 +46,8 @@ export const PROVIDER_PREFERENCE: readonly string[] = [
   'ollama',
 ];
 
-const HARNESSES: readonly Harness[] = ['claude-code', 'codex'];
+/** The harnesses Runtimes has behaviour for (its table, Claude Code first): the ones a catalog's halves are read for. */
+const HARNESSES: readonly Harness[] = supportedHarnessKeys();
 
 /** Every model every catalog lists, one row per catalog, CLI and id, in preference order. */
 function catalogModels(catalogs: readonly ModelCatalogView[]): readonly CatalogModel[] {
@@ -58,14 +59,16 @@ function catalogModels(catalogs: readonly ModelCatalogView[]): readonly CatalogM
     .map((catalog, index) => ({ catalog, index }))
     .toSorted((left, right) => rank(left.catalog.id) - rank(right.catalog.id) || left.index - right.index)
     .flatMap(({ catalog }) =>
-      HARNESSES.flatMap(harness =>
-        ((harness === 'claude-code' ? catalog.claude : catalog.codex) ?? []).map(entry => ({
+      HARNESSES.flatMap(harness => {
+        // A harness with no words in Runtimes' table has no half to read: it lists nothing, never another harness's models.
+        const half = harnessWords(harness)?.catalogHalf;
+        return (half === undefined ? [] : (halfOf(catalog, half) ?? [])).map(entry => ({
           provider: catalog.id,
           providerLabel: catalog.label,
           harness,
           entry,
-        })),
-      ),
+        }));
+      }),
     );
 }
 

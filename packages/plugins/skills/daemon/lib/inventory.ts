@@ -7,21 +7,23 @@
 
 import { basename, dirname, join } from 'node:path';
 
-import type {
-  FerretSkillsInventory,
-  MachineSkillsInventory,
-  SkillEntry,
-  SkillScope,
-  SkillToggle,
+import {
+  type FerretSkillsInventory,
+  type MachineSkillsInventory,
+  type SkillEntry,
+  type SkillScope,
+  type SkillsHarnessKey,
+  type SkillToggle,
+  skillsHarnessKeys,
+  skillsLayout,
 } from '../../contract/index.ts';
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
 import { skillFrontMatter } from './front-matter.ts';
 
 export const MAX_SKILL_MANIFEST_BYTES = 256 * 1024;
 /** Per-directory cap; beyond it a listing is cut short and flagged `truncated`. */
 export const MAX_SKILLS_PER_ROOT = 200;
 
-type Harness = KnownHarnessKey;
+type Harness = SkillsHarnessKey;
 
 /** What the inventory needs to know about one ferret: where it works and which runtime it spends. */
 export interface SkillsFerret {
@@ -68,20 +70,17 @@ export interface SkillsInventoryPorts {
 }
 
 /**
- * Precedence between scopes, per harness.
- *
- * INFERRED, not verified against a running harness: Claude documents personal skills overriding project
- * skills of the same name, so a project skill is shadowed by the home's skill; Codex lists skills of the
- * same name from both scopes without merging them, so nothing shadows anything.
+ * Precedence between scopes, per harness (`skillsLayout(harness).homeShadowsProject`): where the home's skill hides a
+ * project skill of the same name, the project skill is shadowed by it.
  */
 function shadowingScope(harness: Harness, scope: SkillScope, homeHas: ReadonlyMap<string, SkillScope>, name: string) {
-  if (harness !== 'claude-code' || scope !== 'project') return undefined;
+  if (!skillsLayout(harness).homeShadowsProject || scope !== 'project') return undefined;
   return homeHas.get(name);
 }
 
-/** Codex reads `<root>/.agents/skills`; Claude reads `<root>/.claude/skills`. */
+/** Where a harness reads a project's skills: `<root>/<its project folder>/skills`. */
 function projectSkillsDirectory(harness: Harness, root: string): string {
-  return join(root, harness === 'claude-code' ? '.claude' : '.agents', 'skills');
+  return join(root, skillsLayout(harness).projectFolder, 'skills');
 }
 
 const FERRETRY_TOGGLE: SkillToggle = {
@@ -89,20 +88,9 @@ const FERRETRY_TOGGLE: SkillToggle = {
   enabled: true,
   reason: 'a Ferretry skill is switched through the profile that selects it',
 };
-const CODEX_TOGGLE: SkillToggle = {
-  supported: false,
-  enabled: true,
-  reason: "Codex's skills.config switch lives in config.toml, which Ferretry regenerates on every apply",
-};
-const CLAUDE_TOGGLE: SkillToggle = {
-  supported: false,
-  enabled: true,
-  reason: 'Claude has no per-skill switch Ferretry can verify',
-};
-
 function toggleFor(harness: Harness, scope: SkillScope): SkillToggle {
   if (scope === 'ferretry') return FERRETRY_TOGGLE;
-  return harness === 'codex' ? CODEX_TOGGLE : CLAUDE_TOGGLE;
+  return { supported: false, enabled: true, reason: skillsLayout(harness).toggleReason };
 }
 
 interface Listed {
@@ -132,7 +120,7 @@ export class SkillsInventoryService {
     const projectListings = await Promise.all(
       projects.map(async project => {
         const skills: SkillEntry[] = [];
-        for (const harness of ['claude-code', 'codex'] as const) {
+        for (const harness of skillsHarnessKeys()) {
           const runtimes = homes.filter(entry => entry.harness === harness).flatMap(entry => [...entry.runtimes]);
           const listed = await this.projectSkills(harness, project.path, runtimes, project.id, new Map());
           truncated ||= listed.truncated;

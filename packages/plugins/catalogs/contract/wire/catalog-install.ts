@@ -19,6 +19,7 @@
  */
 import { z } from 'zod';
 import { InstantSchema } from './foreign.ts';
+import { InstallHarnessSchema } from './install-harness.ts';
 import { DaemonIdSchema } from './foreign.ts';
 import { SecretNameSchema } from '@ferretry/core-vault/contract';
 import {
@@ -79,7 +80,7 @@ export const CatalogInstallTargetSchema = z.discriminatedUnion('scope', [
     scope: z.literal('project'),
     /** Absolute; B resolves it against the projects it knows. */
     projectRoot: z.string().min(1).max(4_096).startsWith('/'),
-    harness: z.enum(['claude', 'codex']),
+    harness: InstallHarnessSchema,
   }),
   z.strictObject({
     scope: z.literal('runtime'),
@@ -284,7 +285,8 @@ export const CatalogInstallTargetsSchema = z.strictObject({
       id: z.string().min(1),
       name: z.string().min(1),
       profile: z.string().min(1),
-      harness: z.enum(['claude', 'codex']),
+      /** The harness the runtime runs, as its catalog names it; a harness Catalogs cannot install into is listed and refused at the install. */
+      harness: z.string().min(1).max(64),
     }),
   ),
 });

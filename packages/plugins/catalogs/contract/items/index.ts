@@ -31,7 +31,8 @@ export interface CatalogRuntimeTarget {
   readonly id: string;
   readonly name: string;
   readonly profile: string;
-  readonly harness: 'claude' | 'codex';
+  /** The harness the runtime runs, as its catalog names it (`claude`, `codex`, or a harness's own key). */
+  readonly harness: string;
 }
 export interface CatalogProfileTarget {
   readonly name: string;

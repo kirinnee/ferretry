@@ -12,6 +12,8 @@ import {
   type CatalogInstallPreviewRequest,
   type CatalogInstallRequest,
   type CatalogSecretBindings,
+  type InstallHarness,
+  installHarnessFacts,
   readSharedCatalogFile,
   SHARED_CATALOG_FILE_MAX_BYTES,
   type SharedCatalogFile,
@@ -138,14 +140,14 @@ export interface TargetOptions {
 }
 
 export type TargetPick =
-  | { readonly scope: 'project'; readonly projectRoot: string; readonly harness: 'claude' | 'codex' }
+  | { readonly scope: 'project'; readonly projectRoot: string; readonly harness: InstallHarness }
   | { readonly scope: 'runtime'; readonly runtime: string; readonly profile: string };
 
 /** What the person has chosen so far. Every field may still be missing. */
 export interface TargetDraft {
   readonly scope?: 'project' | 'runtime';
   readonly projectRoot?: string;
-  readonly harness?: 'claude' | 'codex';
+  readonly harness?: InstallHarness;
   readonly runtime?: string;
   readonly profile?: string;
 }
@@ -353,7 +355,7 @@ const flatPath = (path: string): string =>
 export function installIsAt(install: CatalogInstall, location: SkillLocation): boolean {
   const { target } = install;
   if (target.scope === 'runtime') return location.scope === 'ferretry' && location.runtimes.includes(target.runtime);
-  const folder = target.harness === 'claude' ? '.claude' : '.agents';
+  const folder = installHarnessFacts(target.harness).projectFolder;
   return (
     location.scope === 'project' &&
     flatPath(location.path) === flatPath(`${target.projectRoot}/${folder}/skills/${install.provenance.name}/SKILL.md`)
