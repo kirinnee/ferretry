@@ -2,7 +2,7 @@
  * Proves the only widening speech threads need (`pthread-workers.ts`): ONNX Runtime's sub-workers may start
  * under Trusted Types when — and only when — they are the app's own speech worker scripts on this origin.
  */
-import { describe, it } from 'bun:test';
+import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
 import { allowSpeechThreads, vetThreadUrl } from '../../../../app/lib/stt/pthread-workers.ts';
 import { createTrustedTypes, isWorkerScriptUrl } from '../../../../app/shell-voice.ts';
@@ -25,7 +25,13 @@ describe('vetThreadUrl', () => {
     should(vetThreadUrl('/assets/vosk-worker-Q.js', scope, trust)).equal('trusted:/assets/vosk-worker-Q.js');
   });
 
+  // The address is a development one: the policy reads `import.meta.env.DEV`, which bun takes from the environment.
+  afterEach(() => {
+    delete process.env.DEV;
+  });
+
   it('trusts the dev server’s address of the same module', () => {
+    process.env.DEV = 'true';
     const dev =
       '/@fs/home/dev/My Code/ferretry/packages/plugins/voice/app/worker/parakeet-worker.ts?worker_file&type=module';
     // The URL parser writes the space as %20 in the path the policy is asked about.
