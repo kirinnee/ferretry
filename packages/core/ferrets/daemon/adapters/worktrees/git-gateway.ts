@@ -31,8 +31,9 @@ async function canonicalRecord(
   for (const record of records) {
     try {
       if ((await fileSystem.realPath(record.path)) === expected) return record;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    } catch {
+      // A sibling this daemon cannot resolve (deleted by hand, or outside every root it may reach: a hand-made worktree in
+      // another folder) is not the checkout being looked for, and must not make every other row unreadable.
     }
   }
   return undefined;

@@ -1925,6 +1925,24 @@
     },
     {
       "audit": {
+        "skip": "a repository worktree list records nothing, as the managed list does not"
+      },
+      "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "filesystem"
+      },
+      "guard": {
+        "none": "worktree paths, branches, heads and ferret ids of one repository, no file contents"
+      },
+      "key": "GET /v1/worktrees/repo",
+      "method": "GET",
+      "minimum": "operator",
+      "noStore": true,
+      "path": "/v1/worktrees/repo"
+    },
+    {
+      "audit": {
         "skip": "a removal check records nothing, as today"
       },
       "caller": "any",

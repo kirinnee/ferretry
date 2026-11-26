@@ -1,4 +1,5 @@
 import type { Clock, RouteHandler, StatePort } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import { type GitByteSpawn, KernelGitRunner } from '../adapters/git/runner.ts';
 import {
   GitWorktreeGateway,
@@ -7,14 +8,17 @@ import {
   StateManagedWorktreeRegistry,
   WorktreeOperationQueue,
 } from '../adapters/worktrees/index.ts';
-import { type WorktreeRouteKey, worktreeRoutes } from '../lib/runtime/mounts/worktrees.ts';
+import { type WorktreeRouteKey, type WorktreeSubsystem, worktreeRoutes } from '../lib/runtime/mounts/worktrees.ts';
 import {
   type ManagedWorktreeOperations,
   ManagedWorktreeService,
   WorktreeError,
   type WorktreeSessionFact,
 } from '../lib/worktrees/index.ts';
+import { RepoWorktreeLister } from '../lib/worktrees/repo-list.ts';
 import type { WorktreeDirectoryPinner, WorktreeFileSystem } from '../lib/worktrees/ports.ts';
+import { GitRepoWorktreeRows } from '../adapters/worktrees/repo-git.ts';
+import type { RepoWorktreeListResponse } from '../../contract/index.ts';
 
 /**
  * Managed worktrees: the checkouts this daemon creates and removes (`/v1/worktrees`), and the evidence a removal is
@@ -62,6 +66,8 @@ export interface BuiltWorktrees {
   readonly service: ManagedWorktreeService;
   /** Where managed checkouts live; `undefined` while this daemon hosts none. */
   readonly managedRoot: string | undefined;
+  /** Every worktree of the repository whose common directory this is (the repository listing). */
+  readonly listRepo: (commonDirectory: string) => Promise<RepoWorktreeListResponse>;
   readonly routes: { readonly [K in WorktreeRouteKey]: RouteHandler };
 }
 
@@ -75,11 +81,12 @@ const NO_HOST_OPERATIONS: ManagedWorktreeOperations = new Proxy({} as ManagedWor
 export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
   const clock = new KernelWorktreeClock(needs.clock);
   const io = needs.io;
+  const runner = io === undefined ? undefined : new KernelGitRunner(io.git);
   const operations: ManagedWorktreeOperations =
-    io === undefined
+    io === undefined || runner === undefined
       ? NO_HOST_OPERATIONS
       : new ManagedWorktreeAdapter(
-          new GitWorktreeGateway(new KernelGitRunner(io.git), io.fileSystem, clock),
+          new GitWorktreeGateway(runner, io.fileSystem, clock),
           io.fileSystem,
           clock,
           new WorktreeOperationQueue(),
@@ -104,5 +111,28 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     { next: needs.newId },
     io?.managedRoot,
   );
-  return { service, managedRoot: io?.managedRoot, routes: worktreeRoutes(service) };
+  // The repository listing reads the managed list's own inspection, the registry and the fleet, and writes nothing.
+  const lister =
+    io === undefined || runner === undefined
+      ? undefined
+      : new RepoWorktreeLister({
+          rows: async commonDirectory => await new GitRepoWorktreeRows(runner).rows(commonDirectory),
+          examine: async input => await operations.examine(input),
+          records: async () => await service.records(),
+          sessions: async () => await needs.sessions(),
+          managedRoot: io.managedRoot,
+          clock: { nowMs: () => needs.clock.nowMs(), sleep: async ms => await needs.clock.sleep(milliseconds(ms)) },
+        });
+  const listRepo = async (commonDirectory: string): Promise<RepoWorktreeListResponse> => {
+    if (lister === undefined) throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
+    return await lister.list(commonDirectory);
+  };
+  const subsystem: WorktreeSubsystem = {
+    list: async () => await service.list(),
+    checkRemoval: async (path, cwd) => await service.checkRemoval(path, cwd),
+    remove: async request => await service.remove(request),
+    create: async request => await service.create(request),
+    listRepo,
+  };
+  return { service, managedRoot: io?.managedRoot, listRepo, routes: worktreeRoutes(subsystem) };
 }

@@ -1281,6 +1281,15 @@ command says so at the moment somebody might be tempted to do that instead.
   `filesystem.configure` (which registering already needs) is the only gate on that choice. Registering `/` or `/home`
   does **not** widen it: those are outside the home, so the three file routes refuse a use-only device with the
   outside-home gate's `403` (the file routes never answer a partial index for a refused caller).
+- **The repository worktree list (`GET /v1/worktrees/repo?commonDir=`) is `filesystem.configure`**, at the `operator` minimum, `caller: any`,
+  `noStore`, audit skipped (a read lists nothing it did not already hold). It names ANY repository on the host by its git
+  common directory and answers the paths, branches, heads and ferret ids of every worktree Git lists for it, so it maps the
+  disk the way an outside-home folder read does and asks the same axis: a use-only or `--limited` device is refused, and a
+  remote device needs the passkey step-up. The directory must be absolute and Git must prove it is a common directory
+  (`422 invalid_common_directory` otherwise, a missing query `400`); it is read with `--git-dir=` and no folder, so a
+  repository no ferret stands in is listable. At most 500 rows. A row whose folder this daemon may not reach (outside
+  every ferret's folder and the managed root) is still listed with Git's own facts and `live.undetermined` saying so.
+  The owner's `fy` with the admin token over loopback is ungoverned, as everywhere.
 - ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
   `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
   `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a
