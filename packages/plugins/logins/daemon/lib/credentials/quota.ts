@@ -174,24 +174,66 @@ function resetFromRelative(seconds: unknown, from: number | undefined): number |
   return Math.trunc(from + seconds * 1000);
 }
 
+/** One Codex window and how long it is, when the source said: a window of a day or more is the long one. */
+interface CodexWindow {
+  readonly percent?: number;
+  readonly window?: FleetUsageWindow;
+  readonly lengthSeconds?: number;
+}
+
+const ONE_DAY_SECONDS = 86_400;
+
+function codexWindowLength(
+  record: Record<string, unknown>,
+  key: 'window_minutes' | 'limit_window_seconds',
+): number | undefined {
+  const value = record[key];
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
+  return key === 'window_minutes' ? value * 60 : value;
+}
+
 function codexWindow(
   value: unknown,
   relativeKey: 'resets_in_seconds' | 'reset_after_seconds',
   absoluteKey: 'resets_at' | 'reset_at',
+  lengthKey: 'window_minutes' | 'limit_window_seconds',
   from: number | undefined,
-): { readonly percent?: number; readonly window?: FleetUsageWindow } {
+): CodexWindow {
   const record = asRecord(value);
   const percent = percentFromStoredUtilization(record.used_percent);
   const resetAt = normalizeResetAt(record[absoluteKey]) ?? resetFromRelative(record[relativeKey], from);
   const built = window(percent, resetAt);
-  return { ...(percent === undefined ? {} : { percent }), ...(built === undefined ? {} : { window: built }) };
+  const lengthSeconds = codexWindowLength(record, lengthKey);
+  return {
+    ...(percent === undefined ? {} : { percent }),
+    ...(built === undefined ? {} : { window: built }),
+    ...(lengthSeconds === undefined ? {} : { lengthSeconds }),
+  };
 }
 
-function codexReading(
-  short: ReturnType<typeof codexWindow>,
-  long: ReturnType<typeof codexWindow>,
-  providerAtLimit: boolean,
-): QuotaReading {
+/**
+ * Slots the two Codex windows by LENGTH, not by position: a plan with one window reports it as `primary`
+ * whatever its length, so a lone weekly window must not be taken for the short one. A window whose length
+ * is not given keeps its position's meaning (primary short, secondary long).
+ */
+function codexReading(primary: CodexWindow, secondary: CodexWindow, providerAtLimit: boolean): QuotaReading {
+  const isLong = (w: CodexWindow, positional: boolean): boolean =>
+    w.lengthSeconds === undefined ? positional : w.lengthSeconds >= ONE_DAY_SECONDS;
+  const primaryLong = isLong(primary, false);
+  const secondaryLong = isLong(secondary, true);
+  const both = primary.window !== undefined && secondary.window !== undefined;
+  // Two windows of one class cannot both take a slot, so they keep their position's meaning: only a long
+  // primary beside a short secondary is out of order.
+  const swapped = primaryLong && !secondaryLong;
+  const lone = primary.window === undefined ? secondary : primary;
+  const loneLong = primary.window === undefined ? secondaryLong : primaryLong;
+  const [short, long]: [CodexWindow, CodexWindow] = both
+    ? swapped
+      ? [secondary, primary]
+      : [primary, secondary]
+    : loneLong
+      ? [{}, lone]
+      : [lone, {}];
   return {
     ...(short.window === undefined ? {} : { shortWindow: short.window }),
     ...(long.window === undefined ? {} : { longWindow: long.window }),
@@ -211,8 +253,8 @@ function codexReading(
 export function parseCodexRateLimits(rateLimits: unknown, observedAt?: number): QuotaReading {
   const root = asRecord(rateLimits);
   return codexReading(
-    codexWindow(root.primary, 'resets_in_seconds', 'resets_at', observedAt),
-    codexWindow(root.secondary, 'resets_in_seconds', 'resets_at', observedAt),
+    codexWindow(root.primary, 'resets_in_seconds', 'resets_at', 'window_minutes', observedAt),
+    codexWindow(root.secondary, 'resets_in_seconds', 'resets_at', 'window_minutes', observedAt),
     false,
   );
 }
@@ -228,8 +270,8 @@ export function parseCodexRateLimits(rateLimits: unknown, observedAt?: number): 
 export function parseCodexUsageBody(body: unknown, now: number): QuotaReading {
   const limit = asRecord(asRecord(body).rate_limit);
   return codexReading(
-    codexWindow(limit.primary_window, 'reset_after_seconds', 'reset_at', now),
-    codexWindow(limit.secondary_window, 'reset_after_seconds', 'reset_at', now),
+    codexWindow(limit.primary_window, 'reset_after_seconds', 'reset_at', 'limit_window_seconds', now),
+    codexWindow(limit.secondary_window, 'reset_after_seconds', 'reset_at', 'limit_window_seconds', now),
     limit.limit_reached === true,
   );
 }

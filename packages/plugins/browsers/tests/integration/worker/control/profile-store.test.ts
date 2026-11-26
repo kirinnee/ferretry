@@ -17,6 +17,8 @@ async function profile(alive: (pid: number) => boolean = () => false): Promise<B
     daemonPid: 1001,
     hostname: 'test-host',
     isProcessAlive: alive,
+    // Fake pids here may name real processes on this host, so none is ever read or signalled.
+    orphans: { readArguments: async () => undefined, terminate: async () => false },
     now: () => new Date(0),
   });
 }

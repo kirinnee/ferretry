@@ -206,6 +206,76 @@ describe('parseCodexRateLimits', () => {
   });
 });
 
+describe('Codex windows are slotted by length, not position', () => {
+  const week = 1_786_500_000;
+  it('should label a lone multi-day primary rollout window as the long window', () => {
+    should(parseCodexRateLimits({ primary: { used_percent: 30, window_minutes: 10_080, resets_at: week } })).deepEqual({
+      longWindow: { usedPercent: 30, resetAt: week * 1000 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+  });
+
+  it('should label a lone short secondary rollout window as the short window', () => {
+    should(parseCodexRateLimits({ secondary: { used_percent: 8, window_minutes: 300, resets_at: week } })).deepEqual({
+      shortWindow: { usedPercent: 8, resetAt: week * 1000 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+  });
+
+  it('should put a long primary and a short secondary in their own slots', () => {
+    should(
+      parseCodexRateLimits({
+        primary: { used_percent: 70, window_minutes: 10_080, resets_at: week },
+        secondary: { used_percent: 5, window_minutes: 300, resets_at: 1_786_000_000 },
+      }),
+    ).deepEqual({
+      shortWindow: { usedPercent: 5, resetAt: 1_786_000_000_000 },
+      longWindow: { usedPercent: 70, resetAt: week * 1000 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+  });
+
+  it('should keep a lone window of unknown length at its position', () => {
+    should(parseCodexRateLimits({ primary: { used_percent: 9 } }).shortWindow).deepEqual({ usedPercent: 9 });
+    should(parseCodexRateLimits({ secondary: { used_percent: 9 } }).longWindow).deepEqual({ usedPercent: 9 });
+  });
+
+  it('should label a lone multi-day wham primary_window as the long window', () => {
+    should(
+      parseCodexUsageBody(
+        { rate_limit: { primary_window: { used_percent: 22, reset_at: week, limit_window_seconds: 604_800 } } },
+        1_000,
+      ),
+    ).deepEqual({
+      longWindow: { usedPercent: 22, resetAt: week * 1000 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+  });
+
+  it('should keep a 5-hour primary and weekly secondary wham body as short and long', () => {
+    should(
+      parseCodexUsageBody(
+        {
+          rate_limit: {
+            primary_window: { used_percent: 1, reset_at: 1_786_000_000, limit_window_seconds: 18_000 },
+            secondary_window: { used_percent: 2, reset_at: week, limit_window_seconds: 604_800 },
+          },
+        },
+        1_000,
+      ),
+    ).deepEqual({
+      shortWindow: { usedPercent: 1, resetAt: 1_786_000_000_000 },
+      longWindow: { usedPercent: 2, resetAt: week * 1000 },
+      hasQuotaSignal: true,
+      providerAtLimit: false,
+    });
+  });
+});
+
 describe('parseCodexUsageBody', () => {
   it('should read both windows and the provider at-limit flag', () => {
     should(
