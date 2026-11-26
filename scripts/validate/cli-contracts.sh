@@ -173,10 +173,24 @@ repo-owner-single-source)
   while IFS= read -r constant; do
     [[ ${constant} == *"RELEASE_OWNER = '${owner}'"* ]] || repo_owner_fail "${constant%%:*}:  RELEASE_OWNER is not '${owner}'"
   done < <(git grep -nIE "RELEASE_OWNER = '" -- '*.ts' ':!*.test.ts' ':!**/tests/**')
+  # The release REPOSITORY is the repository's name, not the product's: a repository moved to another name must not
+  # leave updates and downloads pointing at the old one. `RELEASE_REPO` carries it, and nothing builds the repository
+  # half of a release address from the product name after `RELEASE_OWNER`.
+  while IFS= read -r constant; do
+    [[ ${constant} == *"RELEASE_REPO = '${repo}'"* ]] || repo_owner_fail "${constant%%:*}:  RELEASE_REPO is not '${repo}'"
+  done < <(git grep -nIE "RELEASE_REPO = '" -- '*.ts' ':!*.test.ts' ':!**/tests/**')
+  # shellcheck disable=SC2016 # the \${RELEASE_REPO} text is a literal to exclude, not an expansion
+  product_as_repo="$(git grep -nIE 'RELEASE_OWNER[}]/[$][{]' -- '*.ts' ':!*.test.ts' ':!**/tests/**' | grep -vF '${RELEASE_REPO}' || true)"
+  if [ -n "${product_as_repo}" ]; then
+    printf '%s\n' "${product_as_repo}" >&2
+    repo_owner_fail "the lines above build a release address from the product name; use RELEASE_SLUG or RELEASE_REPO"
+  fi
   # A hand-written owner beside this repository's name, in any file that is not a fixture or a changelog.
-  prefix='(github\.com[/:]|github:|brew (un)?tap |--cask |--repo |repos/)'
+  prefix='(github\.com[/:]|raw\.githubusercontent\.com/|github:|brew (un)?tap |--cask |--repo |repos/)'
+  # What may follow the name: a `.git` remote, a sentence-ending dot or any non-name character — never `<repo>.tools`, another repository.
+  suffix='(\.git)?([^A-Za-z0-9_.-]|\.([^A-Za-z0-9]|$)|$)'
   foreign="$(
-    git grep -nIoE "${prefix}[A-Za-z0-9][A-Za-z0-9-]*/(${repo_pattern}|[$][{]product[}])([^A-Za-z0-9_-]|$)" -- . \
+    git grep -nIoE "${prefix}[A-Za-z0-9][A-Za-z0-9-]*/(${repo_pattern}|[$][{]product[}])${suffix}" -- . \
       ':!Changelog*.md' ':!IncrementalChangelog.md' ':!bun.lock' ':!*.test.ts' ':!**/tests/**' |
       grep -vE ":${prefix}${owner}/" || true
   )"

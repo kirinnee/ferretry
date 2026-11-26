@@ -50,7 +50,7 @@ export default implementDaemon(manifest, {
       product: names.product,
       clientName: names.client,
       install: new HostInstallFacts(host, factCommand(kernel.spawn)),
-      releases: new GitHubLatestRelease(names.product, kernel.fetch, {
+      releases: new GitHubLatestRelease(kernel.fetch, {
         userAgent: `${names.daemon}/${port.release}`,
       }),
       documents: new StateUpdateDocuments(kernel.state, kernel.log),

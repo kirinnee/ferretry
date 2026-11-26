@@ -163,7 +163,6 @@ export function buildUpdateMachine(
       latest: new GitHubLatestRelease(product),
       packages,
       standalone: new StandaloneRelease({
-        product,
         clientName,
         platform: inputs.platform ?? process.platform,
         arch: process.arch,

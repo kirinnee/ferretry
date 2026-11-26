@@ -124,7 +124,7 @@ describe('the latest release read, with a loopback server where GitHub would be'
   function github(answer: (request: Request) => Response | Promise<Response>) {
     const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: answer });
     servers.push(server);
-    return new GitHubLatestRelease('ferretry', toLoopback(server.port ?? 0), {
+    return new GitHubLatestRelease(toLoopback(server.port ?? 0), {
       userAgent: 'fyd/4.28.0',
       timeoutMs: 1_000,
     });
@@ -154,7 +154,6 @@ describe('the latest release read, with a loopback server where GitHub would be'
     const odd = github(() => new Response('<html>not json</html>'));
     const draft = github(() => Response.json({ tag_name: 'v9.9.9', html_url: 'https://x.test/', draft: true }));
     const unreachable = new GitHubLatestRelease(
-      'ferretry',
       { request: async () => await fetch('http://127.0.0.1:1/') },
       { userAgent: 'fyd/4.28.0', timeoutMs: 1_000 },
     );

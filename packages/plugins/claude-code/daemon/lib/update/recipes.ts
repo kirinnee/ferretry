@@ -33,9 +33,6 @@ export type HarnessUpdateReport = z.infer<typeof HarnessUpdateReportSchema>;
 /** How a person names this harness. */
 export const CLAUDE_CODE_LABEL = 'Claude Code';
 
-/** Where the product's releases are published, for the verification link. */
-const RELEASE_OWNER = 'kirinnee';
-
 /** THE one place the harness's package names are spelled: its npm package, its Homebrew cask, and its nixpkgs attribute. */
 const CLAUDE_CODE_PACKAGES = {
   npm: '@anthropic-ai/claude-code',
@@ -52,7 +49,7 @@ export const VERIFIED_CLAUDE_CODE_VERSION = '2.1.220';
 
 /** What "verified" means and what is known to break past it: the contract guard's own README. */
 export const verificationUrl = (product: string): string =>
-  `https://github.com/${RELEASE_OWNER}/${product}/blob/main/packages/plugins/claude-code/tests/contract/README.md`;
+  `https://github.com/kirinnee/${product}/blob/main/packages/plugins/claude-code/tests/contract/README.md`;
 
 /** The registry address of the package's `latest` dist-tag. */
 export const npmLatestUrl = (): string => `https://registry.npmjs.org/${CLAUDE_CODE_PACKAGES.npm}/latest`;

@@ -79,11 +79,13 @@ rewrite='
     local $/; my $text = <$in>; close $in;
     my $n = 0;
     # the full slug, as a URL, flake ref, tap, API path, or ssh remote
-    $n += ($text =~ s{(?<![A-Za-z0-9_.-])\Q$oo\E/\Q$or\E(?![A-Za-z0-9_-])}{$no/$nr}g);
+    # (a `.git` remote or a sentence-ending dot still matches; `<repo>.tools` is another repository and does not)
+    $n += ($text =~ s{(?<![A-Za-z0-9_.-])\Q$oo\E/\Q$or\E(?![A-Za-z0-9_-]|\.(?!git\b)[A-Za-z0-9])}{$no/$nr}g);
     # the owner beside the product-name variable (the repo IS the product name)
     $n += ($text =~ s{(?<![A-Za-z0-9_.-])\Q$oo\E/\$\{product\}}{$or eq $nr ? "$no/\${product}" : "$no/$nr"}ge);
-    # the release owner constant
+    # the release owner and repository constants
     $n += ($text =~ s{(RELEASE_OWNER = \x27)\Q$oo\E(\x27)}{$1$no$2}g);
+    $n += ($text =~ s{(RELEASE_REPO = \x27)\Q$or\E(\x27)}{$1$nr$2}g);
     # GoReleaser: the release repository and the tap repository (an owner line followed by its name)
     $n += ($text =~ s{^(\s+owner: )\Q$oo\E(\n\s+name: )\Q$or\E$}{$1$no$2$nr}mg);
     next if $n == 0;

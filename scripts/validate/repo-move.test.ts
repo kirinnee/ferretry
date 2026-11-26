@@ -53,7 +53,11 @@ function checkout(mutate: (path: (file: string) => string) => void = () => {}): 
   put('Changelog.md', 'see https://github.com/kirinnee/ferretry/pull/1\n');
   put(
     'docs/other.md',
-    'https://github.com/kirinnee/pitwall and GitHub · kirinnee and apt.fury.io/kirinnee97/ and kirinnee/ferretry-b168\n',
+    'https://github.com/kirinnee/pitwall and GitHub · kirinnee and apt.fury.io/kirinnee97/ and kirinnee/ferretry-b168 and kirinnee/ferretry.tools\n',
+  );
+  put(
+    'docs/own.md',
+    'ssh github-personal:kirinnee/ferretry.git and https://raw.githubusercontent.com/kirinnee/ferretry/main/x.sh and kirinnee/ferretry.\n',
   );
   put('packages/x/tests/fixture.ts', "export const url = 'https://github.com/kirinnee/ferretry/releases/tag/v1';\n");
   const git = (...args: string[]) => Bun.spawnSync(['git', ...args], { cwd: directory });
@@ -117,6 +121,36 @@ describe('the repo-owner-single-source contract', () => {
     expect(contract(checkout(edit('.goreleaser.yaml', 'owner: kirinnee', 'owner: other'))).status).not.toBe(0);
   });
 
+  test('a foreign owner in a raw.githubusercontent.com installer URL is refused, and named', () => {
+    const directory = checkout(p =>
+      writeFileSync(
+        p('docs/other.md'),
+        'curl https://raw.githubusercontent.com/someone-else/ferretry/main/install.sh\n',
+      ),
+    );
+    const result = contract(directory);
+    expect(result.status).not.toBe(0);
+    expect(result.err).toContain('docs/other.md');
+    expect(result.err).toContain('someone-else');
+  });
+
+  test('a release URL that spells the PRODUCT name as the repository, or a stale RELEASE_REPO, is refused', () => {
+    const edit = (file: string, from: string, to: string) => (p: (f: string) => string) =>
+      writeFileSync(p(file), readFileSync(p(file), 'utf8').replace(from, to));
+    const release = 'packages/plugins/updates/contract/release.ts';
+    expect(contract(checkout(edit(release, "RELEASE_REPO = 'ferretry'", "RELEASE_REPO = 'other'"))).status).not.toBe(0);
+    const spelled = contract(
+      checkout(p =>
+        writeFileSync(
+          p('packages/x/release.ts'),
+          'export const url = (product: string) => `https://github.com/${RELEASE_OWNER}/${product}/releases`;\n',
+        ),
+      ),
+    );
+    expect(spelled.status).not.toBe(0);
+    expect(spelled.err).toContain('packages/x/release.ts');
+  });
+
   test('a package.json without a repository is refused', () => {
     const directory = checkout(p =>
       writeFileSync(p('package.json'), readFileSync(p('package.json'), 'utf8').replace(/ {2}"repository".*\n/u, '')),
@@ -165,8 +199,14 @@ describe('scripts/local/move-repo.sh', () => {
     // What is not this repository's slug stays: history, another repository, an account label, a longer repo name, the Gemfury account.
     expect(read(directory, 'Changelog.md')).toContain('kirinnee/ferretry');
     expect(read(directory, 'docs/other.md')).toBe(
-      'https://github.com/kirinnee/pitwall and GitHub · kirinnee and apt.fury.io/kirinnee97/ and kirinnee/ferretry-b168\n',
+      'https://github.com/kirinnee/pitwall and GitHub · kirinnee and apt.fury.io/kirinnee97/ and kirinnee/ferretry-b168 and kirinnee/ferretry.tools\n',
     );
+    // The slug is rewritten at a `.git` remote, a raw.githubusercontent.com path and a sentence end — but never at a `.tools` sibling.
+    expect(read(directory, 'docs/own.md')).toBe(
+      'ssh github-personal:newco/fy-home.git and https://raw.githubusercontent.com/newco/fy-home/main/x.sh and newco/fy-home.\n',
+    );
+    // The release URLs are built from the repository name, not the product name.
+    expect(read(directory, 'packages/plugins/updates/contract/release.ts')).toContain("RELEASE_REPO = 'fy-home'");
     expect(contract(directory).status).toBe(0);
     expect(existsSync(join(directory, 'package.json.tmp'))).toBe(false);
   });

@@ -14,7 +14,6 @@ import {
 import type { ReleaseFetch } from './latest-release.ts';
 
 export interface StandaloneReleaseOptions {
-  readonly product: string;
   readonly clientName: string;
   /** `process.platform` and `process.arch` of this host. */
   readonly platform: string;
@@ -62,8 +61,8 @@ export class StandaloneRelease implements IStandaloneReleasePort {
     directory: string,
     observer?: UpdateObserver,
   ): Promise<StagedRelease | StandaloneRefusal> {
-    const { product, clientName } = this.options;
-    const instead = `update with the installer instead: ${installerCommand(product)}`;
+    const { clientName } = this.options;
+    const instead = `update with the installer instead: ${installerCommand()}`;
     if (this.options.keys.length === 0) {
       return {
         refused: `this ${clientName} carries no release-signing key, so it cannot verify a standalone update; ${instead}`,
@@ -73,7 +72,7 @@ export class StandaloneRelease implements IStandaloneReleasePort {
     if (archive === undefined) {
       return { refused: `no release archive is published for ${this.options.platform}/${this.options.arch}` };
     }
-    const base = releaseDownloadBase(product, version);
+    const base = releaseDownloadBase(version);
     const downloaded = await this.#download(
       [`${base}/checksums.txt`, `${base}/checksums.txt.sig`, `${base}/${archive}`],
       observer,
