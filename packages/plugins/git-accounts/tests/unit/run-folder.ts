@@ -61,10 +61,28 @@ export const bareNames = async (name: 'ssh-agent' | 'ssh-add'): Promise<string> 
 /** Synthetic binding only: production's trust check NEVER accepts these user-writable fixture binaries. */
 export function testClient(program: string): BoundProgram {
   if (!existsSync(program))
-    return { program, check: { argv: ['/bin/echo', 'synthetic-binding'], expected: 'synthetic-binding' } };
+    return {
+      program,
+      check: { argv: ['/bin/echo', 'synthetic-binding'], expected: 'synthetic-binding' },
+      verify: async () => true,
+    };
   const file = statSync(program, { bigint: true });
   return {
     program,
+    verify: async () => {
+      try {
+        const now = statSync(program, { bigint: true });
+        return (
+          now.dev === file.dev &&
+          now.ino === file.ino &&
+          now.size === file.size &&
+          now.mtimeNs === file.mtimeNs &&
+          now.ctimeNs === file.ctimeNs
+        );
+      } catch {
+        return false;
+      }
+    },
     check: {
       argv: [
         '/usr/bin/stat',

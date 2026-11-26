@@ -25,6 +25,8 @@ import { shimScript } from '../../daemon/features/gh-shim/shim.ts';
 import { nodeFs } from '@ferretry/kernel/host';
 import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 import type { LaunchPartSource } from '@ferretry/core-ferrets/contract';
+import type { PathsPort } from '@ferretry/kernel/contract';
+import { bindProgram } from '../../../../core/kernel/host/paths.ts';
 
 const clean: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -35,7 +37,7 @@ const scratch = () => {
   clean.push(() => rmSync(path, { recursive: true, force: true }));
   return path;
 };
-async function source(clients: string[], folder = tmpRunFolder()) {
+async function source(clients: string[], folder = tmpRunFolder(), linked = true, binding?: PathsPort['bindProgram']) {
   clean.push(() => folder.destroy());
   let parts: () => Promise<unknown> = async () => undefined;
   let ghSource: LaunchPartSource;
@@ -59,8 +61,26 @@ async function source(clients: string[], folder = tmpRunFolder()) {
       [`${folder.path}/shims`, ...clients.map(path => path.slice(0, path.lastIndexOf('/')))].join(':'),
       clients,
     ),
+    // Use production trust: these clients are planted fixture files, not synthetic installed clients.
+    bindProgram: binding,
     fakes: { sealed: new FakeSealedDocuments(), gate: new FakeGate() },
-    uses: { projects: { list: async () => [] } },
+    uses: {
+      projects: {
+        list: async () =>
+          linked
+            ? [
+                {
+                  id: 'synthetic',
+                  name: 'synthetic',
+                  path: '/synthetic-project',
+                  accounts: ['gha_4242'],
+                  source: 'existing-folder',
+                  createdAt: '2026-11-19T00:00:00.000Z',
+                },
+              ]
+            : [],
+      },
+    },
     spawn: () => ({ exitCode: 1, signal: null, stdout: '', stderr: '' }),
   });
   clean.push(() => host.stop());
@@ -91,6 +111,34 @@ test('MUST 3: failed discovery with an old shim on the inherited PATH refuses th
   await expect(run.parts()).rejects.toThrow('GitHub client unavailable');
   expect(run.required()).toBe(true);
   expect(existsSync(marker)).toBe(false);
+});
+
+test('R1: an unlinked project launches without a shim when client discovery fails', async () => {
+  const run = await source([], tmpRunFolder(), false);
+  expect(await run.parts()).toEqual([]);
+});
+
+test('R1: a linked pane uses the user-owned ~/.local/bin client beside its running daemon', async () => {
+  const home = scratch();
+  const bin = join(home, '.local/bin');
+  mkdirSync(bin, { recursive: true });
+  const client = join(bin, 'fy');
+  const daemon = join(bin, 'fyd');
+  writeFileSync(client, '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+  writeFileSync(daemon, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const run = await source([client], tmpRunFolder(), true, path =>
+    bindProgram(
+      nodeFs(() => crypto.randomUUID()),
+      path,
+      { executable: daemon, client: 'fy', daemon: 'fyd' },
+    ),
+  );
+  expect(await run.parts()).toHaveLength(2);
+  const result = Bun.spawnSync([join(run.folder.path, 'shims/gh'), 'pr', 'list'], {
+    env: { HOME: home, PATH: '/absent' },
+  });
+  expect(result.exitCode).toBe(0);
+  expect(new TextDecoder().decode(result.stdout)).toBe('gh\n--\npr\nlist\n');
 });
 
 test('MUST 1: a replacement after preflight never executes with the pane credential environment', () => {

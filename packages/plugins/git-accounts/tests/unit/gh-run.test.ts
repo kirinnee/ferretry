@@ -9,7 +9,7 @@ import {
   ownerStanding,
   StandInAdmission,
 } from '@ferretry/core-gate/contract/testing';
-import type { CallStanding, SpawnOptions, SpawnResult } from '@ferretry/kernel/contract';
+import type { CallStanding, PathsPort, SpawnOptions, SpawnResult } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { testHost } from '@ferretry/kernel/testing';
 import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
@@ -50,6 +50,7 @@ async function boot(
     ferretFolders?: Record<string, string>;
     standing?: () => CallStanding;
     spawn?: (call: Call) => SpawnResult | Promise<SpawnResult>;
+    bindProgram?: PathsPort['bindProgram'];
     /** The daemon's PATH, the executables the kernel finds, and what it says is in the state home (default: a plain /usr/bin/gh). */
     where?: { path?: string; executables?: readonly string[]; held?: (path: string) => Promise<string | undefined> };
   } = {},
@@ -63,6 +64,7 @@ async function boot(
   const host = await testHost({
     plugins: [daemon],
     ...ghHost(options.where?.path, options.where?.executables),
+    ...(options.bindProgram === undefined ? {} : { bindProgram: options.bindProgram }),
     ...(options.where?.held === undefined ? {} : { stateHomeHolding: options.where.held }),
     gate: new StandInAdmission(() => (connecting ? ownerStanding() : (options.standing ?? (() => ownerStanding()))())),
     fakes: { sealed, gate },
@@ -119,6 +121,38 @@ describe('the gh that gets a token is the real one, never a file in the state ho
   const SHIMS = `${HOME}/state/git-accounts/downloads/shims`;
   const held = async (path: string) => (path === HOME || path.startsWith(`${HOME}/`) ? HOME : undefined);
 
+  test('R2: a planted gh earlier on PATH is refused before any credential-bearing child starts', async () => {
+    const { root } = projectFolder();
+    const world = await boot({
+      projects: [linked(root)],
+      where: { path: `${root}:/usr/bin`, executables: [`${root}/gh`, '/usr/bin/gh'] },
+      bindProgram: async () => undefined,
+    });
+    expect((await world.gh(['pr', 'list'], root)).json()).toEqual({ refused: expect.any(String) });
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
+  test('R2: gh swapped after selection is refused immediately before exec, with no token passed', async () => {
+    const { root } = projectFolder();
+    let verified = false;
+    const world = await boot({
+      projects: [linked(root)],
+      bindProgram: async program => ({
+        program,
+        check: { argv: ['/usr/bin/stat', program], expected: 'synthetic' },
+        verify: async () => {
+          verified = true;
+          return false;
+        },
+      }),
+    });
+    expect((await world.gh(['pr', 'list'], root)).json()).toEqual({ refused: expect.any(String) });
+    expect(verified).toBe(true);
+    expect(world.calls).toEqual([]);
+    expect(everything(world)).not.toContain(FAKE_TOKEN);
+  });
+
   test('a daemon PATH that starts with the shim folder (written there by a pane) still runs the real gh, by absolute path', async () => {
     const { root } = projectFolder();
     const world = await boot({
@@ -130,7 +164,7 @@ describe('the gh that gets a token is the real one, never a file in the state ho
     expect(world.calls.map(call => call.program)).toEqual(['/usr/bin/gh']);
     // The sealed child would otherwise inherit that PATH: it is given its own, with no state-home folder in it (L52).
     const env = world.calls[0]?.options?.env as Record<string, string>;
-    expect(env.PATH).toBe('/usr/bin');
+    expect(env.PATH).toBe('/usr/bin:/bin');
     expect(env.PATH).not.toContain(SHIMS);
   });
 

@@ -134,6 +134,37 @@ describe('bindProgram installed-client trust', () => {
     await writeFile(`${parent}/fy`, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     expect(await bindProgram(disk, `${parent}/fy`)).toBeUndefined();
   });
+
+  test('R1: the running daemon trusts its own user-owned ~/.local/bin sibling, bound to identity', async () => {
+    const { fs, files, writable } = installed();
+    const local = '/home/owner/.local/bin';
+    for (const path of ['/home', '/home/owner', '/home/owner/.local', local]) {
+      files.set(path, { ...files.get('/installed')!, owner: 1000 });
+      writable.add(path);
+    }
+    files.set(`${local}/fy`, { ...files.get('/installed/fy')!, owner: 1000 });
+    files.set(`${local}/fyd`, { ...files.get('/installed/fy')!, inode: 77n, owner: 1000 });
+    writable.add(`${local}/fy`);
+    const bound = await bindProgram(fs, `${local}/fy`, {
+      executable: `${local}/fyd`,
+      client: 'fy',
+      daemon: 'fyd',
+    });
+    expect(bound?.program).toBe(`${local}/fy`);
+    expect(await bound?.verify()).toBe(true);
+    files.get(`${local}/fy`)!.mtimeNs += 1n;
+    expect(await bound?.verify()).toBe(false);
+    expect(await bindProgram(fs, `${local}/fy`)).toBeUndefined();
+  });
+
+  test('R2: a bound system gh rejects replacement and same-second same-size edits', async () => {
+    const { fs, files } = installed();
+    files.set('/installed/gh', { ...files.get('/installed/fy')! });
+    const bound = await bindProgram(fs, '/installed/gh');
+    expect(await bound?.verify()).toBe(true);
+    files.get('/installed/gh')!.mtimeNs += 1n;
+    expect(await bound?.verify()).toBe(false);
+  });
 });
 
 describe('checkDirectory', () => {

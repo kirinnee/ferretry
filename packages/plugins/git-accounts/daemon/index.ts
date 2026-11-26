@@ -28,6 +28,7 @@ import { ghRunRoutes } from './features/gh-run/routes.ts';
 import { sshKeyRoutes } from './features/ssh-keys/routes.ts';
 import { SshKeyService } from './features/ssh-keys/service.ts';
 import { AccountBook } from './lib/accounts.ts';
+import { accountForFolder } from './lib/account-for-folder.ts';
 import { AccountLocks } from './lib/account-locks.ts';
 import { GithubDeviceFlows } from './lib/device-flow.ts';
 import { GitAccountsService } from './lib/service.ts';
@@ -72,6 +73,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         which: (name: string, options: { readonly directories: readonly string[] }) =>
           kernel.paths.which(name, options),
         stateHomeHolding: (path: string) => kernel.paths.stateHomeHolding(path),
+        bindProgram: (path: string) => kernel.paths.bindProgram(path),
       };
       const sshPrograms = {
         'ssh-agent': programLocator({ name: 'ssh-agent', trustedWith: 'an account key' }, locatorPorts),
@@ -198,7 +200,13 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
                 gpg: account => gpgService.launchKit(account),
               }),
             },
-            { id: 'git-accounts-gh', item: ghShimLaunchParts(shimFolders) },
+            {
+              id: 'git-accounts-gh',
+              item: ghShimLaunchParts(shimFolders, async folder => {
+                const linked = accountForFolder(folder, (await projects.current()?.list()) ?? [], () => true);
+                return linked !== undefined;
+              }),
+            },
           ],
         },
         provides: {

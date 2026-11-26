@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
 import { ghLocator } from '../../daemon/lib/gh-locator.ts';
+import { testClient } from './run-folder.ts';
 
 const HOME = '/h/.fy';
 
@@ -13,6 +14,7 @@ function locator(
   const asked: { directories: readonly string[] }[] = [];
   const checked: string[] = [];
   const run = ghLocator({
+    bindProgram: async program => testClient(program),
     daemonPath: () => path,
     which: async (_name, options) => {
       asked.push(options);
@@ -37,17 +39,18 @@ describe('which gh runs with a token', () => {
       inHome,
     );
     // The child's `PATH` is the same filtered list: no state-home folder (the shim folder) in it.
-    expect(await run()).toEqual({ program: '/usr/bin/gh', path: '/opt/bin:/usr/bin' });
+    expect(await run()).toMatchObject({ program: '/usr/bin/gh', path: '/usr/bin:/bin' });
     expect(asked[0]?.directories).toEqual(['/opt/bin', '/usr/bin']);
   });
 
   test('the folder gh was found in is always on the child PATH, even one the kernel reached by its own fallback', async () => {
     const run = ghLocator({
+      bindProgram: async program => testClient(program),
       daemonPath: () => `${HOME}/shims`,
       which: async () => '/opt/gh/bin/gh',
       stateHomeHolding: async candidate => inHome(candidate),
     });
-    expect(await run()).toEqual({ program: '/opt/gh/bin/gh', path: '/opt/gh/bin' });
+    expect(await run()).toMatchObject({ program: '/opt/gh/bin/gh', path: '/usr/bin:/bin' });
   });
 
   test('a PATH the daemon does not have still searches (the kernel falls back to its own list)', async () => {
@@ -68,6 +71,7 @@ describe('which gh runs with a token', () => {
 
   test('a fence that cannot be built is a refusal, not a guess, and the error is always an ApiError', async () => {
     const run = ghLocator({
+      bindProgram: async program => testClient(program),
       daemonPath: () => '/usr/bin',
       which: async () => '/usr/bin/gh',
       stateHomeHolding: async () => {

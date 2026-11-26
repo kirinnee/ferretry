@@ -41,7 +41,9 @@ export interface PathsPort {
    * canonical ancestor must be root-owned and not writable by this process (ACLs included). Group/world write is
    * refused except on root-owned sticky directories (the multi-user Nix store), which protect root-owned entries.
    * The canonical basename must retain the requested program name, so a client-name link to a shell is refused.
-   * Refuses user installs, worktrees, downloads and temporary folders. Requires permissions.which.
+   * Exception: the product client beside the running daemon's canonical executable (the installer's user-owned
+   * ~/.local/bin is supported). Other user installs, worktrees, downloads and temporary folders are refused.
+   * Requires permissions.which. verify() rechecks the full identity, including nanosecond timestamps, before use.
    * The returned trusted stat command lets a shell shim recheck dev/inode/size/mtime/ctime immediately before exec.
    */
   bindProgram(absolutePath: string): Promise<BoundProgram | undefined>;
@@ -74,6 +76,7 @@ export interface PathsPort {
 export interface BoundProgram {
   readonly program: string;
   readonly check: { readonly argv: readonly string[]; readonly expected: string };
+  verify(): Promise<boolean>;
 }
 
 /** {@link PathsPort.locate}'s answer. `override_unusable` names the variable and the path it holds: NO fallback. */

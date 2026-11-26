@@ -118,7 +118,10 @@ describe('every ferret’s launch gets the shim, and never a token', () => {
   const spec = { folder: '/anywhere' } as never;
 
   test('a folder first on PATH, an empty GH_CONFIG_DIR, one instruction: for any folder, linked project or not', async () => {
-    const parts = await ghShimLaunchParts(async () => folders).parts(spec);
+    const parts = await ghShimLaunchParts(
+      async () => folders,
+      async () => true,
+    ).parts(spec);
     expect(parts).toEqual([
       {
         kind: 'pane-env',
@@ -131,7 +134,10 @@ describe('every ferret’s launch gets the shim, and never a token', () => {
   });
 
   test('no GitHub token name and no PATH/HOME in the env it contributes; the sentence says what is refused', async () => {
-    const parts = await ghShimLaunchParts(async () => folders).parts(spec);
+    const parts = await ghShimLaunchParts(
+      async () => folders,
+      async () => true,
+    ).parts(spec);
     const env = parts.flatMap(part => (part.kind === 'pane-env' ? Object.keys(part.env) : []));
     expect(env).toEqual(['GH_CONFIG_DIR']);
     expect(JSON.stringify(parts)).not.toMatch(/GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|ghp_|gho_/u);
@@ -140,7 +146,12 @@ describe('every ferret’s launch gets the shim, and never a token', () => {
   });
 
   test('a missing shim refuses launch even when an older shim remains on inherited PATH', async () => {
-    await expect(ghShimLaunchParts(async () => undefined).parts(spec)).rejects.toThrow('GitHub client unavailable');
+    await expect(
+      ghShimLaunchParts(
+        async () => undefined,
+        async () => true,
+      ).parts(spec),
+    ).rejects.toThrow('GitHub client unavailable');
   });
 });
 
@@ -617,12 +628,24 @@ describe('the daemon half', () => {
         daemonName: 'test-daemon',
         binaries: { client: clientName, daemon: 'fyd' },
       },
-      bindProgram: async path => testClient(path),
       ...ghHost(clients.map(path => path.slice(0, path.lastIndexOf('/'))).join(':') || '/preview/bin', clients),
       stateHomeHolding: async path => (path.startsWith('/synthetic-state/') ? '/synthetic-state' : undefined),
       gate: new StandInAdmission(() => ownerStanding()),
       fakes: { sealed: new FakeSealedDocuments(), gate },
-      uses: { projects: { list: async () => [] } },
+      uses: {
+        projects: {
+          list: async () => [
+            {
+              id: 'synthetic',
+              name: 'synthetic',
+              path: '/linked',
+              accounts: ['gha_4242'],
+              source: 'existing-folder',
+              createdAt: '2026-11-19T00:00:00.000Z',
+            },
+          ],
+        },
+      },
       spawn: () => ({ exitCode: 1, signal: null, stdout: '', stderr: '' }),
     });
     return { host, held };
@@ -689,7 +712,7 @@ describe('the daemon half', () => {
     const { host, held } = await boot(folder, clients);
     try {
       const gh = held.items.find(entry => entry.id === 'git-accounts-gh');
-      await expect(gh!.item.parts({ folder: '/anywhere' })).rejects.toThrow('GitHub client unavailable');
+      await expect(gh!.item.parts({ folder: '/linked' })).rejects.toThrow('GitHub client unavailable');
       expect(existsSync(`${folder.path}/shims/gh`)).toBe(false);
       clients.push('/preview/bin/fy');
       expect((await gh?.item.parts({ folder: '/anywhere' }))?.[0]).toHaveProperty('pathPrepend');
@@ -704,7 +727,7 @@ describe('the daemon half', () => {
     const { host, held } = await boot(folder, ['/synthetic-state/bin/fy']);
     try {
       await expect(
-        held.items.find(entry => entry.id === 'git-accounts-gh')!.item.parts({ folder: '/anywhere' }),
+        held.items.find(entry => entry.id === 'git-accounts-gh')!.item.parts({ folder: '/linked' }),
       ).rejects.toThrow('GitHub client unavailable');
       expect(existsSync(`${folder.path}/shims/gh`)).toBe(false);
     } finally {
@@ -747,6 +770,6 @@ describe('the daemon half', () => {
     const folder = runFolder();
     chmodSync(folder.path, 0o755);
     const { held } = await boot(folder);
-    await expect(held.items[1]!.item.parts({ folder: '/anywhere' })).rejects.toThrow('GitHub client unavailable');
+    await expect(held.items[1]!.item.parts({ folder: '/linked' })).rejects.toThrow('GitHub client unavailable');
   });
 });

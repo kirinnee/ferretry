@@ -6,16 +6,32 @@ import { fencedReal, fenceOf, sameObject, walkPhysically, walkUnchanged } from '
 import type { TruncationWatcher } from './fence-index.ts';
 import { mayReadOverride } from './which.ts';
 
-/** Only a system-managed canonical path can be handed a pane credential by a shim. Never executes a probe. */
-export async function bindProgram(fs: Pick<HostFs, 'realpath' | 'identity' | 'writable'>, path: string) {
-  const trusted = async (named: string) => {
+/** System programs, plus the client beside this running daemon. Never executes a probe. */
+export async function bindProgram(
+  fs: Pick<HostFs, 'realpath' | 'identity' | 'writable'>,
+  path: string,
+  install?: { readonly executable: string; readonly client: string; readonly daemon: string },
+) {
+  const trusted = async (named: string, ownClient = false) => {
     if (!isAbsolute(named)) return undefined;
     const real = await fs.realpath(named);
     // A planted `fy -> /bin/sh` is still a planted client: system ownership alone would trust the interpreter.
     if (basename(real) !== basename(named)) return undefined;
     const file = await fs.identity(real);
     if (file?.kind !== 'file' || (file.mode & 0o111) === 0) return undefined;
-    for (let at = real; ; at = dirname(at)) {
+    // Trust only this daemon's own canonical install, never a general user-writable PATH directory.
+    // The installer defaults to ~/.local/bin. This exception is for the product client, never gh/stat.
+    let sibling = false;
+    if (ownClient && install && basename(named) === install.client) {
+      const daemon = await fs.realpath(install.executable);
+      const running = await fs.identity(daemon);
+      sibling =
+        (basename(daemon) === install.daemon || basename(daemon) === install.client) &&
+        running?.kind === 'file' &&
+        dirname(real) === dirname(daemon) &&
+        basename(real) === install.client;
+    }
+    for (let at = real; !sibling; at = dirname(at)) {
       const found = await fs.identity(at);
       // A root-owned sticky directory (the multi-user Nix store) cannot rename its root-owned children. It is safe
       // only when the daemon itself cannot write there; /tmp still fails the access check.
@@ -44,10 +60,10 @@ export async function bindProgram(fs: Pick<HostFs, 'realpath' | 'identity' | 'wr
     return { real, file };
   };
   try {
-    const bound = await trusted(path);
+    const bound = await trusted(path, true);
     const stat = await trusted('/usr/bin/stat');
     if (bound === undefined || stat === undefined) return undefined;
-    const file = bound.file;
+    const file = { ...bound.file };
     const expected = [
       file.device,
       file.inode,
@@ -58,7 +74,27 @@ export async function bindProgram(fs: Pick<HostFs, 'realpath' | 'identity' | 'wr
       (file.mode & 0o7777).toString(8),
     ].join(':');
     const args = process.platform === 'darwin' ? ['-Lf', '%d:%i:%z:%m:%c:%u:%Lp'] : ['-Lc', '%d:%i:%s:%Y:%Z:%u:%a'];
-    return { program: bound.real, check: { argv: [stat.real, ...args, bound.real], expected } };
+    return {
+      program: bound.real,
+      check: { argv: [stat.real, ...args, bound.real], expected },
+      verify: async () => {
+        try {
+          const current = await trusted(bound.real, true);
+          return (
+            current?.real === bound.real &&
+            current.file.device === file.device &&
+            current.file.inode === file.inode &&
+            current.file.size === file.size &&
+            current.file.mtimeNs === file.mtimeNs &&
+            current.file.ctimeNs === file.ctimeNs &&
+            current.file.mode === file.mode &&
+            current.file.owner === file.owner
+          );
+        } catch {
+          return false;
+        }
+      },
+    };
   } catch {
     return undefined;
   }
