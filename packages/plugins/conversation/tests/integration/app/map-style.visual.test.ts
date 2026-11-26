@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser } from 'playwright-core';
-import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import { describeRoundMisses, roundSafeMisses, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 import { fakeTilePng } from '../../support/app/fake-tile.ts';
 
 setDefaultTimeout(90_000);
@@ -94,7 +94,7 @@ describe('map style — Settings row and both styles of map', () => {
               const tab = await context.newPage();
               const problems: string[] = [];
               tab.on('pageerror', error => problems.push(error.message));
-              await tab.goto(`${origin}/?theme=${style}-${mode}&view=${view}`);
+              await tab.goto(`${origin}/?style=${style}&mode=${mode}&view=${view}`);
               if (view === 'osm' || view === 'fallback' || view === 'needs-key')
                 await tab.waitForSelector('[data-fy-render-map="drawn"]');
               else if (view === 'google') await tab.waitForSelector('iframe');
@@ -130,6 +130,9 @@ describe('map style — Settings row and both styles of map', () => {
               }
               if (view === 'setting') expect(await tab.locator('[data-map-style-key="input"]').count()).toBe(1);
               expect(problems).toEqual([]);
+              // Round-safe: nothing crosses a rounded corner, at either rounding.
+              const misses = await roundSafeMisses(tab);
+              expect(describeRoundMisses(misses)).toBe(describeRoundMisses([]));
 
               if (shotsDir !== '')
                 await tab.screenshot({

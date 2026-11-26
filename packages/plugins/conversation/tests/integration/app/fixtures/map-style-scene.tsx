@@ -3,7 +3,7 @@
  * network). The key is a FAKE one; the Google frame is stubbed by the driver and the OpenStreetMap tiles answered
  * locally, so no capture ever carries a real key or makes a real request.
  *
- *   ?theme=<style>-<mode>   ?view=setting|setting-key|osm|google|fallback|needs-key
+ *   ?style=<style>&mode=light|dark   ?view=setting|setting-key|osm|google|fallback|needs-key
  */
 import { SettingGroup } from '@ferretry/app';
 import { createRoot } from 'react-dom/client';
@@ -12,9 +12,13 @@ import { FyRenderMap } from '../../../../app/render/fy-render-map.tsx';
 import { MapStyleRow, changeMapChoice } from '../../../../app/render/fy-render-map-style-row.tsx';
 
 const params = new URLSearchParams(window.location.search);
-document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+const html = document.documentElement;
+const mode = params.get('mode') === 'dark' ? 'dark' : 'light';
+html.dataset.style = params.get('style') ?? 'studio';
+html.dataset.palette = 'studio';
+html.dataset.mode = mode;
+html.dataset.theme = `studio-${mode}`;
 const view = params.get('view') ?? 'setting';
-const mode = (document.documentElement.dataset.theme ?? '').endsWith('dark') ? 'dark' : 'light';
 
 /** A FAKE key of the right shape. */
 const FAKE_KEY = 'AIzaFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0';
@@ -37,7 +41,7 @@ function Scene() {
       </SettingGroup>
     );
   return (
-    <div className="fy-render" data-fy-render-fullscreen="false">
+    <div className="fy-render p-3" data-fy-render-fullscreen="false">
       <FyRenderMap
         alt="Big Ben"
         environment={{ credentialless: true, isolated: false }}

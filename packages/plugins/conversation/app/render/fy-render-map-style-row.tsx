@@ -126,7 +126,7 @@ export function MapStyleRow() {
                   id={keyId}
                   field={field}
                   className="kt-input min-w-0 flex-1"
-                  placeholder="Paste a key restricted to the Maps Embed API"
+                  placeholder="Paste your key"
                   data-map-style-key="input"
                   onTyped={setTyped}
                 />
