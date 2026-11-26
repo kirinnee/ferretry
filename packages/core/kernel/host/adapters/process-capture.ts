@@ -1,11 +1,11 @@
 export const ABANDONED = Symbol('abandoned');
 
-/** A hard byte cap: stop the child and both readers on overflow or cancellation. */
+/** Retain at most the byte cap; drain overflow unless the caller opts into stopping the child. */
 export async function readCapped(
   stream: ReadableStream<Uint8Array>,
   maxBytes: number,
   abandoned: Promise<typeof ABANDONED>,
-  stop: () => void,
+  stop?: () => void,
 ): Promise<{ readonly bytes: Uint8Array; readonly truncated: boolean }> {
   const chunks: Uint8Array[] = [];
   let keptBytes = 0;
@@ -27,9 +27,11 @@ export async function readCapped(
       keptBytes += kept.byteLength;
       if (kept.byteLength < chunk.byteLength) {
         truncated = true;
-        abandonedRead = true;
-        stop();
-        break;
+        if (stop !== undefined) {
+          abandonedRead = true;
+          stop();
+          break;
+        }
       }
     }
   } finally {

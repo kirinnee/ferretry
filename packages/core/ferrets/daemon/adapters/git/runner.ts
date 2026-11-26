@@ -40,13 +40,17 @@ export interface GitByteSpawn {
       readonly maxStdoutBytes?: number;
       readonly maxStderrBytes?: number;
       readonly signal?: AbortSignal;
+      readonly killOnOutputLimit?: boolean;
     },
   ): Promise<GitExecution>;
 }
 
 /** Today's `BunGitRunner`, over the kernel's spawn: same hardened arguments, environment and limits. */
 export class KernelGitRunner implements GitRunner {
-  constructor(private readonly spawn: GitByteSpawn) {}
+  constructor(
+    private readonly spawn: GitByteSpawn,
+    private readonly capture: { readonly killOnOutputLimit?: true } = {},
+  ) {}
 
   async run(invocation: GitInvocation): Promise<GitExecution> {
     invocation.signal?.throwIfAborted();
@@ -62,6 +66,7 @@ export class KernelGitRunner implements GitRunner {
         maxStdoutBytes,
         maxStderrBytes: DEFAULT_GIT_STDERR_LIMIT,
         signal: invocation.signal,
+        ...this.capture,
       });
     } catch (error) {
       if (error instanceof GitProcessError) throw error;

@@ -82,7 +82,7 @@ export class GitRepoWorktreeRows {
     const checkout = await this.access.checkout(folder, repository);
     try {
       signal?.throwIfAborted();
-      return await read({
+      const result = await read({
         run: async invocation => {
           signal?.throwIfAborted();
           await checkout.verify();
@@ -91,13 +91,18 @@ export class GitRepoWorktreeRows {
             ...invocation,
             cwd: checkout.cwd,
             signal,
-            args: [`--git-dir=${checkout.gitDirectory}`, ...invocation.args],
+            args: [`--git-dir=${checkout.gitDirectory}`, '--work-tree=.', ...invocation.args],
           });
           signal?.throwIfAborted();
           await checkout.verify();
           return result;
         },
       });
+      // The inspection records Git failures as evidence. Identity failures must still escape that catch before a
+      // successful inspection can authorize a managed label.
+      signal?.throwIfAborted();
+      await checkout.verify();
+      return result;
     } finally {
       await checkout.close();
     }

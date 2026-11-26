@@ -118,7 +118,7 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
   const listRepo = async (commonDirectory: string): Promise<RepoWorktreeListResponse> => {
     if (io === undefined || runner === undefined)
       throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
-    const reader = new GitRepoWorktreeRows(runner, io.repoAccess);
+    const reader = new GitRepoWorktreeRows(new KernelGitRunner(io.git, { killOnOutputLimit: true }), io.repoAccess);
     const lister = new RepoWorktreeLister({
       rows: async (directory, signal) => await reader.rows(directory, signal),
       examine: async (input, signal) =>

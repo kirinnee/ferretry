@@ -323,8 +323,18 @@ export function bunSpawn(
       try {
         const [exited, stdout, stderr] = await Promise.all([
           Promise.race([child.exited, abandoned.promise]),
-          readCapped(child.stdout, maxStdout, abandoned.promise, stop),
-          readCapped(child.stderr, maxStderr, abandoned.promise, stop),
+          readCapped(
+            child.stdout,
+            maxStdout,
+            abandoned.promise,
+            options?.killOnOutputLimit === true ? stop : undefined,
+          ),
+          readCapped(
+            child.stderr,
+            maxStderr,
+            abandoned.promise,
+            options?.killOnOutputLimit === true ? stop : undefined,
+          ),
         ]);
         return {
           exitCode: exited === ABANDONED || exited === null ? -1 : exited,

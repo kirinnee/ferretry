@@ -27,11 +27,25 @@ describe('kernel.spawn runBytes (today’s Git runner capture)', () => {
   test('an output flood stops reading and kills the child as soon as the byte cap is exceeded', async () => {
     const result = await spawn.runBytes('sh', ['-c', 'while :; do printf "%4096s" x; done'], {
       maxStdoutBytes: 64,
+      killOnOutputLimit: true,
       timeout: milliseconds(1000),
     });
     expect(result.stdout.byteLength).toBe(64);
     expect(result.stdout.buffer.byteLength).toBe(64);
     expect(result.stdoutTruncated).toBe(true);
+    expect(result.timedOut).toBe(false);
+  });
+
+  test('a default caller drains 2 MiB, keeps the first 1 MiB and preserves the normal exit', async () => {
+    const result = await spawn.runBytes('sh', ['-c', 'head -c 2097152 /dev/zero; printf done >&2'], {
+      timeout: milliseconds(2000),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.byteLength).toBe(1024 * 1024);
+    expect(result.stdout).toEqual(new Uint8Array(1024 * 1024));
+    expect(result.stdoutTruncated).toBe(true);
+    expect(result.stderr).toBe('done');
+    expect(result.stderrTruncated).toBe(false);
     expect(result.timedOut).toBe(false);
   });
 
