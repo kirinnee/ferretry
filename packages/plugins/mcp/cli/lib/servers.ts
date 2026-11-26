@@ -6,6 +6,7 @@
  * home and its project — so an agent can ask "why is my server not there?" and get the scope, the
  * approval and the check in words. Outside one, or with `--machine`, they read the whole machine.
  */
+import { byRecordedHarnessKey } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
   type McpCheckResult,
@@ -92,7 +93,9 @@ export function renderMcpInventory(inventory: McpInventory): string {
     if (lines.length > 0) lines.push('');
     lines.push(`${SCOPE_WORD[scope]}:`);
     for (const server of servers)
-      lines.push(`  ${server.name}${server.harness === 'codex' ? ' (codex)' : ''}  ${rowFacts(server)}`);
+      lines.push(
+        `  ${server.name}${byRecordedHarnessKey(server.harness, { claude: () => '', codex: () => ' (codex)' })}  ${rowFacts(server)}`,
+      );
   }
   if (inventory.problems.length > 0) {
     if (lines.length > 0) lines.push('');

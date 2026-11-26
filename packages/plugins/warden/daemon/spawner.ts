@@ -1,10 +1,13 @@
-import { type FerretId, type FerretsApi, type StartFailure } from '@ferretry/core-ferrets/contract';
+import {
+  type FerretId,
+  type FerretsApi,
+  recordedFamilyOfKey,
+  type StartFailure,
+} from '@ferretry/core-ferrets/contract';
 import type { WardenWorkFolders } from './adapters/index.ts';
 import { WARDEN_SWEEP_ORIGIN } from './lib/remedy.ts';
 import { WardenCallsignTakenError, type WardenSpawner } from './lib/sweep.ts';
 import { WARDEN_LABEL } from './lib/types.ts';
-
-const HARNESS_OF: Readonly<Record<string, 'claude' | 'codex'>> = { 'claude-code': 'claude', codex: 'codex' };
 
 /** A refused start says a name is held in these words (`FerretsService.takeName`); the sweep then takes the next name. */
 const NAME_HELD = /\bis held by\b|\bis already (?:in use|claimed|taken)\b|\bcallsign_taken\b/iu;
@@ -57,7 +60,8 @@ export function ferretsWardenSpawner(ports: {
         sessionId: id,
         createdAt: ferret.createdAt,
         agent: ferret.runtime ?? request.agent,
-        harness: HARNESS_OF[ferret.harness] ?? 'claude',
+        // The family the table names, or the harness's own key: provenance records what ran, never Claude for a harness it cannot name.
+        harness: recordedFamilyOfKey(ferret.harness) ?? ferret.harness,
         // What ran, never what was asked for: provenance records the ferret's own model.
         model: ferret.model ?? request.model ?? 'default',
         modelSource: ferret.model === undefined ? 'configured' : 'agent',
