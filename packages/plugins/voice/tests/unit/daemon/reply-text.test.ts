@@ -55,6 +55,18 @@ describe('a spoken line as pieces', () => {
     // Nowhere to cut at a space: cut at the limit.
     expect(splitForSpeech('x'.repeat(600)).map(piece => piece.length)).toEqual([280, 280, 40]);
   });
+
+  test('a token that fits on its own is never cut, even when the only space is early in the piece', () => {
+    const url = `https://example.com/${'a'.repeat(244)}`;
+    const text = `${'checking '.repeat(27)}${url} before publishing the report.`;
+    const pieces = splitForSpeech(text);
+    expect(pieces.join(' ')).toBe(text);
+    expect(pieces.filter(piece => piece.includes(url))).toHaveLength(1);
+    expect(pieces.filter(piece => piece.includes('https://'))).toHaveLength(1);
+    for (const piece of pieces) expect(piece.length).toBeLessThanOrEqual(280);
+    // Only a token that alone exceeds the limit is cut inside.
+    expect(splitForSpeech(`go ${'x'.repeat(300)} now`)).toEqual(['go', 'x'.repeat(280), `${'x'.repeat(20)} now`]);
+  });
 });
 
 describe('numbers are written out, because the voice has no digits', () => {

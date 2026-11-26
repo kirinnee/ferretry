@@ -63,8 +63,9 @@ function cut(piece: string): string[] {
     return [...cut(tokens.slice(0, boundary).join(' ')), ...cut(tokens.slice(boundary).join(' '))];
   }
   if (piece.length <= MAX_PIECE_CHARS) return [piece];
+  // Any word boundary will do, even an early one: a token is cut inside only when it alone exceeds the limit.
   const space = piece.lastIndexOf(' ', MAX_PIECE_CHARS);
-  const at = space > MAX_PIECE_CHARS / 2 ? space : MAX_PIECE_CHARS;
+  const at = space > 0 ? space : MAX_PIECE_CHARS;
   return [piece.slice(0, at).trim(), ...cut(piece.slice(at).trim())].filter(part => part.length > 0);
 }
 
