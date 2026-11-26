@@ -3,8 +3,8 @@
  * catalog in one JSON document, beside a tiny version document, served with the hosted app so a model
  * list can change without a release.
  *
- * - `catalog/version.json` — `{ "version": N }`. A daemon reads only this to decide; a version that
- *   differs from the one it holds is an update ("diff == update"), an equal one is no download.
+ * - `catalog/version.json` — `{ "version": N, "digest": "<SHA-256 base64url>" }`. A daemon reads only this
+ *   to decide; matching version and digest need no download. The digest includes discovery snapshot changes.
  * - `catalog/models.json` — `{ "version": N, "catalogs": { "<id>": <catalog file>, … }, "prices": … }`.
  *   Listed, with its SHA-256, in the hosted app's signed release list, so a daemon trusts it only after
  *   checking that signature with the key compiled into it.
@@ -28,6 +28,7 @@
  * Pure.
  */
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { modelCatalogFileValue, parseModelCatalog } from './catalog.ts';
 import {
   type CatalogHalf,
@@ -48,7 +49,13 @@ export const PUBLISHED_MODEL_CATALOG_VERSION_FILE = 'catalog/version.json';
 const VersionSchema = z.number().int().nonnegative();
 
 /** `catalog/version.json`. */
-export const PublishedModelCatalogVersionSchema = z.object({ version: VersionSchema });
+export const PublishedModelCatalogVersionSchema = z.object({
+  version: VersionSchema,
+  digest: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{43}$/u)
+    .optional(),
+});
 
 const CatalogIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/u);
 
@@ -128,9 +135,11 @@ export function publishedModelCatalogFiles(
     ),
     ...(suggestions === undefined ? {} : { suggestions }),
   };
+  const text = `${JSON.stringify(document)}\n`;
+  const digest = createHash('sha256').update(text).digest('base64url');
   return {
-    [PUBLISHED_MODEL_CATALOG_FILE]: `${JSON.stringify(document)}\n`,
-    [PUBLISHED_MODEL_CATALOG_VERSION_FILE]: `${JSON.stringify({ version })}\n`,
+    [PUBLISHED_MODEL_CATALOG_FILE]: text,
+    [PUBLISHED_MODEL_CATALOG_VERSION_FILE]: `${JSON.stringify({ version, digest })}\n`,
   };
 }
 

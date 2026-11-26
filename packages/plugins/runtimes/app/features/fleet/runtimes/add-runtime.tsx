@@ -133,7 +133,14 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
   const harnessLabel = (key: HarnessKind): string =>
     machine?.tools.find(tool => tool.harness === key)?.label ?? harnessName(key);
   const fitting = data.profiles.profiles.filter(
-    profile => harness !== undefined && profileFit(profile, harness, registered.has(harness)).fits,
+    profile =>
+      harness !== undefined &&
+      profileFit(profile, harness, registered.has(harness), {
+        model: profileModel(profile, data),
+        choices:
+          runtimes.find(item => item.credential.id === credential?.id && item.harness === harness)?.discovery
+            ?.choices ?? [],
+      }).fits,
   );
   // The preset a person most likely wants: the first that is not already a runtime on this login.
   const unused = fitting.find(

@@ -19,6 +19,7 @@ export async function nativeRuntimeWorld(prepared: boolean) {
   const key = HarnessKeySchema.parse('opencode');
   const logins = fakeLogins([
     sampleLogin('deepseek-key', { harnesses: [key], store: 'environment', label: 'DeepSeek API key' }),
+    sampleLogin('mistral-key', { harnesses: [key], store: 'environment', label: 'Mistral API key' }),
   ]);
   logins.setTemplates([
     {
@@ -51,7 +52,10 @@ export async function nativeRuntimeWorld(prepared: boolean) {
             binary: 'opencode',
             homeEnv: {},
             detect: async () => ({ found: true, binary: '/fixture/opencode', version: '2.4.2' }),
-            models: async () => capture.models,
+            models: async login =>
+              login === 'mistral-key'
+                ? { choices: [{ id: 'mistral/codestral', label: 'Codestral', context: 32768 }] }
+                : capture.models,
           }
         : undefined;
     }
@@ -78,9 +82,9 @@ export async function nativeRuntimeWorld(prepared: boolean) {
     },
     config: {
       profiles: {
-        'claude-only': { contents: ['settings/claude-only'] },
-        'codex-only': { contents: ['settings/codex-only'] },
+        'claude-only': { contents: ['modelSets/claude-only'] },
       },
+      'model-sets': { 'claude-only': { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
     },
     spawn: () => ({ exitCode: 0, signal: null, stdout: 'Linux\n', stderr: '' }),
   });
@@ -107,20 +111,25 @@ export async function nativeRuntimeWorld(prepared: boolean) {
     return answer.json();
   };
   if (prepared) {
-    const staged = (await call('POST /v1/runtimes/proposals', {
-      body: {
-        change: {
-          kind: 'runtime.put',
-          name: 'opencode-plain',
-          credential: 'deepseek-key',
-          profile: 'opencode-plain',
-          harness: key,
-          create: true,
-          createPlainProfile: true,
+    for (const [name, login] of [
+      ['opencode-plain', 'deepseek-key'],
+      ['opencode-mistral', 'mistral-key'],
+    ]) {
+      const staged = (await call('POST /v1/runtimes/proposals', {
+        body: {
+          change: {
+            kind: 'runtime.put',
+            name,
+            credential: login,
+            profile: name,
+            harness: key,
+            create: true,
+            createPlainProfile: true,
+          },
         },
-      },
-    })) as { id: string };
-    await call('POST /v1/runtimes/proposals/:id/apply', { params: { id: staged.id }, body: {} });
+      })) as { id: string };
+      await call('POST /v1/runtimes/proposals/:id/apply', { params: { id: staged.id }, body: {} });
+    }
   }
   return {
     host,

@@ -106,6 +106,7 @@ for (const look of looks)
                   new URL(route.request().url()).origin === origin ? route.continue() : route.abort(),
                 );
                 const page = await context.newPage();
+                page.on('pageerror', error => console.error('native runtime scene:', error.message));
                 page.setDefaultTimeout(10_000);
                 await page.goto(`${origin}/?${query}`);
                 await page.evaluate(style => (document.documentElement.dataset.style = style), look.style);
@@ -113,7 +114,32 @@ for (const look of looks)
                   await page.waitForSelector('[data-create-plain-profile]');
                   const before = await (await context.request.get(`${origin}/state?${query}`)).json();
                   expect(before.runtimes).toEqual([]);
-                  expect(before.profiles).toEqual(['claude-only', 'codex-only']);
+                  expect(before.profiles).toEqual(['claude-only']);
+                  const pinned = await (
+                    await context.request.post(`${origin}/rpc?${query}`, {
+                      data: {
+                        route: 'POST /v1/runtimes/proposals',
+                        init: {
+                          body: {
+                            change: {
+                              kind: 'runtime.put',
+                              name: 'opencode-pinned',
+                              credential: 'deepseek-key',
+                              harness: 'opencode',
+                              profile: 'claude-only',
+                              create: true,
+                            },
+                          },
+                        },
+                      },
+                    })
+                  ).json();
+                  expect(pinned.status).toBe(409);
+                  if (shots !== undefined)
+                    await page.screenshot({
+                      path: join(shots, `${look.style}-${width}-${scheme}-add-plain-option.png`),
+                      fullPage: true,
+                    });
                   await page.check('[data-create-plain-profile]');
                   await page.click('[data-change-submit]');
                   await page.waitForSelector('[data-native-runtime-review]');
@@ -167,6 +193,26 @@ for (const look of looks)
                   ).toBe(true);
                   if (shots !== undefined)
                     await page.screenshot({ path: join(shots, `${look.style}-${width}-${scheme}-new-actions.png`) });
+                  await page.click('#fy-new-ferret-runtime');
+                  const runtimeOptions = page.getByRole('option');
+                  expect(await runtimeOptions.count()).toBe(2);
+                  await runtimeOptions.nth(1).click();
+                  await page.waitForFunction(
+                    () =>
+                      document.querySelector<HTMLInputElement>('#fy-new-ferret-model')?.value === '' ||
+                      document.querySelector('#fy-new-ferret-model')?.textContent?.includes('Choose a model'),
+                  );
+                  expect(await create.isDisabled()).toBe(true);
+                  await page.click('#fy-new-ferret-model');
+                  expect((await page.getByRole('option').allTextContents()).join(' ')).not.toContain('DeepSeek');
+                  await page.getByRole('option', { name: /Codestral/ }).click();
+                  expect(await create.isDisabled()).toBe(false);
+                  await create.scrollIntoViewIfNeeded();
+                  if (shots !== undefined)
+                    await page.screenshot({
+                      path: join(shots, `${look.style}-${width}-${scheme}-new-switched.png`),
+                      fullPage: true,
+                    });
                 }
               } finally {
                 await context.close();

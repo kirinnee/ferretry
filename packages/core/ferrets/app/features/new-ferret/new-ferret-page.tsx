@@ -286,10 +286,24 @@ export function NewFerretPage({
   }, [client]);
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
+  const chooseRuntime = (next: ChosenFerretAccount | null): void => {
+    setChosenRuntime(next);
+    if (next !== null && next.kind !== 'claude-code' && next.kind !== 'codex')
+      setDraft(current =>
+        current.model !== '' && !next.models.some(model => model.id === current.model.trim() && model.available)
+          ? { ...current, model: '' }
+          : current,
+      );
+  };
   // Continue is a way in only while the list is offered (the switch is drawn); on it, nothing starts before a pick.
   const awaitingPick = continueOffered && starting === 'continue' && picked === null;
   const chosen = chosenForDraft(chosenRuntime, draft.runtime);
-  const needsModel = chosen?.requiresModel === true && draft.model.trim() === '';
+  const native = chosen !== null && chosen.kind !== 'claude-code' && chosen.kind !== 'codex';
+  const needsModel =
+    (chosen?.requiresModel === true && draft.model.trim() === '') ||
+    (native &&
+      draft.model.trim() !== '' &&
+      !chosen.models.some(model => model.id === draft.model.trim() && model.available));
   const canSubmit = canStartFerret(draft, submitting) && !awaitingPick && !needsModel;
   const homePath = daemonHomeHref(daemon);
   const back = backPlace ?? { path: homePath, label: '← Home' };
@@ -314,7 +328,7 @@ export function NewFerretPage({
   const slot: NewFerretAccountSlotProps = {
     value: draft.runtime,
     onValueChange: value => update('runtime', value),
-    onChosen: setChosenRuntime,
+    onChosen: chooseRuntime,
     onSettled: accountSettled,
     fallbackId: fieldId('runtime'),
     labelId: RUNTIME_LABEL_ID,

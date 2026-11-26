@@ -55,6 +55,48 @@ const CODEX: ChosenFerretAccount = {
 };
 
 describe('NewFerretPage', () => {
+  it('clears an incompatible native model when switching runtimes and refuses unavailable ids', async () => {
+    const deepseek: ChosenFerretAccount = {
+      ...CLAUDE,
+      kind: 'opencode',
+      wrapper: 'deepseek',
+      defaultModel: null,
+      requiresModel: true,
+      models: [{ id: 'deepseek/flash', available: true }],
+    };
+    const mistral: ChosenFerretAccount = {
+      ...deepseek,
+      wrapper: 'mistral',
+      models: [
+        { id: 'mistral/codestral', available: true },
+        { id: 'mistral/retired', available: false },
+      ],
+    };
+    const h = page();
+    run(() => {
+      h.slot()!.onValueChange(deepseek.wrapper);
+      h.slot()!.onChosen(deepseek);
+    });
+    change(h.view, 'fy-new-ferret-folder', '/fixture');
+    change(h.view, 'fy-new-ferret-prompt', 'Inspect fixture');
+    change(h.view, 'fy-new-ferret-model', 'deepseek/flash');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    run(() => {
+      h.slot()!.onValueChange(mistral.wrapper);
+      h.slot()!.onChosen(mistral);
+    });
+    expect(input(h.view, 'fy-new-ferret-model').props.value).toBe('');
+    for (const invalid of ['deepseek/flash', 'mistral/retired', 'unknown']) {
+      change(h.view, 'fy-new-ferret-model', invalid);
+      expect(button(h.view, 'Create ferret').props.disabled).toBeTrue();
+      await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+      expect(post(h)).toBeUndefined();
+    }
+    change(h.view, 'fy-new-ferret-model', 'mistral/codestral');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+    expect(post(h)?.body).toMatchObject({ runtime: 'mistral', model: 'mistral/codestral' });
+  });
   it('requires an explicit model when a registered runtime has no exact discovery default', async () => {
     const account: ChosenFerretAccount = {
       ...CLAUDE,

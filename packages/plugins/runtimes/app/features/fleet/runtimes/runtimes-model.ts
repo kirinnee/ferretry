@@ -99,12 +99,25 @@ export type ProfileFit =
  * does not ("Codex only — this login is Claude Code"); a mixed one written before P7 does not either,
  * and says which layers disagree.
  */
-export const profileFit = (profile: LayeredProfileView, harness: HarnessKind, registered = false): ProfileFit => {
+export const profileFit = (
+  profile: LayeredProfileView,
+  harness: HarnessKind,
+  registered = false,
+  nativePin?: {
+    readonly model: string | undefined;
+    readonly choices: readonly { readonly id: string; readonly available?: boolean }[];
+  },
+): ProfileFit => {
   // A harness Runtimes has no behaviour for fits nothing: said in the one sentence, never judged as Claude or Codex.
-  if (!isSupportedHarnessKey(harness))
-    return registered && profile.layers.every(reference => reference.startsWith('modelSets/'))
+  if (!isSupportedHarnessKey(harness)) {
+    if (!registered || !profile.layers.every(reference => reference.startsWith('modelSets/')))
+      return { fits: false, reason: unsupportedHarnessSentence(harness) };
+    return profile.layers.length === 0 ||
+      (nativePin?.model !== undefined &&
+        nativePin.choices.some(choice => choice.id === nativePin.model && choice.available !== false))
       ? { fits: true, notes: [] }
-      : { fits: false, reason: unsupportedHarnessSentence(harness) };
+      : { fits: false, reason: 'This profile’s model is not available on this login' };
+  }
   if (profile.scope.kind === 'mixed') return { fits: false, reason: profile.scope.sentence };
   if (profile.scope.scope !== 'generic' && profile.scope.scope !== harness)
     return { fits: false, reason: `${SCOPE_WORDS[profile.scope.scope]} — this login is ${harnessName(harness)}` };

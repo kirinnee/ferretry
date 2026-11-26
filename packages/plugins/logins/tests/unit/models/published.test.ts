@@ -19,11 +19,13 @@ const b64url = (bytes: Uint8Array): string => b64(bytes).replaceAll('+', '-').re
 const sha = async (bytes: Bytes) => b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
 
 /** A throwaway release key, a hosted app signed with it, and the PEM a build would compile in. */
-async function hostedApp(version: number, options: { tamper?: 'catalog' | 'version'; suggestions?: Suggestions } = {}) {
-  const keys = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
-    'sign',
-    'verify',
-  ])) as unknown as CryptoKeyPair;
+async function hostedApp(
+  version: number,
+  options: { tamper?: 'catalog' | 'version'; suggestions?: Suggestions; keys?: CryptoKeyPair } = {},
+) {
+  const keys =
+    options.keys ??
+    ((await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as unknown as CryptoKeyPair);
   const spki = new Uint8Array(await crypto.subtle.exportKey('spki', keys.publicKey));
   const pem = `-----BEGIN PUBLIC KEY-----\n${b64(spki)}\n-----END PUBLIC KEY-----\n`;
   const files = publishedModelCatalogFiles(version, builtInModelCatalogs(), options.suggestions);
@@ -39,7 +41,7 @@ async function hostedApp(version: number, options: { tamper?: 'catalog' | 'versi
     'release-manifest.sig': encode(signature),
   };
   if (options.tamper === 'version') served['catalog/version.json'] = encode(JSON.stringify({ version: version + 1 }));
-  return { pem, served, list, signature, catalog };
+  return { pem, served, list, signature, catalog, keys };
 }
 
 const fetchOf = (served: Record<string, Bytes>, overrides: Record<string, number | 'down'> = {}) => {
@@ -158,6 +160,82 @@ describe('verifyPublishedCatalog with a key the platform cannot use', () => {
 
 describe('PublishedModelCatalogService', () => {
   const NOW = Date.parse('2026-10-19T00:00:00.000Z');
+  it('updates a changed signed discovery snapshot even when its curated version is unchanged', async () => {
+    const app = await hostedApp(12);
+    const cache = memoryCache();
+    let updates = 0;
+    const service = new PublishedModelCatalogService({
+      fetch: fetchOf(app.served).port,
+      cache,
+      publicKeyPem: app.pem,
+      nowMs: () => NOW,
+      onUpdated: async () => {
+        updates += 1;
+      },
+    });
+    should(await service.refresh(true)).match({ outcome: 'updated' });
+    // The same release key signs a different snapshot under curated version 12.
+    const changed = await hostedApp(12, {
+      keys: app.keys,
+      suggestions: {
+        generated: '2026-10-19',
+        sources: { modelsDev: 'https://models.dev/api.json' },
+        providers: { deepseek: { name: 'DeepSeek', models: { fresh: { name: 'Fresh', tool_call: true } } } },
+      },
+    });
+    const next = new PublishedModelCatalogService({
+      fetch: fetchOf(changed.served).port,
+      cache,
+      publicKeyPem: changed.pem,
+      nowMs: () => NOW,
+      onUpdated: async () => {
+        updates += 1;
+      },
+    });
+    should(await next.refresh(true)).match({ outcome: 'updated', version: 12 });
+    should((await next.discovery())?.providers.deepseek?.models.fresh?.name).equal('Fresh');
+    should(updates).equal(2);
+  });
+
+  it('ignores an unproven cached discovery document and explains the refusal with fetch disabled', async () => {
+    const app = await hostedApp(12, {
+      suggestions: {
+        generated: '2026-10-19',
+        sources: { modelsDev: 'https://models.dev/api.json' },
+        providers: { deepseek: { name: 'DeepSeek', models: { forged: { name: 'Forged', tool_call: true } } } },
+      },
+    });
+    const service = new PublishedModelCatalogService({
+      cache: memoryCache({ version: 12, document: JSON.parse(new TextDecoder().decode(app.catalog)) }),
+      publicKeyPem: app.pem,
+      nowMs: () => NOW,
+    });
+    should(await service.discovery()).be.undefined();
+    should(await service.catalogs()).be.undefined();
+    should(await service.status()).match({ last: { outcome: 'refused', reason: /cache.*signature|cache.*proof/ } });
+  });
+
+  it('reverifies persisted proof after restart and refuses tampering or a changed trust key', async () => {
+    const app = await hostedApp(12, {
+      suggestions: {
+        generated: '2026-10-19',
+        sources: { modelsDev: 'https://models.dev/api.json' },
+        providers: { deepseek: { name: 'DeepSeek', models: { fresh: { name: 'Fresh', tool_call: true } } } },
+      },
+    });
+    const cache = memoryCache();
+    const deps = { cache, publicKeyPem: app.pem, nowMs: () => NOW };
+    await new PublishedModelCatalogService({ ...deps, fetch: fetchOf(app.served).port }).refresh(true);
+    should((await new PublishedModelCatalogService(deps).catalogs())?.deepseek).not.be.undefined();
+    should((await new PublishedModelCatalogService(deps).discovery())?.providers.deepseek?.models.fresh?.name).equal(
+      'Fresh',
+    );
+    const other = await hostedApp(12);
+    should(await new PublishedModelCatalogService({ ...deps, publicKeyPem: other.pem }).catalogs()).be.undefined();
+    const altered = structuredClone(cache.held()) as { document: { version: number } };
+    altered.document.version = 99;
+    should(await new PublishedModelCatalogService({ ...deps, cache: memoryCache(altered) }).catalogs()).be.undefined();
+  });
   it('projects separate discovery only after the signed snapshot checks, without changing curated defaults', async () => {
     const app = await hostedApp(12, {
       suggestions: {
@@ -253,11 +331,17 @@ describe('PublishedModelCatalogService', () => {
   });
 
   it('should download nothing when the published version is the one held, and nothing at all before it is due', async () => {
-    // Arrange — a machine that took version 7 an hour ago
+    // Arrange — a machine that took and verified version 7 an hour ago
     const app = await hostedApp(7);
     const { port, asked } = fetchOf(app.served);
-    const document = JSON.parse(new TextDecoder().decode(app.catalog));
-    const cache = memoryCache({ version: 7, document, checkedAt: new Date(NOW - 3_600_000).toISOString() });
+    const cache = memoryCache();
+    await new PublishedModelCatalogService({
+      fetch: port,
+      cache,
+      publicKeyPem: app.pem,
+      nowMs: () => NOW - 3_600_000,
+    }).refresh(true);
+    asked.splice(0);
     const service = new PublishedModelCatalogService({ fetch: port, cache, publicKeyPem: app.pem, nowMs: () => NOW });
 
     // Act

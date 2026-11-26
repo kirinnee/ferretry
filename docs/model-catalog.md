@@ -177,7 +177,7 @@ paired daemon follows them.
 **Publishing.** The hosted app's build (Logins' `packages/plugins/logins/scripts/publish-model-catalog.ts`, chained by `packages/app`'s `bun run build` and run by
 `pwa-pages.yaml` on every push to `main`) writes two files beside the app:
 
-- `https://ferretry.pages.dev/catalog/version.json` — `{ "version": N }`;
+- `https://ferretry.pages.dev/catalog/version.json` — `{ "version": N, "digest": "<SHA-256 base64url>" }`;
 - `https://ferretry.pages.dev/catalog/models.json` — `{ "version": N, "catalogs": { … }, "prices": { … }, "catalogsV2": { … }, "suggestions": { … } }`,
   every `packages/plugins/logins/daemon/data/models/*.yaml` as JSON, with each model's price moved into `prices` (§ Prices),
   the catalogs with a newer half in `catalogsV2` and a trimmed models.dev snapshot in `suggestions` (§ Suggestions).
@@ -187,17 +187,19 @@ does (the Pages build checks out the full history for it, and fails rather than 
 one). Both files are listed in the app's **signed release list** ([pwa-release-signing.md](pwa-release-signing.md)),
 so `catalog/models.json` carries the same Ed25519 signature the app's own files do — no second key.
 
-**Following.** A daemon reads `catalog/version.json` and compares it with the version it holds:
+**Following.** A daemon reads `catalog/version.json` and compares its version and digest with the verified catalog it holds:
 
-- **equal** — nothing else is downloaded;
-- **different** — it reads `catalog/models.json`, `release-manifest.json` and `release-manifest.sig`,
+- **both equal** — nothing else is downloaded;
+- **different, or no digest** — it reads `catalog/models.json`, `release-manifest.json` and `release-manifest.sig`,
   and takes the catalog only if the signature verifies with the release key compiled into the daemon
   (`packages/pwa/release-signing-key.pub`) and the signed list names the catalog's exact SHA-256. A
   catalog in it that does not check is left out on its own; anything else wrong refuses the whole
   update, and the catalog held — or the built-in one — stays in effect.
 
-A taken catalog is kept in the state home (`state/model-catalog.json`), so a restart or an offline
-machine starts from it. The daemon then republishes the fleet, so every runtime's models, default and
+A taken catalog and its exact signed release list, signature and catalog bytes are kept in the state home
+(`state/model-catalog.json`). A restart verifies that proof again against the compiled release key before using
+either curated catalogs or discovery. Missing or invalid proof is refused with a reason; built-in catalogs remain
+available. The daemon then republishes the fleet, so every runtime's models, default and
 tier pins move with it.
 
 **When it checks.** At boot, and whenever something reads the catalogs (a picker, the runtime list, an
@@ -273,8 +275,8 @@ efforts stay the curated YAML's, and a suggestion only ADDS a row marked "new / 
   fresh fetch that grew (schema-valid rows reached 834 KB gzipped).
 - **Refreshing the snapshot** is a PR: `bun run packages/plugins/logins/scripts/suggestions-source.ts --refresh`
   rewrites it with sorted keys and two-space indentation, so the diff reads line by line.
-- **Versioning.** `version` still moves only when `daemon/data/models/` does, so a daemon takes new suggestions when a
-  catalog next changes; the live per-login list will decide whether that is often enough.
+- **Versioning.** `version` still moves only when `daemon/data/models/` does. The digest covers the entire signed
+  `catalog/models.json`, so a changed suggestions snapshot is taken at the next check even at the same curated version.
 
 ## Prices
 

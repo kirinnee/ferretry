@@ -110,3 +110,34 @@ test('missing, withheld or unavailable public discovery offers no models and rea
   delete absent.sources.discovery;
   expect(await opencodeModels(absent.logins, 'key', now)).toEqual({ choices: [] });
 });
+
+test('Qwen Coding Plan uses its login preset provider rather than the shared Qwen catalog', async () => {
+  const f = fixture();
+  f.logins.setTemplates([
+    {
+      id: 'key',
+      kind: 'templates',
+      harness: HarnessKeySchema.parse('opencode'),
+      preset: 'qwen-coding-plan',
+      env: { ALIBABA_CODING_PLAN_API_KEY: '${secret:FIXTURE_KEY}' },
+    },
+  ]);
+  f.sources.presets = [{ id: 'qwen-coding-plan', catalog: 'qwen', variables: {} }];
+  f.sources.discovery!.providers = {
+    alibaba: {
+      name: 'Alibaba',
+      env: ['DASHSCOPE_API_KEY'],
+      models: { payg: { name: 'Pay as you go', tool_call: true } },
+    },
+    'alibaba-coding-plan': {
+      name: 'Alibaba Coding Plan',
+      env: ['ALIBABA_CODING_PLAN_API_KEY'],
+      models: {
+        'qwen3.7-plus': { name: 'Qwen Coding', tool_call: true },
+      },
+    },
+  };
+  expect(await opencodeModels(f.logins, 'key', now)).toEqual({
+    choices: [{ id: 'alibaba-coding-plan/qwen3.7-plus', label: 'Qwen Coding' }],
+  });
+});

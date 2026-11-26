@@ -18,7 +18,10 @@ describe('the published model catalog', () => {
     const read = readPublishedModelCatalog(JSON.parse(files[PUBLISHED_MODEL_CATALOG_FILE] as string));
 
     // Assert
-    should(JSON.parse(files[PUBLISHED_MODEL_CATALOG_VERSION_FILE] as string)).deepEqual({ version: 12 });
+    should(JSON.parse(files[PUBLISHED_MODEL_CATALOG_VERSION_FILE] as string)).match({
+      version: 12,
+      digest: /^[A-Za-z0-9_-]{43}$/u,
+    });
     should(read?.version).equal(12);
     should(Object.keys(read?.catalogs ?? {})).deepEqual(Object.keys(built));
     should(read?.catalogs.zai).match({ id: 'zai', origin: 'published', label: built.zai?.label });

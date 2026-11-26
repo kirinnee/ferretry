@@ -10,6 +10,11 @@ const PROVIDER_OF_CATALOG: Readonly<Record<string, string>> = {
   'vercel-ai-gateway': 'vercel',
 };
 
+/** Endpoint variants are login facts; their shared curated catalog cannot distinguish the plan. */
+const PROVIDER_OF_PRESET: Readonly<Record<string, string>> = {
+  'qwen-coding-plan': 'alibaba-coding-plan',
+};
+
 /** Metadata only: templates retain secret references; no status, credential store, provider call or Vault read. */
 export async function opencodeModels(
   logins: Pick<LoginsApi, 'environmentTemplates' | 'modelSources'> | undefined,
@@ -26,11 +31,12 @@ export async function opencodeModels(
     provider.env?.some(name => Object.hasOwn(template.env ?? {}, name)),
   );
   const providerId =
-    catalogId === undefined
+    (template.preset === undefined ? undefined : PROVIDER_OF_PRESET[template.preset]) ??
+    (catalogId === undefined
       ? matches.length === 1
         ? matches[0]?.[0]
         : undefined
-      : (PROVIDER_OF_CATALOG[catalogId] ?? catalogId);
+      : (PROVIDER_OF_CATALOG[catalogId] ?? catalogId));
   const provider = providerId === undefined ? undefined : providers[providerId];
   if (provider === undefined || providerId === undefined) return { choices: [] };
   const today = new Date(nowMs).toISOString().slice(0, 10);
