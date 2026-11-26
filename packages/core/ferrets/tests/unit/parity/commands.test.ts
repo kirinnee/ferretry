@@ -93,7 +93,7 @@ const ROWS: readonly (readonly [id: string, v5: string])[] = [
   ['V-0437', 'signal <kind> [message...]'],
   ['V-0443', 'start [prompt...]'],
   ['V-0445', 'status [id]'],
-  ['V-0447', 'stop'],
+  ['V-0447', 'stop [ferret]'],
   ['V-0448', 'stop cascade <session>'],
   ['V-0449', 'stop children <session>'],
   ['V-0450', 'stop label <label>'],
@@ -245,7 +245,11 @@ describe('commands parity', () => {
     test('V-0445 fy status [id] reads one ferret, --json prints it, --subtree reads the lineage table; no id is a usage error', async () => {
       const one = run({ answers: { [FERRET_ROUTES.get]: lead } });
       expect(await one.verb('status [id]', ['wren'])).toBe(0);
-      expect(one.calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'wren' } } }]);
+      // C-18: the detail block also reads the live turn/context route (a courtesy: its failure is silent).
+      expect(one.calls).toEqual([
+        { route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'wren' } } },
+        { route: 'GET /v1/ferrets/:ferretId/live', init: { params: { ferretId: 'lead' }, quiet: true } },
+      ]);
       expect(one.out.join('\n')).toContain('wren');
       const json = run({ answers: { [FERRET_ROUTES.get]: lead } });
       expect(await json.verb('status [id]', ['wren'], { json: true })).toBe(0);
@@ -275,7 +279,7 @@ describe('commands parity', () => {
       expect(none.calls).toEqual([]);
     });
 
-    test('V-0496 fy wait <id> exits 0 completed, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout; --json, --interval, --timeout, --until-marker', async () => {
+    test('V-0496 fy wait <id> exits 0 completed, 1 ended, 3 asked for a person, 69 daemon lost, 124 timeout (an idle ferret keeps it waiting); --json, --interval, --timeout, --until-marker', async () => {
       const exitOf = async (
         state: Partial<Parameters<typeof sessionView>[0]>,
         options: Options = {},
@@ -292,8 +296,9 @@ describe('commands parity', () => {
       const ended = await exitOf({ state: 'stopped' });
       expect(ended.code).toBe(1);
       expect(ended.err.join('')).toContain('the ferret ended as stopped');
-      const parked = await exitOf({ state: 'idle' });
-      expect(parked.code).toBe(3);
+      // C-38: a ferret between turns is not a verdict; only the caller's deadline ends this wait.
+      const parked = await exitOf({ state: 'idle' }, { timeout: '2', interval: '1' });
+      expect(parked.code).toBe(124);
       const slow = await exitOf({ state: 'working' }, { timeout: '2', interval: '1' });
       expect(slow.code).toBe(124);
       const marker = await exitOf({ state: 'working' }, { 'until-marker': 'out.md' }, { exists: async () => true });
@@ -850,7 +855,7 @@ describe('commands parity', () => {
 
     test('V-0447 fy stop with no mode prints the modes and is a usage error, touching nothing', async () => {
       const bare = run({ answers });
-      expect(await bare.verb('stop')).toBe(2);
+      expect(await bare.verb('stop [ferret]')).toBe(2);
       expect(bare.out[0]).toContain('stop ferrets');
       for (const mode of ['orphan', 'cascade', 'children', 'label'])
         expect(bare.out.join('\n')).toContain(`fy stop ${mode}`);
@@ -859,25 +864,25 @@ describe('commands parity', () => {
 
     test('V-0447 fy stop -r before the mode carries the reason to every stop; a -r after the mode wins; a switch that swallows the mode is a usage error', async () => {
       const before = run({ answers });
-      expect(await before.verb('stop', ['cascade', 'wren'], { r: 'why', yes: true })).toBe(0);
+      expect(await before.verb('stop [ferret]', ['cascade', 'wren'], { r: 'why', yes: true })).toBe(0);
       expect(stops(before.calls)).toHaveLength(2);
       for (const call of stops(before.calls)) expect(call.init).toMatchObject({ body: { reason: 'why' } });
 
       const longSpelling = run({ answers });
-      expect(await longSpelling.verb('stop', ['label', 'batch'], { reason: 'sweep', yes: true })).toBe(0);
+      expect(await longSpelling.verb('stop [ferret]', ['label', 'batch'], { reason: 'sweep', yes: true })).toBe(0);
       expect(longSpelling.calls.some(call => call.route === FERRET_ROUTES.list)).toBe(true);
 
       const after = run({ answers });
-      expect(await after.verb('stop', ['cascade', 'wren'], { r: ['why', 'own'], yes: true })).toBe(0);
+      expect(await after.verb('stop [ferret]', ['cascade', 'wren'], { r: ['why', 'own'], yes: true })).toBe(0);
       for (const call of stops(after.calls)) expect(call.init).toMatchObject({ body: { reason: 'own' } });
 
       const swallowed = run({ answers });
-      expect(await swallowed.verb('stop', ['x'], { n: 'cascade', yes: true })).toBe(2);
+      expect(await swallowed.verb('stop [ferret]', ['x'], { n: 'cascade', yes: true })).toBe(2);
       expect(swallowed.out.join('\n')).toContain('fy stop cascade');
       const lone = run({ answers });
-      expect(await lone.verb('stop', ['cascade'], { r: 'why' })).toBe(2);
+      expect(await lone.verb('stop [ferret]', ['cascade'], { r: 'why' })).toBe(2);
       const unknown = run({ answers });
-      expect(await unknown.verb('stop', ['toString', 'wren'])).toBe(2);
+      expect(await unknown.verb('stop [ferret]', ['toString', 'wren'])).toBe(2);
       expect(swallowed.calls).toEqual([]);
       expect(lone.calls).toEqual([]);
       expect(unknown.calls).toEqual([]);

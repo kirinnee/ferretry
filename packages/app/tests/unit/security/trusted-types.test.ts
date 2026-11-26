@@ -2,7 +2,7 @@
  * The three Trusted Types policies: what each accepts, what each refuses, and that a browser without
  * Trusted Types gets the same strings by the same rules.
  */
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -77,6 +77,14 @@ describe('isHighlightMarkup', () => {
 });
 
 describe('isWorkerScriptUrl', () => {
+  // Bun reads `import.meta.env` from the process environment; Vite's dev server sets DEV the same way for the page.
+  beforeEach(() => {
+    process.env.DEV = 'true';
+  });
+  afterEach(() => {
+    delete process.env.DEV;
+  });
+
   it('accepts the speech worker the build emits, and its dev-server address', () => {
     expect(isWorkerScriptUrl('/assets/parakeet-worker-D-Ue--TH.js')).toBe(true);
     expect(isWorkerScriptUrl(DEV('parakeet'))).toBe(true);
@@ -121,6 +129,12 @@ describe('isWorkerScriptUrl', () => {
     ]) {
       expect(isWorkerScriptUrl(url)).toBe(false);
     }
+  });
+
+  it('refuses the dev server address outside development mode (a release)', () => {
+    delete process.env.DEV;
+    expect(isWorkerScriptUrl(DEV('parakeet'))).toBe(false);
+    expect(() => trustedWorkerUrl(DEV('parakeet'))).toThrow(TypeError);
   });
 
   it('accepts the Durian worker chunk the build emits, and nothing near it', () => {

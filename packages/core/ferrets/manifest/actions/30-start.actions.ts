@@ -132,6 +132,10 @@ export default fragment({
           flag: '--teammate-fallback',
           help: 'with --teammate: auto-assign a free callsign instead of failing on a collision',
         },
+        {
+          flag: '--parent <id>',
+          help: 'start it as a helper under this ferret (defaults to the ferret that runs this)',
+        },
         { flag: '--label <label>', help: 'ownership label; filter later with `ps --label`' },
         {
           flag: '--task <id>',

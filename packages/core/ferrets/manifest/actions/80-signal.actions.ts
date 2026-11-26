@@ -16,7 +16,8 @@ export default fragment({
   ],
   cli: [
     verb('wait <id>', {
-      summary: 'block until a ferret settles; exits 0 finished, 1 ended, 3 needs a human, 69 daemon lost, 124 timeout',
+      summary:
+        'block until a ferret settles; exits 0 finished, 1 ended, 3 asked for a person (signal help), 69 daemon lost, 124 timeout; an idle ferret keeps it waiting',
       args: [{ name: 'id', help: 'session id' }],
       options: [
         { flag: '--json', help: 'print the session state as one line of JSON' },

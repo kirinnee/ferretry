@@ -268,9 +268,34 @@ describe('the ferrets cli half', () => {
     expect(await verb('start [prompt...]', ['go'], { card: 'F0', cwd: '/abs' })).toBe(2);
   });
 
+  test('D-56 fy stop <ferret> stops that one ferret directly: no mode, no confirmation, its reason recorded', async () => {
+    const { verb, calls, out } = run({ [FERRET_ROUTES.stop]: { id: 'lead', state: 'stopped' } });
+    expect(await verb('stop [ferret]', ['wren'], { reason: 'done with it' })).toBe(0);
+    expect(calls).toEqual([
+      {
+        route: 'POST /v1/ferrets/:ferretId/stop',
+        init: { params: { ferretId: 'wren' }, body: { reason: 'done with it' } },
+      },
+    ]);
+    expect(out).toEqual(['stopped lead (stopped)']);
+    // A mode word with nothing after it is still the usage error, never a ferret called "orphan".
+    const bare = run();
+    expect(await bare.verb('stop [ferret]', ['orphan'])).toBe(2);
+    expect(bare.calls).toEqual([]);
+  });
+
+  test('D-51 fy new --parent <id> sends the parent, as fy start does', async () => {
+    const { verb, calls } = run({ [FERRET_ROUTES.start]: { id: 'kid' }, [FERRET_ROUTES.get]: ferret });
+    expect(await verb('new [words...]', ['look'], { auto: true, cwd: '/abs', parent: 'lead' })).toBe(0);
+    expect(sentBody(calls[0])?.parent).toBe('lead');
+    const none = run({ [FERRET_ROUTES.start]: { id: 'kid' }, [FERRET_ROUTES.get]: ferret });
+    expect(await none.verb('new [words...]', ['look'], { auto: true, cwd: '/abs' })).toBe(0);
+    expect(sentBody(none.calls[0])).not.toHaveProperty('parent');
+  });
+
   test('V-0447 a bare stop prints its modes and is a usage error', async () => {
     const { verb, out, calls } = run();
-    expect(await verb('stop')).toBe(2);
+    expect(await verb('stop [ferret]')).toBe(2);
     expect(out[0]).toContain('stop ferrets');
     expect(calls).toEqual([]);
   });
@@ -450,7 +475,14 @@ describe('wait and instructions', () => {
     });
     const finished = run({ [FERRET_ROUTES.get]: done });
     expect(await finished.verb('wait <id>', ['lead'])).toBe(0);
-    expect(finished.calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'lead' } } }]);
+    // The journal baseline is taken first, at invocation, so a request published after it is never skipped.
+    expect(finished.calls).toEqual([
+      {
+        route: 'GET /v1/ferrets/:ferretId/events',
+        init: { params: { ferretId: 'lead' }, query: { after: '0', limit: '1000' }, quiet: true },
+      },
+      { route: 'GET /v1/ferrets/:ferretId', init: { params: { ferretId: 'lead' } } },
+    ]);
     expect(finished.out).toEqual(['lead is stopped']);
     const ended = run({ [FERRET_ROUTES.get]: sessionView({ id: 'lead', state: 'stopped' }) });
     expect(await ended.verb('wait <id>', ['lead'])).toBe(1);

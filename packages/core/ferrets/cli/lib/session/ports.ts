@@ -1,4 +1,4 @@
-import type { FerretSummary, StartOptions } from '../../../contract/index.ts';
+import type { FerretLiveRead, FerretSummary, StartOptions } from '../../../contract/index.ts';
 
 /**
  * Presentation port for the ferret verbs. `success`/`report`/`warn` are stdout, `error` is stderr — which is why every
@@ -84,6 +84,8 @@ export interface ISessionApi {
   get(reference: string): Promise<FerretSummary>;
   /** The ferret's stored last screen (the gated, re-masked read), or `undefined` when none can be read. */
   lastScreen?(reference: string): Promise<string | undefined>;
+  /** The ferret's turn count and context fill as its state document stands now, or `undefined` when it cannot be read. */
+  live?(reference: string): Promise<FerretLiveRead | undefined>;
   suggestNames(count: number): Promise<string[]>;
   /** `requestId` is the caller's idempotency key (`--request-id`); omitted, the start mints its own. */
   start(body: StartBody, requestId?: string): Promise<StartAnswer>;

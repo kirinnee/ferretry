@@ -44,10 +44,16 @@ export default fragment({
     }),
   ],
   cli: [
-    verb('stop', {
-      summary: 'stop ferrets in bulk, selected by lineage or pack',
-      args: [],
-      options: [{ flag: '-r, --reason <text>', help: 'reason recorded against every stopped session' }],
+    verb('stop [ferret]', {
+      summary: 'stop one ferret by id or callsign (it can resume), or ferrets in bulk with a sub-verb below',
+      args: [{ name: 'ferret', help: 'id or callsign of the one ferret to stop', optional: true }],
+      options: [
+        { flag: '-r, --reason <text>', help: 'reason recorded against every stopped session' },
+        // A bulk mode's switches, typed before the mode: they would swallow it, so a lone word beside one is a usage error.
+        { flag: '-n, --dry-run', help: 'a bulk mode’s switch: put it after the mode', hidden: true },
+        { flag: '-y, --yes', help: 'a bulk mode’s switch: put it after the mode', hidden: true },
+        { flag: '--include-caller', help: 'a bulk mode’s switch: put it after the mode', hidden: true },
+      ],
     }),
     verb('stop orphan <session>', {
       summary: 'stop one ferret and leave its helpers running',
