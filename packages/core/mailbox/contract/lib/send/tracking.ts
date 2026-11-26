@@ -1,3 +1,4 @@
+import { byRecordedHarness, isRecordedHarness, recordedHarnessOf } from '@ferretry/core-ferrets/contract';
 import type { Instant } from '@ferretry/std';
 import { parseHandoffPointer } from '../../turn-handoff.ts';
 import { type SendEvidence } from '../../wire-send.ts';
@@ -153,9 +154,10 @@ export function isRepairableSend(record: SendRecord): boolean {
 export function judgeWatchedSends(
   watched: readonly SendRecord[],
   claimed: ReadonlySet<string>,
-  inputs: readonly ObservedHumanInput[],
+  allInputs: readonly ObservedHumanInput[],
   slackMs: number,
 ): ReadonlyMap<string, SendVerdict> {
+  const inputs = allInputs.filter(isReadableInput);
   const live = watched.filter(record => record.fate !== 'cancelled');
   const verdicts = new Map(judgeSends(live, claimed, inputs, slackMs));
   const taken = new Set([
@@ -325,9 +327,18 @@ function tierOf(record: SendRecord): SendEvidence['tier'] {
 }
 
 function kindOf(input: ObservedHumanInput): SendEvidence['kind'] {
-  if (input.harness === 'codex') return 'response_item';
-  return input.proof === 'native-queue-drain' ? 'queued_command' : 'chat.user';
+  return byRecordedHarness(input.harness, {
+    claude: () => (input.proof === 'native-queue-drain' ? 'queued_command' : 'chat.user'),
+    codex: () => 'response_item',
+  });
 }
+
+/**
+ * An input proves a send only when its harness is one whose record shapes this policy knows. A third harness's parser
+ * may emit one, and it is not read as Claude's: it proves nothing, so the send is judged on the inputs that do and an
+ * unproven send ends unconfirmed (never "delivered" on a guess).
+ */
+const isReadableInput = (input: ObservedHumanInput): boolean => isRecordedHarness(recordedHarnessOf(input.harness));
 
 /**
  * The earliest instant a transcript input may count as this send's: the durable floor a person's Retry of an

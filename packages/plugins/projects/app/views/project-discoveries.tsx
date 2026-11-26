@@ -90,7 +90,7 @@ export function ProjectDiscoveries({ discoveries, ferretsError, status, onConfir
             const pending = registrationPendingFor(status, option.path);
             return (
               <li
-                className="flex min-w-0 flex-wrap items-center gap-sm rounded-control border border-border-soft bg-surface px-control-x py-2"
+                className="flex min-w-0 flex-wrap items-center gap-sm rounded-panel border border-border-soft bg-surface px-panel py-2"
                 data-project-discovery={option.path}
                 key={option.key}
               >

@@ -1,4 +1,4 @@
-import type { BoundTranscriptReader } from '@ferretry/core-ferrets/contract';
+import { type BoundTranscriptReader, isRecordedHarness, recordedHarnessOf } from '@ferretry/core-ferrets/contract';
 import { instantFromEpochMs } from '@ferretry/std';
 import { inputObserverFor, observedInputsOf } from '../../reader/adapters/input-proof.ts';
 import type { TranscriptHarness } from '../../reader/lib/transcript/types.ts';
@@ -51,6 +51,8 @@ export class EntriesSendEvidence implements SendEvidenceSource {
     if (reading === undefined) return { readable: false, inputs: [] };
     const { entries, covered } = reading;
     if (entries.length === 0) return { readable: false, unbound: true, inputs: [] };
+    // A harness with no input observer proves nothing: the send is not called delivered or lost on a guess.
+    if (!isRecordedHarness(recordedHarnessOf(transcript.harness))) return { readable: false, inputs: [] };
     const observer = inputObserverFor(transcript.harness);
     const inputs = entries.flatMap((entry, ordinal) =>
       Number.isFinite(from) && Date.parse(entry.at) < from ? [] : observedInputsOf(observer, entry, ordinal),

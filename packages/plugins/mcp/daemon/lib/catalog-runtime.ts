@@ -81,7 +81,8 @@ export function mcpCatalogRuntime(deps: McpCatalogRuntimeDeps): CatalogRuntimeIn
         id: runtime.id,
         name: runtime.id,
         profile: runtime.profile,
-        harness: runtime.harness === 'codex' ? ('codex' as const) : ('claude' as const),
+        // The harness PLUGIN KEY, as Runtimes lists it; Catalogs refuses a key it has no layout for, by name.
+        harness: runtime.harness,
       })),
     }),
     profiles: async () => ({

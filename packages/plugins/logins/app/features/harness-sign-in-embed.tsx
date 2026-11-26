@@ -151,7 +151,7 @@ export function HarnessSignInEmbed({
       <div
         role="status"
         data-harness-sign-in="done"
-        className="flex items-start gap-3 rounded-control border border-ok/40 bg-ok-bg p-3 text-ui leading-base text-fg"
+        className="flex items-start gap-3 rounded-panel border border-ok/40 bg-ok-bg p-panel text-ui leading-base text-fg"
       >
         <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-ok" aria-hidden="true" />
         <div className="min-w-0">

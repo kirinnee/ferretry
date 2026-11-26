@@ -51,7 +51,8 @@ interface LedgerSendEvidence {
   readonly key: string;
   readonly kind?: 'chat.user' | 'queued_command' | 'response_item';
   readonly tier?: 'queue-file-id' | 'turn-instruction' | 'exact-text' | 'merged-text';
-  readonly harness?: 'claude' | 'codex';
+  /** The harness family or key the evidence names, as the daemon wrote it. */
+  readonly harness?: string;
   readonly proof?: 'normal-user-record' | 'native-queue-drain';
   readonly observedAt?: string;
   readonly originatedAt?: string;
@@ -277,7 +278,7 @@ const parseEvidence = (value: unknown): LedgerSendEvidence | undefined => {
       'tier',
       literal(source['tier'], ['queue-file-id', 'turn-instruction', 'exact-text', 'merged-text'] as const),
     ),
-    ...optional('harness', literal(source['harness'], ['claude', 'codex'] as const)),
+    ...optional('harness', str(source['harness'])),
     ...optional('proof', literal(source['proof'], ['normal-user-record', 'native-queue-drain'] as const)),
     ...optional('observedAt', str(source['observedAt'])),
     ...optional('originatedAt', str(source['originatedAt'])),

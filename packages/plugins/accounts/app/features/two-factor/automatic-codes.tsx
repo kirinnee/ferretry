@@ -210,7 +210,7 @@ export function AutomaticCodesPanel({
 
             {draft.kind === 'mismatch' ? (
               <div
-                className="flex min-w-0 flex-col gap-2 rounded-control border border-warn p-2"
+                className="flex min-w-0 flex-col gap-2 rounded-panel border border-warn p-panel"
                 data-codes-mismatch=""
               >
                 <p className="m-0 text-cell text-warn">{draft.words}</p>

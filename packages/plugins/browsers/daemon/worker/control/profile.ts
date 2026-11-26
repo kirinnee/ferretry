@@ -2,6 +2,8 @@ export interface BrowserProfileLeaseRecord {
   readonly sessionId: string;
   readonly daemonPid: number;
   readonly chromePid?: number;
+  /** When that Chrome started, stamped by Ferretry at launch: the proof, with the pid, that the process is its own. */
+  readonly chromeStartedAt?: string;
   readonly acquiredAt: string;
 }
 
@@ -69,6 +71,9 @@ export function parseBrowserProfileLease(value: string): BrowserProfileLeaseReco
       sessionId: parsed.sessionId,
       daemonPid: parsed.daemonPid,
       ...(parsed.chromePid === undefined ? {} : { chromePid: parsed.chromePid }),
+      ...(typeof parsed.chromeStartedAt === 'string' && parsed.chromeStartedAt
+        ? { chromeStartedAt: parsed.chromeStartedAt }
+        : {}),
       acquiredAt: parsed.acquiredAt,
     };
   } catch {

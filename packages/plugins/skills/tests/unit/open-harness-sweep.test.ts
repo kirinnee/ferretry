@@ -95,11 +95,12 @@ describe('the harnesses Skills has a layout for', () => {
 });
 
 describe('the runtimes a catalog skill can be installed into', () => {
-  it('should name a runtime on a harness Skills has no row for by its own key, never as claude', async () => {
+  it('should name every runtime by its harness plugin KEY, a third one registered under `claude` included', async () => {
     // Arrange
     const runtimes = {
       list: async () => [
         { id: 'a', profile: 'work', harness: 'claude-code' },
+        { id: 'd', profile: 'work', harness: 'claude' },
         { id: 'b', profile: 'work', harness: 'codex' },
         { id: 'c', profile: 'work', harness: THIRD },
       ],
@@ -111,7 +112,8 @@ describe('the runtimes a catalog skill can be installed into', () => {
 
     // Assert
     expect(listed.runtimes.map(runtime => `${runtime.id}:${runtime.harness}`)).toEqual([
-      'a:claude',
+      'a:claude-code',
+      'd:claude',
       'b:codex',
       `c:${THIRD}`,
     ]);

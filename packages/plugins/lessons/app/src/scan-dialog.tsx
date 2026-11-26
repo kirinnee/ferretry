@@ -477,7 +477,7 @@ function ScanEstimate({
     <section
       aria-label="Estimate"
       role="status"
-      className="flex flex-col gap-1 rounded-control border border-border-soft bg-surface-2 px-3 py-2"
+      className="flex flex-col gap-1 rounded-panel border border-border-soft bg-surface-2 px-panel py-2"
       data-lessons-estimate=""
     >
       <p className="m-0 text-ui">

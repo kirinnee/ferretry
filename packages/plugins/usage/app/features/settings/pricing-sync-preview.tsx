@@ -13,7 +13,7 @@ import type {
 } from '../../../contract/index.ts';
 import { DateValue, EffectiveDates, Identity, Provenance, RateAmounts } from './pricing-rate-parts.tsx';
 
-const NOTE_ERR = 'm-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-meta leading-base text-err';
+const NOTE_ERR = 'm-0 rounded-panel border border-err-border bg-err-bg px-panel py-2 text-meta leading-base text-err';
 
 function PreviewRate({ label, rate }: { readonly label: string; readonly rate: AnalyticsPricingRate }) {
   return (

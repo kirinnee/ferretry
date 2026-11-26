@@ -266,7 +266,7 @@ function LineRow({ plan, line, ticks, agentName, disabled, canUsePasskey, onTick
 
   return (
     <li
-      className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+      className="flex min-w-0 flex-col gap-2 rounded-panel border border-border bg-surface-2 p-panel"
       data-task-plan-line={line.line}
       data-task-plan-line-kind={line.kind}
       data-task-plan-line-state={line.state}
@@ -418,7 +418,7 @@ function LineState({ line }: { readonly line: TaskPlanLine }) {
 /** What a plan can't cover: said on every plan card, so the owner knows what will still ask. */
 function StillAsked() {
   return (
-    <details className="rounded-control border border-border p-3" data-task-plan-still-asked="" open>
+    <details className="rounded-panel border border-border p-panel" data-task-plan-still-asked="" open>
       <summary className="min-h-[44px] cursor-pointer text-ui font-medium text-fg">You’ll still be asked</summary>
       <ul className="m-0 mt-1 flex list-none flex-col gap-2 p-0 text-meta text-muted">
         {STILL_ASKED.map(each => (
@@ -448,7 +448,7 @@ function StagedLine({
   const picked = signIn === undefined || signIn.candidates.length !== 1 ? undefined : signIn.candidates[0];
   return (
     <li
-      className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+      className="flex min-w-0 flex-col gap-2 rounded-panel border border-border bg-surface-2 p-panel"
       data-task-plan-line={line.line}
       data-task-plan-line-kind={line.kind}
     >
@@ -581,7 +581,7 @@ function Settled({ plan, agentName, phase, onRevoke }: TaskPlanCardProps) {
       <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Plan lines">
         {plan.lines.map(line => (
           <li
-            className="flex min-w-0 flex-col gap-1 rounded-control border border-border bg-surface-2 p-3"
+            className="flex min-w-0 flex-col gap-1 rounded-panel border border-border bg-surface-2 p-panel"
             data-task-plan-line={line.line}
             data-task-plan-line-state={line.state}
             key={line.line}

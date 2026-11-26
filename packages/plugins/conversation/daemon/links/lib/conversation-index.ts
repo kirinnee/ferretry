@@ -3,12 +3,14 @@ import {
   HARNESS_HISTORY_READ_MAX_BYTES,
   type HarnessHistoryFiles,
   type HarnessHistoryKind,
+  recordedHarnessOf,
 } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { SqliteHandle } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { CONVERSATION_NAME_MAX, type LinkableConversation } from '../../../contract/index.ts';
 import type { TranscriptEvent, TranscriptHarness } from '../../reader/lib/transcript/types.ts';
+import { byHarnessFamily } from '../../seams/harness-family.ts';
 import { describeConversation, type DescribedConversation } from './conversation-describer.ts';
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import { codexIndexNames, type TranscriptNames, transcriptNames } from './conversation-name.ts';
@@ -624,7 +626,14 @@ export class ConversationIndex {
   async #walk(source: IndexSource): Promise<readonly Found[]> {
     const found: Found[] = [];
     const { files } = source;
-    if (source.parser === 'claude') {
+    // The index lists a tree through the parser it is read with; a parser with no walker lists nothing.
+    const claudeLayout = byHarnessFamily(source.parser, {
+      claude: () => true,
+      codex: () => false,
+      unknown: () => undefined,
+    });
+    if (claudeLayout === undefined) return found;
+    if (claudeLayout) {
       const projects = (await files.entries('projects')).filter(project => project.kind === 'directory');
       await inParallel(projects, WALK_CONCURRENCY, async project => {
         for (const entry of await files.entries(`projects/${project.name}`)) {
@@ -730,7 +739,11 @@ export class ConversationIndex {
       found.path,
       found.size,
       HEAD_READ_BYTES,
-      source.parser === 'claude' ? TAIL_NARROW_BYTES : TAIL_READ_BYTES,
+      byHarnessFamily(source.parser, {
+        claude: () => TAIL_NARROW_BYTES,
+        codex: () => TAIL_READ_BYTES,
+        unknown: () => TAIL_READ_BYTES,
+      }),
     );
     if (read === undefined) return undefined;
     let result = await this.#describeText(source, found, read);
@@ -1022,7 +1035,7 @@ export class ConversationIndex {
 
   /** Codex's own name for each thread (its `session_index.jsonl`), which wins over the one a rollout recorded. */
   async #codexNames(source: IndexSource, only?: ReadonlySet<string>): Promise<void> {
-    if (source.parser !== 'codex') return;
+    if (!byHarnessFamily(source.parser, { claude: () => false, codex: () => true, unknown: () => false })) return;
     const db = this.#open();
     const key = sourceKeyOf(source);
     const stat = await source.files.stat(CODEX_INDEX);
@@ -1297,7 +1310,8 @@ export class ConversationIndex {
     // Never empty: a row whose words were all masked still has a name (the wire refuses an empty one, and one bad row would
     // fail the whole listing).
     const name = truncateText(title ?? untitledName(row), CONVERSATION_NAME_MAX).trim() || UNTITLED_NAME;
-    const parser: TranscriptHarness = row.harness === 'codex' ? 'codex' : 'claude';
+    // The parser a row is read with is its harness's family; a harness with no family keeps its own key, which no parser answers to.
+    const parser: TranscriptHarness = recordedHarnessOf(row.harness);
     return {
       harness: row.harness,
       kind: row.kind,

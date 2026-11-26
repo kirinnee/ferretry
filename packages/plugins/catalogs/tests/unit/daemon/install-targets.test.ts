@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 import { catalogsFixture, mcpServer } from '../../support/daemon-host.ts';
 
-const RUNTIME = { id: 'work', name: 'work', profile: 'default', harness: 'claude' } as const;
+const RUNTIME = { id: 'work', name: 'work', profile: 'default', harness: 'claude-code' } as const;
 
 describe('the install targets read', () => {
   it('should answer the runtimes the item provider names, with the profile each one launches with', async () => {

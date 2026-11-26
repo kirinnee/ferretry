@@ -88,7 +88,7 @@ export function ruleLinkView(hold: RuleLinkHold) {
     if (!elsewhere) return null;
     return (
       <div
-        className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center gap-3 rounded-control border border-border bg-surface-2 p-3 shadow-lg"
+        className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center gap-3 rounded-panel border border-border bg-surface-2 p-panel shadow-lg"
         data-rule-linked-elsewhere=""
         role="status"
       >

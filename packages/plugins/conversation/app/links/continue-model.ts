@@ -19,7 +19,7 @@
 import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { LinkableConversation, LinkQuery } from '../../contract/index.ts';
 import { displayCallsign } from '@ferretry/core-ferrets/contract';
-import type { KnownHarnessKey } from './link-words.ts';
+import type { HarnessKey } from './link-words.ts';
 import {
   type DateFilter,
   type FerretMark,
@@ -29,7 +29,7 @@ import {
   sinceInstant,
 } from './conversation-picker-model.ts';
 
-export type ContinueSource = 'all' | 'ferretry' | 'computer' | KnownHarnessKey;
+export type ContinueSource = 'all' | 'ferretry' | 'computer' | HarnessKey;
 
 export const CONTINUE_SOURCES: readonly { readonly id: ContinueSource; readonly label: string }[] = [
   { id: 'all', label: 'All' },
@@ -56,7 +56,7 @@ export const conversationsQuery = (
 ): LinkQuery => ({
   source: 'synced',
   ...listingQuery(
-    { ...search, harness: source === 'claude-code' || source === 'codex' ? source : 'all' },
+    { ...search, harness: source === 'all' || source === 'ferretry' || source === 'computer' ? 'all' : source },
     now,
     // The computer's rows are picked out of the answer here, so read enough of it for them to be in it.
     source === 'computer' ? limit * COMPUTER_LIMIT_FACTOR : limit,

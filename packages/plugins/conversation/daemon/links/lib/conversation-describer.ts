@@ -5,6 +5,7 @@ import {
   type LinkPreview as ConversationPreview,
 } from '../../../contract/index.ts';
 import type { TranscriptHarness as Harness } from '../../reader/lib/transcript/types.ts';
+import { byHarnessFamily } from '../../seams/harness-family.ts';
 import type { PacedTranscriptParser } from '../../reader/lib/transcript/sliced.ts';
 import type { TranscriptEvent } from '../../reader/lib/transcript/types.ts';
 import { transcriptNames } from './conversation-name.ts';
@@ -149,15 +150,26 @@ function conversationHead(
     }
     if (typeof value !== 'object' || value === null) continue;
     const record = value as Record<string, unknown>;
-    const holder =
-      harness === 'claude'
-        ? record
-        : record.type === 'session_meta' && typeof record.payload === 'object' && record.payload !== null
+    // A harness with no family has no head this reads: it is not taken for Claude's (a cwd on every record) or Codex's.
+    const holder = byHarnessFamily<Record<string, unknown> | undefined>(harness, {
+      claude: () => record,
+      codex: () =>
+        record.type === 'session_meta' && typeof record.payload === 'object' && record.payload !== null
           ? (record.payload as Record<string, unknown>)
-          : undefined;
+          : undefined,
+      unknown: () => undefined,
+    });
     const cwd = holder?.cwd;
     if (typeof cwd === 'string' && cwd.startsWith('/'))
-      return { project: cwd, id: typeof holder?.id === 'string' && harness === 'codex' ? holder.id : undefined };
+      return {
+        project: cwd,
+        // Claude names a conversation by its file; only Codex's head carries the id.
+        id: byHarnessFamily(harness, {
+          claude: () => undefined,
+          codex: () => (typeof holder?.id === 'string' ? holder.id : undefined),
+          unknown: () => undefined,
+        }),
+      };
   }
   return undefined;
 }

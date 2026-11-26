@@ -174,24 +174,86 @@ function resetFromRelative(seconds: unknown, from: number | undefined): number |
   return Math.trunc(from + seconds * 1000);
 }
 
+/** One Codex window and how long it is, when the source said: a window of a day or more is the long one. */
+interface CodexWindow {
+  readonly percent?: number;
+  readonly window?: FleetUsageWindow;
+  readonly lengthSeconds?: number;
+}
+
+const ONE_DAY_SECONDS = 86_400;
+
+function codexWindowLength(
+  record: Record<string, unknown>,
+  key: 'window_minutes' | 'limit_window_seconds',
+): number | undefined {
+  const value = record[key];
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
+  return key === 'window_minutes' ? value * 60 : value;
+}
+
 function codexWindow(
   value: unknown,
   relativeKey: 'resets_in_seconds' | 'reset_after_seconds',
   absoluteKey: 'resets_at' | 'reset_at',
+  lengthKey: 'window_minutes' | 'limit_window_seconds',
   from: number | undefined,
-): { readonly percent?: number; readonly window?: FleetUsageWindow } {
+): CodexWindow {
   const record = asRecord(value);
   const percent = percentFromStoredUtilization(record.used_percent);
   const resetAt = normalizeResetAt(record[absoluteKey]) ?? resetFromRelative(record[relativeKey], from);
   const built = window(percent, resetAt);
-  return { ...(percent === undefined ? {} : { percent }), ...(built === undefined ? {} : { window: built }) };
+  const lengthSeconds = codexWindowLength(record, lengthKey);
+  return {
+    ...(percent === undefined ? {} : { percent }),
+    ...(built === undefined ? {} : { window: built }),
+    ...(lengthSeconds === undefined ? {} : { lengthSeconds }),
+  };
 }
 
-function codexReading(
-  short: ReturnType<typeof codexWindow>,
-  long: ReturnType<typeof codexWindow>,
-  providerAtLimit: boolean,
-): QuotaReading {
+type CodexSlot = 'short' | 'long';
+
+/** The slot a window's KNOWN length puts it in, or `undefined` when its length was not given. */
+function slotByLength(w: CodexWindow): CodexSlot | undefined {
+  if (w.lengthSeconds === undefined) return undefined;
+  return w.lengthSeconds >= ONE_DAY_SECONDS ? 'long' : 'short';
+}
+
+/**
+ * Slots the Codex windows by what is KNOWN. A window whose length is given takes the slot that length names whatever
+ * its position (a plan with one window reports it as `primary` however long it is). If two windows of one class are
+ * given, the slot keeps the longer (long) or shorter (short) of them, the primary on a tie, and the other is left out
+ * rather than drawn under a name that is not its length.
+ *
+ * A window whose length is NOT given is never called the long window: nothing says it is a week, and "Week" on
+ * the page is a claim about how long the account must wait. By position alone only the primary — which Codex defines
+ * as the short window — may take the short slot, and only when no known window has. Any other unknown window is
+ * left out (absent, never mislabelled), like every reading this module cannot vouch for.
+ */
+function codexReading(primary: CodexWindow, secondary: CodexWindow, providerAtLimit: boolean): QuotaReading {
+  const entries = [
+    { window: primary, position: 'primary' as const },
+    { window: secondary, position: 'secondary' as const },
+  ].filter(entry => entry.window.window !== undefined);
+  const placed: Partial<Record<CodexSlot, CodexWindow>> = {};
+  for (const { window: candidate } of entries) {
+    const slot = slotByLength(candidate);
+    if (slot === undefined) continue;
+    const held = placed[slot];
+    const wins =
+      held === undefined ||
+      (slot === 'long'
+        ? (candidate.lengthSeconds ?? 0) > (held.lengthSeconds ?? 0)
+        : (candidate.lengthSeconds ?? 0) < (held.lengthSeconds ?? 0));
+    if (wins) placed[slot] = candidate;
+  }
+  for (const { window: candidate, position } of entries) {
+    if (slotByLength(candidate) === undefined && position === 'primary' && placed.short === undefined) {
+      placed.short = candidate;
+    }
+  }
+  const short = placed.short ?? {};
+  const long = placed.long ?? {};
   return {
     ...(short.window === undefined ? {} : { shortWindow: short.window }),
     ...(long.window === undefined ? {} : { longWindow: long.window }),
@@ -201,8 +263,8 @@ function codexReading(
 }
 
 /**
- * The `rate_limits` of a Codex rollout's `token_count` event: `primary` is the 5-hour window and
- * `secondary` the weekly one, each `{used_percent, resets_at}` with `resets_at` in epoch seconds.
+ * The `rate_limits` of a Codex rollout's `token_count` event: `primary` is usually the 5-hour window and
+ * `secondary` the weekly one (each says its own length as `window_minutes`, which wins), each `{used_percent, resets_at}` with `resets_at` in epoch seconds.
  *
  * An older rollout carries `resets_in_seconds` instead, relative to the event, so the event's own
  * instant is taken as `observedAt` and a relative reset without one is absent rather than guessed.
@@ -211,8 +273,8 @@ function codexReading(
 export function parseCodexRateLimits(rateLimits: unknown, observedAt?: number): QuotaReading {
   const root = asRecord(rateLimits);
   return codexReading(
-    codexWindow(root.primary, 'resets_in_seconds', 'resets_at', observedAt),
-    codexWindow(root.secondary, 'resets_in_seconds', 'resets_at', observedAt),
+    codexWindow(root.primary, 'resets_in_seconds', 'resets_at', 'window_minutes', observedAt),
+    codexWindow(root.secondary, 'resets_in_seconds', 'resets_at', 'window_minutes', observedAt),
     false,
   );
 }
@@ -228,8 +290,8 @@ export function parseCodexRateLimits(rateLimits: unknown, observedAt?: number): 
 export function parseCodexUsageBody(body: unknown, now: number): QuotaReading {
   const limit = asRecord(asRecord(body).rate_limit);
   return codexReading(
-    codexWindow(limit.primary_window, 'reset_after_seconds', 'reset_at', now),
-    codexWindow(limit.secondary_window, 'reset_after_seconds', 'reset_at', now),
+    codexWindow(limit.primary_window, 'reset_after_seconds', 'reset_at', 'limit_window_seconds', now),
+    codexWindow(limit.secondary_window, 'reset_after_seconds', 'reset_at', 'limit_window_seconds', now),
     limit.limit_reached === true,
   );
 }

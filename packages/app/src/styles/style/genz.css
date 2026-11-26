@@ -42,10 +42,10 @@
   --radius-sm: 12px;
   --radius-md: 14px;
   --radius-lg: 20px;
-  --radius-control: 999px;
+  --radius-control: var(--radius-round);
   --radius-panel: 20px;
-  --radius-badge: 999px;
-  --radius-tab: 999px;
+  --radius-badge: var(--radius-round);
+  --radius-tab: var(--radius-round);
   --radius-input: 16px;
   --bubble-radius: 20px 20px 20px 6px;
   --card-tail-radius: 8px;
@@ -79,9 +79,9 @@
   --control-h-desktop: 34px;
   --control-h-sm-desktop: 28px;
   --row-min-h-desktop: 42px;
-  --pad-control-x: 16px;
+  --pad-control-x-want: 16px;
   --pad-badge-x: 10px;
-  --pad-panel: 14px;
+  --pad-panel-want: 14px;
   --pad-row-y: 9px;
   --pad-cell-x: 12px;
   --gap-xs: 6px;
@@ -147,7 +147,7 @@
   --md-link-weight: 750;
   --md-link-bg: color-mix(in srgb, var(--accent) 20%, var(--surface));
   --md-link-pad: 0 0.4em;
-  --md-link-radius: 999px;
+  --md-link-radius: var(--radius-round);
   --md-stack-radius: 14px;
   --md-stack-frame: var(--stroke-control) solid var(--border-strong);
   --md-ul-marker: circle;
@@ -329,7 +329,7 @@
 [data-swatch][data-style='genz'] .fy-cc__check {
   background: var(--accent);
   border: var(--stroke-control) solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
 }
 @keyframes fy-genz-wiggle {
   0% {
@@ -352,7 +352,7 @@
 :root[data-style='genz'] [data-neo-switch-track]:where(:not([data-swatch] *)),
 [data-swatch][data-style='genz'] [data-neo-switch-track] {
   border: var(--stroke-control) solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   box-shadow: var(--shadow-control);
 }
 :root[data-style='genz'] [role='switch'][aria-checked='true'] [data-neo-switch-track]:where(:not([data-swatch] *)),
@@ -363,19 +363,19 @@
 [data-swatch][data-style='genz'] [data-neo-switch-thumb] {
   background: var(--surface);
   border: var(--stroke-control) solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
 }
 /* Segmented control (`data-neo-segmented` only, never any radio group): a ruled pill tray; the chosen segment is a sticker. */
 :root[data-style='genz'] [data-neo-segmented]:where(:not([data-swatch] *)),
 [data-swatch][data-style='genz'] [data-neo-segmented] {
   border-color: var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   border-width: var(--stroke-control);
 }
 :root[data-style='genz'] [data-neo-segmented] > label:where(:not([data-swatch] *)),
 [data-swatch][data-style='genz'] [data-neo-segmented] > label {
   border: var(--stroke-control) solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-round);
 }
 :root[data-style='genz'] [data-neo-segmented] > label:has(:checked):where(:not([data-swatch] *)),
 [data-swatch][data-style='genz'] [data-neo-segmented] > label:has(:checked) {
@@ -415,7 +415,7 @@
 :root[data-style='genz'] .fy-sp-progress__segment:where(:not([data-swatch] *)),
 [data-swatch][data-style='genz'] .fy-sp-progress__segment {
   border: var(--stroke-control) solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   height: 14px;
   opacity: 1;
 }
@@ -432,7 +432,7 @@
 [data-swatch][data-style='genz'] [data-option-bar-track] {
   background: var(--surface);
   border: var(--stroke-control) solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-round);
   height: 14px;
 }
 

@@ -98,9 +98,9 @@
   --control-h-desktop: 38px;
   --control-h-sm-desktop: 32px;
   --row-min-h-desktop: 52px;
-  --pad-control-x: 22px;
+  --pad-control-x-want: 22px;
   --pad-badge-x: 10px;
-  --pad-panel: 28px;
+  --pad-panel-want: 28px;
   --pad-row-y: 14px;
   --pad-cell-x: 18px;
   --gap-xs: 8px;
@@ -213,8 +213,8 @@
     --label-size: 12px;
     --tracking-label: 0.16em;
     /* A phone has less width to spend on air. */
-    --pad-panel: 18px;
-    --pad-control-x: 16px;
+    --pad-panel-want: 18px;
+    --pad-control-x-want: 16px;
     --pad-cell-x: 12px;
   }
 }

@@ -154,7 +154,7 @@ export function ProjectBlock({ client, view, filter, noRepo, onChanged, ...share
     <div className="grid gap-sm" data-pulls-project={view.project}>
       {view.watch && view.pausedUntil !== undefined && (
         <p
-          className="m-0 flex items-start gap-xs rounded-control border border-border-strong bg-surface-2 p-xs text-meta text-warn"
+          className="m-0 flex items-start gap-xs rounded-panel border border-border-strong bg-surface-2 p-panel text-meta text-warn"
           data-pulls-paused=""
           role="status"
         >

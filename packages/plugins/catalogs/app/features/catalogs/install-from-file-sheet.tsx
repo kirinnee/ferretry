@@ -11,7 +11,6 @@ import {
   type CatalogInstallPreview,
   type CatalogInstalled,
   installHarnessFacts,
-  installHarnesses,
   isInstallHarness,
   revealHidden,
 } from '../../../contract/wire/index.ts';
@@ -38,6 +37,7 @@ import {
   fileItemRows,
   fileSizeProblem,
   fileSummary,
+  harnessChoices,
   heldHint,
   INSTALL_BUTTON,
   type InstallRefusal,
@@ -163,7 +163,11 @@ function useTargetRuntimes(
           if (live)
             setFetched({
               daemonId,
-              runtimes: targets.runtimes.map(item => ({ runtime: item.id, profiles: [item.profile] })),
+              runtimes: targets.runtimes.map(item => ({
+                runtime: item.id,
+                profiles: [item.profile],
+                harness: item.harness,
+              })),
             });
         },
         () => {
@@ -633,7 +637,10 @@ function TargetPicker({
                 disabled={busy}
                 options={[
                   { value: '', label: CHOOSE_PLACEHOLDER },
-                  ...installHarnesses().map(word => ({ value: word, label: installHarnessFacts(word).short })),
+                  ...harnessChoices(options.runtimes, draft.harness).map(word => ({
+                    value: word,
+                    label: installHarnessFacts(word).short,
+                  })),
                 ]}
               />
             </div>

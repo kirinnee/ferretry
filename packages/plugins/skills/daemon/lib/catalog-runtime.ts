@@ -5,7 +5,7 @@ import {
   type CatalogInstallChange,
   type CatalogRuntimeInstaller,
 } from '@ferretry/plugin-catalogs/contract';
-import { harnessWords, type ProfileLayerOutcome, type RuntimesApi } from '@ferretry/plugin-runtimes/contract';
+import type { ProfileLayerOutcome, RuntimesApi } from '@ferretry/plugin-runtimes/contract';
 import type { SkillsItem } from '../../contract/index.ts';
 import { InstalledSkillConflict, InstalledSkillRefused, type SkillStore } from './skill-store.ts';
 
@@ -80,9 +80,9 @@ export function skillsCatalogRuntime(deps: SkillsCatalogRuntimeDeps): CatalogRun
         id: runtime.id,
         name: runtime.id,
         profile: runtime.profile,
-        // The word its catalog names the harness by; a harness Runtimes has no words for goes by its own key, and the
-        // install refuses it by name rather than reading it as Claude.
-        harness: harnessWords(runtime.harness)?.catalogHalf ?? runtime.harness,
+        // The harness PLUGIN KEY, as Runtimes lists it: Catalogs decides at the install whether it has a layout for that exact
+        // key, so a third plugin registered under the word `claude` is never read as Claude Code.
+        harness: runtime.harness,
       })),
     }),
     profiles: async () => ({

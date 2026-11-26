@@ -261,7 +261,7 @@ export function VoiceEngineChoice({ value, onChange, voice, browserSupport, clas
           <div
             key={option.id}
             className={cn(
-              'flex flex-col gap-2 rounded-control border p-3',
+              'flex flex-col gap-2 rounded-panel border p-panel',
               selected ? 'border-border bg-select-fill' : 'border-border bg-surface-2',
             )}
           >

@@ -542,7 +542,7 @@ export function NewFerretPage({
             </p>
           </div>
 
-          <details className="rounded-control border border-border-strong px-3 py-2" data-new-ferret-advanced="">
+          <details className="rounded-panel border border-border-strong px-panel py-2" data-new-ferret-advanced="">
             <summary className="cursor-pointer text-ui font-medium text-fg-soft">Advanced options</summary>
             <div className="mt-2" data-new-ferret-remote-control="">
               <label className="flex min-h-[44px] items-start gap-sm text-ui text-fg" htmlFor={REMOTE_CONTROL_ID}>
@@ -597,7 +597,7 @@ export function NewFerretPage({
 
           {error ? (
             <div
-              className="rounded-control border border-err-border bg-err-bg px-control-x py-row-y text-ui text-err"
+              className="rounded-panel border border-err-border bg-err-bg px-panel py-row-y text-ui text-err"
               role="alert"
             >
               {error}
@@ -654,7 +654,7 @@ function NoFerretAccounts({
   }, [onShown]);
   return (
     <div
-      className="flex flex-wrap items-center justify-between gap-sm rounded-control border border-border-strong bg-surface-2 px-control-x py-row-y"
+      className="flex flex-wrap items-center justify-between gap-sm rounded-panel border border-border-strong bg-surface-2 px-panel py-row-y"
       data-new-ferret-no-accounts=""
     >
       <p className="m-0 min-w-[14rem] flex-1 text-ui leading-base text-fg-soft">

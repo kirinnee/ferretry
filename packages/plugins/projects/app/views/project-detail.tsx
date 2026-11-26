@@ -186,7 +186,7 @@ function ProjectDetailView({
                   <ul className="m-0 grid list-none gap-xs p-0" data-project-agents="ready">
                     {active.map(ferret => (
                       <li
-                        className="flex min-w-0 items-center justify-between gap-sm rounded-control border border-border-strong bg-surface-2 px-control-x py-2"
+                        className="flex min-w-0 items-center justify-between gap-sm rounded-panel border border-border-strong bg-surface-2 px-panel py-2"
                         key={ferret.id}
                       >
                         <span className="min-w-0">

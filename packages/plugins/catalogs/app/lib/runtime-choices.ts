@@ -16,6 +16,7 @@ export const readRuntimeChoices = async (client: Pick<PluginClient, 'call'>): Pr
     id: runtime.id,
     wrapper: runtime.wrapper,
     profile: runtime.profile,
+    harness: runtime.harness,
   }));
 
 export function useRuntimeChoices(client: Pick<PluginClient, 'call'>): readonly RuntimeChoice[] {

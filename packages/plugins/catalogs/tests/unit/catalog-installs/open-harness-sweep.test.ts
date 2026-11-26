@@ -125,11 +125,11 @@ describe('the Add skills page for a ferret on a harness Catalogs has no row for'
   const installAt = (target: unknown) => ({ ...installRecord('skill', 'pdf-tools'), target }) as never;
   const projects = [{ name: 'app', path: '/work/app' }];
 
-  it('should not guess Claude from a place that names no known harness', () => {
+  it('should not guess Claude from a place that names no known harness: it is unknown', () => {
     const props = { ferret: 'f', folder: '/work/app', scopes: [] as string[] };
     expect(readPlace(placeQuery({ ...props, harness: 'codex' })).harness).toBe('codex');
     expect(readPlace(placeQuery({ ...props, harness: 'claude-code' })).harness).toBe('claude');
-    expect(readPlace(`?folder=/work/app&harness=${THIRD}`).harness).toBeUndefined();
+    expect(readPlace(`?folder=/work/app&harness=${THIRD}`).harness).toBe('unknown');
     expect(readPlace('').harness).toBeUndefined();
   });
 
@@ -143,7 +143,7 @@ describe('the Add skills page for a ferret on a harness Catalogs has no row for'
     expect(landedSentence(install, plan, [], undefined)).toMatch(/does not read that place/u);
     const runtime = installAt({ scope: 'runtime', runtime: 'r1', profile: 'p' });
     const runtimePlan = installPlan({ ...place, cwd: '/elsewhere', runtime: 'box' }, projects, [
-      { id: 'r1', wrapper: 'box', profile: 'p' },
+      { id: 'r1', wrapper: 'box', profile: 'p', harness: 'claude-code' },
     ]);
     expect(landedSentence(runtime, runtimePlan, [], undefined)).toBe(`Installed pdf-tools in ${runtimePlan.sentence}.`);
   });

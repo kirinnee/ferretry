@@ -285,7 +285,7 @@ export const CatalogInstallTargetsSchema = z.strictObject({
       id: z.string().min(1),
       name: z.string().min(1),
       profile: z.string().min(1),
-      /** The harness the runtime runs, as its catalog names it; a harness Catalogs cannot install into is listed and refused at the install. */
+      /** The harness the runtime runs, by its plugin KEY (`claude-code`, `codex`); a key Catalogs has no layout for is listed and refused at the install. */
       harness: z.string().min(1).max(64),
     }),
   ),

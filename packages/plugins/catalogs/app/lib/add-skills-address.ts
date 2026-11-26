@@ -7,7 +7,7 @@
 import { FerretSkillsInventorySchema, type SkillsAddSlotProps } from '@ferretry/plugin-skills/contract';
 import { installHarnessOfKey } from '../../contract/wire/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import type { SessionPlace } from '../features/add-skills/add-skills-model.ts';
+import { type SessionPlace, UNKNOWN_HARNESS } from '../features/add-skills/add-skills-model.ts';
 
 export interface AddSkillsPlace extends SessionPlace {
   /** Where the skills the ferret sees come from. */
@@ -22,15 +22,23 @@ export function placeQuery(props: SkillsAddSlotProps): string {
 }
 
 /**
- * The place a query names; the slot's harness key (`claude-code`) is the word an install target names (`claude`). A harness
- * Catalogs has no layout for, or none named, is no harness here: the page asks which agent instead of assuming one.
+ * The harness an address names: the slot's harness key (`claude-code`) is the word an install target names (`claude`). None named
+ * is no harness (the page picks the only one the machine runs, or asks); a key Catalogs has no layout for is `unknown`, which
+ * is refused, never read as Claude.
  */
+function harnessOf(key: string | null): Pick<SessionPlace, 'harness' | 'unsupportedKey'> {
+  if (key === null || key === '') return { harness: undefined };
+  const harness = installHarnessOfKey(key);
+  return harness === undefined ? { harness: UNKNOWN_HARNESS, unsupportedKey: key } : { harness };
+}
+
+/** The place a query names. */
 export function readPlace(search: string): AddSkillsPlace {
   const query = new URLSearchParams(search);
   const folder = query.get('folder');
   return {
     cwd: folder === null || folder === '' ? undefined : folder,
-    harness: installHarnessOfKey(query.get('harness') ?? ''),
+    ...harnessOf(query.get('harness')),
     runtime: query.get('runtime') ?? undefined,
     scopes: (query.get('scopes') ?? '').split(',').filter(scope => scope !== ''),
   };

@@ -78,7 +78,7 @@ export function AccessRefused({
   };
   return (
     <section
-      className="flex min-w-0 flex-col gap-sm rounded-control border border-err-border bg-err-bg p-control-x py-2 text-err"
+      className="flex min-w-0 flex-col gap-sm rounded-panel border border-err-border bg-err-bg p-panel py-2 text-err"
       aria-label={`${REFUSED_TITLE}: ${label}`}
       data-access-refused=""
     >

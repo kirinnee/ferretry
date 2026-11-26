@@ -62,7 +62,7 @@ export function PhoneApprovalCard({ approval, now, onRefuse, onViewPage }: Phone
         {model.asked}
       </p>
       {model.number === undefined ? null : (
-        <div className="flex flex-col gap-1 rounded-control border border-border bg-surface-2 p-4 text-center">
+        <div className="flex flex-col gap-1 rounded-panel border border-border bg-surface-2 p-4 text-center">
           <span
             aria-label={`Number ${model.number}`}
             role="img"
@@ -78,7 +78,7 @@ export function PhoneApprovalCard({ approval, now, onRefuse, onViewPage }: Phone
       )}
       {model.number !== undefined || words.noNumber === undefined ? null : (
         <div
-          className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+          className="flex flex-col gap-2 rounded-panel border border-border bg-surface-2 p-panel"
           data-phone-approval-no-number={model.terminal ? 'terminal' : model.steered ? 'steered' : 'page'}
         >
           <p className="m-0 text-ui text-fg">{words.noNumber}</p>

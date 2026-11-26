@@ -250,9 +250,9 @@ class FakeFleet {
       ({
         format: 'version-2',
         runtimes: [
-          { id: 'rt-claude', name: 'claude-work', profile: 'work', harness: 'claude' },
+          { id: 'rt-claude', name: 'claude-work', profile: 'work', harness: 'claude-code' },
           { id: 'rt-codex', name: 'codex-work', profile: 'work', harness: 'codex' },
-          { id: 'rt-orphan', name: 'orphan', profile: 'gone', harness: 'claude' },
+          { id: 'rt-orphan', name: 'orphan', profile: 'gone', harness: 'claude-code' },
           { id: 'rt-third', name: 'third-work', profile: 'work', harness: 'fake-third' },
         ],
       }) as unknown as FleetRuntimeCatalog,
@@ -321,7 +321,7 @@ export interface Rig {
   roots: string[];
 }
 
-export function rig(options: { maxKept?: number } = {}): Rig {
+export function rig(options: { maxKept?: number; fleet?: CatalogInstallServiceDeps['fleet'] } = {}): Rig {
   const store = new MemoryStore();
   const prefs = new MemoryPrefs();
   const mcp = new FakeMcpFiles();
@@ -354,7 +354,7 @@ export function rig(options: { maxKept?: number } = {}): Rig {
       mcpFiles: mcp,
       skillFiles: new FakeProjectSkills(folders),
       runtimeSkills: new FakeRuntimeSkills(folders),
-      fleet: fleet.api,
+      fleet: options.fleet ?? fleet.api,
       secretNames: async () => {
         state.secretNameReads += 1;
         return state.secrets;

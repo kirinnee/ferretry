@@ -77,7 +77,7 @@ import {
 import { startupParkedPending } from './lib/delivery/service.ts';
 import { type DeliveredAttachment, deliveredFilename } from './lib/attachments-delivery.ts';
 import { harnessSendTerminal } from './send-terminal.ts';
-import { harnessFamily } from '../contract/index.ts';
+import { harnessFamily, hasClaudeChannel } from '../contract/index.ts';
 import { KeyedSerialExecutor } from '../contract/index.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from '../contract/index.ts';
 import type { ClockPort } from '../contract/index.ts';
@@ -933,7 +933,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const channelled = (ferret: SessionId, target: SendTarget, request: TypedSend): boolean =>
     request.warden !== true &&
     request.now !== true &&
-    target.harness === 'claude' &&
+    hasClaudeChannel(target.harness) &&
     (request.senderSessionId !== undefined || request.notice === true || request.agenda === true) &&
     deps.claude?.connected(ferret) === true;
   /**
