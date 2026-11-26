@@ -13,7 +13,7 @@ import manifest from '../manifest.ts';
 import { FetchGithubHttp } from './adapters/github-http.ts';
 import { gitAccountRoutes } from './routes.ts';
 import { psAgentProcesses } from './adapters/agent-processes.ts';
-import { rootRunFolder } from './adapters/run-folder.ts';
+import { rootGhShimFolder, rootRunFolder } from './adapters/run-folder.ts';
 import { accountLaunchParts } from './features/launch/parts.ts';
 import { GpgSigners } from './features/gpg-keys/signer.ts';
 import { GpgKeyService } from './features/gpg-keys/service.ts';
@@ -23,11 +23,12 @@ import { GhRunner } from './features/gh-run/gh-runner.ts';
 import { ghLocator } from './lib/gh-locator.ts';
 import { programLocator } from './lib/program-locator.ts';
 import { ghShimLaunchParts } from './features/gh-shim/parts.ts';
-import { type GhShimFolders, installGhShim } from './features/gh-shim/shim.ts';
+import { closeGhConfig, type GhShimFolders, installGhShim } from './features/gh-shim/shim.ts';
 import { ghRunRoutes } from './features/gh-run/routes.ts';
 import { sshKeyRoutes } from './features/ssh-keys/routes.ts';
 import { SshKeyService } from './features/ssh-keys/service.ts';
 import { AccountBook } from './lib/accounts.ts';
+import { accountForFolder } from './lib/account-for-folder.ts';
 import { AccountLocks } from './lib/account-locks.ts';
 import { GithubDeviceFlows } from './lib/device-flow.ts';
 import { GitAccountsService } from './lib/service.ts';
@@ -68,10 +69,12 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
       const runFolder = overrides.runFolder ?? rootRunFolder(kernel.roots.root('downloads'));
       // `gh` (a token), `ssh-agent` and `ssh-add` (the PRIVATE KEY on stdin) are found the same way: outside the state home, absolute.
       const locatorPorts = {
+        home: () => kernel.paths.home(),
         daemonPath: () => kernel.hostFacts.launchGuard().searchPath,
         which: (name: string, options: { readonly directories: readonly string[] }) =>
           kernel.paths.which(name, options),
         stateHomeHolding: (path: string) => kernel.paths.stateHomeHolding(path),
+        bindProgram: (path: string) => kernel.paths.bindProgram(path),
       };
       const sshPrograms = {
         'ssh-agent': programLocator({ name: 'ssh-agent', trustedWith: 'an account key' }, locatorPorts),
@@ -97,20 +100,28 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
       );
       kernel.lifecycle.onStop(() => agents.stopAll());
       kernel.lifecycle.onStop(() => gnupg.stopAll());
-      // Ferretry's `gh` (B10): the shim is written at boot and again whenever a launch finds it was not (a failure is not kept).
+      // Bind the canonical system-managed client, never a pane-writable executable found on PATH.
+      const client = programLocator(
+        { name: kernel.identity.binaries.client, trustedWith: "a ferret's session" },
+        locatorPorts,
+      );
+      const shimFolder = overrides.runFolder ?? rootGhShimFolder(kernel.roots);
+      // Repair before each launch. Only overlapping installs share a promise; a completed install is never cached.
       let shim: Promise<GhShimFolders | undefined> | undefined;
       const shimFolders = (): Promise<GhShimFolders | undefined> => {
-        shim ??= installGhShim(runFolder, kernel.identity.binaries.client).then(
-          folders => {
-            if (folders === undefined) shim = undefined;
-            return folders;
-          },
-          () => {
-            shim = undefined;
-            kernel.log.warn("git-accounts: Ferretry's gh shim could not be written, so ferrets keep no gh shim");
+        shim ??= client()
+          .then(async found => {
+            const pinned = await kernel.paths.bindProgram(found.program);
+            if (pinned === undefined) throw new Error('GitHub client unavailable');
+            return await installGhShim(shimFolder, pinned);
+          })
+          .catch(() => {
+            kernel.log.warn('git-accounts: GitHub client unavailable; ferret launch will be refused');
             return undefined;
-          },
-        );
+          })
+          .finally(() => {
+            shim = undefined;
+          });
         return shim;
       };
       void shimFolders();
@@ -190,7 +201,17 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
                 gpg: account => gpgService.launchKit(account),
               }),
             },
-            { id: 'git-accounts-gh', item: ghShimLaunchParts(shimFolders) },
+            {
+              id: 'git-accounts-gh',
+              item: ghShimLaunchParts(
+                shimFolders,
+                async folder => {
+                  const linked = accountForFolder(folder, (await projects.current()?.list()) ?? [], () => true);
+                  return linked !== undefined;
+                },
+                () => closeGhConfig(shimFolder),
+              ),
+            },
           ],
         },
         provides: {

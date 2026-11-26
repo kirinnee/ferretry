@@ -87,7 +87,7 @@ import kernelManifest, {
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { bindDirectory } from './bound-directory.ts';
-import { checkDirectory, gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from './paths.ts';
+import { bindProgram, checkDirectory, gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from './paths.ts';
 import { type ExecutableProbe, handleReaders, locateCommand, whichCommand, whichForCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
@@ -860,16 +860,14 @@ async function bootLocked(
     );
 
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
-  /**
-   * `kernel.paths` for one plugin before its gates. `whichFor`'s readers come from the DECLARED manifests alone (the
-   * plugin itself and each one offering a hook it takes), never from anything the caller passes; the Vault answers a
-   * handle minted for any other plugin, a forged one and a spent one alike (`unprovable`).
-   */
+  /** Paths before gating; whichFor's readers come only from declared manifests, never caller input. */
   const ownerPathsFor = (plugin: string): PathsPort => {
     const readers = handleReaders(plugin, manifests);
     const probe: ExecutableProbe = adapters.executable ?? (async () => false);
     return Object.freeze({
       ...ownerPaths,
+      bindProgram: async (path: string) =>
+        await bindProgram(adapters.fs, path, { executable: process.execPath, ...identityPort.binaries }),
       locate: async (
         name: string,
         locateOptions: { readonly override: string; readonly directories?: readonly string[] },
