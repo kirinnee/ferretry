@@ -13,6 +13,7 @@ import {
 } from '../../../contract/index.ts';
 import { VoiceEngineError } from '../../../contract/index.ts';
 import { spansFromProbabilities, VAD_CHUNK } from '../../../daemon/lib/engine/spans.ts';
+import { ENTRY_LEASE_MS } from '../../../contract/index.ts';
 import { StreamRegistry } from '../../../daemon/lib/stream/registry.ts';
 import { SampleBuffer } from '../../../daemon/lib/stream/samples.ts';
 import { VoiceStream, type StreamParts } from '../../../daemon/lib/stream/session.ts';
@@ -37,6 +38,8 @@ interface Rig {
   readonly frames: Uint8Array[];
   readonly closes: { code: number; reason: string }[];
   readonly sent: { ferretId: string; message: string; sendId: string }[];
+  /** The entry messages ("(voice mode on) …") the stream sent when voice mode began: kept apart from the turns the person spoke. */
+  readonly entered: { ferretId: string; message: string; sendId: string }[];
   /** The ferret ids a send was audited for. */
   readonly audited: string[];
   readonly transcribed: number[];
@@ -69,6 +72,7 @@ async function rig(
   const frames: Uint8Array[] = [];
   const closes: { code: number; reason: string }[] = [];
   const sent: Rig['sent'] = [];
+  const entered: Rig['entered'] = [];
   const audited: string[] = [];
   const transcribed: number[] = [];
   let counter = 0;
@@ -106,13 +110,17 @@ async function rig(
       'send' in overrides
         ? overrides.send
         : async (ferretId, message, sendId) => {
-            sent.push({ ferretId, message, sendId });
+            (message.startsWith('(voice mode on)') ? entered : sent).push({ ferretId, message, sendId });
             return { ok: true };
           },
     mayChat: overrides.mayChat ?? (() => true),
     resolveFerret: overrides.resolveFerret ?? (async reference => reference),
     recordSent: ferretId => void audited.push(ferretId),
     claimFerret: overrides.claimFerret ?? (ferret => registry.claimFerret(ferret)),
+    entry: {
+      enter: ferret => registry.enterVoice(ferret, clock.nowMs()),
+      leave: ferret => registry.leaveVoice(ferret),
+    },
     onEnd: () => {
       ended += 1;
     },
@@ -126,6 +134,7 @@ async function rig(
     frames,
     closes,
     sent,
+    entered,
     audited,
     transcribed,
     stream,
@@ -152,8 +161,165 @@ async function rig(
   return view;
 }
 
-const chat = { t: 'start', v: 1, purpose: 'chat', ferretId: 'fer-1' } as const;
+const chat = { t: 'start', v: 1, purpose: 'chat', ferretId: 'fer-1', session: 'vm-test-session' } as const;
 const test_ = { t: 'start', v: 1, purpose: 'test' } as const;
+
+describe('V1: entering voice mode', () => {
+  const ENTRY = '(voice mode on) Speak first, narrate as you work, speak the result.';
+
+  test('the ferret is told once, at once, as the owner: before any word was spoken', async () => {
+    const r = await rig();
+    r.start(chat);
+    await r.talk(400);
+    expect(r.entered).toEqual([{ ferretId: 'fer-1', message: ENTRY, sendId: 'voice-on:vm-test-session' }]);
+    expect(r.audited).toEqual([]); // the audit is of what the person said, not of this fixed sentence
+    // Nothing else is sent while nobody speaks, however long the stream stays open.
+    await r.talk(5_000);
+    expect(r.entered).toHaveLength(1);
+    expect(r.sent).toEqual([]);
+    expect(r.closes).toEqual([]);
+  });
+
+  test('a reconnect inside the chat’s claim is not a repeat: the ferret already has the message', async () => {
+    const registry = new StreamRegistry();
+    const first = await rig({ registry });
+    first.start(chat);
+    await first.talk(400);
+    expect(first.entered.map(each => each.sendId)).toEqual(['voice-on:vm-test-session']);
+    first.stream.close();
+    // The same voice-mode session reopens its stream (a dropped carrier): the claim is still live, so nothing is sent.
+    const again = await rig({ registry });
+    again.start(chat);
+    await again.talk(400);
+    expect(again.entered).toEqual([]);
+  });
+
+  test('ONE entry per chat however many tabs, devices and engines: whoever holds the claim first sends, the rest send nothing', async () => {
+    // A phone's own engine (or another tab's) claimed this chat first; the machine's stream finds the claim live.
+    const registry = new StreamRegistry();
+    const stream = await rig({ registry });
+    expect(registry.enterVoice('fer-1', stream.clock.nowMs())).toBe(true);
+    stream.start(chat);
+    await stream.talk(400);
+    expect(stream.entered).toEqual([]);
+    expect(stream.closes).toEqual([]);
+    // And the other way round: the stream claims it, so a phone asking afterwards is not the one to send.
+    const other = new StreamRegistry();
+    const streaming = await rig({ registry: other });
+    streaming.start(chat);
+    await streaming.talk(400);
+    expect(streaming.entered).toHaveLength(1);
+    expect(other.enterVoice('fer-1', streaming.clock.nowMs())).toBe(false);
+  });
+
+  test('the claim lapses once nobody renews it: a later voice mode tells the ferret afresh, and a holder renews it while it stays', async () => {
+    const registry = new StreamRegistry();
+    expect(registry.enterVoice('fer-1', 0)).toBe(true);
+    expect(registry.enterVoice('fer-1', ENTRY_LEASE_MS - 1)).toBe(false); // renews
+    expect(registry.enterVoice('fer-1', 2 * ENTRY_LEASE_MS - 2)).toBe(false); // still live: the last call renewed it
+    expect(registry.enterVoice('fer-1', 4 * ENTRY_LEASE_MS)).toBe(true); // nobody renewed it
+    // An open stream renews on its own: after longer than the lease, the claim is still live.
+    const held = new StreamRegistry();
+    const live = await rig({ registry: held });
+    live.start(chat);
+    await live.talk(400);
+    expect(live.entered).toHaveLength(1);
+    // A phone's unit every 4 s (silence of 5 s ends a stream), for four minutes: more than the lease.
+    for (let second = 0; second < 240; second += 4) {
+      await live.clock.advance(4_000);
+      await live.talk(40);
+    }
+    expect(live.closes).toEqual([]);
+    expect(held.enterVoice('fer-1', live.clock.nowMs())).toBe(false);
+  });
+
+  test('a client that names no session is one that predates the entry message: it streams as before and nothing is sent', async () => {
+    const r = await rig();
+    r.start({ t: 'start', v: 1, purpose: 'chat', ferretId: 'fer-1' });
+    await r.talk(1_000);
+    expect(r.entered).toEqual([]);
+    expect(r.closes).toEqual([]);
+    expect(r.snapshot().state).toBe('listening');
+  });
+
+  test('a grant narrowed between the start and the entry sends nothing and gives the claim up', async () => {
+    const registry = new StreamRegistry();
+    let asked = 0;
+    const narrowed = await rig({
+      registry,
+      mayChat: () => {
+        asked += 1;
+        return asked === 1; // allowed at the start, gone by the time the entry would be sent
+      },
+    });
+    narrowed.start(chat);
+    await narrowed.talk(400);
+    expect(narrowed.entered).toEqual([]);
+    expect(registry.enterVoice('fer-1', narrowed.clock.nowMs())).toBe(true);
+  });
+
+  test('a refused entry gives the claim up, so the next to enter sends it', async () => {
+    const registry = new StreamRegistry();
+    const refused = await rig({ registry, send: async () => ({ ok: false, code: 'send_refused' }) });
+    refused.start(chat);
+    await refused.talk(400);
+    expect(registry.enterVoice('fer-1', refused.clock.nowMs())).toBe(true);
+  });
+
+  test('after a refused first entry the next renewal reacquires the claim AND tries the entry, never holding a claim it did not send', async () => {
+    const registry = new StreamRegistry();
+    const attempts: string[] = [];
+    let accept = false;
+    const late = await rig({
+      registry,
+      send: async (_ferretId, _message, sendId) => {
+        attempts.push(sendId);
+        return accept ? { ok: true } : { ok: false, code: 'send_refused' };
+      },
+    });
+    late.start(chat);
+    await late.talk(400);
+    expect(attempts).toHaveLength(1);
+    accept = true;
+    for (let second = 0; second < 64; second += 4) {
+      await late.clock.advance(4_000);
+      await late.talk(40);
+    }
+    expect(attempts).toHaveLength(2);
+    expect(late.closes).toEqual([]);
+    expect(registry.enterVoice('fer-1', late.clock.nowMs())).toBe(false);
+  });
+
+  test('Talk to test, a refused grant and a missing Conversation send nothing, and a refused entry does not end the stream', async () => {
+    const testing = await rig();
+    testing.start(test_);
+    await testing.talk(400);
+    expect(testing.entered).toEqual([]);
+
+    const narrowed = await rig({ mayChat: () => false });
+    narrowed.start(chat);
+    await narrowed.talk(400);
+    expect(narrowed.entered).toEqual([]);
+
+    const refused = await rig({ send: async () => ({ ok: false, code: 'send_refused' }) });
+    refused.start(chat);
+    await refused.talk(1_000);
+    expect(refused.closes).toEqual([]);
+    expect(refused.audited).toEqual([]);
+    expect(refused.snapshot().state).toBe('listening');
+
+    // A send that throws (the socket closed under it) is the same: the stream carries on and the person can talk.
+    const thrown = await rig({
+      send: async () => {
+        throw new Error('the socket closed under the send');
+      },
+    });
+    thrown.start(chat);
+    await thrown.talk(1_000);
+    expect(thrown.closes).toEqual([]);
+    expect(thrown.snapshot().state).toBe('listening');
+  });
+});
 
 describe('the voice stream: what the machine hears and shows', () => {
   test('Talk to test: live words appear while you speak, the final words follow the pause, and nothing is sent', async () => {
@@ -274,8 +440,10 @@ describe('the voice stream: when it sends, and when it must not', () => {
   test('a send the mailbox refused is reported, not repeated', async () => {
     let calls = 0;
     const r = await rig({
-      send: async () => {
-        calls += 1;
+      send: async (_ferret, message) => {
+        // The entry message is not a turn: only what the person said counts here.
+        if (message.startsWith('(voice) ')) calls += 1;
+        else if (message.startsWith('(voice mode on)')) return { ok: true };
         return { ok: false, code: 'send_refused' };
       },
     });
@@ -288,8 +456,10 @@ describe('the voice stream: when it sends, and when it must not', () => {
   test('an acknowledgement that never came (the send threw) is not retried by the stream', async () => {
     let calls = 0;
     const r = await rig({
-      send: async () => {
-        calls += 1;
+      send: async (_ferret, message) => {
+        // The entry message is not a turn: only what the person said counts here.
+        if (message.startsWith('(voice) ')) calls += 1;
+        else if (message.startsWith('(voice mode on)')) return { ok: true };
         throw new Error('the socket closed under the send');
       },
     });
@@ -418,7 +588,7 @@ describe('the voice stream: malformed is fatal', () => {
     expect(before.closes.at(-1)).toEqual(STREAM_CLOSES.protocol);
 
     const bad = await rig();
-    bad.start({ t: 'start', v: 1, purpose: 'chat' }); // no ferret
+    bad.start({ t: 'start', v: 1, purpose: 'chat', session: 'vm-test-session' }); // no ferret
     expect(bad.closes.at(-1)).toEqual(STREAM_CLOSES.protocol);
 
     const twice = await rig();

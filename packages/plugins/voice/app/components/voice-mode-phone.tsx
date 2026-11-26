@@ -23,7 +23,8 @@ import { type UseDictationOptions, useDictation } from '../hooks/use-dictation.t
 import { useReadAloudController } from '../hooks/use-read-aloud.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import { PauseWatcher } from '../lib/voice-mode/phone-loop.ts';
-import { newSessionKey, sendIdOf, sendSpoken } from '../lib/voice-mode/phone-send.ts';
+import { ENTRY_RENEW_MS } from '../../contract/index.ts';
+import { enterVoice, newSessionKey, sendIdOf, sendSpoken } from '../lib/voice-mode/phone-send.ts';
 import type { VoiceModeStore } from '../lib/voice-mode/voice-mode-store.ts';
 import { Button, type DaemonConnection, type VoicePluginClient } from '../shell-voice.ts';
 import { inputRms, waveformAnalyser } from './input-waveform.tsx';
@@ -112,6 +113,16 @@ export function PhoneSession({
     deliver(handle.review.cleaned === '' ? handle.review.raw : handle.review.cleaned);
     handle.discard();
   }, [deliver, handle.discard, handle.review]);
+
+  // Voice mode is on here (entered, or handed over from the machine inside the same session): the machine tells the ferret once
+  // for the whole chat, and the claim is renewed while this phone stays in it.
+  useEffect(() => {
+    const session = store.get(ferretId).session;
+    if (session === '') return undefined;
+    void enterVoice(client, ferretId, session);
+    const renew = setInterval(() => void enterVoice(client, ferretId, session), ENTRY_RENEW_MS);
+    return () => clearInterval(renew);
+  }, [client, ferretId, store]);
 
   // An engine that cannot listen ends voice mode and says why: nothing else would ever send.
   useEffect(() => {
