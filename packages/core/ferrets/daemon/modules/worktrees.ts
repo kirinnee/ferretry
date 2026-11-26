@@ -48,11 +48,12 @@ export interface WorktreesNeeds {
    */
   readonly sessions: () => Promise<readonly WorktreeSessionFact[] | undefined>;
   /**
-   * Which shells are still in a checkout (today: the terminal runtime). Terminals is a plugin Ferrets cannot read
-   * (§2.1), so the host answers `undefined` until a hook carries it: a read still succeeds and a destructive write
+   * Which shells are still in a checkout (the terminal runtime). Terminals is a plugin Ferrets cannot read
+   * (§2.1), so the feature asks what it contributes to `terminal.roots`; `undefined` is unknown: a read still succeeds and a destructive write
    * still refuses.
    */
   readonly terminalRoots: () => Promise<readonly string[] | undefined>;
+  readonly withTerminalRemoval?: <T>(path: string, remove: () => Promise<T>) => Promise<T>;
   /** Opaque ids for ownership tokens (today: `crypto.randomUUID`). */
   readonly newId: () => string;
 }
@@ -93,7 +94,10 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     new StateManagedWorktreeRegistry(needs.state),
     operations,
     { sessions: async () => await needs.sessions().catch(() => undefined) },
-    { roots: async () => await needs.terminalRoots().catch(() => undefined) },
+    {
+      roots: async () => await needs.terminalRoots().catch(() => undefined),
+      ...(needs.withTerminalRemoval === undefined ? {} : { withRemoval: needs.withTerminalRemoval }),
+    },
     // The SAME clock the Git adapter stamps records with, so an intent this daemon writes before a mutation and
     // the record it writes after cannot disagree about when.
     clock,

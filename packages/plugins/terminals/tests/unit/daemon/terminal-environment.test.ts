@@ -84,7 +84,8 @@ describe('the terminal environment: the daemon reads the file live', () => {
     const tmux = new ScriptedTmux();
     let caller: 'ferret' | 'owner' = 'owner';
     const plugin = implementDaemon(manifest, {
-      build: ctx => buildTerminals(ctx, { tmux, socketPath: '/fixture/state/terminals/tmux.sock' }),
+      build: ctx =>
+        buildTerminals(ctx, { realPath: async path => path, tmux, socketPath: '/fixture/state/terminals/tmux.sock' }),
     });
     const host = await testHost({
       hostFacts: unarmedHostFacts,

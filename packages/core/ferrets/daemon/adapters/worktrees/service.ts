@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { unclearedRemovalBlockers, type WorktreeLiveState } from '../../../contract/index.ts';
 import { WorktreeError, WorktreeRemovalRefusal } from '../../lib/worktrees/errors.ts';
+import { verifyWorktreeOccupancy } from '../../lib/worktrees/occupancy.ts';
 import { assessBranchDeletion, assessWorktreeRemoval, isWithinDirectory } from '../../lib/worktrees/policy.ts';
 import type {
   GitWorkingDirectory,
@@ -564,14 +565,8 @@ export class ManagedWorktreeAdapter {
   }
 
   /**
-   * Removes one checkout, and its branch when that was asked for and can be justified.
-   *
-   * THE PREFLIGHT RUNS TWICE AND THE SECOND ONE IS THE POINT. Between the verdict a caller
-   * authorized and the moment Git is asked to destroy anything, an agent can dirty the tree, another
-   * session can move in, or somebody can lock the checkout. The second pass runs inside the same
-   * per-repository queue immediately before the mutation, and ANY change to the blocker set — not
-   * merely one that adds an uncleared blocker — refuses: consent was given against a specific account
-   * of what would be lost, and a different account is not the thing that was consented to.
+   * Remove under the repository queue: repeat the Git preflight, refusing ANY blocker change.
+   * Re-read occupancy after pinning, immediately before deleting, to catch a late shell or ferret.
    */
   async remove(input: RemoveManagedWorktreeInput): Promise<RemovedManagedWorktree> {
     return await this.queue.run(input.managed.commonDir, async () => {
@@ -584,7 +579,8 @@ export class ManagedWorktreeAdapter {
         );
       }
 
-      const fresh = await this.examine((await input.refreshEvidence?.()) ?? input);
+      const refreshed = (await input.refreshEvidence?.()) ?? input;
+      const fresh = await this.examine(refreshed);
       if (blockerFingerprint(fresh.decision.blockers) !== blockerFingerprint(preflight.decision.blockers)) {
         throw new WorktreeRemovalRefusal(
           `refusing to remove ${preflight.decision.path}: the checkout changed after the preflight`,
@@ -601,7 +597,10 @@ export class ManagedWorktreeAdapter {
             `refusing to remove ${fresh.decision.path}: checkout identity changed at the mutation boundary`,
             fresh.decision.blockers,
           ),
-        async pinnedCwd => await this.gateway.remove(pinnedCwd, discarding),
+        async pinnedCwd => {
+          await verifyWorktreeOccupancy(refreshed, input.refreshEvidence);
+          return await this.gateway.remove(pinnedCwd, discarding);
+        },
       );
       const retained = { path: fresh.decision.path, branch: input.managed.branch, removedAt: this.clock.nowIso() };
       if (!input.deleteBranch) return { ...retained, branchRetained: true, branchBlockers: [] };

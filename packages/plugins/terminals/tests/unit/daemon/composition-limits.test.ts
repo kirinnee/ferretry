@@ -30,7 +30,8 @@ async function subject(effectiveLimits?: () => Promise<LimitsFile>, platform = '
   const ferrets = fakeFerrets();
   if (effectiveLimits !== undefined) ferrets.effectiveLimits = effectiveLimits;
   const plugin = implementDaemon(manifest, {
-    build: ctx => buildTerminals(ctx, { tmux, socketPath: '/fixture/state/terminals/tmux.sock' }),
+    build: ctx =>
+      buildTerminals(ctx, { realPath: async path => path, tmux, socketPath: '/fixture/state/terminals/tmux.sock' }),
   });
   const host = await testHost({
     hostFacts: unarmedHostFacts,
