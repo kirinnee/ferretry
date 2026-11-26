@@ -173,7 +173,7 @@ export class RepoWorktreeLister {
       this.evidence.records().catch(() => undefined),
       this.evidence.sessions().catch(() => undefined),
     ]);
-    const tracked = new Set(
+    const tracked = new Map(
       (records ?? [])
         .filter(
           record =>
@@ -181,7 +181,7 @@ export class RepoWorktreeLister {
             record.unresolved === undefined &&
             path.resolve(record.commonDirectory) === path.resolve(commonDirectory),
         )
-        .map(record => path.resolve(record.path)),
+        .map(record => [path.resolve(record.path), record.origin ?? 'managed'] as const),
     );
     const standing = sessions === undefined ? undefined : ferretsByRow(listed, sessions);
     signal.throwIfAborted();
@@ -200,7 +200,7 @@ export class RepoWorktreeLister {
       path: entry.path,
       main: index === 0,
       bare: entry.bare,
-      tracked: tracked.has(path.resolve(entry.path)) && verified.has(entry.path) ? 'managed' : 'none',
+      tracked: verified.has(entry.path) ? (tracked.get(path.resolve(entry.path)) ?? 'none') : 'none',
       live: lives[index] ?? gitFacts(entry, ['this row was not inspected']),
       ...(standing === undefined ? {} : { ferrets: [...(standing.get(index) ?? [])] }),
     }));

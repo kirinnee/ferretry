@@ -20,6 +20,7 @@ import type { WorktreeDirectoryPinner, WorktreeFileSystem } from '../lib/worktre
 import { GitRepoWorktreeRows } from '../adapters/worktrees/repo-git.ts';
 import type { RepoWorktreeListResponse } from '../../contract/index.ts';
 import type { RepoWorktreeAccess } from '../adapters/worktrees/repo-access.ts';
+import { InPlaceWorktrees } from '../adapters/worktrees/in-place.ts';
 
 /**
  * Managed worktrees: the checkouts this daemon creates and removes (`/v1/worktrees`), and the evidence a removal is
@@ -44,6 +45,7 @@ interface WorktreeHostIo {
 
 /** What the worktrees module is built from. */
 export interface WorktreesNeeds {
+  readonly stateHomeHolding?: (folder: string) => Promise<string | undefined>;
   readonly state: StatePort;
   /** The SAME clock the Git adapter stamps records with. */
   readonly clock: Clock;
@@ -84,7 +86,7 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
   const clock = new KernelWorktreeClock(needs.clock);
   const io = needs.io;
   const runner = io === undefined ? undefined : new KernelGitRunner(io.git);
-  const operations: ManagedWorktreeOperations =
+  const baseOperations: ManagedWorktreeOperations =
     io === undefined || runner === undefined
       ? NO_HOST_OPERATIONS
       : new ManagedWorktreeAdapter(
@@ -94,6 +96,21 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
           new WorktreeOperationQueue(),
           io.pinner,
         );
+  const inPlace =
+    io === undefined || runner === undefined
+      ? undefined
+      : new InPlaceWorktrees(
+          baseOperations,
+          new KernelGitRunner(io.git, { killOnOutputLimit: true }),
+          io.repoAccess,
+          io.fileSystem,
+          clock,
+          needs.stateHomeHolding ??
+            (async () => {
+              throw new WorktreeError('verification_failed', 'the state home fence is unavailable');
+            }),
+        );
+  const operations = inPlace?.operations() ?? baseOperations;
   // The evidence is read through the SAME collaborators the rest of the daemon serves from, so a refusal to
   // remove a checkout because a ferret or a shell is still in it cites the very records the client would see if
   // it asked. BOTH READS ANSWER `undefined` RATHER THAN THROWING, and neither swallows the failure: the domain
@@ -113,6 +130,9 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     clock,
     { next: needs.newId },
     io?.managedRoot,
+    inPlace === undefined
+      ? undefined
+      : async (folder, token, planned) => await inPlace.adoptExisting(folder, token, planned),
   );
   // The repository listing reads the managed list's own inspection, the registry and the fleet, and writes nothing.
   const listRepo = async (commonDirectory: string): Promise<RepoWorktreeListResponse> => {
@@ -156,6 +176,7 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     checkRemoval: async (path, cwd) => await service.checkRemoval(path, cwd),
     remove: async request => await service.remove(request),
     create: async request => await service.create(request),
+    adopt: async request => await service.adopt(request.path),
     listRepo,
   };
   return { service, managedRoot: io?.managedRoot, listRepo, routes: worktreeRoutes(subsystem) };

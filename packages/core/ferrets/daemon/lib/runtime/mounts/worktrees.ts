@@ -1,4 +1,6 @@
 import {
+  type AdoptWorktreeRequest,
+  AdoptWorktreeRequestSchema,
   type CreateWorktreeRequest,
   CreateWorktreeRequestSchema,
   type CreatedWorktree,
@@ -51,6 +53,7 @@ type RouteContext = CallContext;
 
 /** The whole surface, as the routes need it. The composition root supplies the real implementation. */
 export interface WorktreeSubsystem {
+  adopt(request: AdoptWorktreeRequest): Promise<CreatedWorktree>;
   list(): Promise<WorktreeListResponse>;
   checkRemoval(path: string, currentWorkingDirectory?: string): Promise<WorktreeRemovalDecision>;
   remove(request: WorktreeRemovalRequest): Promise<RemovedWorktree>;
@@ -145,6 +148,7 @@ async function create(worktrees: WorktreeSubsystem, context: RouteContext): Prom
 
 /** The five route keys, exactly as `manifest.ts` declares them (R-… rows of the parity table, paths unchanged). */
 export const WORKTREE_ROUTE_KEYS = [
+  'POST /v1/worktrees/adopt',
   'GET /v1/worktrees/removal',
   'GET /v1/worktrees/repo',
   'POST /v1/worktrees/remove',
@@ -160,6 +164,8 @@ export type WorktreeRouteKey = (typeof WORKTREE_ROUTE_KEYS)[number];
  */
 export function worktreeRoutes(worktrees: WorktreeSubsystem): { readonly [K in WorktreeRouteKey]: RouteHandler } {
   return {
+    'POST /v1/worktrees/adopt': async context =>
+      jsonResponse(await worktrees.adopt(await parseBody(context.request, AdoptWorktreeRequestSchema)).catch(refuse)),
     'GET /v1/worktrees/removal': async context => await checkRemoval(worktrees, context),
     'GET /v1/worktrees/repo': async context => await listRepo(worktrees, context),
     'POST /v1/worktrees/remove': async context => await remove(worktrees, context),
