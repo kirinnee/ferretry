@@ -170,21 +170,32 @@ export class NodeWorktreeFileSystem implements WorktreeFileSystem {
     ).root('worktrees');
   }
 
-  async quarantineRename(target: string, quarantine: string, expected: string): Promise<void> {
+  async quarantineRename(
+    target: string,
+    quarantine: string,
+    expected: string,
+    beforeRename?: () => Promise<void>,
+  ): Promise<void> {
     const root = await this.#removalRoot(target);
     const from = root.resolve(target);
     const to = root.resolve(quarantine);
     if (!from.ok || !to.ok) throw new Error('fixture outside root');
     const [device, inode] = expected.split(':').map(BigInt);
-    await root.quarantineRename!(from.value, to.value, { device: device!, inode: inode! });
+    await root.quarantineRename!(from.value, to.value, { device: device!, inode: inode! }, beforeRename);
   }
 
-  async removeTree(target: string, expected: string, beforeDelete?: () => Promise<void>): Promise<void> {
+  async removeTree(
+    target: string,
+    expected: string,
+    beforeDelete?: () => Promise<void>,
+  ): Promise<'deleted' | 'already_missing'> {
     const root = await this.#removalRoot(target);
     const at = root.resolve(target);
     if (!at.ok) throw new Error('fixture outside root');
     const [device, inode] = expected.split(':').map(BigInt);
-    await root.remove(at.value, { expectedIdentity: { device: device!, inode: inode! }, beforeDelete });
+    const result = await root.remove(at.value, { expectedIdentity: { device: device!, inode: inode! }, beforeDelete });
+    if (result === undefined) throw new Error('identity-bound removal did not report its outcome');
+    return result;
   }
 
   async makeDirectory(target: string, mode: number): Promise<void> {

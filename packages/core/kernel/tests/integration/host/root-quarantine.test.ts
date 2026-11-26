@@ -106,6 +106,55 @@ test('expected identity refuses a replacement without deleting its contents', as
   expect(await readFile(`${f.checkout}/keep`, 'utf8')).toBe('replacement');
 });
 
+for (const descriptorPath of [true, false]) {
+  test(`identity removal distinguishes deleted from already missing (descriptor path ${descriptorPath})`, async () => {
+    const f = await fresh(
+      nodeFs(
+        () => crypto.randomUUID(),
+        descriptorPath
+          ? {}
+          : {
+              descriptorFolder: '/nonexistent-descriptor-folder',
+              descriptorCalls: loadDescriptorCalls,
+              bracket: loadProcessBracket,
+            },
+      ),
+    );
+    expect(await f.root.remove(f.checkout, { expectedIdentity: f.identity })).toBe('deleted');
+    expect(await f.root.remove(f.checkout, { expectedIdentity: f.identity })).toBe('already_missing');
+  });
+}
+
+for (const exclusive of [true, false]) {
+  test(`rename veto runs after async preflight (exclusive ${exclusive})`, async () => {
+    const fs = nodeFs(
+      () => crypto.randomUUID(),
+      exclusive
+        ? {}
+        : {
+            noReplaceRename: () => {
+              throw new Error('synthetic unavailable');
+            },
+          },
+    );
+    let preflightFinished = false;
+    const f = await fresh({
+      ...fs,
+      identity: async target => {
+        const identity = await fs.identity(target);
+        if (target.endsWith('/.fy-remove-fixture')) preflightFinished = true;
+        return identity;
+      },
+    });
+    await expect(
+      f.root.quarantineRename!(f.checkout, at(f.root, '.fy-remove-fixture'), f.identity, async () => {
+        if (preflightFinished) throw new Error('lock after rename preflight');
+      }),
+    ).rejects.toThrow('lock after rename preflight');
+    expect(await readFile(`${f.checkout}/keep`, 'utf8')).toBe('verified');
+  });
+}
+
 for (const descriptorPath of [true, false])
   test(`quarantine deletion preserves a replacement (descriptor path ${descriptorPath})`, async () => {
     const f = await fresh(

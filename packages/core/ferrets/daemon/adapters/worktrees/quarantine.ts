@@ -46,14 +46,45 @@ export async function verifyRemovalMetadata(
       'verification_failed',
       'the recorded worktree metadata or repository was replaced or is missing',
     );
+  if (checkBacklink) {
+    if (!(allowMissingBacklink && (await files.type(path.join(entry.gitDir, 'gitdir'))) === 'missing')) {
+      const backlink = (await files.readText(path.join(entry.gitDir, 'gitdir'))).replace(/\n$/, '');
+      if (!path.isAbsolute(backlink) && backlink.split(path.sep).includes('..'))
+        throw new WorktreeError(
+          'verification_failed',
+          'a relative worktree backlink with parent traversal is unsafe; run git worktree repair',
+        );
+      if (path.resolve(entry.gitDir, backlink) !== path.join(entry.path, '.git'))
+        throw new WorktreeError('verification_failed', 'the recorded worktree metadata points to a different checkout');
+    }
+  }
   if ((await files.type(path.join(entry.gitDir, 'locked'))) !== 'missing')
     throw new WorktreeError('unsafe_remove', 'the worktree is locked; its checkout and metadata are kept');
-  if (checkBacklink) {
-    if (allowMissingBacklink && (await files.type(path.join(entry.gitDir, 'gitdir'))) === 'missing') return;
-    const backlink = (await files.readText(path.join(entry.gitDir, 'gitdir'))).replace(/\n$/, '');
-    if (path.resolve(entry.gitDir, backlink) !== path.join(entry.path, '.git'))
-      throw new WorktreeError('verification_failed', 'the recorded worktree metadata points to a different checkout');
-  }
+}
+
+const missingRemovalProof = () =>
+  new WorktreeError(
+    'unsafe_remove',
+    'checkout removal could not be proved; metadata is kept; run git worktree repair or remove it yourself',
+  );
+
+/** Only an actual identity-bound deletion, verified absent, can authorize metadata cleanup. */
+export async function removeQuarantinedCheckout(
+  files: WorktreeFileSystem,
+  entry: ManagedWorktree,
+  expected: WorktreeRemovalIdentity,
+  recordRemovalIdentity?: RecordRemovalIdentity,
+): Promise<WorktreeRemovalIdentity> {
+  const quarantine = quarantinePath(entry);
+  const result = await files.removeTree(
+    quarantine,
+    expected.checkout,
+    async () => await verifyRemovalMetadata(files, entry, expected),
+  );
+  if (result !== 'deleted' || (await files.type(quarantine)) !== 'missing') throw missingRemovalProof();
+  const completed = { ...expected, checkoutRemoved: true as const };
+  await recordRemovalIdentity?.(completed);
+  return completed;
 }
 
 /** Remove exactly the journalled metadata directory. Git must never prune other registrations. */
@@ -63,6 +94,7 @@ export async function removeRecordedMetadata(
   expected: WorktreeRemovalIdentity,
   recordRemovalIdentity?: RecordRemovalIdentity,
 ): Promise<void> {
+  if (expected.checkoutRemoved !== true) throw missingRemovalProof();
   await verifyRemovalMetadata(files, entry, expected, true, expected.metadataCleanupStarted === true);
   await recordRemovalIdentity?.({ ...expected, metadataCleanupStarted: true });
   let started = false;
@@ -88,6 +120,8 @@ export async function recoverQuarantine(
   if (expected === undefined) return undefined;
   const quarantine = quarantinePath(entry);
   const kind = await files.type(quarantine);
+  if (kind === 'missing' && (await files.type(entry.path)) === 'missing' && expected.checkoutRemoved !== true)
+    return { kind: 'unverified', reason: missingRemovalProof().message };
   // A crash after both deletes needs only a tombstone. Missing metadata never authorizes deleting a checkout.
   if (
     kind === 'missing' &&
@@ -107,12 +141,8 @@ export async function recoverQuarantine(
     if (kind !== 'directory' || (await files.directoryIdentity(quarantine)) !== expected.checkout)
       return { kind: 'unverified', reason: `a different directory is preserved at recovery path ${quarantine}` };
     await verifyRemovalMetadata(files, entry, expected);
-    await files.removeTree(
-      quarantine,
-      expected.checkout,
-      async () => await verifyRemovalMetadata(files, entry, expected),
-    );
-    await removeRecordedMetadata(files, entry, expected, recordRemovalIdentity);
+    const completed = await removeQuarantinedCheckout(files, entry, expected, recordRemovalIdentity);
+    await removeRecordedMetadata(files, entry, completed, recordRemovalIdentity);
     return { kind: 'absent' };
   }
   if ((await files.directoryIdentity(entry.path)) !== expected.checkout)

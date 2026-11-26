@@ -31,7 +31,13 @@ import type {
 } from '../../lib/worktrees/types.ts';
 import type { GitWorktreeGateway } from './git-gateway.ts';
 import type { WorktreeOperationQueue } from './queue.ts';
-import { quarantinePath, removalIdentity, verifyRemovalMetadata, removeRecordedMetadata } from './quarantine.ts';
+import {
+  quarantinePath,
+  removalIdentity,
+  verifyRemovalMetadata,
+  removeRecordedMetadata,
+  removeQuarantinedCheckout,
+} from './quarantine.ts';
 
 const OWNERSHIP_MARKER = 'worktree-owner';
 
@@ -660,14 +666,20 @@ export class ManagedWorktreeAdapter {
           const quarantine = quarantinePath(input.managed);
           try {
             await verifyRemovalMetadata(this.fileSystem, input.managed, identity);
-            await this.fileSystem.quarantineRename(input.managed.path, quarantine, identity.checkout);
-            await verifyRemovalMetadata(this.fileSystem, input.managed, identity);
-            await this.fileSystem.removeTree(
+            await this.fileSystem.quarantineRename(
+              input.managed.path,
               quarantine,
               identity.checkout,
               async () => await verifyRemovalMetadata(this.fileSystem, input.managed, identity),
             );
-            await removeRecordedMetadata(this.fileSystem, input.managed, identity, input.recordRemovalIdentity);
+            await verifyRemovalMetadata(this.fileSystem, input.managed, identity);
+            const completed = await removeQuarantinedCheckout(
+              this.fileSystem,
+              input.managed,
+              identity,
+              input.recordRemovalIdentity,
+            );
+            await removeRecordedMetadata(this.fileSystem, input.managed, completed, input.recordRemovalIdentity);
           } catch (error) {
             throw new WorktreeError(
               'unsafe_remove',

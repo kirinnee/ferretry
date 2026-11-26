@@ -24,7 +24,7 @@ export function rootRemoval<S extends RemovalScope>(checks: {
   onlyIfEmpty: boolean,
   expectedIdentity?: RootIdentity,
   beforeDelete?: () => Promise<void>,
-) => Promise<void> {
+) => Promise<void | 'deleted' | 'already_missing'> {
   const { openCheckedFolder, folderProblem, heldMember, refuseHeldName, refuse } = checks;
   const errnoOf = (error: unknown): string | undefined => (error as { code?: string }).code;
 
@@ -124,33 +124,35 @@ export function rootRemoval<S extends RemovalScope>(checks: {
     onlyIfEmpty: boolean,
     expectedIdentity?: RootIdentity,
     beforeDelete?: () => Promise<void>,
-  ): Promise<void> {
+  ): Promise<'deleted' | 'already_missing'> {
     const identity = await removal.lstat(leaf).catch(error => heldFailure(error));
-    if (identity === undefined) return;
+    if (identity === undefined) return 'already_missing';
     if (expectedIdentity !== undefined && (identity.kind !== 'directory' || !same(expectedIdentity, identity)))
       refuse('changed');
     if (onlyIfEmpty && identity.kind === 'directory') {
       await beforeDelete?.();
-      await removeEmptyFolder(() => removal.rmdir(leaf).catch(error => heldFailure(error)));
-      return;
+      return await removeEmptyFolder(() => removal.rmdir(leaf).catch(error => heldFailure(error)));
     }
     // Inspect the entire tree first: a known mount must not cost even an earlier sibling's contents.
     if (expectedIdentity !== undefined)
       await removeWithinHeld(scope, steps, removal, leaf, identity, identity.device, true);
     await removeWithinHeld(scope, steps, removal, leaf, identity, identity.device, false, beforeDelete);
+    if ((await removal.lstat(leaf).catch(error => heldFailure(error))) !== undefined) refuse('changed');
+    return 'deleted';
   }
 
   /**
    * `rmdir(2)` through the checked folder: ONE syscall both looks for an entry and removes the folder, so no entry can
    * arrive between a look and the removal (a list-then-remove would have that window). Never recurses.
    */
-  async function removeEmptyFolder(rmdirIt: () => Promise<void>): Promise<void> {
+  async function removeEmptyFolder(rmdirIt: () => Promise<void>): Promise<'deleted' | 'already_missing'> {
     try {
       await rmdirIt();
+      return 'deleted';
     } catch (error) {
       const code = errnoOf(error);
       if (code === 'ENOTEMPTY' || code === 'EEXIST') return refuse('not_empty');
-      if (code === 'ENOENT') return;
+      if (code === 'ENOENT') return 'already_missing';
       // the name is no longer a folder (a link or a file took its place after the look)
       if (code === 'ENOTDIR') return refuse('changed');
       throw error;
@@ -163,7 +165,7 @@ export function rootRemoval<S extends RemovalScope>(checks: {
     onlyIfEmpty: boolean,
     expectedIdentity?: RootIdentity,
     beforeDelete?: () => Promise<void>,
-  ): Promise<void> {
+  ): Promise<void | 'deleted' | 'already_missing'> {
     const leaf = basename(full);
     const parent = dirname(full);
     const folder =
@@ -178,9 +180,17 @@ export function rootRemoval<S extends RemovalScope>(checks: {
         // Linux, for an owner's root as for an internal one.
         const steps = folder.at;
         if (steps?.removal !== undefined) {
-          await removeHeld(scope, steps, steps.removal, leaf, onlyIfEmpty, expectedIdentity, beforeDelete);
+          const result = await removeHeld(
+            scope,
+            steps,
+            steps.removal,
+            leaf,
+            onlyIfEmpty,
+            expectedIdentity,
+            beforeDelete,
+          );
           if (expectedIdentity !== undefined) await folder.sync();
-          return;
+          return result;
         }
         // Without that reach (S44): an owner root removes nothing, and no root removes a FOLDER, because a by-path
         // `rm -r` after one re-proof of the parent deletes an outside tree when the parent is swapped for a link in
@@ -199,17 +209,18 @@ export function rootRemoval<S extends RemovalScope>(checks: {
         return;
       }
       const identity = await scope.fs.identity(through);
-      if (identity === undefined) return;
+      if (identity === undefined) return 'already_missing';
       if (expectedIdentity !== undefined && (identity.kind !== 'directory' || !same(expectedIdentity, identity)))
         refuse('changed');
       if (onlyIfEmpty && identity.kind === 'directory') {
         await beforeDelete?.();
-        await removeEmptyFolder(() => scope.fs.rmdir(through));
-        return;
+        return await removeEmptyFolder(() => scope.fs.rmdir(through));
       }
       if (expectedIdentity !== undefined) await removeWithin(scope, through, identity, identity.device, true);
       await removeWithin(scope, through, identity, identity.device, false, beforeDelete);
+      if ((await scope.fs.identity(through)) !== undefined) refuse('changed');
       if (expectedIdentity !== undefined) await folder.sync();
+      return 'deleted';
     } finally {
       await folder.close();
     }
@@ -225,9 +236,9 @@ export function rootQuarantine<S extends RemovalScope>(checks: {
   readonly openCheckedFolder: (scope: S, real: string) => Promise<OpenedDirectory>;
   readonly heldMember: (scope: S, identity: FileIdentity) => Promise<boolean>;
   readonly refuse: (reason: RootRefusal) => never;
-}): (scope: S, from: string, to: string, expected: RootIdentity) => Promise<void> {
+}): (scope: S, from: string, to: string, expected: RootIdentity, beforeRename?: () => Promise<void>) => Promise<void> {
   const { openCheckedFolder, heldMember, refuse } = checks;
-  return async (scope, from, to, expected) => {
+  return async (scope, from, to, expected, beforeRename) => {
     if (dirname(from) !== dirname(to) || !/^\.fy-remove-[a-zA-Z0-9_-]+$/.test(basename(to)) || from === to)
       refuse('outside');
     const parent = await openCheckedFolder(scope, dirname(from));
@@ -246,6 +257,7 @@ export function rootQuarantine<S extends RemovalScope>(checks: {
       if ((await look(target)) !== undefined) return refuse('changed');
       let exclusive = parent.renameNoReplace;
       if (exclusive !== undefined) {
+        await beforeRename?.();
         try {
           await exclusive(source, parent, target);
         } catch (error) {
@@ -260,6 +272,7 @@ export function rootQuarantine<S extends RemovalScope>(checks: {
         if ((await look(target)) !== undefined) return refuse('changed');
         const fromAt = parent.entryPath(source);
         const toAt = parent.entryPath(target);
+        await beforeRename?.();
         if (fromAt !== undefined && toAt !== undefined)
           await scope.fs.rename(fromAt, toAt).catch(() => refuse('changed'));
         else if (parent.at !== undefined)

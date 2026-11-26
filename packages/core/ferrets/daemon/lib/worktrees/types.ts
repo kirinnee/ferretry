@@ -151,8 +151,9 @@ export interface WorktreeAdoptionIdentity {
   readonly commonDirectory: string;
 }
 
-/** Recorded only after checkout deletion and before metadata deletion, so a partial metadata walk can resume. */
+/** Durable proofs of completed checkout deletion and entry into metadata cleanup. */
 export interface WorktreeRemovalIdentity extends WorktreeAdoptionIdentity {
+  readonly checkoutRemoved?: true;
   readonly metadataCleanupStarted?: true;
 }
 export type RecordRemovalIdentity = (identity: WorktreeRemovalIdentity) => Promise<void>;

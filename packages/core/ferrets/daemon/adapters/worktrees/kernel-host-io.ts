@@ -90,17 +90,19 @@ export function createKernelWorktreeHostIo(input: KernelWorktreeHostInputs): Ker
       const identity = await root.fileIdentity(fenced);
       return identity === undefined ? undefined : `${identity.device}:${identity.inode}`;
     },
-    quarantineRename: async (target, quarantine, expected) => {
+    quarantineRename: async (target, quarantine, expected, beforeRename) => {
       const { root, fenced } = route(target);
       const to = root.resolve(quarantine);
       if (!to.ok || root.quarantineRename === undefined) throw new Error('identity-bound quarantine is unavailable');
       const [device, inode] = expected.split(':').map(BigInt);
-      await root.quarantineRename(fenced, to.value, { device: device!, inode: inode! });
+      await root.quarantineRename(fenced, to.value, { device: device!, inode: inode! }, beforeRename);
     },
     removeTree: async (target, expected, beforeDelete) => {
       const { root, fenced } = route(target);
       const [device, inode] = expected.split(':').map(BigInt);
-      await root.remove(fenced, { expectedIdentity: { device: device!, inode: inode! }, beforeDelete });
+      const result = await root.remove(fenced, { expectedIdentity: { device: device!, inode: inode! }, beforeDelete });
+      if (result === undefined) throw new Error('identity-bound removal did not report its outcome');
+      return result;
     },
     makeDirectory: async (target, mode) => {
       const { root, fenced } = route(target);

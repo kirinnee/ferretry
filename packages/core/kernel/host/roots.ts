@@ -2771,14 +2771,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
       // name (a link leaf is removed as a link). The root's own folder has no parent inside the root, so it is judged
       // as itself.
       const { full, scope } = path === base() ? await real(path) : await realParent(path);
-      // What sits at the name is judged by its own identity, still without following it: a second name of a fenced
-      // file (the key, planted as a hard link) is refused, while a link leaf (never the thing it points at) goes.
+      // Judge the leaf's own identity: refuse a hard link to a fenced file; remove a symlink without following it.
       const fence = scope.base.fence;
       if (fence !== undefined) {
         const found = await scope.fs.identity(full);
         if (found !== undefined && found.kind !== 'link' && heldByFence(fence, [toComponent(found)])) refuse('fenced');
       }
-      await removeChecked(
+      const result = await removeChecked(
         scope,
         full,
         removeOptions?.onlyIfEmpty === true,
@@ -2786,8 +2785,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
         removeOptions?.beforeDelete,
       );
       PLACED_LINKS.forgetUnder(full);
+      return result;
     },
-    quarantineRename: async (from, to, expected) => {
+    quarantineRename: async (from, to, expected, beforeRename) => {
       writable();
       if (name !== 'work' && name !== 'worktrees') return refuse('read_only');
       gate(from, 'remove');
@@ -2795,7 +2795,7 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const source = await realParent(from);
       const target = await realParent(to);
       if (source.full !== from || target.full !== to) return refuse('link_escape');
-      await quarantineChecked(source.scope, source.full, target.full, expected);
+      await quarantineChecked(source.scope, source.full, target.full, expected, beforeRename);
     },
     linkTo: async (at: FencedPath, target: RootLinkTarget) => {
       writable();

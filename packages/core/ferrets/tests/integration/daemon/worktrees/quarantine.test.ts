@@ -1,9 +1,13 @@
 import { afterAll, expect, test } from 'bun:test';
-import { cp, mkdir, rename, unlink } from 'node:fs/promises';
+import { cp, mkdir, rename, symlink, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { WorktreesFile } from '../../../../contract/index.ts';
 import { buildWorktrees } from '../../../../daemon/modules/worktrees.ts';
-import { quarantinePath } from '../../../../daemon/adapters/worktrees/quarantine.ts';
+import {
+  quarantinePath,
+  removalIdentity,
+  verifyRemovalMetadata,
+} from '../../../../daemon/adapters/worktrees/quarantine.ts';
 import { worktreeRouteWorld } from '../../../support/daemon/worktree-world.ts';
 import { cleanupTempDirectories, setupGit } from '../support/repository.ts';
 
@@ -58,11 +62,12 @@ for (const adopted of [false, true]) {
           await Bun.write(path.join(target, 'locked'), 'synthetic late lock');
           throw new Error('synthetic metadata interruption');
         }
-        await removeTree(target, expected, beforeDelete);
+        return await removeTree(target, expected, beforeDelete);
       };
       if (recovering) await f.restart().records();
       else expect((await f.remove()).status).toBe(409);
       expect(f.record().removalIdentity.metadataCleanupStarted).toBe(true);
+      expect(f.record().removalIdentity.checkoutRemoved).toBe(true);
       expect(f.record().removedAt).toBeUndefined();
       await unlink(path.join(f.record().gitDir, 'locked'));
       f.io.fileSystem.removeTree = removeTree;
@@ -72,12 +77,73 @@ for (const adopted of [false, true]) {
     });
   }
 
-  test(`removal accepts a relative Git metadata backlink (${adopted ? 'adopted' : 'managed'})`, async () => {
+  test(`removal refuses a symlink and parent traversal in a relative Git backlink (${adopted ? 'adopted' : 'managed'})`, async () => {
     const f = await fixture(adopted);
     const metadata = f.record().gitDir;
-    await Bun.write(path.join(metadata, 'gitdir'), `${path.relative(metadata, path.join(f.target, '.git'))}\n`);
-    expect((await f.remove()).status).toBe(200);
-    expect(await f.io.fileSystem.type(metadata)).toBe('missing');
+    const elsewhere = path.join(f.repository.root, 'elsewhere', 'nested');
+    await mkdir(elsewhere, { recursive: true });
+    await symlink(elsewhere, path.join(metadata, 'detour'));
+    const backlink = `detour/../${path.relative(metadata, path.join(f.target, '.git'))}`;
+    expect(path.resolve(metadata, backlink)).toBe(path.join(f.target, '.git'));
+    await Bun.write(path.join(metadata, 'gitdir'), `${backlink}\n`);
+    await expect(
+      verifyRemovalMetadata(f.io.fileSystem, f.record(), (await removalIdentity(f.io.fileSystem, f.record()))!),
+    ).rejects.toThrow('relative');
+    expect((await f.remove()).status).toBe(409);
+    expect(await f.io.fileSystem.type(metadata)).toBe('directory');
+    expect(await f.io.fileSystem.type(f.target)).toBe('directory');
+  });
+
+  test(`recovery keeps metadata when the quarantine was moved without repair (${adopted ? 'adopted' : 'managed'})`, async () => {
+    const f = await fixture(adopted);
+    const removeTree = f.io.fileSystem.removeTree;
+    f.io.fileSystem.removeTree = async () => {
+      throw new Error('synthetic crash after rename');
+    };
+    expect((await f.remove()).status).toBe(409);
+    const before = f.record();
+    const moved = `${f.target}-moved`;
+    await rename(quarantinePath(before), moved);
+    f.io.fileSystem.removeTree = removeTree;
+    await f.restart().records();
+    expect(await f.io.fileSystem.directoryIdentity(before.gitDir)).toBe(before.removalIdentity.gitDirectory);
+    expect(f.record()).toEqual(before);
+    expect(await Bun.file(path.join(moved, 'README.md')).exists()).toBe(true);
+  });
+
+  test(`an already missing quarantine never stamps checkoutRemoved (${adopted ? 'adopted' : 'managed'})`, async () => {
+    const f = await fixture(adopted);
+    const removeTree = f.io.fileSystem.removeTree;
+    f.io.fileSystem.removeTree = async (target, expected, beforeDelete) => {
+      if (target === quarantinePath(f.record())) await rename(target, `${f.target}-moved`);
+      return await removeTree(target, expected, beforeDelete);
+    };
+    expect(await f.remove()).toMatchObject({
+      status: 409,
+      json: { error: expect.stringContaining('git worktree repair') },
+    });
+    expect(f.record().removalIdentity.checkoutRemoved).toBeUndefined();
+    expect(f.record().removalIdentity.metadataCleanupStarted).toBeUndefined();
+    expect(f.record().removedAt).toBeUndefined();
+    expect(await f.io.fileSystem.type(f.record().gitDir)).toBe('directory');
+  });
+
+  test(`a lock arriving during the backlink read prevents rename (${adopted ? 'adopted' : 'managed'})`, async () => {
+    const f = await fixture(adopted);
+    const readText = f.io.fileSystem.readText;
+    let installed = false;
+    f.io.fileSystem.readText = async target => {
+      const value = await readText(target);
+      if (!installed && f.record().removalIdentity !== undefined && target === path.join(f.record().gitDir, 'gitdir')) {
+        installed = true;
+        await Bun.write(path.join(f.record().gitDir, 'locked'), 'lock during backlink read');
+      }
+      return value;
+    };
+    expect((await f.remove()).status).toBe(409);
+    expect(installed).toBe(true);
+    expect(await f.io.fileSystem.type(f.target)).toBe('directory');
+    expect(await f.io.fileSystem.type(quarantinePath(f.record()))).toBe('missing');
   });
 
   for (const metadata of [false, true]) {
@@ -87,7 +153,7 @@ for (const adopted of [false, true]) {
       let installed = false;
       f.io.fileSystem.removeTree = async (target, expected, beforeDelete) => {
         const guarded = metadata ? target === f.record().gitDir : target === quarantinePath(f.record());
-        await removeTree(target, expected, async () => {
+        return await removeTree(target, expected, async () => {
           if (guarded && !installed) {
             expect(beforeDelete).toBeFunction();
             installed = true;
@@ -152,7 +218,7 @@ for (const adopted of [false, true]) {
         await Bun.write(path.join(f.target, 'keep'), 'replacement');
         metadataRemoved = true;
       }
-      await removeTree(target, expected);
+      return await removeTree(target, expected);
     };
     expect((await f.remove()).status).toBe(200);
     expect(metadataRemoved).toBe(true);
@@ -232,12 +298,13 @@ test('a replaced metadata directory is preserved after checkout deletion', async
   const f = await fixture(false);
   const removeTree = f.io.fileSystem.removeTree;
   f.io.fileSystem.removeTree = async (target, expected) => {
-    await removeTree(target, expected);
-    if (target !== quarantinePath(f.record())) return;
+    const result = await removeTree(target, expected);
+    if (target !== quarantinePath(f.record())) return result;
     const metadata = f.record().gitDir;
     await rename(metadata, `${metadata}-original`);
     await cp(`${metadata}-original`, metadata, { recursive: true });
     await Bun.write(path.join(metadata, 'keep'), 'foreign metadata');
+    return result;
   };
   expect((await f.remove()).status).toBe(409);
   expect(await Bun.file(path.join(f.record().gitDir, 'keep')).text()).toBe('foreign metadata');

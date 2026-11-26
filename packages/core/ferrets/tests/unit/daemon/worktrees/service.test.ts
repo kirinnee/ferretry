@@ -13,6 +13,7 @@ import {
   type ManagedWorktreeIntent,
   type ManagedWorktreeOperations,
   type ManagedWorktreePresence,
+  type RecordRemovalIdentity,
   type ManagedWorktreeRegistryState,
   ManagedWorktreeService,
   managedWorktreeRemovalContext,
@@ -103,6 +104,7 @@ class RecordingOperations implements ManagedWorktreeOperations {
       readonly existsFails?: Error;
       readonly afterPlanned?: (input: CreateManagedWorktreeInput) => Promise<void>;
       readonly beforeRemove?: (input: RemoveManagedWorktreeInput) => Promise<void>;
+      readonly beforePresence?: (entry: ManagedWorktree, record?: RecordRemovalIdentity) => Promise<void>;
     } = {},
   ) {}
 
@@ -154,8 +156,9 @@ class RecordingOperations implements ManagedWorktreeOperations {
     return this.answers.adoption ?? { kind: 'absent' };
   }
 
-  async presence(entry: ManagedWorktree): Promise<ManagedWorktreePresence> {
+  async presence(entry: ManagedWorktree, record?: RecordRemovalIdentity): Promise<ManagedWorktreePresence> {
     this.probed.push(entry.path);
+    await this.answers.beforePresence?.(entry, record);
     if (this.answers.existsFails) throw this.answers.existsFails;
     return this.answers.presence ?? { kind: 'absent' };
   }
@@ -218,6 +221,42 @@ const thrown = async (operation: Promise<unknown>): Promise<unknown> =>
   await operation.then(() => undefined).catch((error: unknown) => error);
 
 describe('unresolved identity journals', () => {
+  for (const recovering of [false, true]) {
+    it(`should durably retain checkoutRemoved when ${recovering ? 'restart' : 'failure reconciliation'} cannot finish metadata cleanup`, async () => {
+      const identity = { checkout: '1:11', gitDirectory: '1:12', commonDirectory: '1:13' };
+      const completed = { ...identity, checkoutRemoved: true as const };
+      const operations = new RecordingOperations({
+        beforeRemove: async input => {
+          await input.recordRemovalIdentity?.(identity);
+        },
+        removalFails: new Error('metadata cleanup interrupted'),
+        beforePresence: async (entry, persist) => {
+          should(entry.removalIdentity).eql(identity);
+          should(persist).be.a.Function();
+          await persist!(completed);
+          should(registry.state.worktrees[0]?.removalIdentity).eql(completed);
+        },
+        presence: { kind: 'unverified', reason: 'metadata cleanup interrupted' },
+      });
+      const { subject, registry } = build({
+        entries: [
+          recovering ? record({ removalStartedAt: '2026-08-04T01:00:00.000Z', removalIdentity: identity }) : record(),
+        ],
+        operations,
+      });
+      if (recovering) await subject.records();
+      else {
+        const error = await thrown(
+          subject.remove({ path: record().path, overrides: [], deleteBranch: false, confirmations: [] }),
+        );
+        should((error as Error).message).equal('metadata cleanup interrupted');
+      }
+      should(registry.state.worktrees[0]?.removalIdentity).eql(completed);
+      should(registry.state.worktrees[0]?.removalStartedAt).be.a.String();
+      should(registry.state.worktrees[0]?.removedAt).be.undefined();
+    });
+  }
+
   it('should refuse a fresh removal without rewriting an unresolved journal', async () => {
     const entry = record({
       removalStartedAt: '2026-08-04T01:00:00.000Z',

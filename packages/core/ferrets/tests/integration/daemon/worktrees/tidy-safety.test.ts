@@ -93,9 +93,10 @@ describe('Tidy data-loss regressions', () => {
     ).trim();
     const removeTree = w.io.fileSystem.removeTree;
     w.io.fileSystem.removeTree = async (target, expected) => {
-      await removeTree(target, expected);
+      const result = await removeTree(target, expected);
       if (path.dirname(target) === path.join(w.repository.root, '.git/worktrees'))
         await setupGit(w.repository.root, 'update-ref', 'refs/heads/feature', newer);
+      return result;
     };
     const result = await w.built.service.remove(w.request);
     expect(result.branchRetained).toBe(true);
@@ -108,9 +109,10 @@ describe('Tidy data-loss regressions', () => {
     await setupGit(w.repository.root, 'branch', 'unrelated', w.request.expectedHead!);
     const removeTree = w.io.fileSystem.removeTree;
     w.io.fileSystem.removeTree = async (target, expected) => {
-      await removeTree(target, expected);
+      const result = await removeTree(target, expected);
       if (path.dirname(target) === path.join(w.repository.root, '.git/worktrees'))
         await setupGit(w.repository.root, 'symbolic-ref', 'refs/heads/feature', 'refs/heads/unrelated');
+      return result;
     };
 
     const result = await w.built.service.remove(w.request);
