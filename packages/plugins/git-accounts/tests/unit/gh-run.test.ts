@@ -488,6 +488,18 @@ describe('who may ask, and for which folder', () => {
 });
 
 describe('G21b tokenless formatting and help', () => {
+  test('a missing jq filter refuses before any child starts', async () => {
+    const world = await boot();
+    try {
+      expect((await world.gh(['api', 'user', '--jq'], '/unlinked')).json()).toEqual({
+        refused: '--jq needs a filter.',
+      });
+      expect(world.calls).toHaveLength(0);
+    } finally {
+      await world.host.stop();
+    }
+  });
+
   for (const tool of ['jq', 'gojq']) {
     test(`G21b review: ${tool} module and data imports never read planted files`, async () => {
       const { root } = projectFolder();
