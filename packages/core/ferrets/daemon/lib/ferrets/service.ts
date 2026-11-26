@@ -1164,7 +1164,9 @@ export class FerretsService implements FerretsApi {
     // A start naming a runtime launches with THAT runtime's harness and login (Runtimes answers), resolved before any write:
     // a runtime that cannot serve refuses here, never launched signed out. A start naming no runtime, login or harness is on
     // the machine's DEFAULT runtime (v4 parity) and its login gate; with none, `defaultHarnessKey` picks the harness.
-    const runtimeName = request.runtime ?? (await this.defaultRuntimeFor(request));
+    const fallback = await this.defaultRuntimeFor(request);
+    if (!fallback.ok) return fallback;
+    const runtimeName = request.runtime ?? fallback.value;
     const resolved = await this.resolveRuntime(runtimeName, { harness: request.harness, login: request.login });
     if (!resolved.ok) return resolved;
     request = withRuntimeModel(request, resolved.value?.model);
@@ -2754,13 +2756,18 @@ export class FerretsService implements FerretsApi {
     }
   }
 
-  /** The machine's default runtime when this start chose nothing of its own (no runtime, login or harness), else none. */
-  private async defaultRuntimeFor(request: StartRequest): Promise<string | undefined> {
-    if (request.login !== undefined || request.harness !== undefined || this.ports.defaultRuntime === undefined)
-      return undefined;
+  /** The default runtime when this start chose nothing (no runtime, login or harness), else none; a failed lookup refuses. */
+  private async defaultRuntimeFor(request: StartRequest): Promise<Result<string | undefined, StartFailure>> {
+    if (request.runtime !== undefined || request.login !== undefined || request.harness !== undefined)
+      return ok(undefined);
+    if (this.ports.defaultRuntime === undefined) return ok(undefined);
+    const lookup = this.ports.defaultRuntime().then(
+      name => ok(name),
+      () => failed('refused', 'the machine’s default runtime could not be looked up, so the ferret was not started'),
+    );
     return await this.withinDeadline(
-      this.ports.defaultRuntime().catch(() => undefined),
-      undefined,
+      lookup,
+      failed('refused', 'the machine’s default runtime could not be looked up in time; try again'),
     );
   }
 

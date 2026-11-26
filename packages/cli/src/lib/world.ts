@@ -66,6 +66,8 @@ export interface CliWorld {
   readonly io: TerminalIo;
   readonly environment: Environment;
   readonly identity: Identity;
+  /** The state home this `fy` resolved (`FY_HOME`): what a verb that must work with no daemon answers from. */
+  readonly home: string;
   readonly registry: CommandRegistry;
   probe(): Promise<Probe>;
   /** Opens the connection on first use; starts the daemon first when none answers and this is a person's shell. */
@@ -86,6 +88,8 @@ export interface CliWorld {
   readonly promptHidden?: (question: string) => Promise<string | undefined>;
   /** A local file's text; throws when it cannot be read. */
   readText?(path: string): Promise<string>;
+  /** A regular file's text, never reached through a link; `undefined` when it is not one or cannot be read. */
+  readRegularText?(path: string): Promise<string | undefined>;
   /** `fy statusline`'s two effects: the passive usage file and the person's own command. Absent: nothing is recorded. */
   readonly statusline?: StatuslinePorts;
   /** The shell's local update transaction. Never depends on an enabled plugin. */

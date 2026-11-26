@@ -47,7 +47,16 @@ const STATUS = (over: Record<string, unknown> = {}): DaemonReply => ({
   },
 });
 
-const world = (answers: Record<string, DaemonReply>, files: Record<string, string> = {}, stdin = '') => {
+/** The manifest the daemon writes beside its schemas: the only names a daemon-less `fy` serves. */
+const MANIFEST = `${DIRECTORY}/.schema/.published.json`;
+const manifestOf = (...names: string[]): Record<string, string> => ({ [MANIFEST]: `${JSON.stringify(names)}\n` });
+
+const world = (
+  answers: Record<string, DaemonReply>,
+  files: Record<string, string> = {},
+  stdin = '',
+  extra: { links?: readonly string[]; environment?: Record<string, string> } = {},
+) => {
   const transport = new RoutedTransport(answers);
   const host = createPluginHost({
     home: '/fake-home',
@@ -74,7 +83,11 @@ const world = (answers: Record<string, DaemonReply>, files: Record<string, strin
     },
     transport,
     host,
+    ...(extra.environment === undefined ? {} : { environment: extra.environment }),
   });
+  // As the real world reads: a regular file only, never one reached through a link.
+  made.world.readRegularText = async path =>
+    extra.links?.includes(path) === true ? undefined : (files as Record<string, string | undefined>)[path];
   return { ...made, transport };
 };
 
@@ -167,6 +180,63 @@ describe('fy config status / path / schema (V-0196, V-0193, V-0194)', () => {
     should(file.io.stdout()).equal(`${DIRECTORY}/logins/work.yaml\n`);
   });
 
+  it('C-100: `path` and `schema <name>` answer from the home alone, sending nothing to a daemon that may be down', async () => {
+    const files = { ...manifestOf('warden.json'), [`${DIRECTORY}/.schema/warden.json`]: '{"title":"warden"}\n' };
+    const path = world({}, files);
+    should(await runFy(['config', 'path'], path.world)).equal(0);
+    should(path.io.stdout()).equal(`${DIRECTORY}\n`);
+    should(await runFy(['config', 'path', 'logins/work.yaml'], path.world)).equal(0);
+    const schema = world({}, files);
+    should(await runFy(['config', 'schema', 'warden'], schema.world)).equal(0);
+    should(schema.io.stdout()).equal('{"title":"warden"}\n');
+    should(path.transport.sent).have.length(0);
+    should(schema.transport.sent).have.length(0);
+  });
+
+  it('C-100: a pinned FY_URL keeps daemon selection: path and schema follow the daemon it names, not this home', async () => {
+    const other = '/other-home/config';
+    const pinned = { FY_URL: 'http://127.0.0.1:7499' };
+    const files = {
+      ...manifestOf('warden.json'),
+      [`${DIRECTORY}/.schema/warden.json`]: '{"title":"local"}\n',
+      [`${other}/.schema/.published.json`]: '["warden.json"]\n',
+      [`${other}/.schema/warden.json`]: '{"title":"selected"}\n',
+    };
+    const answers = { 'GET /v1/config/status': STATUS({ directory: other }) };
+    const path = world(answers, files, '', { environment: pinned });
+    should(await runFy(['config', 'path'], path.world)).equal(0);
+    should(path.io.stdout()).equal(`${other}\n`);
+    const schema = world(answers, files, '', { environment: pinned });
+    should(await runFy(['config', 'schema', 'warden'], schema.world)).equal(0);
+    should(schema.io.stdout()).equal('{"title":"selected"}\n');
+    should(schema.transport.sent).have.length(1);
+  });
+
+  it('C-100: offline, only a schema the daemon listed is served: a stale file, or one reached through a link, asks the daemon', async () => {
+    const stale = world(
+      { 'GET /v1/config/status': STATUS({ files: [] }) },
+      { ...manifestOf('runtimes.json'), [`${DIRECTORY}/.schema/warden.json`]: '{"title":"stale"}\n' },
+    );
+    should(await runFy(['config', 'schema', 'warden'], stale.world)).equal(1);
+    should(stale.io.stdout()).equal('');
+    should(stale.transport.sent).have.length(1);
+    const broken = world(
+      { 'GET /v1/config/status': STATUS() },
+      { [MANIFEST]: 'not json', [`${DIRECTORY}/.schema/warden.json`]: '{"title":"unlisted"}\n' },
+    );
+    should(await runFy(['config', 'schema', 'warden'], broken.world)).equal(1);
+    should(broken.io.stdout()).equal('');
+    const linkPath = `${DIRECTORY}/.schema/warden.json`;
+    const linked = world(
+      { 'GET /v1/config/status': STATUS() },
+      { ...manifestOf('warden.json'), [linkPath]: '{"title":"elsewhere"}\n' },
+      '',
+      { links: [linkPath] },
+    );
+    should(await runFy(['config', 'schema', 'warden'], linked.world)).equal(1);
+    should(linked.io.stdout()).equal('');
+  });
+
   it('should refuse a path that leaves the directory or is not a yaml file', async () => {
     for (const bad of ['../machine.yaml', '/etc/passwd', 'notes.txt']) {
       const { world: w, io } = world({ 'GET /v1/config/status': STATUS() });
@@ -178,6 +248,7 @@ describe('fy config status / path / schema (V-0196, V-0193, V-0194)', () => {
   it('V-0194 should list the schemas the daemon publishes, and print one by name or by a file it checks', async () => {
     const answers = { 'GET /v1/config/status': STATUS() };
     const files = {
+      ...manifestOf('runtimes--item.json', 'warden.json'),
       [`${DIRECTORY}/.schema/runtimes--item.json`]: '{"title":"runtime"}\n',
       [`${DIRECTORY}/.schema/warden.json`]: '{"title":"warden"}\n',
     };

@@ -408,7 +408,14 @@ describe('config files: collections, claims and refusals', () => {
     });
     await files.publishSchemas();
     const published = [...memory.snapshot().keys()].filter(p => p.includes('/.schema/')).toSorted();
-    expect(published).toEqual([`${HOME}/config/.schema/runtimes--item.json`, `${HOME}/config/.schema/runtimes.json`]);
+    expect(published).toEqual([
+      `${HOME}/config/.schema/.published.json`,
+      `${HOME}/config/.schema/runtimes--item.json`,
+      `${HOME}/config/.schema/runtimes.json`,
+    ]);
+    expect(memory.snapshot().get(`${HOME}/config/.schema/.published.json`)).toBe(
+      '["runtimes--item.json","runtimes.json"]\n',
+    );
   });
 
   test('two defs that would publish one schema name are refused at declaration, in a sentence (F-0142)', () => {
@@ -638,6 +645,7 @@ describe('config files: live reading and watching', () => {
     const h = configHarness();
     await h.files.publishSchemas();
     expect([...h.fs.snapshot().keys()].filter(p => p.includes('/.schema/')).toSorted()).toEqual([
+      h.path('.schema/.published.json'),
       h.path('.schema/logins--item.json'),
       h.path('.schema/updates.json'),
     ]);

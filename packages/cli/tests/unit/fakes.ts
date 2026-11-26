@@ -278,6 +278,7 @@ export function fakeWorld(options: FakeWorldOptions = {}): {
     io,
     environment: options.environment ?? {},
     identity: { binary: 'fy', version: '5.0.0' },
+    home: '/fake-home',
     registry: options.registry ?? registryOf(),
     probe: async () => probe,
     launch: async () => options.launch ?? { started: true, baseUrl: probe.baseUrl },
