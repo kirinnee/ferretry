@@ -296,6 +296,15 @@ describe('the reply voice: use', () => {
     expect(threads).toHaveLength(0);
   });
 
+  test('a model changed on disk at the same size is refused and deleted, and no thread is started', async () => {
+    const built = build();
+    for (const file of CATALOG) built.files.held.set(file.role, BODY);
+    built.files.held.set('model', new TextEncoder().encode('voice fil!'));
+    await expect(built.engine.warm()).rejects.toMatchObject({ code: 'hash_mismatch' });
+    expect(built.files.held.has('model')).toBe(false);
+    expect(built.threads).toHaveLength(0);
+  });
+
   test('a runtime whose file vanished between the size check and the read is not_ready', async () => {
     const built = build();
     for (const file of CATALOG) built.files.held.set(file.role, BODY);
