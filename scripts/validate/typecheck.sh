@@ -6,7 +6,8 @@ set -euo pipefail
 # The root includes core/plugin app halves and their app tests, with React JSX
 # and the same DOM libraries as packages/app. The shell itself is checked against
 # its own config. Any other package carrying a tsconfig is checked too, at any
-# depth. Pending app ports have explicit, documented exclusions in tsconfig.json.
+# depth. Pending app ports have explicit, documented exclusions in tsconfig.json. The root project is checked through
+# tsconfig.typecheck.json: the root tsconfig.json plus the declaration-only mapping of durian-markdown, which Bun must not read.
 #
 # EVERY WORKSPACE PACKAGE IS CHECKED, and that is proved rather than assumed: a
 # package (from the root manifest's `workspaces` globs) with no tsconfig of its own
@@ -117,7 +118,7 @@ fi
 
 # The repository's own Bun scripts (gates, CI helpers, release tooling) are a project of their own.
 # scripts/gen (the registry generator and the 5.0 checks) is its own project, with its own includes.
-projects=(tsconfig.json scripts/tsconfig.json scripts/gen/tsconfig.json)
+projects=(tsconfig.typecheck.json scripts/tsconfig.json scripts/gen/tsconfig.json)
 while IFS= read -r project; do
   projects+=("${project}")
 done < <(find packages -path '*/node_modules' -prune -o -name tsconfig.json -print | sort)
@@ -128,7 +129,7 @@ mapfile -t workspace_packages < <(
   done | sort -u
 )
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace packages found from package.json workspaces" >&2 && exit 1
-root_files="$("${tsc}" -p tsconfig.json --listFilesOnly | sed "s#^${root_dir}/##")"
+root_files="$("${tsc}" -p tsconfig.typecheck.json --listFilesOnly | sed "s#^${root_dir}/##")"
 # Check every app source, not merely the first source in its workspace package.
 # A checked manifest must never hide an unchecked TSX view in that same package.
 printf '%s\n' "${root_files}" | bun scripts/validate/typecheck-apps.ts

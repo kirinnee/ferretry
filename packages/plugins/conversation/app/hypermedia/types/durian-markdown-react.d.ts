@@ -1,6 +1,6 @@
 /**
  * `durian-markdown/react/*` as we use it (the strict entry for types, and each part's own entry: `document`, `terminal`, `filetree`, `editor`,
- * `codewalk`, `animation`, `tierlist`, `alignment`, `containers`; `tsconfig.json` maps every one of them here, and `durian-entries.test.ts` holds
+ * `codewalk`, `animation`, `tierlist`, `alignment`, `containers`; `tsconfig.typecheck.json` maps every one of them here, and `durian-entries.test.ts` holds
  * every name we import from an entry to the installed entry's exports); see `./durian-markdown.d.ts` for why this stands in for the package's
  * source, and why nothing here is loose. Shapes are `src/react/strict.tsx`, `src/react/document.tsx` and `src/react/context.tsx`.
  */

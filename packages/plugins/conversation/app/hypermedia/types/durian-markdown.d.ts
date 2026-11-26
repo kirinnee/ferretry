@@ -1,5 +1,5 @@
 /**
- * THE TYPES OF `durian-markdown` AS WE USE THEM, mapped in by the root `tsconfig.json` (`paths`, the way
+ * THE TYPES OF `durian-markdown` AS WE USE THEM, mapped in by `tsconfig.typecheck.json` (`paths`, the way
  * `playwright-core` is). The package's own `types` entry is its TypeScript SOURCE (`./src/index.ts`; its `dist/` is never
  * built here, see `../../vite-durian.ts`), which this workspace's compiler would read as OURS and reject: the source is
  * written without `noUncheckedIndexedAccess` and has duplicate-key literals, so one `import` puts hundreds of errors
