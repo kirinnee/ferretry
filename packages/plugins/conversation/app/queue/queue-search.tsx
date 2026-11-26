@@ -3,6 +3,8 @@
 // A native search input, so the keyboard, the screen reader and a phone's keyboard all already know it: Tab reaches it,
 // Escape clears it, and a Clear button does the same for a pointer. Filtering is `matchingRows` (queue-view.ts).
 
+import type { ReactNode } from 'react';
+
 export interface QueueSearchProps {
   readonly query: string;
   readonly onChange: (query: string) => void;
@@ -37,6 +39,18 @@ export function QueueSearch({ query, onChange }: QueueSearchProps) {
   );
 }
 
+/**
+ * The live region the search's "nothing matched" answer is spoken from. It is mounted, empty, with the search box,
+ * so the first answer is a change inside a region the screen reader already watches (W3C ARIA22).
+ */
+export function QueueSearchStatus({ children }: { readonly children: ReactNode }) {
+  return (
+    <div data-queue-search-status="" role="status">
+      {children}
+    </div>
+  );
+}
+
 /** What the page says when the search hides every message: what was asked, and that older ones are not read. */
 export function QueueNoMatch({
   query,
@@ -48,7 +62,7 @@ export function QueueNoMatch({
   readonly onClear: () => void;
 }) {
   return (
-    <div className="fy-queue-empty kt-panel" data-queue-no-match="" role="status">
+    <div className="fy-queue-empty kt-panel" data-queue-no-match="">
       <p className="fy-queue-empty-title">{`No message matched “${query.trim()}”`}</p>
       <p className="fy-queue-empty-hint">
         {olderUnread

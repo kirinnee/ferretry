@@ -445,3 +445,33 @@ describe('QueuePageView search (G6 · W-05)', () => {
     expect(text(mounted.root.findByProps({ 'data-queue-no-match': '' }))).toContain('older messages');
   });
 });
+
+describe('QueuePageView search announcement (G6 · ARIA22)', () => {
+  const box = () => mounted!.root.findByProps({ 'data-queue-search': '' });
+  const type = (value: string) => run(() => box().props.onChange({ target: { value } }));
+  const region = () => mounted!.root.findAllByProps({ 'data-queue-search-status': '' });
+
+  test('the status region is mounted, and empty, before any search says anything', () => {
+    mounted = view();
+    expect(region()).toHaveLength(1);
+    expect(region()[0]?.props.role).toBe('status');
+    expect(text(region()[0]!)).toBe('');
+  });
+
+  test('a first search with no match fills the region that was already there', () => {
+    mounted = view();
+    const before = region()[0]!;
+    type('zebra');
+    expect(region()).toHaveLength(1);
+    expect(region()[0]).toBe(before);
+    expect(text(region()[0]!)).toContain('No message matched “zebra”');
+    type('');
+    expect(region()).toHaveLength(1);
+    expect(text(region()[0]!)).toBe('');
+  });
+
+  test('no region without a search box', () => {
+    mounted = view({ groups: [] });
+    expect(region()).toHaveLength(0);
+  });
+});

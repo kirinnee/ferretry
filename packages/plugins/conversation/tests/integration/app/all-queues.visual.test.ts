@@ -172,9 +172,26 @@ describe('searching the queue (G6)', () => {
             expect(await box.inputValue()).toBe('');
             expect(await tab.locator('[data-queue-row]').count()).toBe(3);
 
+            // A message the ferret already read is not listed, but the search finds it, and the ferret's card comes with it.
+            await tab.keyboard.type('rollback');
+            expect(await tab.locator('[data-queue-row]').count()).toBe(1);
+            expect(await tab.locator('[data-queue-group]').count()).toBe(1);
+            expect(await tab.locator('.fy-queue-ferret').allInnerTexts()).toEqual(['Idle']);
+            if (shotsDir !== '') {
+              await tab.waitForTimeout(150);
+              await tab.screenshot({
+                path: join(shotsDir, `search-${width}-${family}-${scheme}-finished.png`),
+                fullPage: true,
+              });
+            }
+            await tab.keyboard.press('Escape');
+            expect(await tab.locator('[data-queue-row]').count()).toBe(3);
+
             await tab.keyboard.type('zebra');
             expect(await tab.locator('[data-queue-row]').count()).toBe(0);
             expect(await tab.locator('[data-queue-no-match]').innerText()).toContain('No message matched “zebra”');
+            // The status region was on the page, empty, before the first search found nothing.
+            expect(await tab.locator('[data-queue-search-status][role="status"]').count()).toBe(1);
             expect(await tab.locator('[data-queue-empty]').count()).toBe(0);
             expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
             if (shotsDir !== '') {

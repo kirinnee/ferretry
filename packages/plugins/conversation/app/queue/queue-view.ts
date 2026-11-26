@@ -198,12 +198,17 @@ export interface QueueGroup {
 const oldestAt = (rows: readonly QueueRow[]): string =>
   rows.reduce((oldest, row) => (oldest === '' || row.at < oldest ? row.at : oldest), '');
 
-/** Only ferrets with something waiting, or whose queue could not be read, the longest-waiting first. */
-export const waitingGroups = (groups: readonly QueueGroup[]): readonly QueueGroup[] =>
-  groups
-    .map(group => ({ ...group, rows: group.rows.filter(isWaitingRow) }))
+/**
+ * The ferrets the All-queues view can draw: those with any message at all, or whose queue could not be read, the
+ * longest-waiting first (a ferret with nothing waiting goes last). Finished rows stay in the group, because the page's
+ * search looks at them; the page itself draws only the waiting ones until something is searched for.
+ */
+export const queueGroups = (groups: readonly QueueGroup[]): readonly QueueGroup[] => {
+  const waitingAt = (group: QueueGroup): string => oldestAt(group.rows.filter(isWaitingRow)) || '\uffff';
+  return groups
     .filter(group => group.rows.length > 0 || group.unread !== undefined)
-    .sort((a, b) => oldestAt(a.rows).localeCompare(oldestAt(b.rows)) || a.key.localeCompare(b.key));
+    .sort((a, b) => waitingAt(a).localeCompare(waitingAt(b)) || a.key.localeCompare(b.key));
+};
 
 /** "3 waiting for connection" — the one line a count of saved-on-device messages reads as. */
 export const waitingCountLine = (count: number): string =>

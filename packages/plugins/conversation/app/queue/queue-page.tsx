@@ -42,7 +42,7 @@ import {
   refreshQueueHistory,
 } from './send-queue.ts';
 import { QueueProse } from './queue-prose.tsx';
-import { QueueNoMatch, QueueSearch } from './queue-search.tsx';
+import { QueueNoMatch, QueueSearch, QueueSearchStatus } from './queue-search.tsx';
 import './queue-page.css';
 
 /** Where a message is, in words; a queued one is on the machine's queue, which is what this page is. */
@@ -271,6 +271,8 @@ export interface QueuePageViewProps {
   readonly now?: number;
   /** The daemon's sentence when the list of ferrets could not be read: said instead of the empty state. */
   readonly error?: string;
+  /** Draw only what still waits, until something is searched for (then finished messages are found too). */
+  readonly waitingOnly?: boolean;
 }
 
 /** What a ferret's card says when its queue could not be read; the daemon's own sentence follows. */
@@ -291,11 +293,13 @@ export function QueuePageView({
   olderFailed = null,
   onLoadOlder,
   error,
+  waitingOnly = false,
 }: QueuePageViewProps) {
   // The search box filters what is drawn; the counts, "Next up" and "next send" read every message, so a search never moves them.
   const [query, setQuery] = useState('');
   const searching = searchTerm(query) !== '';
-  const rowsOf = (group: QueueGroup): readonly QueueRow[] => (searching ? matchingRows(group.rows, query) : group.rows);
+  const rowsOf = (group: QueueGroup): readonly QueueRow[] =>
+    searching ? matchingRows(group.rows, query) : waitingOnly ? group.rows.filter(isWaitingRow) : group.rows;
   // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all. One
   // whose newest window shows nothing (every message in it cancelled) but whose machine holds older messages keeps its
   // card, because "Show older messages" lives there and would otherwise be unreachable.
@@ -331,9 +335,15 @@ export function QueuePageView({
             {error}
           </p>
         ) : null}
-        {canSearch ? <QueueSearch onChange={setQuery} query={query} /> : null}
-        {searching && !matched && !loading ? (
-          <QueueNoMatch olderUnread={groups.some(hasOlder)} onClear={() => setQuery('')} query={query} />
+        {canSearch ? (
+          <div className="fy-queue-searchbox">
+            <QueueSearch onChange={setQuery} query={query} />
+            <QueueSearchStatus>
+              {searching && !matched && !loading ? (
+                <QueueNoMatch olderUnread={groups.some(hasOlder)} onClear={() => setQuery('')} query={query} />
+              ) : null}
+            </QueueSearchStatus>
+          </div>
         ) : null}
         {shown.length === 0 && !searching && !loading && !incomplete ? (
           <div className="fy-queue-empty kt-panel" data-queue-empty="">
