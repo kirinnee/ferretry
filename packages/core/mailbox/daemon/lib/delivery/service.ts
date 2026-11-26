@@ -5,8 +5,7 @@ import {
   type SendCancelEffect,
   type SendDisposition,
 } from '../../../contract/index.ts';
-import type { ClockPort, SerialExecutor } from '../../../contract/index.ts';
-import type { SessionId } from '../../../contract/index.ts';
+import type { ClockPort, SerialExecutor, SessionId, SessionSendSettings } from '../../../contract/index.ts';
 import {
   authorizeSend,
   endsPeerWait,
@@ -22,7 +21,6 @@ import {
   turnInstruction,
   typedIntoBusyPane,
 } from '../../../contract/index.ts';
-import type { SessionSendSettings } from '../../../contract/index.ts';
 import {
   retractedPointer,
   sameComposerText,
@@ -31,8 +29,7 @@ import {
   strandableText,
   strandedSend,
 } from '../../../contract/index.ts';
-import type { SendRetractionProof } from '../../../contract/index.ts';
-import { heldForTyping, isOpenSend } from '../../../contract/index.ts';
+import { heldForTyping, isOpenSend, type SendRetractionProof } from '../../../contract/index.ts';
 import { type LedgerPath as SendPath, type LedgerRecord as SendRecord } from '../../../contract/index.ts';
 import {
   type ComposerDraftAction,
