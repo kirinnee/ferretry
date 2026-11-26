@@ -68,6 +68,8 @@ export const QueueWaitReasonSchema = z.enum([
   'stopped',
   /** The harness is compacting its context: nothing is typed until it is done (a wait, not "busy"). */
   'compacting',
+  /** A person is typing in the pane: the daemon's own messages wait for 5 s of quiet (the keys are never held). */
+  'typing',
 ]);
 export type QueueWaitReason = z.infer<typeof QueueWaitReasonSchema>;
 

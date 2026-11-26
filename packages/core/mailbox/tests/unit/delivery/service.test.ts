@@ -164,6 +164,8 @@ class FakeLedger implements SendLedger {
 class FakeTerminal implements SendTerminal {
   readonly calls: string[] = [];
   readonly typed: string[] = [];
+  /** Whose write each key-pressing call said it was (the typing hold's write-boundary guard reads it). */
+  readonly by: (string | undefined)[] = [];
   queueOutcome: SendQueueOutcome = 'held';
   deliverFailure: Error | undefined;
   queueFailure: Error | undefined;
@@ -185,7 +187,8 @@ class FakeTerminal implements SendTerminal {
       : (this.frames[0] as SendPaneObservation);
   }
 
-  async deliver(_id: SessionId, text: string): Promise<void> {
+  async deliver(_id: SessionId, text: string, by?: string): Promise<void> {
+    this.by.push(by);
     if (this.occupied !== undefined) throw new SendComposerOccupied(this.occupied);
     if (this.unreadable) throw new SendComposerUnreadable();
     if (this.notReady !== undefined) throw this.notReady;
@@ -194,7 +197,8 @@ class FakeTerminal implements SendTerminal {
     if (this.deliverFailure !== undefined) throw this.deliverFailure;
   }
 
-  async queue(_id: SessionId, text: string): Promise<SendQueueOutcome> {
+  async queue(_id: SessionId, text: string, by?: string): Promise<SendQueueOutcome> {
+    this.by.push(by);
     if (this.occupied !== undefined) throw new SendComposerOccupied(this.occupied);
     if (this.unreadable) throw new SendComposerUnreadable();
     this.calls.push('queue');
@@ -229,7 +233,8 @@ class FakeTerminal implements SendTerminal {
   /** Whether each Enter asked for the strict whole-text check (&B153). */
   readonly submitStrict: boolean[] = [];
 
-  async submitComposer(_id?: SessionId, _text?: string, strict = false): Promise<ComposerSubmitOutcome> {
+  async submitComposer(_id?: SessionId, _text?: string, strict = false, by?: string): Promise<ComposerSubmitOutcome> {
+    this.by.push(by);
     this.calls.push('submitComposer');
     this.submitStrict.push(strict);
     return this.submitOutcome;
@@ -914,6 +919,7 @@ describe('re-attempting a send under its original id', () => {
     await built.service.send(request());
     built.ledger.records.set('send-1', { ...built.ledger.only(), fate, ...extra });
     built.terminal.typed.length = 0;
+    built.terminal.by.length = 0;
     built.tracked.length = 0;
     return built;
   }
@@ -943,6 +949,50 @@ describe('re-attempting a send under its original id', () => {
 
     should(terminal.calls.at(-1)).equal('queue');
     should(record).match({ fate: 'queued', attempt: 2 });
+  });
+
+  it('holds the tracker’s retype of a daemon’s send while a person types, and never a person’s own retry', async () => {
+    const typing = pane({ promptReady: true, typing: true });
+    const held = await settled('accepted', { untyped: true, senderKind: 'daemon' }, [typing, typing]);
+
+    const withheld = await held.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should((withheld as SendRetypeWithheld).reason).equal('busy');
+    should(held.terminal.typed).be.empty();
+
+    const own = await settled('accepted', { untyped: true, senderKind: 'human' }, [typing, typing]);
+    await own.service.reattempt(ID, 'send-1', { by: 'daemon' });
+    should(own.terminal.typed).not.be.empty();
+  });
+
+  it('tells the terminal whose write a retype is, so the write boundary can hold the daemon’s and never a person’s', async () => {
+    const daemon = await settled('accepted', { untyped: true, senderKind: 'agent' });
+    await daemon.service.reattempt(ID, 'send-1', { by: 'daemon' });
+    const person = await settled('timed_out', { retryable: true, senderKind: 'agent' });
+    await person.service.reattempt(ID, 'send-1', { by: 'person' });
+    const queued = await settled('accepted', { senderKind: 'human' }, [
+      pane({ promptReady: true }),
+      pane({ activeWork: true }),
+    ]);
+    await queued.service.reattempt(ID, 'send-1', { by: 'daemon' });
+
+    should(daemon.terminal.by).eql(['agent']);
+    should(person.terminal.by).eql(['human']);
+    should(queued.terminal.by).eql(['human']);
+  });
+
+  it('keeps a retype retryable when a person starts typing during the write itself: nothing typed, the record restored', async () => {
+    const built = await settled('accepted', { untyped: true, senderKind: 'daemon' });
+    built.terminal.notReady = new SendPaneNotReady('a person is typing in the ferret’s terminal', 'busy');
+    const before = { ...built.ledger.only() };
+
+    const withheld = await built.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should((withheld as SendRetypeWithheld).reason).equal('busy');
+    should(built.terminal.typed).be.empty();
+    should(built.ledger.only()).match({ fate: before.fate, untyped: true });
   });
 
   it("types a send nothing was ever typed for only at an idle prompt, never into a busy pane's queue", async () => {
@@ -2300,6 +2350,37 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
     should(await built.service.resubmit(ID, 'a')).match({ sendId: 'a' });
     should(await built.service.resubmitStuck(ID, 'a')).equal('refused');
     should(built.terminal.calls).not.containEql('submitComposer');
+  });
+
+  it('presses nothing and counts nothing while a person types, for the queue, the Warden and the tracker alike', async () => {
+    const typing = pane({ draft: POINTER, typing: true });
+    const queue = idle([typing], unconfirmed());
+    const warden = idle([typing], unconfirmed());
+    const tracker = idle([typing], unconfirmed());
+
+    should(await queue.service.finishOwnDraft(ID)).eql({ kind: 'stuck', sendId: 'send-0', tried: false });
+    should(await warden.service.resubmitStuck(ID, 'send-0')).equal('refused');
+    await tracker.service.resubmit(ID, 'send-0');
+
+    for (const built of [queue, warden, tracker]) {
+      should(built.terminal.calls).not.containEql('submitComposer');
+      should(built.ledger.records.get('send-0')?.submitNudges).be.undefined();
+    }
+    // The press comes once they stop, and it is still the first of its Enters.
+    queue.terminal.frozen = pane({ draft: POINTER });
+    should(await queue.service.finishOwnDraft(ID)).eql({ kind: 'clear' });
+    should(queue.ledger.records.get('send-0')).match({ submitNudges: 1 });
+  });
+
+  it('says the Enter is the daemon’s own to the terminal, so a hold that began after the look still stops it', async () => {
+    const built = idle([pane({ draft: POINTER })], unconfirmed());
+
+    await built.service.finishOwnDraft(ID);
+    should(built.terminal.by).eql(['daemon']);
+    // A person's own Enter on a draft is never the daemon's.
+    const own = idle([pane({ draft: 'fix the login bug' })]);
+    await own.service.resolveDraft(ID, 'submit', 'fix the login bug');
+    should(own.terminal.by).eql([undefined]);
   });
 
   it("answers absent to the Warden when an idle pane's box is empty", async () => {

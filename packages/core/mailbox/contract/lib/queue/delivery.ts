@@ -1,5 +1,5 @@
 import type { QueuedMessage, QueuedMessageState, QueueWaitReason } from '../../wire-send.ts';
-import type { SendFate } from '../../stores.ts';
+import type { SendFate, SendSenderKind } from '../../stores.ts';
 import type { SendPaneObservation, SendTarget } from '../send/types.ts';
 
 /**
@@ -19,12 +19,37 @@ export interface DeliveryView {
 }
 
 /**
- * Why nothing may be typed into this session now, or `undefined` when its input box is free.
+ * THE TYPING HOLD (owner idea A563): a person pressed a key in this pane a moment ago, so every write that is not the
+ * person's own waits for the quiet. The person's keys and the person's own sends are never held. ONE predicate, read by
+ * the queue's look, the send path's pane check and the tracker's retype, beside the draft guard it extends.
+ */
+export function heldForTyping(pane: Pick<SendPaneObservation, 'typing'>, sender: SendSenderKind): boolean {
+  return pane.typing === true && sender !== 'human';
+}
+
+/** Whose write a typing send is, for the typing hold: a person's own carries no flag and no sender session. */
+export function typingSenderOf(request: {
+  readonly senderSessionId?: string | undefined;
+  readonly by?: unknown;
+  readonly warden?: boolean | undefined;
+  readonly agenda?: boolean | undefined;
+  readonly notice?: boolean | undefined;
+  readonly monitor?: boolean | undefined;
+}): SendSenderKind {
+  if (request.senderSessionId !== undefined) return 'agent';
+  return request.by !== undefined || request.warden || request.agenda || request.notice || request.monitor
+    ? 'daemon'
+    : 'human';
+}
+
+/**
+ * Why nothing may be typed into this session now, or `undefined` when its input box is free. `sender` is whose
+ * message it is, which only the typing hold reads: a person's own is never held for typing.
  *
  * A stopped session is NOT held: the send path revives it with the message as its first turn, exactly as
  * a person's send to it does today. A pane that cannot be read is the caller's to say (`unreadable`).
  */
-export function reasonForWaiting(view: DeliveryView): QueueWaitReason | undefined {
+export function reasonForWaiting(view: DeliveryView, sender: SendSenderKind = 'human'): QueueWaitReason | undefined {
   if (view.launching) return 'launching';
   if (view.target.pendingQuestion !== undefined) return 'question';
   if (!view.pane.alive || view.pane.dead) return undefined;
@@ -35,6 +60,7 @@ export function reasonForWaiting(view: DeliveryView): QueueWaitReason | undefine
   // composer shows.
   if (view.pane.startupParked === true) return 'launching';
   if (view.pane.draft !== undefined && view.pane.draft.trim() !== '') return 'draft';
+  if (heldForTyping(view.pane, sender)) return 'typing';
   return undefined;
 }
 
