@@ -1,0 +1,75 @@
+{
+  "range": {
+    "from": 1767225600000,
+    "to": 1795666826664
+  },
+  "sessions": 3,
+  "subagents": 0,
+  "prompts": 4,
+  "steps": 5,
+  "tokens": {
+    "input": 8050,
+    "output": 272,
+    "reasoning": 298,
+    "cache": {
+      "read": 18560,
+      "write": 0
+    }
+  },
+  "cost": 0.0016051799999999997,
+  "tools": {
+    "mode": "detail",
+    "totals": {
+      "calls": 2,
+      "succeeded": 1,
+      "failed": 1,
+      "unfinished": 0
+    },
+    "usage": [
+      {
+        "name": "shell",
+        "calls": 1,
+        "succeeded": 1,
+        "failed": 0,
+        "unfinished": 0,
+        "durationP50": 93
+      },
+      {
+        "name": "read",
+        "calls": 1,
+        "succeeded": 0,
+        "failed": 1,
+        "unfinished": 0,
+        "durationP50": 6
+      }
+    ]
+  },
+  "activeDays": 1,
+  "streak": 1,
+  "activity": [
+    {
+      "date": "2026-11-26",
+      "steps": 5
+    }
+  ],
+  "models": [
+    {
+      "model": {
+        "id": "deepseek-flash",
+        "providerID": "deepseek",
+        "variant": "default"
+      },
+      "steps": 5,
+      "tokens": {
+        "input": 8050,
+        "output": 272,
+        "reasoning": 298,
+        "cache": {
+          "read": 18560,
+          "write": 0
+        }
+      },
+      "cost": 0.0016051799999999997
+    }
+  ]
+}

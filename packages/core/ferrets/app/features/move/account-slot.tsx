@@ -10,11 +10,11 @@
  */
 
 import { type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react';
-import { type ChosenFerretAccount, type KnownHarnessKey, MOVE_ACCOUNT_SLOT } from '../../../contract/index.ts';
+import { type ChosenFerretAccount, type ConvertibleHarness, MOVE_ACCOUNT_SLOT } from '../../../contract/index.ts';
 import { holdsPicker } from '../../lib/slot-picker.ts';
 
 export interface AccountSlotField {
-  readonly harness: KnownHarnessKey;
+  readonly harness: ConvertibleHarness;
   readonly value: string;
   readonly onValueChange: (next: string) => void;
   readonly onChosen: (chosen: ChosenFerretAccount | null) => void;

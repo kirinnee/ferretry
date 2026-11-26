@@ -89,6 +89,10 @@ export default implementCli(manifest, {
               io.out(
                 `These keys could not be removed on GitHub; delete them at github.com/settings/keys: ${removed.keysLeftOnProvider.join(', ')}`,
               );
+            if (removed.gpgUploadsToCheck.length > 0)
+              io.out(
+                `These GPG uploads have unknown outcomes. Compare these public fingerprints at github.com/settings/keys and confirm who registered each key before taking any action: ${removed.gpgUploadsToCheck.join(', ')}`,
+              );
             io.out(`To fully revoke Ferretry's access, open ${removed.revokeAt}`);
           }
           return OK;

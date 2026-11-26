@@ -28,6 +28,11 @@ export const SshPublicKeySchema = z
 /** `SHA256:` and 43 base64 characters, as `ssh-keygen -l` prints it. */
 export const SshFingerprintSchema = z.string().regex(/^SHA256:[A-Za-z0-9+/]{43}$/u);
 
+/** An OpenPGP fingerprint: 40 hexadecimal capitals (the long form GnuPG prints). */
+export const OpenpgpFingerprintSchema = z
+  .string()
+  .regex(/^[A-F0-9]{40}$/u, 'an OpenPGP fingerprint is 40 hex capitals');
+
 /**
  * A key on the account at GitHub. Public facts only: the private half of a key Ferretry made lives in the sealed
  * `keys.json` and never leaves the daemon.
@@ -42,8 +47,19 @@ export const GitAccountKeySchema = z.strictObject({
   /** The public key line, for `user.signingkey` and for the screen. */
   publicKey: SshPublicKeySchema.optional(),
   fingerprint: SshFingerprintSchema.optional(),
-  /** `generated`: made here, private half sealed here. `own`: the person's own key, used through the host's ssh-agent. */
-  source: z.enum(['generated', 'own']).optional(),
+  /** Which kind of signing key this is. Absent means ssh (every record written before GPG existed). */
+  format: z.enum(['ssh', 'gpg']).optional(),
+  /** A GPG key's fingerprint (`format: gpg`): what `user.signingkey` names. Public. */
+  openpgpFingerprint: OpenpgpFingerprintSchema.optional(),
+  /** Durable removal intent: retries retain the remote id, but startup never reloads this signing key. */
+  revoking: z.literal(true).optional(),
+  /** An upload whose final account write failed; removal reconciles it by public fingerprint. */
+  registrationPending: z.literal(true).optional(),
+  /**
+   * `generated`: made here, private half sealed here. `imported`: the person handed Ferretry the private half (a GPG key),
+   * sealed here. `own`: the person's own SSH key, used through the host's ssh-agent.
+   */
+  source: z.enum(['generated', 'imported', 'own']).optional(),
 });
 export type GitAccountKey = z.infer<typeof GitAccountKeySchema>;
 
@@ -106,6 +122,8 @@ export const GitAccountRemovedSchema = z.strictObject({
   removed: z.literal(true),
   /** Registered keys that could not be taken off the account at GitHub (the person deletes them there). */
   keysLeftOnProvider: z.array(z.string().min(1).max(200)).max(8),
+  /** Upload outcomes without a confirmed provider id: check identity and ownership, never advise deletion by title. */
+  gpgUploadsToCheck: z.array(OpenpgpFingerprintSchema).max(8),
   /** Revoking an OAuth token needs the client secret, which Ferretry deliberately does not have. */
   revokeAt: z.url(),
 });
@@ -122,6 +140,7 @@ export const GIT_ACCOUNT_CODES = {
   keyRefused: 'key_refused',
   keyNotOnAccount: 'key_not_on_account',
   agentUnavailable: 'agent_unavailable',
+  keyCleanupManual: 'key_cleanup_manual',
   /** The daemon's scratch folder sits where `git` cannot be fenced into it (a `:` in its parent's path). */
   scratchUnusable: 'scratch_unusable',
 } as const;
@@ -140,6 +159,12 @@ export const GitKeyPurposeSchema = z.enum(GIT_KEY_PURPOSES);
 export type GitKeyPurpose = z.infer<typeof GitKeyPurposeSchema>;
 /** The two registrations a key can hold at GitHub; `both` is a request for the two. */
 export const GitKeyKindSchema = z.enum(['auth', 'signing']);
+/** `ssh`: an ed25519 key held by a per-account ssh-agent. `gpg`: an OpenPGP key held by an in-memory signer. */
+export const GitKeyFormatSchema = z.enum(['ssh', 'gpg']);
+export type GitKeyFormat = z.infer<typeof GitKeyFormatSchema>;
+export const GitConnectRequestSchema = z.strictObject({ signingFormat: GitKeyFormatSchema.default('ssh') });
+/** The most an armored secret key may be (a 4096-bit RSA key with a few subkeys is about 10 KiB). */
+export const GPG_KEY_BLOCK_MAX = 24 * 1024;
 export type GitKeyKind = z.infer<typeof GitKeyKindSchema>;
 
 /**
@@ -147,10 +172,29 @@ export type GitKeyKind = z.infer<typeof GitKeyKindSchema>;
  * With one, the person says "I already have this key on GitHub": it is only recorded (after GitHub confirms the
  * account holds it), the private half is never asked for, and the host's own ssh-agent is used.
  */
-export const GitKeyRequestSchema = z.strictObject({
-  purpose: GitKeyPurposeSchema,
-  publicKey: SshPublicKeySchema.optional(),
-});
+export const GitKeyRequestSchema = z
+  .strictObject({
+    purpose: GitKeyPurposeSchema,
+    publicKey: SshPublicKeySchema.optional(),
+    /** `gpg`: a GPG signing key (purpose `signing` only). Absent: an SSH key, as before. */
+    format: GitKeyFormatSchema.optional(),
+    /**
+     * `format: gpg` only: an ASCII-armored OpenPGP secret key the person hands Ferretry to keep (sealed, never returned).
+     * Absent with `format: gpg`, Ferretry makes the key. It needs no passphrase.
+     */
+    keyBlock: z
+      .string()
+      .max(GPG_KEY_BLOCK_MAX)
+      .regex(/^\s*-----BEGIN PGP PRIVATE KEY BLOCK-----/u, 'an armored OpenPGP secret key')
+      .optional(),
+  })
+  .refine(
+    request =>
+      request.format === 'gpg'
+        ? request.purpose === 'signing' && request.publicKey === undefined
+        : request.keyBlock === undefined,
+    'a GPG key is for signing only and takes no SSH public key; a key block needs format gpg',
+  );
 export type GitKeyRequest = z.infer<typeof GitKeyRequestSchema>;
 
 /** The public half and what is registered. Never the private half. */
@@ -162,6 +206,22 @@ export const GitKeyResultSchema = z.strictObject({
   source: z.enum(['generated', 'own']),
 });
 export type GitKeyResult = z.infer<typeof GitKeyResultSchema>;
+
+/** What a GPG key request answers: the PUBLIC armored block (GitHub's own copy) and the fingerprint; never the secret key. */
+export const GitGpgKeyResultSchema = z.strictObject({
+  format: z.literal('gpg'),
+  publicKey: z.string().max(GPG_KEY_BLOCK_MAX),
+  fingerprint: OpenpgpFingerprintSchema,
+  registered: z.array(z.literal('signing')).max(1),
+  source: z.enum(['generated', 'imported']),
+});
+export type GitGpgKeyResult = z.infer<typeof GitGpgKeyResultSchema>;
+
+/** Ferretry holds the private half of this key (the person's own SSH key is theirs, in the host's agent). */
+export const keptHere = (key: GitAccountKey | undefined): boolean =>
+  key !== undefined && (key.source === 'generated' || key.source === 'imported');
+/** A signing key that is an OpenPGP one. */
+export const isGpgKey = (key: GitAccountKey | undefined): boolean => key?.format === 'gpg';
 
 export const GitKeyRemovedSchema = z.strictObject({
   id: GitAccountIdSchema,

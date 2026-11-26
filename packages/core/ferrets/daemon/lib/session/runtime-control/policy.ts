@@ -10,7 +10,7 @@ import type { RuntimeControlRequest, SessionStatus, SessionView } from '../../pr
 import { type HarnessRuntimeSwitchRequest, isPickerQuarantined, pickerInputRefusal } from '../peers/harness.ts';
 import { TERMINAL_SEND_STATUSES } from '../peers/send-lifecycle.ts';
 import { type RuntimePaneObservation, SessionRuntimeError } from './types.ts';
-import { isRecordedHarness } from '../../../../contract/index.ts';
+import { byRecordedHarness, isRecordedHarness, type RecordedFamily } from '../../../../contract/index.ts';
 
 /**
  * The refusal for a ferret whose harness this control cannot drive: only the two families here have a switch plan and a
@@ -103,7 +103,7 @@ export function switchRequest(
  * escape hatch exists for.
  */
 export function needsLiveCatalog(wanted: HarnessRuntimeSwitchRequest): boolean {
-  return wanted.harness === 'codex' && wanted.model !== undefined;
+  return byRecordedHarness(wanted.harness, { claude: () => false, codex: () => wanted.model !== undefined });
 }
 
 /**
@@ -116,7 +116,7 @@ export function needsFastFacts(wanted: HarnessRuntimeSwitchRequest): boolean {
   return wanted.fast !== undefined;
 }
 
-const closedHarness = (view: SessionView): 'claude' | 'codex' => {
+const closedHarness = (view: SessionView): RecordedFamily => {
   const harness = view.config.harness;
   if (isRecordedHarness(harness)) return harness;
   throw unsupportedHarness(harness);

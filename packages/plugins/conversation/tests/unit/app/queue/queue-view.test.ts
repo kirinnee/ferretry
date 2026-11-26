@@ -16,7 +16,7 @@ import {
   queueRowOf,
   rowSend,
   waitingCountLine,
-  waitingGroups,
+  queueGroups,
 } from '../../../../app/queue/queue-view.ts';
 import type { OutboxEntry } from '../../../../app/composer/send-outbox.ts';
 /** A message as a test spells it: plain strings for its instants (the helper casts). */
@@ -137,8 +137,15 @@ describe('waiting', () => {
     });
     const early = queueRowOf('d', 's', 'f', message({ enqueuedAt: '2026-10-30T09:00:00.000Z' }));
     const late = queueRowOf('d', 's', 'f', message({ enqueuedAt: '2026-10-30T11:00:00.000Z' }));
-    const groups = waitingGroups([group('b', late), group('empty', row('read')), group('c', early), group('a', early)]);
-    expect(groups.map(item => item.key)).toEqual(['a', 'c', 'b']);
+    // A ferret with only finished messages stays (the search finds them), after the ones that wait; one with nothing goes.
+    const groups = queueGroups([
+      group('b', late),
+      group('finished', row('read')),
+      group('none'),
+      group('c', early),
+      group('a', early),
+    ]);
+    expect(groups.map(item => item.key)).toEqual(['a', 'c', 'b', 'finished']);
   });
 
   test('the count line', () => {
@@ -280,7 +287,7 @@ describe('needsClamp', () => {
   });
 });
 
-describe('waitingGroups order', () => {
+describe('queueGroups order', () => {
   test('the longest-waiting message decides, even when delivery order lists a newer one first', () => {
     const rowsOf = (ferretId: string, items: LooseMessage[]) =>
       ferretRows(
@@ -308,7 +315,7 @@ describe('waitingGroups order', () => {
     );
     const mid = group('mid', rowsOf('mid', [{ id: 'c', sender: 'human', enqueuedAt: '2026-10-30T10:00:00.000Z' }]));
     expect(old.rows[0]?.id).toBe('b');
-    expect(waitingGroups([mid, old]).map(item => item.key)).toEqual(['old', 'mid']);
+    expect(queueGroups([mid, old]).map(item => item.key)).toEqual(['old', 'mid']);
   });
 });
 describe('when a queued message goes', () => {

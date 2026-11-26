@@ -1,4 +1,5 @@
 import { type ConversionPreview, type MoveConversation, MoveConversationSchema } from '../../../contract/move.ts';
+import { harnessProductName } from '../../../contract/records.ts';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import type { SessionPresenter } from '../session/presenter.ts';
 import type { IMoveGateway } from './ports.ts';
@@ -83,8 +84,8 @@ const verb = (count: number, one: string, many: string): string => (count === 1 
 export function renderConversionPreview(preview: ConversionPreview): readonly string[] {
   if (preview.kind === 'refused') return [`Can't convert onto ${preview.targetAgent}: ${preview.reason}`];
   const summary = preview.summary;
-  const target = summary.targetHarness === 'codex' ? 'Codex' : 'Claude Code';
-  const source = summary.sourceHarness === 'codex' ? 'Codex' : 'Claude Code';
+  const target = harnessProductName(summary.targetHarness);
+  const source = harnessProductName(summary.sourceHarness);
   const dropped = [
     summary.dropped.reasoning > 0 ? `thinking (${summary.dropped.reasoning})` : '',
     summary.dropped.sidechains > 0 ? `subagent work (${summary.dropped.sidechains})` : '',

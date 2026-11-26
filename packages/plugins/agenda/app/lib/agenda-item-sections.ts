@@ -26,6 +26,7 @@ import {
   type AgendaStage,
   agendaStage,
   agendaState,
+  askedTaskAsks,
   gateReference,
 } from '@ferretry/core-asks/contract';
 import { revisionStamp } from './agenda-revisions.ts';
@@ -51,7 +52,7 @@ export const PART_TITLES: Readonly<Record<Exclude<ItemViewPart, 'head' | 'premis
   references: 'Terms and references',
   needs: 'What I need from you',
   tabs: 'The live document',
-  conversation: 'Conversation',
+  conversation: 'History',
   activity: 'Activity',
 };
 
@@ -168,18 +169,19 @@ export interface ItemTaskAsk {
 }
 
 /**
- * The current task ask carries its own How to test in the snapshot. A host may also provide board steps.
+ * EVERY open task ask, in the order they are asked (`askedTaskAsks`): each carries its own How to test (the snapshot's,
+ * else the host's board steps). An answered ask is the History's, never drawn here.
  */
 export const itemTaskAsks = (
   item: AgendaItem,
   howToTestFor?: (cardId: string) => string | null | undefined,
-): readonly ItemTaskAsk[] => {
-  const view = attachedGateView(item);
-  if (view === undefined) return [];
-  const attached = item.cardAsks?.find(ask => gateReference(ask.gate) === gateReference(view.gate));
-  const steps = (attached?.howToTest ?? howToTestFor?.(view.gate.cardId))?.trim() ?? '';
-  return [{ key: gateReference(view.gate), gate: view.gate, view, howToTest: steps === '' ? null : steps }];
-};
+): readonly ItemTaskAsk[] =>
+  askedTaskAsks(item).flatMap(attached => {
+    const view = attachedGateView(item, attached.gate);
+    if (view === undefined) return [];
+    const steps = (attached.howToTest ?? howToTestFor?.(view.gate.cardId))?.trim() ?? '';
+    return [{ key: gateReference(view.gate), gate: view.gate, view, howToTest: steps === '' ? null : steps }];
+  });
 
 // ---------------------------------------------------------------------------------------------------
 // 9. The activity log

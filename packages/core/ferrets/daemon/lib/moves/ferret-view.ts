@@ -6,7 +6,7 @@ import {
   FerretTitleSchema,
   RuntimeNameSchema,
 } from '../../../contract/ids.ts';
-import { FerretProjectIdSchema } from '../../../contract/records.ts';
+import { FerretProjectIdSchema, harnessKeyOfRecorded } from '../../../contract/records.ts';
 import type { Instant } from '@ferretry/std';
 import type { SessionStatus } from '../protocol/session-base.ts';
 import type { SessionView } from '../protocol/session.ts';
@@ -89,7 +89,7 @@ export function ferretSummaryOfSessionView(view: SessionView): FerretSummary {
     ...(parent.success ? { parent: parent.data } : {}),
     role: parent.success ? 'helper' : 'lead',
     mode: config.mode,
-    harness: config.harness === 'codex' ? 'codex' : 'claude-code',
+    harness: harnessKeyOfRecorded(config.harness),
     runner: 'tmux',
     ...(runtime.success ? { runtime: runtime.data } : {}),
     folder: config.cwd,

@@ -855,10 +855,15 @@ describe('AGENDA_INSTRUCTION', () => {
     // The owner (&C48): "make sure the chat ALWAYS update their asks, their body"; tabs hold any kind, and steps and
     // explainers stay in them.
     // And READ → EDIT (the owner: "we need to read to know what needs to be updated"): every part, the ask's too.
+    // A-29 (the owner on !A404): asks stack on the one item, EVERY open ask stays floated, answered Q&A goes to History.
     should(text).containEql(
-      "Every update: `show <id> --yaml` whole, rewrite all that's stale (premise, context, ask, options, kind, still-open, each tab), then `patch <id> --file f`; chat points there.",
+      "Ask/answer stack on the topic's ONE item: `show <id> --yaml` whole→`patch <id> --file f`; chat points there.",
     );
-    should(text).containEql('Tabs hold any kind (to-dos, steps, explainers), one each, serial stays one, kept there.');
+    should(text).not.containEql("rewrite all that's stale");
+    should(text).containEql(
+      'Float EVERY open ask in premise (where we are) + ask (what I need); answered Q&A→`History`, oldest first, with answer.',
+    );
+    should(text).containEql('Tabs by kind, serial stays one; steps/explainers stay.');
     should(text).not.containEql('(main)');
     should(text).not.containEql('--back');
     should(text).containEql("Only you mark it `done` when nothing's left.");
