@@ -46,9 +46,14 @@ describe('Conversation’s device settings panels', () => {
   it(
     'shell S4: Conversation width loads on first use and draws with no machine (the three modes)',
     async () => {
-      const view = await draw('chat-width', each => each.container.querySelector('input') !== null);
-      expect(view.container.querySelectorAll('input[type="radio"]')).toHaveLength(3);
+      const view = await draw('chat-width', each => each.container.querySelector('[data-map-style-row]') !== null);
+      expect(view.container.querySelector('[role="radiogroup"]')?.querySelectorAll('input[type="radio"]')).toHaveLength(
+        3,
+      );
       expect(view.container.textContent).toContain('Conversation width');
+      // G7: the map style (OpenStreetMap by default, Google Maps opt-in with a key kept on this device) sits in the same group.
+      expect(view.container.querySelector('[data-map-style-row]')).not.toBeNull();
+      expect(view.container.textContent).toContain('Map style');
       await view.unmount();
     },
     LOAD_TIMEOUT_MS,
