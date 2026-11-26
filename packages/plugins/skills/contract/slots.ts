@@ -9,6 +9,7 @@
  *
  * The props are plain data (no framework type: this is a contract). A contributing panel reads them from its props.
  */
+import { isSkillsHarnessKey, type SkillsHarnessKey } from './harness-layout.ts';
 
 /** In the Skills tab's header, beside the "active in this ferret" line. */
 export const SKILLS_ADD_SLOT = 'skills.add' as const;
@@ -30,7 +31,7 @@ export interface SkillsAddSlotProps {
   /** The folder the ferret works in: the project an install goes into by default. */
   readonly folder: string;
   /** Which harness reads the skills: it decides where an install is active. */
-  readonly harness: 'claude-code' | 'codex';
+  readonly harness: SkillsHarnessKey;
   /** The runtime's wrapper name, as the inventory names it. */
   readonly runtime?: string;
   /** Where the skills the ferret sees come from ('project', 'user', 'ferretry'), once each: whether an install makes a new skills folder. */
@@ -75,7 +76,8 @@ export function isSkillsAddSlotProps(props: unknown): props is SkillsAddSlotProp
   return (
     typeof candidate.ferret === 'string' &&
     typeof candidate.folder === 'string' &&
-    (candidate.harness === 'claude-code' || candidate.harness === 'codex') &&
+    typeof candidate.harness === 'string' &&
+    isSkillsHarnessKey(candidate.harness) &&
     (candidate.runtime === undefined || typeof candidate.runtime === 'string') &&
     Array.isArray(candidate.scopes) &&
     candidate.scopes.every(scope => typeof scope === 'string')

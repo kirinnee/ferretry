@@ -1,6 +1,7 @@
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { SessionId } from '../../session-id.ts';
 import type { SendRecord } from '../../stores.ts';
+import { byHarnessFamily } from '../../harness-family.ts';
 
 /**
  * &B153 — PROVING A HARNESS TOOK A DELIVERED POINTER BACK, rather than a person recalling it.
@@ -66,7 +67,7 @@ export class TranscriptRetractionProof implements SendRetractionProof {
 
   async unanswered(id: SessionId, record: SendRecord): Promise<boolean> {
     const evidence = record.evidence;
-    if (record.fate !== 'delivered' || evidence?.harness !== 'claude' || evidence.proof !== 'normal-user-record')
+    if (record.fate !== 'delivered' || !chainsByParent(evidence?.harness) || evidence?.proof !== 'normal-user-record')
       return false;
     const tail = await this.transcript.tail(id, this.bytes).catch(() => undefined);
     return tail !== undefined && replyProofInTail(tail, evidence.key) === 'unanswered';
@@ -111,9 +112,18 @@ export class EntriesRetractionProof implements SendRetractionProof {
 
   async unanswered(id: SessionId, record: SendRecord): Promise<boolean> {
     const evidence = record.evidence;
-    if (record.fate !== 'delivered' || evidence?.harness !== 'claude' || evidence.proof !== 'normal-user-record')
+    if (record.fate !== 'delivered' || !chainsByParent(evidence?.harness) || evidence?.proof !== 'normal-user-record')
       return false;
     const entries = await this.transcript.entries(id).catch(() => undefined);
     return entries !== undefined && replyProofInEntries(entries, evidence.key) === 'unanswered';
   }
+}
+
+/**
+ * Whether a harness's records chain to the prompt they answer by `parentUuid`, which is what the proof reads. Claude's do;
+ * Codex's do not, and a harness this build has no family for is not read as either: no proof, so the pointer is not
+ * called taken back (every failure answers `false`).
+ */
+function chainsByParent(harness: string | undefined): boolean {
+  return byHarnessFamily(harness, { claude: () => true, codex: () => false, unknown: () => false });
 }

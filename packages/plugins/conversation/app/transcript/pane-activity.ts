@@ -14,7 +14,9 @@
  * keep their status line — a spinner line that has scrolled up is history, not the present.
  */
 
-type PaneActivityHarness = 'claude' | 'codex';
+import { isRecordedHarness, recordedHarnessOf, type RecordedFamily } from '@ferretry/core-ferrets/contract';
+
+type PaneActivityHarness = RecordedFamily;
 
 export interface PaneActivity {
   readonly harness: PaneActivityHarness;
@@ -67,7 +69,10 @@ const codexActivity = (line: string): PaneActivity | null => {
 };
 
 /** The live status line in a captured frame, or `null` when the harness shows none. */
-export const parsePaneActivity = (frame: string): PaneActivity | null => {
+export const parsePaneActivity = (frame: string, harness?: string): PaneActivity | null => {
+  // These are the two status lines this reader knows. A harness with no family is not read as either, so a frame it
+  // painted shows no line rather than a guessed one.
+  if (harness !== undefined && !isRecordedHarness(recordedHarnessOf(harness))) return null;
   const lines = frame.replaceAll('\r\n', '\n').split('\n').slice(-STATUS_WINDOW_LINES);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index] as string;

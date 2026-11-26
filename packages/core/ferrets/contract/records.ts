@@ -50,6 +50,9 @@ export const OpenRecordedHarnessSchema = z
 export const isRecordedHarness = (harness: string): harness is RecordedFamily =>
   (RECORDED_FAMILIES as readonly string[]).includes(harness);
 
+/** Whether `key` is the plugin key of a harness the family table has a row for (`claude-code`, `codex`); the family word `claude` is not a key. */
+export const isRecordedHarnessKey = (key: string): boolean => Object.hasOwn(FAMILY_OF_KEY, key);
+
 /** The harness a session document stamps for a ferret's harness key: the family for the two known, the key itself otherwise. */
 export const recordedHarnessOf = (key: string): OpenRecordedHarness =>
   Object.hasOwn(FAMILY_OF_KEY, key) ? FAMILY_OF_KEY[key as keyof typeof FAMILY_OF_KEY] : key;

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,6 +18,12 @@ import {
   passwordSavingOff,
   sameBrowserProfileLease,
 } from '../index.ts';
+import {
+  clearRecordedChrome,
+  type OrphanChromeInspector,
+  type ProcessIdentity,
+  type SignalOutcome,
+} from './orphan-chrome.ts';
 
 // GAP (kernel port, banned-globals stays visible here): Chrome takes a REAL `--user-data-dir`, so the agent profile, its
 // lease file and the symlink checks need a real state path and a lease no kernel port gives (`kernel.state` stores
@@ -42,6 +49,90 @@ const BrowserProfileMetadataSchema = z.object({
   latestAt: MetadataFieldSchema,
 }) satisfies z.ZodType<BrowserProfileMetadata>;
 
+// The real process table (`/proc`) and a signal: the only way to prove which Chrome is Ferretry's and stop it.
+/** Field 22 of `/proc/<pid>/stat` (start time in ticks) and the state, after the parenthesised command name. */
+function readStat(text: string): { readonly state: string; readonly ticks: string } | undefined {
+  const rest = text.slice(text.lastIndexOf(')') + 2).split(' ');
+  const state = rest[0];
+  const ticks = rest[19];
+  return state && ticks ? { state, ticks } : undefined;
+}
+
+/** What the process table is read and signalled through; the real `/proc` and `kill` by default. */
+export interface ProcessTable {
+  readonly readText: (file: string) => string;
+  readonly kill: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => void;
+}
+
+const systemProcessTable: ProcessTable = {
+  readText: file => readFileSync(file, 'utf8'),
+  kill: (pid, signal) => {
+    process.kill(pid, signal);
+  },
+};
+
+type ProcessRead =
+  | { readonly kind: 'gone' }
+  | { readonly kind: 'unreadable' }
+  | (ProcessIdentity & { readonly kind: 'live' });
+
+/**
+ * Identity from `/proc` (Linux). Where there is no `/proc` nothing can be identified, so nothing is ever signalled:
+ * a flattened `ps` line loses argument boundaries and cannot prove which profile a process holds.
+ *
+ * Every read here is synchronous, and `signalIf` reads the identity and sends the signal in one step with no `await`
+ * between them (see the GAP in orphan-chrome.ts for the one kernel race that remains without a pidfd).
+ */
+export function systemOrphanChromeInspector(table: ProcessTable = systemProcessTable): OrphanChromeInspector {
+  let bootId: string | undefined;
+  const boot = (): string | undefined => {
+    if (bootId !== undefined) return bootId;
+    try {
+      bootId = table.readText('/proc/sys/kernel/random/boot_id').trim();
+    } catch {
+      return undefined;
+    }
+    return bootId;
+  };
+  const read = (pid: number): ProcessRead => {
+    try {
+      const id = boot();
+      if (id === undefined) return { kind: 'unreadable' };
+      const before = readStat(table.readText(`/proc/${pid}/stat`));
+      if (before === undefined) return { kind: 'unreadable' };
+      if (before.state === 'Z' || before.state === 'X') return { kind: 'gone' };
+      const args = table
+        .readText(`/proc/${pid}/cmdline`)
+        .split('\0')
+        .filter(part => part !== '');
+      // The same process answered both reads, or neither is trusted.
+      const after = readStat(table.readText(`/proc/${pid}/stat`));
+      if (after?.ticks !== before.ticks) return { kind: 'unreadable' };
+      return { kind: 'live', startedAt: `${id}:${before.ticks}`, args };
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'gone' } : { kind: 'unreadable' };
+    }
+  };
+  return {
+    identify: pid => {
+      const found = read(pid);
+      return found.kind === 'live' ? { startedAt: found.startedAt, args: found.args } : undefined;
+    },
+    signalIf: (pid, signal, accept): SignalOutcome => {
+      const found = read(pid);
+      if (found.kind !== 'live') return found.kind;
+      if (!accept({ startedAt: found.startedAt, args: found.args })) return 'rejected';
+      try {
+        table.kill(pid, signal);
+        return 'delivered';
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'gone' : 'denied';
+      }
+    },
+    sleep: milliseconds => Bun.sleep(milliseconds),
+  };
+}
+
 type SingletonLockState =
   | { readonly kind: 'missing' }
   | { readonly kind: 'stale'; readonly pid: number }
@@ -52,6 +143,8 @@ export interface BrowserProfileStoreOptions {
   readonly daemonPid?: number;
   readonly hostname?: string;
   readonly isProcessAlive?: (pid: number) => boolean;
+  /** How a Chrome left behind on the profile is recognised and stopped; the system's by default. */
+  readonly orphans?: OrphanChromeInspector;
   readonly now?: () => Date;
   readonly sleep?: (milliseconds: number) => Promise<void>;
 }
@@ -66,6 +159,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
   private readonly daemonPid: number;
   private readonly hostname: string;
   private readonly isProcessAlive: (pid: number) => boolean;
+  private readonly orphans: OrphanChromeInspector;
   private readonly now: () => Date;
   private readonly sleep: (milliseconds: number) => Promise<void>;
 
@@ -87,6 +181,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
           return (error as NodeJS.ErrnoException).code === 'EPERM';
         }
       });
+    this.orphans = options.orphans ?? systemOrphanChromeInspector();
     this.now = options.now ?? (() => new Date());
     this.sleep = options.sleep ?? (milliseconds => Bun.sleep(milliseconds));
   }
@@ -107,6 +202,8 @@ export class BrowserProfileStore implements BrowserProfilePort {
       };
       try {
         await this.createExclusive(this.leaseFile, desired);
+        // A live Chrome holding the profile with no lease naming it is never signalled: with no Ferretry launch
+        // record it may be the owner's own browser, so it blocks (and is named) rather than being stopped.
         const singleton = await this.singletonLockState();
         if (singleton.kind === 'live') {
           await this.releaseRecord(desired);
@@ -154,13 +251,28 @@ export class BrowserProfileStore implements BrowserProfilePort {
           `shared browser profile is leased by session ${current.sessionId}`,
         );
       }
+      // The owning daemon is gone. A Chrome it named is only ever stopped when the lease's own launch record (pid AND
+      // start time) proves Ferretry started that very process; a recycled pid is cleared without a signal, and
+      // anything unproven or unreadable is refused.
+      let chromeCleared: number | undefined;
       if (current.chromePid && this.isProcessAlive(current.chromePid)) {
-        throw new BrowserProfileBusyError(
-          'chrome',
-          `shared browser profile has a live orphaned Chrome pid ${current.chromePid}`,
+        const outcome = await clearRecordedChrome(
+          this.orphans,
+          {
+            pid: current.chromePid,
+            ...(current.chromeStartedAt === undefined ? {} : { startedAt: current.chromeStartedAt }),
+          },
+          this.profile,
         );
+        if (outcome === 'refused') {
+          throw new BrowserProfileBusyError(
+            'chrome',
+            `shared browser profile has a live orphaned Chrome pid ${current.chromePid}`,
+          );
+        }
+        chromeCleared = current.chromePid;
       }
-      await this.reclaimDeadLease(current);
+      await this.reclaimDeadLease(current, chromeCleared);
       recoveredDeadOwner = true;
     }
   }
@@ -232,10 +344,17 @@ export class BrowserProfileStore implements BrowserProfilePort {
     if (chromePid !== undefined && !isPositiveInteger(chromePid)) {
       throw new BrowserControlError('bad_request', 'browser Chrome pid must be a positive integer');
     }
+    // The launch record that later proves this process is Ferretry's: its start time. It is read HERE, before the
+    // first `await`, so it is the identity of the process the caller has just spawned (both callers report the pid
+    // in the same synchronous step as the spawn) and never of a replacement that took the pid during the file work.
+    const startedAt = chromePid === undefined ? undefined : this.orphans.identify(chromePid)?.startedAt;
     const current = await this.requireOwner(expected);
     if (chromeVersion !== undefined) await this.recordChromeVersion(chromeVersion);
-    const { chromePid: _previousChromePid, ...withoutChromePid } = current;
-    const updated = chromePid === undefined ? withoutChromePid : { ...withoutChromePid, chromePid };
+    const { chromePid: _previousChromePid, chromeStartedAt: _previousStart, ...withoutChromePid } = current;
+    const updated =
+      chromePid === undefined
+        ? withoutChromePid
+        : { ...withoutChromePid, chromePid, ...(startedAt === undefined ? {} : { chromeStartedAt: startedAt }) };
     await this.writeJson(this.leaseFile, updated);
   }
 
@@ -312,7 +431,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
     throw new BrowserProfileBusyError('lease', 'shared browser profile lease is no longer owned by this session');
   }
 
-  private async reclaimDeadLease(expected: BrowserProfileLeaseRecord): Promise<void> {
+  private async reclaimDeadLease(expected: BrowserProfileLeaseRecord, chromeCleared?: number): Promise<void> {
     const guard = path.join(this.browserDirectory, reclaimName);
     try {
       await this.createExclusive(guard, {
@@ -330,8 +449,11 @@ export class BrowserProfileStore implements BrowserProfilePort {
     try {
       const current = await this.readLease();
       if (!current || !sameBrowserProfileLease(current, expected)) return;
-      if (this.isProcessAlive(current.daemonPid) || (current.chromePid && this.isProcessAlive(current.chromePid)))
-        return;
+      const chromeLive =
+        current.chromePid !== undefined &&
+        current.chromePid !== chromeCleared &&
+        this.isProcessAlive(current.chromePid);
+      if (this.isProcessAlive(current.daemonPid) || chromeLive) return;
       await rm(this.leaseFile, { force: true });
     } finally {
       await rm(guard, { force: true });

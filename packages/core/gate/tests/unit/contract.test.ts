@@ -19,6 +19,7 @@ import {
   GrantsPatchSchema,
   MEMBER_UNLOCK_DAYS_DEFAULT,
   ReadCapabilityGrantsSchema,
+  StoredCapabilityGrantsSchema,
   SecuritySettingsSchema,
   securitySettingsOf,
   grantRefusalCode,
@@ -323,12 +324,25 @@ describe('gate.yaml security.memberUnlockDays', () => {
   });
 });
 
+const OFF_GRANT = { use: false, configure: false };
+
 describe('the grants wire', () => {
   test('a client reads a capability an older daemon omitted as off, and drops one it does not know', () => {
     const { sharing: _omitted, ...older } = DEFAULT_GATE_CONFIG.grants;
     const read = ReadCapabilityGrantsSchema.parse({ ...older, someday: { use: true, configure: true } });
     expect(read.sharing).toEqual({ use: false, configure: false });
     expect(read).not.toHaveProperty('someday');
+  });
+
+  test('a stored grant set refuses any own key it does not know, a __proto__ read from JSON included', () => {
+    const known = JSON.stringify(DEFAULT_GATE_CONFIG.grants);
+    expect(StoredCapabilityGrantsSchema.safeParse(JSON.parse(known)).success).toBe(true);
+    const poisoned = JSON.parse(`${known.slice(0, -1)},"__proto__":{"use":true,"configure":true}}`);
+    expect(Object.hasOwn(poisoned, '__proto__')).toBe(true);
+    expect(StoredCapabilityGrantsSchema.safeParse(poisoned).success).toBe(false);
+    expect(StoredCapabilityGrantsSchema.safeParse({ ...DEFAULT_GATE_CONFIG.grants, someday: OFF_GRANT }).success).toBe(
+      false,
+    );
   });
 
   test('a grant patch must change something, and names only known capabilities and axes', () => {

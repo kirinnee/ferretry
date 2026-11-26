@@ -322,6 +322,14 @@ describe('links', () => {
         ),
       ),
     ).toMatchObject({ status: 404 });
+    // The refusal names the harness the person asked about, a third one included.
+    expect(
+      await failure(
+        routes['GET /v1/links/conversations/:harness/:conversationId/preview'](
+          call({}, { harness: 'fake-third', conversationId: 'abcdef0123' }),
+        ),
+      ),
+    ).toMatchObject({ status: 404, message: expect.stringContaining('fake-third') });
     const listed = JSON.parse((await routes['GET /v1/links/conversations'](call({}))).body) as { matched: number };
     expect(listed.matched).toBe(1);
     const history = JSON.parse((await routes['GET /v1/links/history'](call({}))).body) as {

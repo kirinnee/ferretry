@@ -41,8 +41,8 @@ const answering = (answer: () => unknown) => ({
 describe('readRuntimeChoices', () => {
   it('names each runtime by the id and profile an install takes and the wrapper a ferret is known by', async () => {
     expect(await readRuntimeChoices(answering(() => catalog(runtime('box', 'Work'), runtime('desk'))))).toEqual([
-      { id: 'rt-box', wrapper: 'box', profile: 'Work' },
-      { id: 'rt-desk', wrapper: 'desk', profile: 'Default' },
+      { id: 'rt-box', wrapper: 'box', profile: 'Work', harness: 'claude-code' },
+      { id: 'rt-desk', wrapper: 'desk', profile: 'Default', harness: 'claude-code' },
     ]);
   });
 

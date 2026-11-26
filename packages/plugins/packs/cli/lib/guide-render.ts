@@ -2,6 +2,7 @@
  * Clean up as a person reads it in a terminal (docs/pack-mode.md § Clean up): the inventory the clean-up
  * ferret is shown, and its rewrite as a before/after word diff, then its notes. Pure: values in, text out.
  */
+import { harnessWords, supportedHarnessKeys } from '@ferretry/plugin-runtimes/contract';
 import {
   diffText,
   type PackCleanUpJob,
@@ -65,6 +66,13 @@ export function renderCleanUp(
   ].join('\n');
 }
 
+/**
+ * The tag after a model's id that says which CLI runs it. The harness Runtimes lists first (Claude Code) is the unmarked
+ * default; every other harness is tagged by its own command word, and a harness Runtimes has no words for by its own key.
+ */
+const harnessTag = (harness: string): string =>
+  supportedHarnessKeys()[0] === harness ? '' : ` (${harnessWords(harness)?.commandWord ?? harness})`;
+
 /** The inventory: every runtime with its readiness, quota and models, then every model with where it runs. */
 export function renderInventory(inventory: PackInventory): string {
   return [
@@ -76,7 +84,7 @@ export function renderInventory(inventory: PackInventory): string {
     '',
     `Models (${String(inventory.models.length)}):`,
     ...inventory.models.flatMap(model => [
-      `  ${model.provider}/${model.id}${model.harness === 'codex' ? ' (codex)' : ''} — ${model.label}, ${model.tier}${model.context === undefined ? '' : `, ${String(model.context)} context`}`,
+      `  ${model.provider}/${model.id}${harnessTag(model.harness)} — ${model.label}, ${model.tier}${model.context === undefined ? '' : `, ${String(model.context)} context`}`,
       `      runs on: ${model.runtimes.length === 0 ? 'no runtime here' : model.runtimes.map(r => `${r.name}${r.ready ? '' : ' (cannot start now)'}`).join(', ')}`,
     ]),
   ].join('\n');

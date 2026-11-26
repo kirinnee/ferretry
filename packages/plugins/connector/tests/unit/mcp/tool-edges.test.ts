@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { AgendaItem } from '@ferretry/core-asks/contract';
 import should from 'should';
+import { z } from 'zod';
 import type { FleetGateway } from '../../../daemon/lib/mcp/gateway.ts';
 import { ConnectorTextGuard } from '../../../daemon/lib/mcp/redaction.ts';
 import { ConnectorToolbox } from '../../../daemon/lib/mcp/toolbox.ts';
@@ -314,6 +315,38 @@ describe('ConnectorToolbox — a tool that fails in ways its author did not plan
       gateway,
     );
     should(result).eql({ text: 'Stopped.', isError: false });
+  });
+});
+
+describe('ConnectorToolbox — the calls log never keeps a host-token-shaped value', () => {
+  it('masks a bare 43-character base64url value a caller typed, and leaves ordinary text alone', async () => {
+    const hostShaped = 'Qk3-x_Z0aB9cD8eF7gH6iJ5kL4mN3oP2qR1sT0uVwXy'; // synthetic: 43 characters of base64url
+    should(hostShaped).have.length(43);
+    const calls = new CallsSpy();
+    const toolbox = new ConnectorToolbox({
+      daemonGrants: () => ALL_GRANTS,
+      guard: new ConnectorTextGuard(async value => value), // the Vault knows nothing of host tokens
+      callsLog: calls,
+      audit: new AuditSpy(),
+      now: () => NOW,
+    });
+    const write: ConnectorToolSpec = {
+      name: 'send_to_ferret',
+      title: 't',
+      description: 'd',
+      scope: 'fleet:write',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      input: { message: z.string(), ferret: z.string() },
+      run: async () => ({ text: 'Sent.' }),
+    };
+    await toolbox.execute(
+      write,
+      { message: `use ${hostShaped} now`, ferret: hostShaped },
+      WRITE_ACCESS,
+      {} as FleetGateway,
+    );
+    should(JSON.stringify(calls.records[0]?.args)).not.containEql(hostShaped);
+    should(calls.records[0]?.args).eql({ message: 'use [redacted] now', ferret: '[redacted]' });
   });
 });
 

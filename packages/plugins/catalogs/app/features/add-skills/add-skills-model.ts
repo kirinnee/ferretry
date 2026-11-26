@@ -7,10 +7,16 @@
  * the sentence that says where an install landed and whether the running ferret already sees it.
  */
 
-import { type CatalogInstall, type SharedCatalogManifestEntry } from '../../../contract/wire/index.ts';
+import {
+  type CatalogInstall,
+  type InstallHarness,
+  installHarnessFacts,
+  type SharedCatalogManifestEntry,
+  unsupportedInstallHarnessSentence,
+} from '../../../contract/wire/index.ts';
 import { revealHidden } from '../../../contract/wire/shared-catalog-review.ts';
 import { relativeWords } from '../../shell.ts';
-import type { TargetDraft } from '../catalogs/catalog-install-model.ts';
+import { harnessChoices, type TargetDraft } from '../catalogs/catalog-install-model.ts';
 import type { SharedCatalogView } from '../shared/shared-controller.ts';
 import type { CardState } from '../shared/shared-screens-model.ts';
 
@@ -30,11 +36,20 @@ export const NO_SKILLS_FOUND = 'No subscribed skill matches that.';
 export const READING_SUBSCRIPTIONS = 'Reading your subscriptions…';
 export const PICK_A_PLACE = 'You will pick where to install it.';
 
+/** The harness of a ferret whose address NAMED one Catalogs has no layout for: an install for it is refused, never guessed. */
+export const UNKNOWN_HARNESS = 'unknown';
+
 /** What the page knows of the ferret it was opened from. */
 export interface SessionPlace {
   /** The ferret's working folder. */
   readonly cwd: string | undefined;
-  readonly harness: 'claude' | 'codex';
+  /**
+   * The harness an install target names; `undefined` when the address named none (the page then picks the only harness the
+   * machine runs, or asks); {@link UNKNOWN_HARNESS} when it named one a catalog cannot install into.
+   */
+  readonly harness: InstallHarness | typeof UNKNOWN_HARNESS | undefined;
+  /** The harness key the address named when {@link UNKNOWN_HARNESS}, for the sentence that refuses it. */
+  readonly unsupportedKey?: string;
   /** The runtime's wrapper name, as the skills inventory names it. */
   readonly runtime: string | undefined;
 }
@@ -50,6 +65,8 @@ export interface RuntimeChoice {
   readonly id: string;
   readonly wrapper: string;
   readonly profile: string;
+  /** The harness the runtime runs, by plugin key (`claude-code`): what the agent picker is offered from. */
+  readonly harness: string;
 }
 
 /** Where an install goes unless the person picks another place. */
@@ -60,6 +77,10 @@ export interface InstallPlan {
   readonly sentence: string;
   readonly projectRoot?: string;
   readonly runtimeId?: string;
+  /** The harness a project install is for: the one the address named, else the only one the machine runs. */
+  readonly harness?: InstallHarness;
+  /** Set when the ferret's harness is one a catalog cannot install into: nothing is offered, and the sentence says why. */
+  readonly refused?: true;
 }
 
 const PROJECT_SENTENCE = 'this project (every ferret in this folder)';
@@ -83,20 +104,47 @@ export function projectHolding(cwd: string, projects: readonly PlaceProject[]): 
   return best;
 }
 
-/** This project when the ferret sits in one, else this account; neither when neither can be told. */
+/**
+ * The agent a project install is for: the one the address named, else the ONLY harness the machine runs (a Claude-only
+ * machine needs no question), else none, and the person picks from what is installed. `undefined` also for an address that
+ * named a harness a catalog cannot install into: that is refused before this is asked.
+ */
+function projectHarness(place: SessionPlace, runtimes: readonly RuntimeChoice[]): InstallHarness | undefined {
+  if (place.harness === UNKNOWN_HARNESS) return undefined;
+  if (place.harness !== undefined) return place.harness;
+  const running = harnessChoices(runtimes);
+  const [only] = running;
+  return runtimes.length > 0 && running.length === 1 ? only : undefined;
+}
+
+/** This project when the ferret sits in one, else this account; neither when neither can be told; refused for a harness a catalog cannot install into. */
 export function installPlan(
   place: SessionPlace,
   projects: readonly PlaceProject[],
   runtimes: readonly RuntimeChoice[],
 ): InstallPlan {
-  const project = place.cwd === undefined || place.cwd === '' ? undefined : projectHolding(place.cwd, projects);
-  if (project !== undefined)
+  if (place.harness === UNKNOWN_HARNESS)
     return {
-      draft: { scope: 'project', projectRoot: project.path, harness: place.harness },
+      draft: {},
+      scope: 'none',
+      sentence: `${unsupportedInstallHarnessSentence(place.unsupportedKey ?? UNKNOWN_HARNESS)}.`,
+      refused: true,
+    };
+  const project = place.cwd === undefined || place.cwd === '' ? undefined : projectHolding(place.cwd, projects);
+  if (project !== undefined) {
+    const harness = projectHarness(place, runtimes);
+    return {
+      draft: {
+        scope: 'project',
+        projectRoot: project.path,
+        ...(harness === undefined ? {} : { harness }),
+      },
       scope: 'project',
       sentence: PROJECT_SENTENCE,
       projectRoot: project.path,
+      ...(harness === undefined ? {} : { harness }),
     };
+  }
   const runtime =
     place.runtime === undefined ? undefined : runtimes.find(candidate => candidate.wrapper === place.runtime);
   if (runtime !== undefined)
@@ -111,7 +159,11 @@ export function installPlan(
 
 /** The line above the list: where Install will put a skill unless the person picks another place. */
 export const scopeLine = (plan: InstallPlan): string =>
-  plan.scope === 'none' ? PICK_A_PLACE : `Installs into ${plan.sentence}. You can pick another place when you install.`;
+  plan.refused === true
+    ? plan.sentence
+    : plan.scope === 'none'
+      ? PICK_A_PLACE
+      : `Installs into ${plan.sentence}. You can pick another place when you install.`;
 
 /** One subscribed skill, ready to list. */
 export interface SkillRow {
@@ -244,7 +296,7 @@ const sameFolder = (a: string, b: string): boolean => normalizeProjectPath(a) ==
 export function readsPlace(
   install: Pick<CatalogInstall, 'target'>,
   plan: InstallPlan,
-  harness: 'claude' | 'codex',
+  harness: InstallHarness | undefined,
 ): boolean {
   const { target } = install;
   if (target.scope === 'project')
@@ -278,12 +330,18 @@ export function landedSentence(
   install: CatalogInstall,
   plan: InstallPlan,
   scopes: readonly string[],
-  harness: 'claude' | 'codex',
+  harness: InstallHarness | undefined,
 ): string {
   const name = revealHidden(install.provenance.name);
   if (!readsPlace(install, plan, harness)) return `Installed ${name} on ${placeName(install)}. ${NOT_HERE}`;
   const where = install.target.scope === 'project' ? PROJECT_SENTENCE : plan.sentence;
-  const activation = harness === 'codex' ? CODEX_NEXT : likelyNewFolder(install, scopes) ? CLAUDE_RELOAD : CLAUDE_LIVE;
+  // A harness this page has no layout for says nothing about when the skill becomes active.
+  if (harness === undefined) return `Installed ${name} in ${where}.`;
+  const activation = !installHarnessFacts(harness).skillsActiveInRunningFerret
+    ? CODEX_NEXT
+    : likelyNewFolder(install, scopes)
+      ? CLAUDE_RELOAD
+      : CLAUDE_LIVE;
   return `Installed ${name} in ${where}. ${activation}`;
 }
 

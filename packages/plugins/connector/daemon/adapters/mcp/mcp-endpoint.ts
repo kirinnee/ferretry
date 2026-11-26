@@ -121,6 +121,9 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
     const call = toolCall(parsed);
     if (call !== undefined) {
       const spec = this.#specs.get(call.name);
+      // An unknown name spends the read budget like any call: guessing tool names is not free.
+      const refused = this.#rateLimit(access, budgetOf(spec));
+      if (refused !== undefined) return refused;
       // The SDK would echo a caller-chosen name back in its error, outside the redactor: say a fixed sentence instead.
       if (spec === undefined)
         return {
@@ -132,8 +135,6 @@ export class ConnectorMcpEndpoint implements ConnectorHttpHandler {
             result: { content: [{ type: 'text', text: 'There is no such tool.' }], isError: true },
           }),
         };
-      const refused = this.#rateLimit(access, budgetOf(spec));
-      if (refused !== undefined) return refused;
       // A write tool this token was not approved for is not registered, so the SDK would call it unknown. Say it
       // as the tool error the contract asks for, through the same toolbox that records the refusal. This reply
       // never reaches the SDK, so the transport's own envelope check is made here first: an unsupported

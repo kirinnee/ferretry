@@ -1105,7 +1105,7 @@ from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.t
   to start and the browser was told the machine no longer accepted it). So the stored record's `grants` is read
   through `StoredCapabilityGrantsSchema` (`packages/core/gate/contract/grants.ts`), which fills each capability the
   file lacks with `{ use: false, configure: false }` — a narrowing, never a widening, whichever capability it is.
-  A key the build does not know, or a malformed grant, is still refused (the file fails closed). The file is not
+  A key the build does not know (a `__proto__` own key from `JSON.parse` included, which zod alone would silently strip), or a malformed grant, is still refused (the file fails closed). The file is not
   rewritten at boot; the next ordinary write carries the full set. The `stored-device-grants` unit test parses a
   record written with every earlier capability set (`RELEASED_CAPABILITY_SETS`), and a real-daemon test boots on one,
   so a capability added without thought for old records fails there.

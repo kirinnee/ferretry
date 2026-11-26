@@ -1,12 +1,11 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { isKnownHarnessKey } from '@ferretry/core-ferrets/contract';
-import { isSupportedHarnessKey } from '@ferretry/plugin-runtimes/contract';
 import type { CatalogSkillProvider } from '@ferretry/plugin-catalogs/contract';
 import {
   type FerretSkills,
   type FerretSkillsInventory,
   SKILLS_CONFIG,
+  isSkillsHarnessKey,
   type SkillsApi,
   type SkillsItem,
 } from '../contract/index.ts';
@@ -97,9 +96,7 @@ export default implementDaemon(manifest, {
       homes: async () =>
         (await publishedHomes()).flatMap(home =>
           // A home of a harness this plugin has no skills layout for lists none here: never read as another harness.
-          isSupportedHarnessKey(home.harness)
-            ? [{ runtimes: home.runtimes, harness: home.harness, home: home.home }]
-            : [],
+          isSkillsHarnessKey(home.harness) ? [{ runtimes: home.runtimes, harness: home.harness, home: home.home }] : [],
         ),
       projects: async () =>
         ((await projects.current()?.list()) ?? []).map(project => ({
@@ -113,7 +110,7 @@ export default implementDaemon(manifest, {
     const ferretView = async (id: string): Promise<FerretSkillsInventory | undefined> => {
       const ferret = await ferrets.get(id as FerretId);
       // A ferret on a harness this plugin has no skills layout for has no inventory here: never read as another harness.
-      if (ferret === undefined || !isKnownHarnessKey(ferret.harness)) return undefined;
+      if (ferret === undefined || !isSkillsHarnessKey(ferret.harness)) return undefined;
       const work = {
         files: new RootSkillFiles(kernel.roots.root('work', { ferret: ferret.id }), ferret.folder),
         base: ferret.folder,
@@ -225,7 +222,7 @@ export default implementDaemon(manifest, {
             id: 'skills',
             item: {
               parts: async spec =>
-                spec.runtime === undefined || !isKnownHarnessKey(spec.harness)
+                spec.runtime === undefined || !isSkillsHarnessKey(spec.harness)
                   ? []
                   : await skillParts(
                       items(),

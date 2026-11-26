@@ -80,7 +80,9 @@ export function skillsCatalogRuntime(deps: SkillsCatalogRuntimeDeps): CatalogRun
         id: runtime.id,
         name: runtime.id,
         profile: runtime.profile,
-        harness: runtime.harness === 'codex' ? ('codex' as const) : ('claude' as const),
+        // The harness PLUGIN KEY, as Runtimes lists it: Catalogs decides at the install whether it has a layout for that exact
+        // key, so a third plugin registered under the word `claude` is never read as Claude Code.
+        harness: runtime.harness,
       })),
     }),
     profiles: async () => ({
