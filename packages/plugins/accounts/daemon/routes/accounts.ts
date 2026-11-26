@@ -95,7 +95,12 @@ export interface AccountRoutesDeps {
   /** Management only: it seals and never opens. */
   readonly accounts: AccountDirectory;
   readonly recipes?: RecipeMasking & {
-    decideSignIn?(id: SignInId, proposal: string, decision: 'approve' | 'decline'): Promise<SignInSummary>;
+    decideSignIn?(
+      id: SignInId,
+      proposal: string,
+      decision: 'approve' | 'decline',
+      pin?: string,
+    ): Promise<SignInSummary>;
   };
   /** The vault's one look-alike answer (handles only): the only part of it a route holds. */
   readonly lookAlike?: Pick<AccountVault, 'lookAlike'>;
@@ -412,11 +417,11 @@ export function accountRoutes(deps: AccountRoutesDeps) {
           decodeParameter(call.params.get('proposalId') ?? '') ?? '',
         );
         if (!proposal.success) throw new ApiError(400, 'the proposal in the path is not usable', 'invalid_proposal');
-        const { decision } = await parseBody(call.request, LoginRecipeDecisionSchema);
+        const { decision, pin } = await parseBody(call.request, LoginRecipeDecisionSchema);
         const recipes = deps.recipes;
         if (recipes?.decideSignIn === undefined)
           throw new ApiError(503, 'this daemon cannot answer recipes yet', 'unavailable');
-        return await recipes.decideSignIn(signIn, proposal.data, decision);
+        return await recipes.decideSignIn(signIn, proposal.data, decision, pin);
       },
     ),
     'DELETE /v1/accounts/sign-ins/:signIn': owned('remove a sign-in', async call => {

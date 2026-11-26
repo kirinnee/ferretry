@@ -15,6 +15,8 @@ const GITHUB_SIGN_IN = 'si_0000000000000001';
 const WORK_SIGN_IN = 'si_0000000000000002';
 const NOW = '2026-11-01T09:00:00.000Z';
 const CURRENT = '# Sign in\nClick Sign in.';
+/** The only words about the change that the ask itself carries; the change is read behind the owner-only accounts read. */
+const FIXED_CONTEXT = 'A ferret proposed a sign-in recipe change — review it here';
 
 const baseListing = list();
 const fixture = baseListing.signIns.find(each => each.id === GITHUB_SIGN_IN);
@@ -47,6 +49,7 @@ function world(
     filed: [] as LoginRecipeProposal[],
     cards: [] as Parameters<RecipeAgendaPort['raise']>[1][],
     closed: [] as string[],
+    closedOn: [] as string[],
     linked: [] as string[],
     audit: [] as unknown[],
     refused: [] as string[],
@@ -59,12 +62,13 @@ function world(
         return { applied: options.applied === true, dropped: options.dropped ?? [] };
       },
       proposalCardSignIn: async (_id, _proposal, card) => {
-        calls.linked.push(card);
+        calls.linked.push(card.id);
         if (options.cardFails === true) throw new Error('the store is busy');
       },
-      decideSignIn: async (id, proposalId, decision) => {
+      decideSignIn: async (id, proposalId, decision, guard) => {
         const proposal = signIns.find(each => each.id === id)?.proposals?.find(each => each.id === proposalId);
         if (proposal === undefined) throw new Error('no such proposal');
+        guard?.(signIns.find(each => each.id === id) as SignInSummary, proposal);
         calls.closed.push(`decided ${decision}`);
         return { signIn: signIns.find(each => each.id === id) as SignInSummary, proposal };
       },
@@ -82,9 +86,12 @@ function world(
     agenda: {
       raise: async (_session, card) => {
         calls.cards.push(card);
-        return options.cardRefused === true ? { ok: false, message: 'Asks is paused' } : { ok: true, id: 'ask-1' };
+        return options.cardRefused === true
+          ? { ok: false, message: 'Asks is paused' }
+          : { ok: true, id: 'ask-1', ferret: 'F1' };
       },
-      close: async (_session, id, note) => {
+      close: async (session, id, note) => {
+        calls.closedOn.push(`${session}/${id}`);
         calls.closed.push(`${id}: ${note}`);
         if (options.closeFails === true) throw new Error('Asks is paused');
       },
@@ -193,9 +200,8 @@ describe('a ferret proposing steps', () => {
       signIn: GITHUB_SIGN_IN,
       subject: 'Recipe change on github.com',
     });
-    should(w.calls.cards[0]?.context).equal(
-      '- # Sign in\n- Click Sign in.\n+ Click Continue.\n\nThe ferret says: the button moved',
-    );
+    // Asks' text is every ferret's to read: a FIXED sentence, never the recipe lines or the ferret's reason.
+    should(w.calls.cards[0]?.context).equal(FIXED_CONTEXT);
     should(w.calls.cards[0]?.howToResolve).containEql(
       `fy account site recipe approve ${GITHUB_SIGN_IN} rp_0000000000000009`,
     );
@@ -204,27 +210,17 @@ describe('a ferret proposing steps', () => {
     should(w.calls.audit).eql([]);
   });
 
-  it('should file a first recipe with no base, and say there are no line changes when the text is the same', async () => {
+  it('should file a first recipe with no base, and put no recipe line or reason in the ask however long or short', async () => {
     const first = world({ signIns: [withRecipe({ recipe: undefined })] });
-    const same = world();
+    const long = world();
+    const bigRecipe = Array.from({ length: 60 }, (_, index) => `Step ${String(index)}: ${'x'.repeat(60)}`).join('\n');
 
     await first.service.propose('session-1', { signIn: GITHUB_SIGN_IN }, 'First steps.', 'none yet');
-    await same.service.propose('session-1', { signIn: GITHUB_SIGN_IN }, CURRENT, 'it still works');
+    await long.service.propose('session-1', { signIn: GITHUB_SIGN_IN }, bigRecipe, 'rewrote it');
 
     should(first.calls.filed[0]).not.have.property('base');
-    should(first.calls.cards[0]?.context).equal('+ First steps.\n\nThe ferret says: none yet');
-    should(same.calls.cards[0]?.context).equal('No line changes.\n\nThe ferret says: it still works');
-  });
-
-  it('should cut a long diff to fit the card, saying how many changed lines are left out', async () => {
-    const w = world();
-    const long = Array.from({ length: 60 }, (_, index) => `Step ${String(index)}: ${'x'.repeat(60)}`).join('\n');
-
-    await w.service.propose('session-1', { signIn: GITHUB_SIGN_IN }, long, 'rewrote it');
-
-    const context = w.calls.cards[0]?.context ?? '';
-    should(context.length).be.belowOrEqual(2_048);
-    should(context).match(/… \d+ more changed line\(s\): see the whole diff in Settings/u);
+    should(first.calls.cards[0]?.context).equal(FIXED_CONTEXT);
+    should(long.calls.cards[0]?.context).equal(FIXED_CONTEXT);
   });
 
   it('should name a terminal sign-in by its program and host, and a bare site by its match host', async () => {
@@ -287,7 +283,7 @@ describe('a ferret proposing steps', () => {
   it('should close the ask of each proposal that was pushed out by a newer one, and ignore one that had none', async () => {
     const w = world({
       dropped: [
-        proposal({ id: 'rp_0000000000000002', agendaItemId: 'ask-old' }),
+        proposal({ id: 'rp_0000000000000002', agendaItemId: 'ask-old', agendaSession: 'F1' }),
         proposal({ id: 'rp_0000000000000003' }),
       ],
       closeFails: true,
@@ -313,42 +309,6 @@ describe('a ferret proposing steps', () => {
     should(inReason.message).containEql('never holds a value');
     should(recipe.calls.filed).eql([]);
     should(reason.calls.filed).eql([]);
-  });
-
-  it('should show a fixed sentence on the ask when the current recipe cannot be masked for it', async () => {
-    const w = world();
-    let calls = 0;
-    const flaky = new LoginRecipeService({
-      accounts: {
-        list: async () => ({ accounts: baseListing.accounts, signIns: [withRecipe({})] }),
-        proposeSignIn: async () => ({ applied: false, dropped: [] }),
-        proposalCardSignIn: async () => undefined,
-        decideSignIn: async () => Promise.reject(new Error('unused')),
-      },
-      refuse: (_refusal, words) => new Error(words),
-      // The two value checks pass; masking the card's own text is what fails.
-      values: {
-        redact: async text => {
-          calls += 1;
-          if (calls > 2) throw new Error('the vault is locked');
-          return text;
-        },
-      },
-      agenda: {
-        raise: async (_session, card) => {
-          w.calls.cards.push(card);
-          return { ok: true, id: 'ask-1' };
-        },
-        close: async () => undefined,
-      },
-      audit: { record: async () => undefined },
-      clock: { now: () => NOW },
-    });
-
-    const answer = await flaky.propose('session-1', { signIn: GITHUB_SIGN_IN }, 'Steps.', 'why');
-
-    should(w.calls.cards[0]?.context).equal('The change could not be shown here; see it in Settings.');
-    should(answer.id).match(/^rp_[0-9a-f]{16}$/u);
   });
 });
 
@@ -386,7 +346,7 @@ describe('a listing as it may be served', () => {
     should(served.signIns[1]?.proposals?.[0]).not.have.property('base');
   });
 
-  it('should drop every recipe and proposal, failing closed, when the redactor cannot run', async () => {
+  it('should drop every recipe and every proposal text, failing closed, but keep each proposal on file unpinned so the card says it cannot show it', async () => {
     const w = world({ redactFails: true });
 
     const served = await w.service.scrubbedAccounts({
@@ -397,13 +357,19 @@ describe('a listing as it may be served', () => {
     const [one] = served.signIns;
     should(one).not.have.property('recipe');
     should(one).not.have.property('recipeVersion');
-    should(one).not.have.property('proposals');
+    // Not "already answered or replaced": the proposal is still waiting, only its words cannot be masked, so it has no pin to approve.
+    should(one?.proposals?.map(each => each.id)).eql(['rp_0000000000000001']);
+    should(one?.proposals?.[0]).not.have.property('pin');
+    // Named, not inferred: every surface (Settings too) hides Approve for it.
+    should(one?.proposals?.[0]).have.property('unreadable', true);
+    should(one?.proposals?.[0]).not.have.property('base');
+    should(JSON.stringify(one?.proposals)).not.containEql('new steps');
     should(one?.id).equal(GITHUB_SIGN_IN);
   });
 });
 
 describe('the owner answering a proposal', () => {
-  const waiting = proposal({ agendaItemId: 'ask-1' });
+  const waiting = proposal({ agendaItemId: 'ask-1', agendaSession: 'F1' });
   const withWaiting = () => world({ signIns: [withRecipe({ proposals: [waiting] })] });
 
   it('should close the proposal’s ask as approved, and serve the sign-in masked', async () => {
@@ -417,7 +383,11 @@ describe('the owner answering a proposal', () => {
 
   it('should close the ask as declined, and check no value on a decline', async () => {
     const w = world({
-      signIns: [withRecipe({ proposals: [proposal({ agendaItemId: 'ask-1', recipe: `type ${SECRET}` })] })],
+      signIns: [
+        withRecipe({
+          proposals: [proposal({ agendaItemId: 'ask-1', agendaSession: 'F1', recipe: `type ${SECRET}` })],
+        }),
+      ],
     });
 
     await w.service.decideSignIn(GITHUB_SIGN_IN, waiting.id, 'decline');
@@ -445,6 +415,29 @@ describe('the owner answering a proposal', () => {
 
     should(quiet.calls.closed).eql(['decided approve']);
     should(failing.calls.closed).eql(['decided approve', 'ask-1: Approved: the recipe was updated.']);
+  });
+
+  it('should close only the ask whose board it stored: a proposal with no stored board closes nothing, never the proposer’s board', async () => {
+    // A proposal whose ask id has no board beside it must not be closed by guessing the proposer's board: that id may be another ask.
+    const w = world({
+      signIns: [withRecipe({ proposals: [proposal({ agendaItemId: 'A1', sessionId: 'proposer' })] })],
+    });
+    const stored = withWaiting();
+
+    await w.service.decideSignIn(GITHUB_SIGN_IN, waiting.id, 'approve');
+    await stored.service.decideSignIn(GITHUB_SIGN_IN, waiting.id, 'decline');
+
+    should(w.calls.closedOn).eql([]);
+    should(stored.calls.closedOn).eql(['F1/ask-1']);
+  });
+
+  it('should refuse to approve a proposal whose words cannot be masked, and answer nothing', async () => {
+    const w = world({ redactFails: true, signIns: [withRecipe({ proposals: [waiting] })] });
+
+    const refused = await w.service.decideSignIn(GITHUB_SIGN_IN, waiting.id, 'approve').then(unexpected, asError);
+
+    should(refused.message).containEql('could not check');
+    should(w.calls.closed).eql([]);
   });
 
   it('should go on to the answer when the proposal it is checking is not on the list any more', async () => {
