@@ -55,6 +55,15 @@ const spawn = () =>
   );
 
 describe('a sealed child', () => {
+  test('empty mode clears even the sealed allowlist and all tool overlays', async () => {
+    const result = await spawn().run(process.execPath, ['-e', 'console.log(JSON.stringify(process.env))'], {
+      inheritEnv: false,
+      env: {},
+    });
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({});
+  });
+
   test('the sealed allowlist is the v4 one', () => {
     expect([...SEALED_ENVIRONMENT_NAMES]).toEqual([
       'PATH',

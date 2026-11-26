@@ -166,7 +166,7 @@ export default definePlugin({
     setMode: true,
     // `gh` runs as an account, with its token in that child's environment alone (`GitAccountsApi.run`).
     // `ps` lists the processes once at boot, so an agent an earlier unclean run left behind can be ended (`sweep.ts`).
-    spawn: ['gh', 'ssh-agent', 'ssh-add', 'ps', 'gpg', 'curl'],
+    spawn: ['gh', 'jq', 'gojq', 'ssh-agent', 'ssh-add', 'ps', 'gpg', 'curl'],
     // Which `gh` gets a token (B10 SEC): the daemon's PATH minus any folder in the state home, resolved by the kernel, and an answer
     // inside the state home is refused. Nothing is executed to find out, and no PATH value is ever returned to a caller.
     hostFacts: true,
