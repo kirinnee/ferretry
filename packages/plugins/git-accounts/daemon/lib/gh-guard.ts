@@ -8,9 +8,9 @@
  *
  * So the argv is checked against a strict ALLOW-list of SUBCOMMAND + FLAGS, never a deny-list: a command, subcommand or
  * flag nobody listed (`auth`, `extension`, `repo clone`, `pr checkout`, anything a later `gh` adds) is refused because it
- * is not named, not because someone remembered it. `--jq`, `-q`, `-t` and `--template` are refused on every command:
- * gh's jq (gojq) and Go templates can read the child's environment (`env.GH_TOKEN`, `$ENV`), past any scrub of the
- * output. A repository is named `OWNER/REPO` or `github.com/OWNER/REPO` and nothing else (no SSH form, no other
+ * is not named, not because someone remembered it. Formatting flags must never reach the token child: service.run
+ * extracts jq for a separately bound child with an empty environment; templates have no safe stdin formatter here.
+ * A repository is named `OWNER/REPO` or `github.com/OWNER/REPO` and nothing else (no SSH form, no other
  * host), and `github.localhost` / `*.ghe.com` appear nowhere, since gh would send the token there. On top of that, `--`, any short-flag cluster (`-dF`), any flag that
  * takes a file or directory (`--body-file`, `-F`, `--notes-file`, `--template`, `-T`, `--input`) and any argument that
  * looks like a local path are refused wherever they appear.
@@ -49,7 +49,7 @@ const REFUSED_FLAGS: ReadonlySet<string> = new Set([
   '--template',
   '-T',
   // gh's jq (gojq) and Go templates can read the child's ENVIRONMENT (`env.GH_TOKEN`, `$ENV`, `env`), past any
-  // scrub of the output, so they are refused on every command; callers post-process the scrubbed `--json` themselves.
+  // scrub of the output. Only service.run's tokenless formatter may receive them, never this child.
   '--jq',
   '-q',
   '-t',
@@ -219,7 +219,7 @@ const REDACTED = '[redacted]';
 
 /** Output with the exact token and anything shaped like a GitHub token replaced. */
 export function scrubToken(text: string, token: string): string {
-  return text.split(token).join(REDACTED).replace(TOKEN_SHAPE, REDACTED);
+  return (token === '' ? text : text.split(token).join(REDACTED)).replace(TOKEN_SHAPE, REDACTED);
 }
 
 /**

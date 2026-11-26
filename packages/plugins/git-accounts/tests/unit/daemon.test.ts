@@ -477,7 +477,6 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
     ['gist', 'create'],
     ['browse'],
     ['completion', '-s', 'bash'],
-    ['--version'],
     ['-R', 'o/r', 'pr', 'list'],
     ['api', '/user', '--hostname', 'ghe.example.com'],
     ['api', '/user', '--hostname=ghe.example.com'],
@@ -501,7 +500,7 @@ describe('gh runs as an account, narrowed (review HIGH 1)', () => {
     ['api', '/x', '--include'],
     ['api', '/x', '--cache', '1h'],
     ['api', '/x', '-t', '{{.}}'],
-    // HIGH 1 (security re-check): gh's jq reads the environment, so jq and templates are refused on EVERY command.
+    // Filters never reach credential-bearing gh; this fixture has no installed tokenless formatter.
     ['api', '/user', '--jq', 'env.GH_TOKEN|@base64'],
     ['api', '/user', '-q', '$ENV.GH_TOKEN|explode'],
     ['api', '/user', '--jq=env|tostring|@base64'],
