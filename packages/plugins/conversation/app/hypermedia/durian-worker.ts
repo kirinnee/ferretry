@@ -1,5 +1,7 @@
 import { answer } from './durian-answer.ts';
-import { isReadRequest } from './durian-wire.ts';
+import { serve } from './durian-serve.ts';
+import { loadNeeded, takeNeeds } from './durian-shims/lazy-part.ts';
+import { isReadRequest, type WorkerMessage } from './durian-wire.ts';
 
 /**
  * THE DURIAN WORKER (r12 H11): the only place the product runs Durian's parser. A parse can take far longer than a frame on
@@ -11,7 +13,9 @@ import { isReadRequest } from './durian-wire.ts';
  * page's own policy: `worker-src 'self'` and the `fy-worker` Trusted Types policy, which accepts exactly this chunk's name.
  *
  * It says `ready` once its code is loaded, so the page does not count module loading against a message's budget, and then
- * answers each `read` ask with one message back. Anything that is not a well-formed ask is ignored.
+ * answers each `read` ask with one message back (`durian-serve.ts`: a message that needs a part's parser or KaTeX, which arrive
+ * when first needed, says `loading` and `working` on the way). The asks are answered one at a time, in the order they came: a fetch
+ * in progress holds the next ask as a parse in progress does. Anything that is not a well-formed ask is ignored.
  */
 interface WorkerScope {
   onmessage: ((event: { readonly data: unknown }) => void) | null;
@@ -19,8 +23,12 @@ interface WorkerScope {
 }
 
 const scope = self as unknown as WorkerScope;
+const say = (message: WorkerMessage): void => scope.postMessage(message);
 
+let queue: Promise<void> = Promise.resolve();
 scope.onmessage = event => {
-  if (isReadRequest(event.data)) scope.postMessage(answer(event.data));
+  const request = event.data;
+  if (!isReadRequest(request)) return;
+  queue = queue.then(() => serve(request, { answer, takeNeeds, loadNeeded, say }));
 };
-scope.postMessage({ kind: 'ready' });
+say({ kind: 'ready' });

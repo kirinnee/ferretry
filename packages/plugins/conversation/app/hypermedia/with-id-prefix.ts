@@ -1,4 +1,4 @@
-import type { Document } from 'durian-hypermedia';
+import type { Document } from 'durian-markdown';
 
 /**
  * A DOCUMENT FOR THIS MESSAGE'S OWN IDS. A message is read once per text and the document kept (`durian-reader.ts`), so the

@@ -1,5 +1,6 @@
 import type { ProseProps } from '@ferretry/app';
-import { DocumentView, type InlineDef } from 'durian-hypermedia/react/strict';
+import { DocumentView } from 'durian-markdown/react/document';
+import type { InlineDef } from 'durian-markdown/react/strict';
 import { memo, useId, useMemo, useSyncExternalStore } from 'react';
 import { DrawableFyRenderBodies } from './fy-render-host.tsx';
 import { LITERAL_CODE_INLINES } from './literal-code.tsx';

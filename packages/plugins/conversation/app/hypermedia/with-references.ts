@@ -1,5 +1,5 @@
 import { findReferences, type Reference } from '@ferretry/app/references/grammar';
-import type { Block, Document } from 'durian-hypermedia';
+import type { Block, Document } from 'durian-markdown';
 
 /**
  * OUR REFERENCE GRAMMAR, LAID OVER DURIAN'S PARSED TREE.

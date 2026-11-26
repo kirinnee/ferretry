@@ -40,6 +40,19 @@
   white-space: pre-wrap;
 }
 
+/* A stepped mermaid diagram (`mermaid-slot.tsx`): the steps already shown sit on one grid cell and the active one is seen, so the stage
+   keeps the tallest step's height and the controls do not jump. An inactive step is invisible, never dimmed (`opacity` is a contrast failure). */
+.fy-hm .dh-doc .fy-hm-mermaid-stage {
+  display: grid;
+}
+.fy-hm .dh-doc .fy-hm-mermaid-step {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+.fy-hm .dh-doc .fy-hm-mermaid-step:not([data-active]) {
+  visibility: hidden;
+}
+
 /* The "LLM-only text" disclosure (`llm-text.tsx`): a quiet, collapsed line under its part; wrapped, never sideways. Quiet
    by size and ink, never by `opacity`. */
 .fy-hm .dh-doc details.llm-peek {

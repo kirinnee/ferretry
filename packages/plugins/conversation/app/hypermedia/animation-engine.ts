@@ -1,4 +1,4 @@
-import type { AnimationBlock } from 'durian-hypermedia';
+import type { AnimationBlock } from 'durian-markdown';
 import type { ComponentType } from 'react';
 
 /**

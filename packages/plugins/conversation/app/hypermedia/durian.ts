@@ -1,9 +1,9 @@
-import { setYamlParser } from 'durian-hypermedia';
+import { setYamlParser } from 'durian-markdown';
 
 /**
  * DURIAN'S ONE HOST SETTING: no YAML is read in a message (r12 H8 fix, lead decision on size).
  *
- * Durian reads YAML through a parser the host gives it (`durian-hypermedia/src/host/yaml.ts`: the browser has no `Bun.YAML`,
+ * Durian reads YAML through a parser the host gives it (`durian-markdown/src/host/yaml.ts`: the browser has no `Bun.YAML`,
  * and Durian ships none). Measured on the pinned release, the only things in a message that reach it are a leading front
  * matter block (this app reads none: `frontMatter: false`) and a ```chart fence's data, and every chart fence is held as code
  * before Durian reads it (`held-fences.tsx`). The alignment, tier list, animation, terminal, file tree, editor, tabs, accordion

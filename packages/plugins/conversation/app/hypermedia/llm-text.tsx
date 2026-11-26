@@ -1,5 +1,5 @@
-import type { Block, HumanBlock } from 'durian-hypermedia';
-import { Blocks } from 'durian-hypermedia/react/strict';
+import type { Block, HumanBlock } from 'durian-markdown';
+import { Blocks } from 'durian-markdown/react/document';
 import type { ComponentType, ReactElement } from 'react';
 
 /**

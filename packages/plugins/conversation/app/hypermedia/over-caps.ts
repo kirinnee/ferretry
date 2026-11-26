@@ -1,4 +1,4 @@
-import type { Block } from 'durian-hypermedia';
+import type { Block } from 'durian-markdown';
 
 /**
  * A MESSAGE THAT WENT OVER ONE OF DURIAN'S SIX SIZE CAPS (r12 H13, Durian 0.6.2): the YAML caps (`maxYamlChars`,

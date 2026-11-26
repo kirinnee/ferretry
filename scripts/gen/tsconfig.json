@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../tsconfig.typecheck.json",
   "compilerOptions": { "types": ["bun"], "typeRoots": ["../../node_modules/@types"] },
   "include": [
     "./**/*.ts",

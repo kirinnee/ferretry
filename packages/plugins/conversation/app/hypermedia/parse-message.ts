@@ -1,4 +1,4 @@
-import { type Document, parse, UNTRUSTED_LIMITS } from 'durian-hypermedia';
+import { type Document, parse, UNTRUSTED_LIMITS } from 'durian-markdown';
 import { configureDurian } from './durian.ts';
 import { settleFences } from './fence-boundaries.ts';
 import { type DrawableFyRenderBodiesMap, drawableBodies, fyRenderParseBlock } from './fy-render-parse.ts';

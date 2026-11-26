@@ -1,5 +1,5 @@
 /**
- * r12 H1 — THE DECLARATIONS ARE EXACT. `app/hypermedia/types/*.d.ts` stand in for durian-hypermedia's source for the type
+ * r12 H1 — THE DECLARATIONS ARE EXACT. `app/hypermedia/types/*.d.ts` stand in for durian-markdown's source for the type
  * checker (the source does not compile under this workspace's flags), so they must refuse what Durian would silently
  * ignore: a misspelled cap, an unknown part key, a renderer needing a prop Durian never passes. Each `@ts-expect-error`
  * below is a probe that FAILS THE TYPECHECK if the declaration loosens (an unused directive is an error), so `tsc` is
@@ -9,40 +9,26 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { parse, type Limits, type ParseOptions } from 'durian-hypermedia';
-import type { ChartBlock, TerminalBlock } from 'durian-hypermedia';
-import type { Components, DocumentProps } from 'durian-hypermedia/react/strict';
+import { FORMAT_VERSION, LIMITS, parse, type ParseOptions, UNTRUSTED_LIMITS, VERSION } from 'durian-markdown';
+import { HELD_FOLDER_PARTS } from '../../../../app/hypermedia/held-fence-parse.ts';
+import type { ChartBlock, TerminalBlock } from 'durian-markdown';
+import type { Components, DocumentProps } from 'durian-markdown/react/strict'; // types only: erased, never bundled
 
 const root = dirname(
-  createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-hypermedia/package.json'),
+  createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-markdown/package.json'),
 );
 
-/** Every cap Durian v0.6.2 has: adding or dropping a key in `Limits` breaks this object's type. */
-const CAPS = {
-  maxInputBytes: true,
-  maxBlocks: true,
-  maxDepth: true,
-  maxAnimEntities: true,
-  maxAnimSteps: true,
-  maxAnimChars: true,
-  maxAnimWork: true,
-  maxPageAnimWork: true,
-  maxChartPoints: true,
-  maxItems: true,
-  maxMermaidChars: true,
-  maxSteps: true,
-  maxEvalSteps: true,
-  maxEvalValues: true,
-  maxEvalChars: true,
-  maxPageEvalSteps: true,
-  maxPageEvalValues: true,
-  maxPageEvalChars: true,
-  maxYamlAliases: true,
-  maxYamlChars: true,
-  maxPageYamlChars: true,
-  maxYamlNodes: true,
-  maxPageYamlNodes: true,
-} as const satisfies Record<keyof Limits, true>;
+/** The declarations file: the one this test holds to the installed package. */
+const declarations = readFileSync(
+  join(import.meta.dir, '../../../../app/hypermedia/types/durian-markdown.d.ts'),
+  'utf8',
+);
+
+/** The `name: number;` keys of one declared interface. */
+const declaredCaps = (name: string): string[] => {
+  const block = new RegExp(`export interface ${name}[^{]*\\{([\\s\\S]*?)\\n\\}`).exec(declarations)?.[1] ?? '';
+  return [...block.matchAll(/^\s+(\w+):\s*number;/gm)].map(m => m[1] ?? '');
+};
 
 describe('the Durian declarations are exact (types)', () => {
   it('limits takes only the real cap names', () => {
@@ -73,13 +59,28 @@ describe('the Durian declarations are exact (types)', () => {
   });
 });
 
-describe('the Durian declarations match the installed v0.6.2 (runtime)', () => {
-  it('declares exactly the caps `src/safety.ts` has', () => {
-    const source = readFileSync(join(root, 'src/safety.ts'), 'utf8');
-    const block = /export interface Limits \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? '';
-    const real = [...block.matchAll(/^\s+(\w+):\s*number;/gm)].map(m => m[1] ?? '').sort();
-    expect(real.length).toBe(23);
-    expect(Object.keys(CAPS).sort()).toEqual(real);
+describe('the Durian declarations match the installed v0.7.0 (runtime)', () => {
+  it("declares exactly the caps `src/safety.ts` has: its own and every folder part's", () => {
+    const declared = [...declaredCaps('Limits'), ...declaredCaps('PartLimits')].sort();
+    expect(declared).toEqual(Object.keys(LIMITS).sort());
+    expect(Object.keys(UNTRUSTED_LIMITS).sort()).toEqual(declared);
+  });
+
+  it('declares the version and the format number of the installed release', () => {
+    expect(VERSION).toBe('0.7.0');
+    expect(FORMAT_VERSION).toBe(11);
+  });
+
+  it('declares exactly the folder parts the installed release has', () => {
+    const registry = readFileSync(join(root, 'src/parts/generated/registry.ts'), 'utf8');
+    const real = [
+      ...(/export const FOLDER_PART_NAMES = \[([^\]]*)\]/u.exec(registry)?.[1] ?? '').matchAll(/"([^"]+)"/gu),
+    ]
+      .map(m => m[1] ?? '')
+      .sort();
+    const union = /export type FolderPartName =([\s\S]*?);\n/u.exec(declarations)?.[1] ?? '';
+    expect([...union.matchAll(/'([^']+)'/gu)].map(m => m[1] ?? '').sort()).toEqual(real);
+    expect(Object.keys(HELD_FOLDER_PARTS).sort()).toEqual(real);
   });
 
   it('applies a real cap and ignores a misspelled one (why the type must refuse it)', () => {
@@ -105,8 +106,8 @@ describe('the Durian declarations match the installed v0.6.2 (runtime)', () => {
         'Editor',
         'CodeWalk',
         'Chart',
-        'Mermaid',
         'Animation',
+        'Diagram',
         'TierList',
         'Alignment',
         'Tabs',
@@ -114,6 +115,10 @@ describe('the Durian declarations match the installed v0.6.2 (runtime)', () => {
         'Human',
         'Error',
         'Host',
+        'Folder',
+        'Reference',
+        'Svg',
+        'Interactive',
       ].sort(),
     );
   });

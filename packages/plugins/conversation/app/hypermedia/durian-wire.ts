@@ -1,4 +1,4 @@
-import type { Document } from 'durian-hypermedia';
+import type { Document } from 'durian-markdown';
 
 /**
  * WHAT CROSSES BETWEEN THE PAGE AND THE DURIAN WORKER: plain data, nothing else (structured-clone safe, which
@@ -19,14 +19,18 @@ export interface ReadRequest {
 /** The bodies of `fy-render` fences the code slot may draw, as `[key, bodies]` pairs (a `Map` is rebuilt on the page). */
 export type DrawableEntries = readonly (readonly [string, readonly string[]])[];
 
-/** What the worker sends: it is loaded and listening, or the answer to one ask. */
+/** What the worker sends: it is loaded and listening, how far one ask has got, or the answer to it. */
 export type WorkerMessage =
   | { readonly kind: 'ready' }
   | { readonly kind: 'read'; readonly id: number; readonly doc: Document; readonly drawable: DrawableEntries }
   /** The message is to be shown as the text it is (over a cap, or the document made of it is out of proportion). */
   | { readonly kind: 'text'; readonly id: number }
   /** The parse threw. */
-  | { readonly kind: 'failed'; readonly id: number };
+  | { readonly kind: 'failed'; readonly id: number }
+  /** The ask needs code that has not arrived (a part's parser, KaTeX): the worker is fetching it and has stopped parsing. */
+  | { readonly kind: 'loading'; readonly id: number }
+  /** The code arrived and the worker is parsing the ask again. */
+  | { readonly kind: 'working'; readonly id: number };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
@@ -44,6 +48,7 @@ export function isWorkerMessage(value: unknown): value is WorkerMessage {
   if (!isRecord(value)) return false;
   if (value.kind === 'ready') return true;
   if (typeof value.id !== 'number') return false;
-  if (value.kind === 'text' || value.kind === 'failed') return true;
+  if (value.kind === 'text' || value.kind === 'failed' || value.kind === 'loading' || value.kind === 'working')
+    return true;
   return value.kind === 'read' && isRecord(value.doc) && Array.isArray(value.drawable);
 }

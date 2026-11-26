@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { redirectedImport } from '../../../app/vite-durian.ts';
 
 const root = dirname(
-  createRequire(join(import.meta.dir, '../../../package.json')).resolve('durian-hypermedia/package.json'),
+  createRequire(join(import.meta.dir, '../../../package.json')).resolve('durian-markdown/package.json'),
 );
 const source = (path: string): string => readFileSync(join(root, 'src', path), 'utf8');
 const shim = (name: string): string => join(import.meta.dir, '../../../app/hypermedia/durian-shims', name);
@@ -32,11 +32,28 @@ describe('redirectedImport', () => {
     expect(redirectedImport('./other', join(root, 'src/core/chipw.ts'), root)).toBeNull();
   });
 
+  it('0.7.0: sends every parser-side chart reader import in core/ (dh-lib, chart11, pagecharts, doccheck) to the held stand-in', () => {
+    for (const importer of ['dh-lib', 'chart11', 'pagecharts', 'doccheck'])
+      expect(redirectedImport('./chart', join(root, `src/core/${importer}.ts`), root)).toBe(shim('chart-held.ts'));
+    expect(redirectedImport('./chart11', join(root, 'src/core/doccheck.ts'), root)).toBe(shim('chart-held.ts'));
+  });
+
+  it('0.7.0: sends the composed-stage compiler (document, dh-lib, doccheck) to the held stand-in, and `inlineText` to its one-function copy', () => {
+    expect(redirectedImport('./core/stage', join(root, 'src/document.ts'), root)).toBe(shim('stage-held.ts'));
+    expect(redirectedImport('./core/stage-part', join(root, 'src/document.ts'), root)).toBe(shim('stage-held.ts'));
+    expect(redirectedImport('./stage-part', join(root, 'src/core/dh-lib.ts'), root)).toBe(shim('stage-held.ts'));
+    expect(redirectedImport('./stage-part', join(root, 'src/core/doccheck.ts'), root)).toBe(shim('stage-held.ts'));
+    expect(redirectedImport('../markdown', join(root, 'src/react/markdown.tsx'), root)).toBe(shim('inline-text.ts'));
+    expect(redirectedImport('../markdown', join(root, 'src/react/document.tsx'), root)).toBeNull();
+  });
+
   it('leaves the renderer’s own imports alone: the compiler lives in the animation chunk, the chart renderer is unused', () => {
     expect(redirectedImport('../core/scene', join(root, 'src/ui/anim.tsx'), root)).toBeNull();
     expect(redirectedImport('../core/chart', join(root, 'src/ui/chart.tsx'), root)).toBeNull();
     expect(redirectedImport('./chart', undefined, root)).toBeNull();
-    expect(redirectedImport('./chart', join(root, 'src/core/doccheck.ts'), root)).toBeNull();
+    // Outside `core/` a `./chart` is not the parser's: the renderer's own `ui/` files keep theirs.
+    expect(redirectedImport('./chart', join(root, 'src/ui/chart-axes.tsx'), root)).toBeNull();
+    expect(redirectedImport('./stage', join(root, 'src/core/stage-part.ts'), root)).toBeNull();
   });
 });
 

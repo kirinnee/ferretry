@@ -7,7 +7,7 @@ import {
   revalidateReference,
 } from '@ferretry/app';
 import { ExternalLink } from '@ferretry/app/ui';
-import type { CodeSlotProps, InlineCodeSlotProps, LinkSlotProps, Slots } from 'durian-hypermedia/react/strict';
+import type { CodeSlotProps, InlineCodeSlotProps, LinkSlotProps, Slots } from 'durian-markdown/react/strict';
 import type { MouseEvent, ReactNode } from 'react';
 import { type ReferenceProof, referenceClick, useReferenceProof } from './reference-proof.tsx';
 

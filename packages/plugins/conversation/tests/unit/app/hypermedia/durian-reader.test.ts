@@ -8,6 +8,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   CACHE_WEIGHT,
   createDurianReader,
+  FETCH_BUDGET_MS,
   idPrefixOf,
   PARSE_BUDGET_MS,
   type Reading,
@@ -237,6 +238,82 @@ describe('a parse that is too slow', () => {
     clock.advance(PARSE_BUDGET_MS);
     worker.answer(1);
     expect(reader.snapshot(slot, 'slow one', false)).toEqual({ kind: 'plain', reason: 'slow' });
+  });
+});
+
+describe('a message whose parts and KaTeX the worker has to fetch', () => {
+  it('stops the parse clock while the worker fetches, and counts again from what was left', async () => {
+    const { reader, up, clock } = rig();
+    const slot = reader.slot();
+    reader.want(slot, 'a formula', false);
+    const worker = await up();
+    clock.advance(PARSE_BUDGET_MS - 100);
+    worker.say({ kind: 'loading', id: 1 });
+    // A cold phone's download is far longer than the parse budget, and is not the parse.
+    clock.advance(PARSE_BUDGET_MS * 10);
+    expect(worker.terminated).toBe(false);
+    expect(reader.snapshot(slot, 'a formula', false)).toEqual({ kind: 'pending' });
+    worker.say({ kind: 'working', id: 1 });
+    clock.advance(99);
+    expect(worker.terminated).toBe(false);
+    clock.advance(1);
+    expect(worker.terminated).toBe(true);
+    expect(reader.snapshot(slot, 'a formula', false)).toEqual({ kind: 'plain', reason: 'slow' });
+  });
+
+  it('adds up the parse time of every round: a message cannot buy more than one budget by asking for more code', async () => {
+    const { reader, up, clock } = rig();
+    const slot = reader.slot();
+    reader.want(slot, 'many parts', false);
+    const worker = await up();
+    for (let round = 0; round < 4; round++) {
+      clock.advance(PARSE_BUDGET_MS / 5);
+      worker.say({ kind: 'loading', id: 1 });
+      clock.advance(300);
+      worker.say({ kind: 'working', id: 1 });
+    }
+    expect(worker.terminated).toBe(false);
+    clock.advance(PARSE_BUDGET_MS / 5 - 1);
+    expect(worker.terminated).toBe(false);
+    clock.advance(1);
+    expect(worker.terminated).toBe(true);
+    expect(reader.snapshot(slot, 'many parts', false)).toEqual({ kind: 'plain', reason: 'slow' });
+  });
+
+  it('gives the fetch its own budget and ends a worker that never finishes it', async () => {
+    const { reader, up, clock } = rig();
+    const slot = reader.slot();
+    reader.want(slot, 'a formula', false);
+    const worker = await up();
+    worker.say({ kind: 'loading', id: 1 });
+    clock.advance(FETCH_BUDGET_MS - 1);
+    expect(worker.terminated).toBe(false);
+    clock.advance(1);
+    expect(worker.terminated).toBe(true);
+    expect(reader.snapshot(slot, 'a formula', false)).toEqual({ kind: 'plain', reason: 'slow' });
+  });
+
+  it('reads the message once the worker answers after its fetch, and leaves no timer behind', async () => {
+    const { reader, up, clock } = rig();
+    const slot = reader.slot();
+    reader.want(slot, 'a formula', false);
+    const worker = await up();
+    worker.say({ kind: 'loading', id: 1 });
+    clock.advance(3_000);
+    worker.say({ kind: 'working', id: 1 });
+    worker.answer(1);
+    expect(reader.snapshot(slot, 'a formula', false).kind).toBe('rich');
+    expect(clock.timers).toBe(0);
+  });
+
+  it('ignores a loading or working note for another ask', async () => {
+    const { reader, up, clock } = rig();
+    const slot = reader.slot();
+    reader.want(slot, 'a formula', false);
+    const worker = await up();
+    worker.say({ kind: 'loading', id: 99 });
+    clock.advance(PARSE_BUDGET_MS);
+    expect(worker.terminated).toBe(true);
   });
 });
 

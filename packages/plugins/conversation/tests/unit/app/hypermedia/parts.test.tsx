@@ -8,6 +8,7 @@ import { interact, mount, must } from '@ferretry/app/testing';
 import { resolve } from 'node:path';
 import type { ReactNode } from 'react';
 import { HypermediaProse } from '../../../../app/hypermedia/hypermedia-prose.tsx';
+import { mustRead } from './must-read.ts';
 import { fixture, inShell } from './surface-fixture.tsx';
 
 const FENCE = '`'.repeat(3);
@@ -89,48 +90,160 @@ describe('an author’s :::llm text is the disclosure beside a part, never the p
     });
 });
 
-describe('a mermaid part is drawn by our renderer', () => {
+describe('a mermaid fence is a host block of ours, drawn by our renderer (Durian 0.7.0 removed its part)', () => {
   const diagram = fence('mermaid', 'flowchart LR', '  A --> B');
 
-  it('hands each step to the one fy-render door as a mermaid block, and draws what that returns', async () => {
+  it('is read as a host block named mermaid, never a Durian part', () => {
+    const { doc } = mustRead(diagram, 'p-');
+    expect(doc.blocks).toMatchObject([{ type: 'host', name: 'mermaid' }]);
+  });
+
+  it('hands the source to the one fy-render door as a mermaid block, and draws what that returns', async () => {
     const asked: string[] = [];
     const { container, unmount } = await draw(diagram, surfaceWith(asked));
     expect(asked).toEqual(['type: mermaid\nalt: Mermaid diagram\n---\nflowchart LR\n  A --> B']);
     expect(container.querySelectorAll('[data-fy-render-type="mermaid"]').length).toBe(1);
-    // Durian's own mermaid library is not in the page: its host-drawn part says so.
-    expect(container.querySelector('[data-dh-mermaid="host"]')).not.toBeNull();
+    expect(container.querySelector('[data-fy-mermaid]')).not.toBeNull();
     expect(container.querySelector('[data-mermaid]')).toBeNull();
     await unmount();
   });
 
+  const STEPPED = fence(
+    'mermaid',
+    'flowchart LR',
+    '%% @step First arrow',
+    '  A --> B',
+    '%% @step Second arrow',
+    '  B --> C',
+  );
+  const NEXT = '.fy-hm-mermaid-steps .btn-go:not(:disabled)';
+  const BACK = '.fy-hm-mermaid-steps .ctl .btn:not(.btn-go)';
+  const caption = (root: ParentNode): string =>
+    [...root.querySelectorAll('.fy-hm-mermaid-steps .dh-step-title > span:not(.dh-step-hidden)')]
+      .map(span => span.textContent)
+      .join('|');
+
   it('starts a step only when it is first shown (a stepped diagram is not a frame per step)', async () => {
     const asked: string[] = [];
-    const steps = fence(
-      'mermaid',
-      'flowchart LR',
-      '%% @step First arrow',
-      '  A --> B',
-      '%% @step Second arrow',
-      '  B --> C',
-    );
-    const { container, unmount } = await draw(steps, surfaceWith(asked));
-    expect(asked.length).toBe(1);
-    expect(asked[0]).toContain('alt: First arrow');
-    expect(asked[0]).toContain('A --> B');
-    const next = must(container.querySelector<HTMLButtonElement>('.dg .btn-go:not(:disabled)'), 'the next-step button');
+    const { container, unmount } = await draw(STEPPED, surfaceWith(asked));
+    expect(asked).toEqual(['type: mermaid\nalt: First arrow\n---\nflowchart LR\n  A --> B']);
+    const next = must(container.querySelector<HTMLButtonElement>(NEXT), 'the next-step button');
     await interact(() => next.click());
-    expect(asked.length).toBe(2);
-    expect(asked[1]).toContain('B --> C');
+    // Step 2 builds on step 1: the head and every line up to the end of the step, and no marker line.
+    expect(asked).toEqual([
+      'type: mermaid\nalt: First arrow\n---\nflowchart LR\n  A --> B',
+      'type: mermaid\nalt: Second arrow\n---\nflowchart LR\n  A --> B\n  B --> C',
+    ]);
+    for (const body of asked) expect(body).not.toContain('@step');
     await unmount();
   });
 
-  it('keeps a step title on ONE header line, so it cannot add a header of its own', async () => {
+  it('shows each step’s caption, and the count, as the reader moves', async () => {
+    const { container, unmount } = await draw(STEPPED, surfaceWith([]));
+    expect(caption(container)).toBe('First arrow');
+    expect(container.querySelector('.fy-hm-mermaid-steps .ctl-count')?.textContent).toBe('1 / 2');
+    expect(container.querySelector('.fy-hm-mermaid-steps .cw-num')?.textContent).toBe('1');
+    await interact(() => must(container.querySelector<HTMLButtonElement>(NEXT), 'next').click());
+    expect(caption(container)).toBe('Second arrow');
+    expect(container.querySelector('.fy-hm-mermaid-steps .ctl-count')?.textContent).toBe('2 / 2');
+    // At the last step Next is off; at the first, Back is.
+    expect(container.querySelector(NEXT)).toBeNull();
+    await unmount();
+  });
+
+  it('goes back without drawing a step again, and shows only the active step', async () => {
+    const asked: string[] = [];
+    const { container, unmount } = await draw(STEPPED, surfaceWith(asked));
+    expect(must(container.querySelector<HTMLButtonElement>(BACK), 'back').disabled).toBe(true);
+    await interact(() => must(container.querySelector<HTMLButtonElement>(NEXT), 'next').click());
+    await interact(() => must(container.querySelector<HTMLButtonElement>(BACK), 'back').click());
+    expect(caption(container)).toBe('First arrow');
+    expect(asked.length).toBe(2);
+    const steps = [...container.querySelectorAll('.fy-hm-mermaid-step')];
+    expect(steps.map(step => step.hasAttribute('data-active'))).toEqual([true, false]);
+    expect(steps.map(step => step.getAttribute('aria-hidden'))).toEqual([null, 'true']);
+    await unmount();
+  });
+
+  it('moves with the slider and with the arrow keys of the group', async () => {
+    const asked: string[] = [];
+    const { container, unmount } = await draw(STEPPED, surfaceWith(asked));
+    const slider = must(container.querySelector<HTMLInputElement>('.fy-hm-mermaid-steps .ctl-range'), 'the slider');
+    expect(slider.max).toBe('1');
+    const group = must(container.querySelector<HTMLElement>('.fy-hm-mermaid-steps'), 'the step group');
+    await interact(() => {
+      group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      return Promise.resolve();
+    });
+    expect(caption(container)).toBe('Second arrow');
+    expect(asked.length).toBe(2);
+    await interact(() => {
+      group.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+      return Promise.resolve();
+    });
+    expect(caption(container)).toBe('First arrow');
+    await unmount();
+  });
+
+  it('draws a diagram with no step line, or one, whole and with no controls (a lone step line is a comment)', async () => {
+    for (const body of [
+      ['flowchart LR', '  A --> B'],
+      ['flowchart LR', '%% @step Only', '  A --> B'],
+    ]) {
+      const asked: string[] = [];
+      const { container, unmount } = await draw(fence('mermaid', ...body), surfaceWith(asked));
+      expect(asked.length).toBe(1);
+      expect(container.querySelector('.fy-hm-mermaid-steps, .ctl')).toBeNull();
+      await unmount();
+    }
+  });
+
+  it('keeps the author’s :::llm text beside a stepped diagram, once', async () => {
+    const { container, unmount } = await draw(
+      [STEPPED, '', ':::llm', 'A flows to B, then C.', ':::'].join('\n'),
+      surfaceWith([]),
+    );
+    const [only, ...others] = disclosures(container);
+    expect(others).toEqual([]);
+    expect(only?.querySelector('pre')?.textContent).toBe('A flows to B, then C.');
+    await unmount();
+  });
+
+  it('drops a %%{...}%% directive line, as Durian 0.6.2 did, so a diagram cannot ask for settings of its own', async () => {
     const asked: string[] = [];
     const { unmount } = await draw(
-      fence('mermaid', 'flowchart LR', '%% @step Then alt: other', '  A --> B'),
+      fence('mermaid', '%%{init: {"securityLevel": "loose"}}%%', 'flowchart LR', '  A --> B'),
       surfaceWith(asked),
     );
+    expect(asked).toEqual(['type: mermaid\nalt: Mermaid diagram\n---\nflowchart LR\n  A --> B']);
+    await unmount();
+  });
+
+  it('keeps a title, and a step title, on ONE header line, so neither can add a header of its own', async () => {
+    const asked: string[] = [];
+    const { container, unmount } = await draw(
+      [
+        fence('mermaid title="Then alt: other"', 'flowchart LR', '  A --> B'),
+        fence('mermaid', 'flowchart LR', '%% @step Then alt: other', '  A --> B', '%% @step And then', '  B --> C'),
+      ].join('\n\n'),
+      surfaceWith(asked),
+    );
+    expect(asked.length).toBe(2);
     for (const body of asked) expect(body.split('\n').filter(line => line.startsWith('alt:')).length).toBe(1);
+    expect(asked[1]).toContain('alt: Then alt: other');
+    expect(container.querySelectorAll('.fy-hm-mermaid-steps').length).toBe(1);
+    await unmount();
+  });
+
+  it('keeps the author’s :::llm text as the disclosure beside the diagram', async () => {
+    const asked: string[] = [];
+    const { container, unmount } = await draw(
+      [diagram, '', ':::llm', 'A flows to B.', ':::'].join('\n'),
+      surfaceWith(asked),
+    );
+    const [only, ...others] = disclosures(container);
+    expect(others).toEqual([]);
+    expect(only?.querySelector('pre')?.textContent).toBe('A flows to B.');
     await unmount();
   });
 
@@ -142,27 +255,48 @@ describe('a mermaid part is drawn by our renderer', () => {
   });
 });
 
-describe('only the strict entry of Durian reaches the app', () => {
+describe('only the entries of Durian that this app has reviewed reach it', () => {
   /**
-   * `durian-hypermedia/react` (the full entry) draws mermaid in the page with DOMPurify and an HTML-string sink, which the
-   * page's Trusted Types policy refuses. The app imports the core, the strict entry and the stylesheet, and nothing else:
-   * a new import of any other entry is this test failing, and a review.
+   * `durian-markdown/react` and `react/strict` list EVERY part of the package, the folder parts' media players, pdf.js and map providers
+   * included, and a bundler keeps them all (the first build of 0.7.0 was +550 KB gzip first load). The app imports the core (in the
+   * worker), the stylesheet, the document view and, one entry each, the parts it draws; `react/strict` is for TYPES only (erased). A new
+   * import of any other entry is this test failing, and a review.
    */
-  const ALLOWED = new Set(['durian-hypermedia', 'durian-hypermedia/react/strict', 'durian-hypermedia/styles.css']);
-  const SPECIFIER = /(?:from|import\()\s*['"](durian-hypermedia[^'"]*)['"]/gu;
+  const VALUE_ENTRIES = new Set([
+    'durian-markdown',
+    'durian-markdown/styles.css',
+    'durian-markdown/react/document',
+    'durian-markdown/react/terminal',
+    'durian-markdown/react/filetree',
+    'durian-markdown/react/editor',
+    'durian-markdown/react/codewalk',
+    'durian-markdown/react/animation',
+    'durian-markdown/react/tierlist',
+    'durian-markdown/react/alignment',
+    'durian-markdown/react/containers',
+  ]);
+  const SPECIFIER = /(?:from|import\()\s*['"](durian-markdown[^'"]*)['"]/gu;
+  const TYPE_ONLY = /import\s+type\b[^;]*?from\s*['"](durian-markdown[^'"]*)['"]/gu;
   const roots = ['app', 'tests'].map(folder => resolve(import.meta.dir, '../../../..', folder));
   const sourcesOf = (folder: string): string[] =>
     [...new Bun.Glob('**/*.{ts,tsx}').scanSync({ cwd: folder, absolute: true })].filter(
       path => !path.includes('/node_modules/'),
     );
 
-  it('imports no other entry of the package, in any source or test of the Conversation plugin', async () => {
+  it('imports no other entry of the package as a value, in any source or test of the Conversation plugin', async () => {
     const bad: string[] = [];
     for (const folder of roots)
       for (const path of sourcesOf(folder)) {
         const text = await Bun.file(path).text();
-        for (const match of text.matchAll(SPECIFIER))
-          if (!ALLOWED.has(match[1] ?? '')) bad.push(`${path.split('/plugins/conversation/')[1]}: ${match[1]}`);
+        const typeOnly = new Set([...text.matchAll(TYPE_ONLY)].map(match => match[0]));
+        for (const match of text.matchAll(SPECIFIER)) {
+          const specifier = match[1] ?? '';
+          if (VALUE_ENTRIES.has(specifier)) continue;
+          // `react/strict` and a type-only import of any entry are erased by the build and never reach the page.
+          const erased = [...typeOnly].some(statement => statement.includes(specifier));
+          if (erased && specifier === 'durian-markdown/react/strict') continue;
+          bad.push(`${path.split('/plugins/conversation/')[1]}: ${specifier}`);
+        }
       }
     expect(bad).toEqual([]);
   });

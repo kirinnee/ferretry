@@ -45,11 +45,11 @@ const viteAssetUrls: Bun.BunPlugin = {
   },
 };
 
-/** `durian-hypermedia` arrives as source under the `bun` condition; a browser-target build does not read it (see `build-scene.ts`). */
+/** `durian-markdown` arrives as source under the `bun` condition; a browser-target build does not read it (see `build-scene.ts`). */
 const durianSource: Bun.BunPlugin = {
-  name: 'durian-hypermedia-source',
+  name: 'durian-markdown-source',
   setup(build) {
-    build.onResolve({ filter: /^durian-hypermedia(?:\/[a-z/-]+)?$/u }, args => ({
+    build.onResolve({ filter: /^durian-markdown(?:\/[a-z/-]+)?$/u }, args => ({
       path: Bun.resolveSync(args.path, conversation),
     }));
   },

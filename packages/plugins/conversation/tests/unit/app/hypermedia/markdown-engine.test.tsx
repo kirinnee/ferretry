@@ -15,7 +15,7 @@
  *     beside it still becomes a reference.
  */
 import { describe, expect, it } from 'bun:test';
-import type { Block, MdBlock } from 'durian-hypermedia';
+import type { Block, MdBlock } from 'durian-markdown';
 import { drawn, FENCE, installFyRenderDom, SQUARE } from './fy-render-draw.tsx';
 import { mustRead } from './must-read.ts';
 
@@ -65,7 +65,7 @@ const markdownCode = (nodes: readonly MdBlock[]): number =>
     return sum;
   }, 0);
 
-describe('no spelling of a chart or code-walk fence is a part', () => {
+describe('no spelling of a chart, a graph or a state fence is a part', () => {
   const body = ['kind: line', 'series:', '  - name: s', '    data: [1, 2]'];
   const SPELLINGS = [
     ['top level', '', ''],
@@ -74,14 +74,13 @@ describe('no spelling of a chart or code-walk fence is a part', () => {
     ['in a quote', '> ', '> '],
     ['after a paragraph line', 'text\n\n', ''],
   ] as const;
-  for (const word of ['chart', 'codewalk'])
+  for (const word of ['chart', 'graph', 'state'])
     for (const [place, lead, rest] of SPELLINGS)
       it(`${word}, ${place}`, () => {
         const text = [`${lead}${FENCE}${word}`, ...body.map(line => `${rest}${line}`), `${rest}${FENCE}`].join('\n');
         const parts: string[] = [];
         walk(mustRead(text, 'p-').doc.blocks, block => parts.push(block.type));
-        expect(parts).not.toContain('chart');
-        expect(parts).not.toContain('codewalk');
+        expect(parts).not.toContain(word);
       });
 
   it('Durian reads a fence at any indent as a part, so an indented chart is the HELD host block, and one behind a list marker is Markdown code', () => {

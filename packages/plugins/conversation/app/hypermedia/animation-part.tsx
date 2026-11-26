@@ -1,4 +1,4 @@
-import type { AnimationBlock } from 'durian-hypermedia';
+import type { AnimationBlock } from 'durian-markdown';
 import { type ReactElement, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { animationStage } from './animation-engine.ts';
 import { watchStageColours } from './stage-colours.ts';

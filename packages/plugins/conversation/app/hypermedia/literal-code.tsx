@@ -1,4 +1,4 @@
-import type { InlineDef } from 'durian-hypermedia/react/strict';
+import type { InlineDef } from 'durian-markdown/react/strict';
 import type { ReactElement } from 'react';
 import { CODE_SPAN, LITERAL_CODE_INLINE } from './literal-code-match.ts';
 import { HypermediaInlineCode } from './slots.tsx';

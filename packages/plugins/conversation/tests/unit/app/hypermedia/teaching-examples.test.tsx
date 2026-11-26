@@ -54,7 +54,8 @@ const DRAWN_FENCES: Readonly<Record<string, string>> = {
   editor: 'editor',
   tierlist: 'tierlist',
   alignment: 'alignment',
-  mermaid: 'mermaid',
+  // not a Durian part in 0.7.0: our host block of that name (`app/hypermedia/mermaid-slot.tsx`)
+  mermaid: 'host',
 };
 
 /** The words of a fence Durian reads as a part but the app holds as code: never taught. */

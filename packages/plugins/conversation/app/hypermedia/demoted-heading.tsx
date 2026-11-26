@@ -1,4 +1,4 @@
-import type { HeadingSlotProps } from 'durian-hypermedia/react/strict';
+import type { HeadingSlotProps } from 'durian-markdown/react/strict';
 import { createContext, useContext } from 'react';
 
 /**

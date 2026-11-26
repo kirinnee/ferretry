@@ -23,6 +23,11 @@ import { type ReadRequest, isWorkerMessage, type WorkerMessage } from './durian-
  *    {@link STREAM_INTERVAL_MS}. While the next answer is awaited the last one stays drawn, so a growing message does not
  *    blink to plain text and back.
  *
+ *  - THE PARSE BUDGET IS THE PARSE'S TIME, NOT THE FETCH'S. The worker holds the parts and KaTeX back until a message first needs one
+ *    (`durian-shims/lazy-part.ts`): it says `loading`, the page stops the parse clock and starts the fetch's (`fetchBudgetMs`), and
+ *    `working` starts the parse clock again with what was left of the budget, so a cold phone's download cannot turn an honest message
+ *    into plain text, and a hostile one still gets no more than {@link PARSE_BUDGET_MS} of parsing however many rounds it asks for.
+ *
  * A message that is over the author's cap ({@link exceedsMessageCap}) or over a pre-parse limit ({@link exceedsPreParseLimits}) never reaches the worker, and where there is no worker
  * at all (the build did not make one, or the browser refused it) a message is shown as text, never as nothing.
  */
@@ -34,6 +39,8 @@ import { type ReadRequest, isWorkerMessage, type WorkerMessage } from './durian-
  * ones on a phone; 500 ms leaves those alone and still ends a parse that does not return in about half a second.
  */
 export const PARSE_BUDGET_MS = 500;
+/** How long the worker may take to fetch the parts and KaTeX a message needs, from `loading` to `working`. */
+export const FETCH_BUDGET_MS = 8_000;
 /** How long a worker may take to say it is loaded before it is given up on (a cold start on a phone over a slow link is seconds). */
 export const STARTUP_BUDGET_MS = 8_000;
 /** The least time between two asks for the same streaming message. */
@@ -91,6 +98,7 @@ export interface ReaderDeps {
   readonly timers?: Timers;
   readonly parseBudgetMs?: number;
   readonly startupBudgetMs?: number;
+  readonly fetchBudgetMs?: number;
   readonly streamIntervalMs?: number;
   readonly cacheWeight?: number;
 }
@@ -139,7 +147,11 @@ interface Running {
   readonly slot: Slot;
   readonly source: string;
   readonly arriving: boolean;
-  readonly timer: unknown;
+  /** The clock that ends this ask: the parse's, or while the worker fetches, the fetch's. */
+  timer: unknown;
+  /** The parse time this ask has used, and when its parse clock was last started (0 while the worker fetches). */
+  spent: number;
+  startedAt: number;
 }
 
 /** The id prefix of a message: made of its text, so it is the same every time the message is read (and so cached). */
@@ -174,6 +186,7 @@ export function createDurianReader(deps: ReaderDeps): DurianReader {
   const timers = deps.timers ?? SYSTEM_TIMERS;
   const parseBudget = deps.parseBudgetMs ?? PARSE_BUDGET_MS;
   const startupBudget = deps.startupBudgetMs ?? STARTUP_BUDGET_MS;
+  const fetchBudget = deps.fetchBudgetMs ?? FETCH_BUDGET_MS;
   const streamInterval = deps.streamIntervalMs ?? STREAM_INTERVAL_MS;
   const capacity = deps.cacheWeight ?? CACHE_WEIGHT;
   const settled = [new WeightedLru(capacity / 2), new WeightedLru(capacity / 2)] as const;
@@ -241,6 +254,14 @@ export function createDurianReader(deps: ReaderDeps): DurianReader {
     notify();
   };
 
+  /** The only thing that can stop a parse (or a fetch) that is still running: the worker is ended and the message is the text it is. */
+  const endSlow = (id: number): void => {
+    if (running?.id !== id) return;
+    dropWorker();
+    finish(plain('slow'));
+    pump();
+  };
+
   const onMessage = (message: WorkerMessage): void => {
     if (message.kind === 'ready') {
       if (startupTimer !== undefined) timers.clear(startupTimer);
@@ -252,6 +273,20 @@ export function createDurianReader(deps: ReaderDeps): DurianReader {
     }
     const current = running;
     if (current === undefined || current.id !== message.id) return;
+    if (message.kind === 'loading') {
+      // The worker is fetching code the message needs: the parse clock stops, the fetch's starts.
+      timers.clear(current.timer);
+      current.spent += timers.now() - current.startedAt;
+      current.timer = timers.set(() => endSlow(current.id), fetchBudget);
+      return;
+    }
+    if (message.kind === 'working') {
+      // The code is here and the worker parses again: what was left of the parse budget, never more.
+      timers.clear(current.timer);
+      current.startedAt = timers.now();
+      current.timer = timers.set(() => endSlow(current.id), Math.max(1, parseBudget - current.spent));
+      return;
+    }
     if (message.kind === 'read')
       finish({
         kind: 'rich',
@@ -319,13 +354,9 @@ export function createDurianReader(deps: ReaderDeps): DurianReader {
       slot,
       source,
       arriving,
-      timer: timers.set(() => {
-        // The only thing that can stop a parse that is still running.
-        if (running?.id !== id) return;
-        dropWorker();
-        finish(plain('slow'));
-        pump();
-      }, parseBudget),
+      timer: timers.set(() => endSlow(id), parseBudget),
+      spent: 0,
+      startedAt: timers.now(),
     };
     sentTo.postMessage(request);
   }

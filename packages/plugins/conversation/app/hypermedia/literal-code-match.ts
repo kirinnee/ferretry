@@ -1,4 +1,4 @@
-import type { InlineDef } from 'durian-hypermedia';
+import type { InlineDef } from 'durian-markdown';
 
 /**
  * THE PARSER HALF OF LITERAL INLINE CODE (the renderer half, and the reason, are `literal-code.tsx`). No React in this file:

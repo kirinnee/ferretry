@@ -136,31 +136,56 @@ describe('a chart is held as code, never evaluated (S1)', () => {
   });
 });
 
-describe('a code walk keeps its source and notes beside the :::llm disclosure (G1)', () => {
-  const walk = fence('codewalk', '- file: src/api.ts', '  note: the entry point');
+describe('a code walk is drawn by Durian (U1: no longer held), with the :::llm text as the disclosure beside it', () => {
+  const walk = fence(
+    'codewalk',
+    '@file src/api.ts',
+    'export function entry() {',
+    '  return 1;',
+    '}',
+    '@step src/api.ts focus=1',
+    'The entry point.',
+  );
 
-  it('draws the walk’s own text as code AND the author’s text as the disclosure', async () => {
+  it('is read as a codewalk part, never a host block', () => {
+    const { doc } = mustRead(walk, 'p-');
+    expect(doc.blocks.map(block => block.type)).toEqual(['codewalk']);
+    expect(holdFences(walk)).toBe(walk);
+  });
+
+  it('draws the walk as a part, its note as text, and the author’s text as the disclosure', async () => {
     const { container, unmount } = await draw([walk, '', llm('Walks the entry point.')].join('\n'));
-    const [block, ...rest] = [...container.querySelectorAll('.dh-doc .code-block')];
-    expect(rest).toEqual([]);
-    expect(block?.querySelector('.code-lang')?.textContent).toBe('codewalk');
-    expect(block?.querySelector('pre')?.textContent).toBe('- file: src/api.ts\n  note: the entry point');
+    expect(container.querySelector('.dh-doc [data-dh-part="codewalk"]')).not.toBeNull();
+    expect(container.textContent).toContain('The entry point.');
+    expect(container.querySelector('.dh-error')).toBeNull();
     const [only, ...others] = disclosures(container);
     expect(others).toEqual([]);
     expect(only?.querySelector('pre')?.textContent).toBe('Walks the entry point.');
-    expect(container.querySelector('.cw, [data-dh-part="codewalk"]')).toBeNull();
-    expect(container.querySelector('.dh-error')).toBeNull();
     await unmount();
   });
 
-  it('draws the walk’s own text as code when the author wrote no :::llm text, and no disclosure', async () => {
+  it('draws with no disclosure when the author wrote no :::llm text', async () => {
     const { container, unmount } = await draw(walk);
-    expect(container.querySelector('.dh-doc .code-block pre')?.textContent).toBe(
-      '- file: src/api.ts\n  note: the entry point',
-    );
+    expect(container.querySelector('.dh-doc [data-dh-part="codewalk"]')).not.toBeNull();
     expect(disclosures(container)).toEqual([]);
     await unmount();
   });
+});
+
+describe('every part of Durian’s folders is held as the code it is (U1)', () => {
+  for (const word of ['diff', 'log', 'http', 'graph', 'sequence', 'math', 'state']) {
+    const text = fence(word, 'x');
+    it(`${word}: is renamed to a host block and drawn as code in its own language, with the fence’s text`, async () => {
+      expect(holdFences(text)).toContain(`${FENCE}fy-held-${word}`);
+      expect(mustRead(text, 'p-').doc.blocks).toMatchObject([{ type: 'host', name: `fy-held-${word}` }]);
+      const { container, unmount } = await draw(text);
+      const block = container.querySelector('.dh-doc .code-block');
+      expect(block?.querySelector('.code-lang')?.textContent).toBe(word);
+      expect(block?.querySelector('pre')?.textContent).toBe('x');
+      expect(container.querySelector('.dh-doc .dh-fallback, .dh-doc .dh-error')).toBeNull();
+      await unmount();
+    });
+  }
 });
 
 const TABS = [

@@ -2,8 +2,10 @@
  * r12 H11 — WHAT THE DURIAN WORKER CARRIES. It is built by the app shell's own Vite with the shell's Durian plugin (the build
  * the page's worker gets), and its module list is read from the build, not from the source: the worker is the parser and the
  * pure halves of our reading, and NOTHING of the page. No React, no shell barrel (`@ferretry/app`, whose import would start the
- * shell's whole graph inside a worker), no part drawn, and a single file: a worker that fetched a second chunk could not be
- * started from the one script the page's Trusted Types policy accepts.
+ * shell's whole graph inside a worker), no part drawn, and nothing it needs to START in a chunk it fetches later. Since U1's review (item 2) it
+ * is its entry and the chunk that entry imports, and the folder parts' parsers and KaTeX are chunks of their own, fetched when a message first
+ * needs one (`app/hypermedia/durian-shims/lazy-part.ts`); the page's policy names the ENTRY (`fy-worker`), an import the worker makes is not
+ * a Trusted Types sink, and `hypermedia-csp.visual.test.ts` proves it in Chromium under the real policy.
  */
 import { beforeAll, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
@@ -37,8 +39,8 @@ const pageModules = (): string[] => [...page.firstModules, ...page.lazy.flatMap(
  */
 describe('the Durian parser in the built bundles', () => {
   test('is in the worker chunk', () => {
-    expect(has(/durian-hypermedia\/src\/document\.ts$/u).length).toBe(1);
-    expect(has(/durian-hypermedia\/src\/core\/dh-lib\.ts$/u).length).toBe(1);
+    expect(has(/durian-markdown\/src\/document\.ts$/u).length).toBe(1);
+    expect(has(/durian-markdown\/src\/core\/dh-lib\.ts$/u).length).toBe(1);
     expect(has(/hypermedia\/parse-message\.ts$/u).length).toBe(1);
   });
 
@@ -46,7 +48,7 @@ describe('the Durian parser in the built bundles', () => {
     const modules = pageModules();
     // The page is the whole conversation app half: a real number of modules, so an empty scan cannot pass.
     expect(modules.length).toBeGreaterThan(500);
-    expect(modules.filter(path => /durian-hypermedia\/src\/(?:document|core\/dh-lib)\.ts$/u.test(path))).toEqual([]);
+    expect(modules.filter(path => /durian-markdown\/src\/(?:document|core\/dh-lib)\.ts$/u.test(path))).toEqual([]);
     expect(
       modules.filter(path => /hypermedia\/(?:parse-message|durian|durian-answer|durian-worker)\.ts$/u.test(path)),
     ).toEqual([]);
@@ -58,13 +60,24 @@ describe('the Durian parser in the built bundles', () => {
 });
 
 describe('the Durian worker chunk', () => {
-  test('is one file: nothing it needs is fetched later', () => {
-    expect(worker.lazy.map(chunk => chunk.name)).toEqual([]);
+  test('fetches later only the folder parts’ parsers and KaTeX: nothing it needs to start, and nothing of the reading, is in a lazy chunk', () => {
+    const lazy = worker.lazy.flatMap(chunk => chunk.modules);
+    expect(lazy.length).toBeGreaterThan(0);
+    const allowed =
+      /durian-markdown\/src\/parts\/|\/node_modules\/(?:\.bun\/[^/]+\/node_modules\/)?(?:katex|diff|d3-[\w-]+|internmap|delaunator|robust-predicates)\//u;
+    expect(lazy.filter(path => !allowed.test(path))).toEqual([]);
+    // What the worker needs to start and to read the plainest message is in what it fetches first.
+    for (const start of [
+      /durian-markdown\/src\/document\.ts$/u,
+      /hypermedia\/parse-message\.ts$/u,
+      /hypermedia\/durian-serve\.ts$/u,
+    ])
+      expect(has(start).length).toBe(1);
   });
 
   test("holds Durian's parser and our parse halves", () => {
-    expect(has(/durian-hypermedia\/src\/document\.ts$/u).length).toBe(1);
-    expect(has(/durian-hypermedia\/src\/core\/dh-lib\.ts$/u).length).toBe(1);
+    expect(has(/durian-markdown\/src\/document\.ts$/u).length).toBe(1);
+    expect(has(/durian-markdown\/src\/core\/dh-lib\.ts$/u).length).toBe(1);
     expect(has(/hypermedia\/fy-render-parse\.ts$/u).length).toBe(1);
     expect(has(/hypermedia\/fence-boundaries\.ts$/u).length).toBe(1);
   });
@@ -72,7 +85,7 @@ describe('the Durian worker chunk', () => {
   test('holds no React, and no module that draws anything', () => {
     expect(has(/\/node_modules\/(?:\.bun\/[^/]+\/node_modules\/)?react(?:-dom)?\//u)).toEqual([]);
     expect(has(/\.tsx$/u)).toEqual([]);
-    expect(has(/durian-hypermedia\/src\/(?:react|ui)\//u)).toEqual([]);
+    expect(has(/durian-markdown\/src\/(?:react|ui)\//u)).toEqual([]);
   });
 
   test('holds none of the shell: its barrel and everything it starts are not in the worker', () => {
@@ -90,6 +103,6 @@ describe('the Durian worker chunk', () => {
   });
 
   test('holds neither the chart evaluator nor the scene compiler (a chart and an animation are held as code in a message)', () => {
-    expect(has(/durian-hypermedia\/src\/core\/(?:expr|chart|chart-llm|scene)\.ts$/u)).toEqual([]);
+    expect(has(/durian-markdown\/src\/core\/(?:expr|chart|chart-llm|scene)\.ts$/u)).toEqual([]);
   });
 });

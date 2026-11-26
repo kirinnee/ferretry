@@ -1,5 +1,7 @@
 /**
- * `durian-hypermedia/react/strict` as we use it; see `./durian-hypermedia.d.ts` for why this stands in for the package's
+ * `durian-markdown/react/*` as we use it (the strict entry for types, and each part's own entry: `document`, `terminal`, `filetree`, `editor`,
+ * `codewalk`, `animation`, `tierlist`, `alignment`, `containers`; `tsconfig.typecheck.json` maps every one of them here, and `durian-entries.test.ts` holds
+ * every name we import from an entry to the installed entry's exports); see `./durian-markdown.d.ts` for why this stands in for the package's
  * source, and why nothing here is loose. Shapes are `src/react/strict.tsx`, `src/react/document.tsx` and `src/react/context.tsx`.
  */
 import type { ComponentType, ReactElement, ReactNode } from 'react';
@@ -11,17 +13,17 @@ import type {
   BlockDef,
   BlockType,
   ChartBlock,
+  CodeWalkBlock,
   Document,
   EditorBlock,
   FileTreeBlock,
   HostBlock,
   InlineDef as ParsedInlineDef,
-  MermaidBlock,
   TabsBlock,
   TerminalBlock,
   TierListBlock,
   UrlPolicy,
-} from './durian-hypermedia';
+} from './durian-markdown';
 
 /**
  * A component per part type, keyed by the REAL block types only (a misspelled key is an error) and receiving the block
@@ -53,17 +55,6 @@ export interface LinkSlotProps {
   readonly children: ReactNode;
 }
 
-/** One step of a mermaid diagram, for the host's `Mermaid` slot to draw (Durian's `DiagramDrawProps`). */
-export interface MermaidSlotProps {
-  /** The step's mermaid source. */
-  readonly src: string;
-  readonly title: string;
-  /** This step's place in the diagram. */
-  readonly step: number;
-  /** True while this step is the one shown (every step is mounted at once). */
-  readonly active: boolean;
-}
-
 /** One Markdown heading, for the host's `Heading` slot to draw (Durian's `HeadingSlotProps`). */
 export interface HeadingSlotProps {
   /** The level written in the message (1 for `#`). */
@@ -80,7 +71,6 @@ export interface HeadingSlotProps {
 /** The chrome and Markdown elements a host may draw itself (Durian's `Slots`, the ones we set). */
 export interface Slots {
   readonly Heading?: ComponentType<HeadingSlotProps>;
-  readonly Mermaid?: ComponentType<MermaidSlotProps>;
   readonly Code?: ComponentType<CodeSlotProps>;
   readonly InlineCode?: ComponentType<InlineCodeSlotProps>;
   readonly Link?: ComponentType<LinkSlotProps>;
@@ -108,7 +98,7 @@ export interface DocumentProps {
   readonly blocks?: readonly BlockDef<any, ComponentType<{ readonly block: HostBlock; readonly data: any }>>[];
 }
 
-/** Every part, with mermaid drawn by the host's slot: imports neither mermaid nor DOMPurify. */
+/** Every part, under Trusted Types: no module of it sets an HTML string. */
 export declare function DhDocument(props: DocumentProps): ReactElement;
 /** The document view alone: only the parts named in `components` are drawn, the rest as LLM text. */
 export declare function DocumentView(props: DocumentProps): ReactElement;
@@ -122,8 +112,8 @@ export declare const FileTreePart: ComponentType<{ readonly block: FileTreeBlock
 export declare const EditorPart: ComponentType<{ readonly block: EditorBlock }>;
 /** The chart part (` ```chart `): Chart.js on a canvas, loaded when the chart mounts. */
 export declare const ChartPart: ComponentType<{ readonly block: ChartBlock }>;
-/** The mermaid part with no mermaid library: each step is drawn by the host's `Mermaid` slot. */
-export declare const HostMermaidPart: ComponentType<{ readonly block: MermaidBlock }>;
+/** The code walk part (` ```codewalk `): its notes are React elements. */
+export declare const CodeWalkPart: ComponentType<{ readonly block: CodeWalkBlock }>;
 /** The animation part (` ```animation `): 2D in SVG, 3D (three.js, a lazy module) when a reader opens it. */
 export declare const AnimationPart: ComponentType<{ readonly block: AnimationBlock }>;
 /** The tier list part. */

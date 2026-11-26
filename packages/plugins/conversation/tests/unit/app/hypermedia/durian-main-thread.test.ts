@@ -145,7 +145,7 @@ function reaching(starts: readonly string[]): Set<string> {
 
 /** Durian's own root entry (`parse`, `check`, `llmView`, `setYamlParser`) and its server entry; the React entries are not parsers. */
 const isParserEntry = (specifier: string): boolean =>
-  specifier === 'durian-hypermedia' || specifier === 'durian-hypermedia/server';
+  specifier === 'durian-markdown' || specifier === 'durian-markdown/server';
 
 describe('the Durian parser and the main thread', () => {
   it('is imported by three modules only: the message reader, its one-line YAML lock, and the CLI check', () => {
@@ -212,9 +212,9 @@ describe('the Durian parser and the main thread', () => {
       }
   });
 
-  it("is not called through the renderer's entries: no module takes parse, check or llmView from `durian-hypermedia/react`", () => {
+  it("is not called through the renderer's entries: no module takes parse, check or llmView from `durian-markdown/react`", () => {
     for (const [path, imports] of graph)
-      for (const each of imports.filter(each => each.specifier.startsWith('durian-hypermedia/react')))
+      for (const each of imports.filter(each => each.specifier.startsWith('durian-markdown/react')))
         expect(
           /\b(parse|check|llmView)\b/u.test(each.names),
           `${path} imports ${each.names} from ${each.specifier}`,

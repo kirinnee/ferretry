@@ -1,5 +1,5 @@
 /**
- * r12 H1 — THE UPSTREAM ASKS (C1-upstream-ask.md items 1–8 and 10; 9 is the licence) VERIFIED AGAINST THE PINNED v0.6.2 (first v0.5.1, re-run on each pin),
+ * r12 H1 — THE UPSTREAM ASKS (C1-upstream-ask.md items 1–8 and 10; 9 is the licence) VERIFIED AGAINST THE PINNED v0.7.0 (first v0.5.1, re-run on each pin),
  * one assert each, before any later unit relies on them. Items 1–5 are rendered for real (react-dom/server) through the
  * renderer's own entry; 6–8 are read off the installed source and the bundle test's strict graph; the heading-slug rule
  * is Durian's against GitHub's.
@@ -10,11 +10,11 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { parse } from 'durian-hypermedia';
+import { parse } from 'durian-markdown';
 import { configureDurian } from '../../../../app/hypermedia/durian.ts';
 
 const root = dirname(
-  createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-hypermedia/package.json'),
+  createRequire(join(import.meta.dir, '../../../../package.json')).resolve('durian-markdown/package.json'),
 );
 const source = (path: string): string => readFileSync(join(root, path), 'utf8');
 
@@ -22,7 +22,7 @@ const source = (path: string): string => readFileSync(join(root, path), 'utf8');
 interface DocumentModule {
   readonly DocumentView: (props: Record<string, unknown>) => ReactNode;
 }
-const { DocumentView } = (await import(['durian-hypermedia', 'react', 'document'].join('/'))) as DocumentModule;
+const { DocumentView } = (await import(['durian-markdown', 'react', 'document'].join('/'))) as DocumentModule;
 
 const PAGE = [
   '# Title',
@@ -46,7 +46,7 @@ const render = (props: Record<string, unknown>): string => {
   );
 };
 
-describe('C1 asks against durian-hypermedia v0.6.2', () => {
+describe('C1 asks against durian-markdown v0.7.0', () => {
   it('ask 1: a Code slot draws a fenced block, given lang, text and meta', () => {
     const html = render({
       slots: {
@@ -102,12 +102,23 @@ describe('C1 asks against durian-hypermedia v0.6.2', () => {
     expect(source('src/ui/codewalk.tsx')).not.toContain('dangerouslySetInnerHTML');
   });
 
-  it('ask 7: the host can swap mermaid out, and an entry exists that never imports it', () => {
-    expect(source('src/react/context.tsx')).toMatch(/Mermaid\?:\s*React\.ComponentType<MermaidSlotProps>/u);
+  it('ask 7: there is no mermaid in the package any more, so no entry can import it (the mermaid fence is ours: a host block)', () => {
+    // 0.7.0 removed the part and the `Mermaid` slot; the strict entry imports neither mermaid nor DOMPurify.
+    expect(source('src/react/context.tsx')).not.toMatch(/Mermaid/u);
+    expect(source('CHANGELOG.md')).toMatch(/Removed \(breaking\):\*\* the `mermaid` part/u);
     const strict = source('src/react/strict.tsx');
-    expect(strict).toContain('HostMermaidPart');
-    expect(strict).not.toMatch(/from "\.\/mermaid"|from "mermaid"|dompurify/u);
-    expect(source('src/react/mermaid-host.tsx')).not.toMatch(/import[^\n]*from "(?:mermaid|dompurify)"/u);
+    expect(strict).not.toMatch(/mermaid|dompurify/iu);
+    expect(JSON.parse(source('package.json')).dependencies).not.toHaveProperty('mermaid');
+    expect(JSON.parse(source('package.json')).dependencies).not.toHaveProperty('dompurify');
+    // A mermaid fence is plain code to Durian until a host names a block `mermaid`.
+    configureDurian();
+    const plain = parse('\n```mermaid\nflowchart TB\n A --> B\n```\n', { frontMatter: false });
+    expect(plain.blocks.map(block => block.type)).toEqual(['markdown']);
+    const hosted = parse('\n```mermaid\nflowchart TB\n A --> B\n```\n', {
+      frontMatter: false,
+      blocks: [{ name: 'mermaid' }],
+    });
+    expect(hosted.blocks.map(block => block.type)).toEqual(['host']);
   });
 
   it('ask 8: the legacy `Tabs` with an html prop is gone', () => {
@@ -115,7 +126,7 @@ describe('C1 asks against durian-hypermedia v0.6.2', () => {
   });
 
   it('ask 10: a tagged release with a CHANGELOG entry (and ask 9, the licence, is MIT)', () => {
-    expect(source('CHANGELOG.md')).toMatch(/^## 0\.6\.2/mu);
+    expect(source('CHANGELOG.md')).toMatch(/^## 0\.7\.0$/mu);
     expect(source('LICENSE')).toContain('MIT License');
   });
 
