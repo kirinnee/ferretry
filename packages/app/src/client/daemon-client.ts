@@ -202,13 +202,17 @@ const DEFAULT_REREAD_AFTER_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000, 
 const DEFAULT_BOOTSTRAP_DEADLINE_MS = 15_000;
 
 /** `work`, or a rejection once `ms` has passed without it: the bootstrap reads never wait for ever. */
-async function within<T>(work: Promise<T>, ms: number): Promise<T> {
+async function within<T>(work: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`the daemon did not answer within ${Math.round(ms / 1000)} s`)), ms);
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`the daemon did not answer within ${Math.round(ms / 1000)} s`));
+    }, ms);
   });
   try {
-    return await Promise.race([work, late]);
+    return await Promise.race([work(controller.signal), late]);
   } finally {
     clearTimeout(timer);
   }
@@ -253,6 +257,8 @@ export class DaemonClient {
   #rereadTimer: ReturnType<typeof setTimeout> | undefined;
   /** Background reads refused for a step-up, answered with that refusal for a while rather than sent again. */
   readonly #backoff: StepUpBackoff;
+  /** The daemon's machine-wide unlock refusal; other passive routes wait on it without sending. */
+  #lockedAnswer: TransportAnswer | undefined;
   readonly #personActing: () => boolean;
   /** The passkey a read nobody caused was last refused for, until a confirm: what the shell offers a press for. */
   #unasked: PasskeyNeed | undefined;
@@ -391,6 +397,7 @@ export class DaemonClient {
    */
   noteConfirmed(): void {
     this.#backoff.clear();
+    this.#lockedAnswer = undefined;
     this.#setUnasked(undefined);
     this.#generation += 1;
     this.#signal({ kind: 'confirmed' });
@@ -412,6 +419,14 @@ export class DaemonClient {
       answer = await this.#transport.request({ method: 'GET', path: GRANTS_PATH });
     } catch {
       answer = undefined;
+    }
+    if (generation === this.#generation && answer !== undefined) {
+      if (this.#need(answer)?.kind === 'unlock') this.#lockedAnswer = answer;
+      else if (answer.status < 400 && this.#lockedAnswer !== undefined) {
+        this.#lockedAnswer = undefined;
+        this.#backoff.clear();
+        if (this.#unasked?.kind === 'unlock') this.#setUnasked(undefined);
+      }
     }
     return { generation, answer, need: answer === undefined ? undefined : this.#need(answer) };
   }
@@ -472,7 +487,7 @@ export class DaemonClient {
     let inventory: Inventory;
     try {
       const answer = await within(
-        this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path }),
+        signal => this.#transport.request({ method: 'GET', path: parseRouteKey(INVENTORY_ROUTE).path, signal }),
         this.#bootstrapDeadlineMs,
       );
       inventory = inventoryFromAnswer(answer);
@@ -482,7 +497,7 @@ export class DaemonClient {
     }
     try {
       const health = await within(
-        this.#transport.request({ method: 'GET', path: parseRouteKey(HEALTH_ROUTE).path }),
+        signal => this.#transport.request({ method: 'GET', path: parseRouteKey(HEALTH_ROUTE).path, signal }),
         this.#bootstrapDeadlineMs,
       );
       const parsed = HealthEnvelopeSchema.safeParse(health.body);
@@ -634,9 +649,12 @@ export class DaemonClient {
     const key = unasked ? backoffKey(request) : undefined;
     const held = key === undefined ? undefined : this.#backoff.held(key);
     if (held !== undefined) return held;
+    const exempt = this.#surfaces.some(surface =>
+      surface.manifest.actions?.routes?.some(def => def.key === route && def.unlockExempt === true),
+    );
     const answer = await this.#confirmed(
       origin,
-      await this.#sent(request),
+      unasked && read && !exempt && this.#lockedAnswer !== undefined ? this.#lockedAnswer : await this.#sent(request),
       async () => {
         await this.#admit(caller, owner);
         return await this.#sent(request);
@@ -704,8 +722,10 @@ export class DaemonClient {
     } catch (error) {
       throw this.#failed(error, request.signal);
     }
-    if (answer.status === 401 && this.#need(answer)?.kind === 'unlock') this.#signal({ kind: 'locked', generation });
-    else if (isCapabilityRefusal(answer)) this.#signal({ kind: 'refused', generation });
+    if (answer.status === 401 && this.#need(answer)?.kind === 'unlock') {
+      if (generation === this.#generation) this.#lockedAnswer = answer;
+      this.#signal({ kind: 'locked', generation });
+    } else if (isCapabilityRefusal(answer)) this.#signal({ kind: 'refused', generation });
     return answer;
   }
 

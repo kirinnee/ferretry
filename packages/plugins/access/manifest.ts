@@ -131,6 +131,14 @@ export default definePlugin({
         audit: { record: AUDIT.passkeyRegistered },
         guard: GUARD_NONE,
       }),
+      route('POST /v1/passkeys/failure', {
+        minimum: 'operator',
+        caller: 'person',
+        unlockExempt: true,
+        noStore: true,
+        audit: { skip: 'a browser-reported failure, recorded in the grant journal without credential material' },
+        guard: GUARD_NONE,
+      }),
       route('POST /v1/passkeys/options', {
         minimum: 'operator',
         caller: 'person',

@@ -81,3 +81,14 @@ describe('the route request client', () => {
     expect(await client.request('/v1/passkeys', z.unknown()).catch(e => e)).toBe(reason);
   });
 });
+
+it('E-24 carries the reporting deadline signal through the real Access request adapter', async () => {
+  const { client, calls } = recorder(async () => ({}));
+  const controller = new AbortController();
+  await client.request('/v1/passkeys/failure', z.strictObject({}), {
+    method: 'POST',
+    signal: controller.signal,
+    body: '{}',
+  });
+  expect(calls[0]).toEqual({ route: 'POST /v1/passkeys/failure', init: { body: {}, signal: controller.signal } });
+});

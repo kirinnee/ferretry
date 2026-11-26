@@ -17,8 +17,6 @@ import {
 } from '../../contract/index.ts';
 
 const MICRO = 1_000_000;
-/** The ledger window read for a day's sum and a request's earlier spends: far more than any day holds. */
-const LEDGER_WINDOW_BYTES = 4 * 1024 * 1024;
 
 const SOURCE = CREATE_SPEND_SOURCE as SourceKey;
 
@@ -45,7 +43,9 @@ export class SpendLedger {
   constructor(private readonly state: StatePort) {}
 
   async facts(day: string, request: string): Promise<SpendFacts> {
-    const { records } = await this.state.tail(SPEND_LEDGER, { maxBytes: LEDGER_WINDOW_BYTES });
+    // A tail forgets old spends and makes their approvals reusable. Read every record, including after a restart.
+    const { records, unreadable } = await this.state.records(SPEND_LEDGER);
+    if (unreadable > 0) throw new Error('the creative spend history cannot be read, so nothing may be spent');
     // A refund repeats the line it gives back and counts against it, so every sum below is net of refunds.
     const sign = (record: SpendRecord): 1 | -1 => (record.refund === true ? -1 : 1);
     return {

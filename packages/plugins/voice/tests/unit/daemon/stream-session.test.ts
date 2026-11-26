@@ -762,7 +762,26 @@ describe('the voice stream: voice chat needs the fleet permission as well (revie
     await r.talk(3_000);
     expect(r.sent).toHaveLength(1);
     expect(r.audited).toEqual(['fer-1']);
-    expect(r.snapshot().last).toMatchObject({ turn: 2, outcome: 'failed', code: 'fleet_not_granted' });
+    expect(r.snapshot().error).toMatchObject({ code: 'fleet_not_granted' });
+    expect(r.closes.at(-1)).toEqual(STREAM_CLOSES.forbidden);
+  });
+
+  test('an unanswerable fleet grant on a generation closes the chat and later notices do nothing', async () => {
+    let broken = false;
+    const r = await rig({
+      mayChat: () => {
+        if (broken) throw new Error('synthetic grant lookup failure');
+        return true;
+      },
+    });
+    r.start(chat);
+    await r.talk(400);
+    broken = true;
+    r.stream.grantsChanged();
+    expect(r.snapshot().error).toMatchObject({ code: 'fleet_not_granted' });
+    expect(r.closes).toEqual([STREAM_CLOSES.forbidden]);
+    r.stream.grantsChanged();
+    expect(r.closes).toHaveLength(1);
   });
 
   test('a send the mailbox refused leaves no audit record', async () => {
