@@ -1,4 +1,5 @@
 import { mkdir } from 'node:fs/promises';
+import { isWithinDirectory } from '../../../daemon/lib/worktrees/policy.ts';
 import path from 'node:path';
 import should from 'should';
 import { ApiError } from '@ferretry/kernel/contract';
@@ -91,6 +92,8 @@ export async function worktreeRouteWorld(
   const built = buildWorktrees({
     state: state.port([WorktreesFile]),
     clock,
+    stateHomeHolding: async folder =>
+      isWithinDirectory(path.join(world.parent, 'home'), folder) ? path.join(world.parent, 'home') : undefined,
     io: world.io,
     sessions: async () => [],
     terminalRoots,

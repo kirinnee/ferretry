@@ -64,13 +64,13 @@ export function assessWorktreeRemoval(evidence: WorktreeRemovalEvidence): Worktr
   const resolvedPath = evidence.resolvedPath === undefined ? undefined : path.resolve(evidence.resolvedPath);
 
   if (evidence.ownerActive) blockers.push(blocker('active_session', 'the owning session is still active'));
-  if (!isWithinDirectory(resolvedRoot, recordedPath)) {
+  if (evidence.origin !== 'adopted' && !isWithinDirectory(resolvedRoot, recordedPath)) {
     blockers.push(blocker('outside_managed_root', 'the recorded checkout is outside the managed root'));
   }
   if (resolvedPath === undefined) {
     blockers.push(blocker('missing_worktree', 'the recorded checkout no longer exists'));
   } else {
-    if (!isWithinDirectory(resolvedRoot, resolvedPath)) {
+    if (evidence.origin !== 'adopted' && !isWithinDirectory(resolvedRoot, resolvedPath)) {
       blockers.push(blocker('outside_managed_root', 'the checkout resolves outside the managed root'));
     }
     if (resolvedPath !== recordedPath) {
@@ -95,6 +95,8 @@ export function assessWorktreeRemoval(evidence: WorktreeRemovalEvidence): Worktr
   }
 
   const checkout = evidence.checkout;
+  if (evidence.origin === 'adopted' && checkout === undefined)
+    blockers.push(blocker('repository_mismatch', 'the adopted linked-worktree identity could not be proved'));
   if (checkout !== undefined) {
     if (checkout.kind === 'main_checkout') {
       blockers.push(blocker('main_checkout', 'the primary checkout cannot be removed as a managed worktree'));

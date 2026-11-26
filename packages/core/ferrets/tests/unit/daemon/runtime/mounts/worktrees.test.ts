@@ -11,6 +11,7 @@ import type {
   WorktreeRemovalRequest,
 } from '../../../../../contract/index.ts';
 import should from 'should';
+import actions from '../../../../../manifest/actions/90-worktrees.actions.ts';
 import {
   WORKTREE_ROUTE_KEYS,
   type WorktreeRouteKey,
@@ -48,6 +49,10 @@ const REMOVED: RemovedWorktree = {
 
 /** A subsystem that answers with fixtures and records what the routes asked of it. */
 class FakeWorktrees implements WorktreeSubsystem {
+  async adopt(): Promise<CreatedWorktree> {
+    if (this.failure) throw this.failure;
+    return { worktree: VIEW, cwd: PATH };
+  }
   readonly checks: { path: string; cwd?: string }[] = [];
   readonly removals: WorktreeRemovalRequest[] = [];
   readonly creations: CreateWorktreeRequest[] = [];
@@ -103,13 +108,24 @@ const thrownBy = async (work: Promise<unknown>): Promise<unknown> =>
   );
 
 describe('the managed-worktree mount', () => {
-  it('should key the five handlers exactly as the manifest declares them', () => {
+  it('should put adoption behind operator and filesystem.configure admission', () => {
+    const adoption = actions.routes?.find(route => route.path === '/v1/worktrees/adopt');
+    should(adoption).match({
+      method: 'POST',
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      capability: { capability: 'filesystem', axis: 'configure' },
+    });
+  });
+  it('should key the handlers exactly as the manifest declares them', () => {
     // Act
     const routes = worktreeRoutes(new FakeWorktrees());
 
     // Assert
     should(Object.keys(routes)).eql([...WORKTREE_ROUTE_KEYS]);
     should(Object.keys(routes)).eql([
+      'POST /v1/worktrees/adopt',
       'GET /v1/worktrees/removal',
       'GET /v1/worktrees/repo',
       'POST /v1/worktrees/remove',
@@ -352,6 +368,7 @@ describe('the managed-worktree mount', () => {
       checkRemoval: async () => DECISION,
       remove: async () => REMOVED,
       create: async () => ({ worktree: VIEW, cwd: PATH }),
+      adopt: async () => ({ worktree: VIEW, cwd: PATH }),
       listRepo: async () => ({ commonDirectory: '/r/.git', worktrees: [], total: 0, truncated: false }),
     };
 

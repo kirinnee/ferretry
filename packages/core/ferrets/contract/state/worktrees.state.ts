@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 export const ManagedWorktreeRecordSchema = z.strictObject({
   version: z.literal(1),
+  origin: z.enum(['managed', 'adopted']).optional(),
   path: z.string().min(1),
   branch: z.string().min(1),
   repositoryRoot: z.string().min(1),
@@ -23,6 +24,15 @@ export const ManagedWorktreeRecordSchema = z.strictObject({
 
 export const ManagedWorktreeIntentSchema = z.strictObject({
   version: z.literal(1),
+  origin: z.enum(['managed', 'adopted']).optional(),
+  gitDir: z.string().min(1).optional(),
+  adoptionIdentity: z
+    .strictObject({
+      checkout: z.string().regex(/^\d+:\d+$/),
+      gitDirectory: z.string().regex(/^\d+:\d+$/),
+      commonDirectory: z.string().regex(/^\d+:\d+$/),
+    })
+    .optional(),
   path: z.string().min(1),
   branch: z.string().min(1),
   repositoryRoot: z.string().min(1),
