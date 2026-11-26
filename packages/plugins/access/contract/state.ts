@@ -1,13 +1,13 @@
 /**
  * Access's state files (§9.2), each a kernel `defineState` at `format: 1`. The record schemas are today's adapters'
  * (`daemon/src/adapters/{pairing,step-up,push,grants}/…`), copied field for field; every reader of an older shape is
- * gone (the bearer-token `devices.json`, the missing-`grants` default, the missing-capability fill, push `prefs`).
+ * gone (the bearer-token `devices.json`, the missing-`grants` default, push `prefs`); the one fill kept is a capability the file predates, read as OFF.
  * The kernel parses each file against its schema and reports a mismatch as damaged; no route returns a key.
  */
 import { defineState } from '@ferretry/kernel/contract';
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { CapabilityGrantsSchema } from '@ferretry/core-gate/contract';
+import { StoredCapabilityGrantsSchema } from '@ferretry/core-gate/contract';
 import { DaemonIdSchema, PairedDeviceIdSchema, PairingDeviceNameSchema } from './pairing.ts';
 import { AppOriginSchema } from './step-up.ts';
 import { BrowserPushSubscriptionSchema, PushDeviceViewSchema, RegisterPushDeviceRequestSchema } from './push.ts';
@@ -19,7 +19,7 @@ const Base64Url = z.string().regex(/^[A-Za-z0-9_-]+$/u);
 /**
  * One device grant. The public key is the ONLY thing kept about the device: SPKI, base64url, Ed25519 (the daemon half
  * checks the key shape when it writes). `grants` is required and closed: a malformed one fails the document closed
- * (G141's kept half); a missing one is not filled in.
+ * (G141's kept half); a capability the file predates reads as OFF (`StoredCapabilityGrantsSchema`), so a new capability never strands an older record.
  */
 export const DeviceRecordSchema = z.strictObject({
   id: PairedDeviceIdSchema,
@@ -31,7 +31,7 @@ export const DeviceRecordSchema = z.strictObject({
   pairedOver: z.enum(['direct', 'relay']).optional(),
   /** The device's non-extractable signing key, public half (SPKI, base64url). Never on the wire. */
   publicKey: Base64Url.min(1).max(512),
-  grants: CapabilityGrantsSchema,
+  grants: StoredCapabilityGrantsSchema,
   /** When `publicKey` last replaced an earlier one. Absent until a first rotation. */
   keyRotatedAt: InstantSchema.optional(),
 });
