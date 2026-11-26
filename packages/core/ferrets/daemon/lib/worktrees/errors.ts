@@ -13,6 +13,7 @@ export type WorktreeErrorCode =
   | 'not_git_repository'
   | 'invalid_session_id'
   | 'invalid_group'
+  | 'invalid_common_directory'
   | 'invalid_ownership_token'
   | 'invalid_branch'
   | 'branch_in_use'

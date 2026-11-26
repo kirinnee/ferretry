@@ -29,6 +29,9 @@ export const HARDENED_GIT_ARGUMENTS: readonly string[] = [
   'core.quotepath=false',
   '-c',
   'diff.external=',
+  // Local evidence must never start a transport, including a promisor's implicit lazy fetch.
+  '-c',
+  'protocol.allow=never',
   // Porcelain paths must stay repo-root-relative whatever a repo-local `status.relativePaths=true` says,
   // because that is the shape the status parser filters by prefix. And `showUntrackedFiles=all` is pinned
   // because a repo-local or global `no` would otherwise hide every untracked file from a Changes list.
@@ -65,6 +68,7 @@ export function gitEnvironment(
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_TERMINAL_PROMPT: '0',
     GIT_OPTIONAL_LOCKS: '0',
+    GIT_NO_LAZY_FETCH: '1',
     GIT_PAGER: 'cat',
     GIT_ASKPASS: '',
     ...(literalPathspecs ? { GIT_LITERAL_PATHSPECS: '1' } : {}),

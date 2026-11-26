@@ -6,6 +6,16 @@ import { fragment } from '../kit.ts';
 export default fragment({
   routes: [
     // Managed worktrees (today's `mounts/worktrees.ts`); the removal check is a deeper literal than the collection.
+    // The whole repository, hand-made worktrees included: the caller names ANY repository's common directory, so this maps
+    // the disk the way an outside-home folder read does, and asks the same axis (docs/grants.md).
+    route('GET /v1/worktrees/repo', {
+      minimum: 'operator',
+      caller: 'any',
+      capability: { capability: CAPABILITIES.filesystem, axis: 'configure' },
+      noStore: true,
+      audit: { skip: 'a repository worktree list records nothing, as the managed list does not' },
+      guard: { none: 'worktree paths, branches, heads and ferret ids of one repository, no file contents' },
+    }),
     // R-0211
     route('GET /v1/worktrees/removal', {
       minimum: 'operator',

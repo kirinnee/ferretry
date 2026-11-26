@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createKernelWorktreeHostIo } from '../adapters/worktrees/kernel-host-io.ts';
 import { liveTerminalRoots, withTerminalRemoval } from '../lib/worktrees/terminal-roots.ts';
+import { refuse } from '../lib/runtime/mounts/worktrees.ts';
 import { buildWorktrees } from '../modules/worktrees.ts';
 import { TerminalRoots } from '../../contract/index.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
@@ -41,7 +42,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   });
   late.worktrees = worktrees;
 
-  return { routes: worktrees.routes };
+  // The repository listing is also a read other plugins make (Projects' worktrees section): the same refusals, as ApiErrors.
+  return {
+    routes: worktrees.routes,
+    port: { repoWorktrees: async commonDir => await worktrees.listRepo(commonDir).catch(refuse) },
+  };
 }
 
 export default { id: 'worktrees', register } satisfies FerretsFeature;

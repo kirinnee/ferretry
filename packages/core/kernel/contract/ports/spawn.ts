@@ -66,15 +66,17 @@ export interface SpawnResult {
 
 /** `runBytes`: caps on what is kept of each stream (today's Git runner). */
 export interface SpawnBytesOptions extends SpawnOptions {
-  /** Default 1 MiB. Bytes past it are dropped and `stdoutTruncated` is set. */
+  /** Default 1 MiB. Extra bytes are drained and discarded; `stdoutTruncated` is set. */
   readonly maxStdoutBytes?: number;
-  /** Default 64 KiB. */
+  /** Default 64 KiB. Extra bytes are drained and discarded; `stderrTruncated` is set. */
   readonly maxStderrBytes?: number;
+  /** Opt in to killing the child and stopping both streams when either cap is exceeded. */
+  readonly killOnOutputLimit?: boolean;
 }
 
 /** A finished child's raw stdout, capped (today's `GitExecution`). A timeout kills it (`SIGKILL`). */
 export interface SpawnBytesResult {
-  /** `-1` when the child was abandoned at its timeout. */
+  /** `-1` when capture abandons the child at a timeout, cancellation or output cap. */
   readonly exitCode: number;
   readonly stdout: Uint8Array;
   readonly stderr: string;
