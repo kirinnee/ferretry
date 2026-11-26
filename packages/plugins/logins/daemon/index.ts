@@ -66,7 +66,8 @@ import { signInRoutes } from './lib/routes/sign-in.ts';
 import { HOSTED_APP_ORIGIN, HOSTED_APP_RELEASE_KEY } from './lib/shared/hosted.ts';
 import { endpointFiles, loginFiles, modelFiles } from './lib/config.ts';
 import { sanitizeHarnessEnv } from './lib/shared/harness-env.ts';
-import { type HarnessKind, isKind } from './lib/shared/harness.ts';
+import { type HarnessKind, isKind, supportedKindOfKey } from './lib/shared/harness.ts';
+import { credentialHarnessKeys } from './lib/shared/halves.ts';
 
 /** How often the Codex passive reading looks for a rollout that moved: an unchanged one costs a stat. */
 const CODEX_PASSIVE_USAGE_INTERVAL_MS = 30_000;
@@ -361,7 +362,15 @@ export function buildLoginsDaemon() {
       const api: Omit<LoginsApi, 'authorizeFetch'> = {
         launchRefusal: async (id, harness) => {
           const file = files().get(id);
-          if (harness !== 'opencode') return undefined;
+          if (supportedKindOfKey(harness) !== undefined) return undefined;
+          if (harness !== 'opencode') {
+            const kind = file === undefined ? undefined : supportedKindOfKey(file.harness);
+            return file !== undefined &&
+              kind !== undefined &&
+              credentialHarnessKeys({ ...file, harness: kind }).includes(harness)
+              ? undefined
+              : `Login ${id} cannot be spent by ${harness}`;
+          }
           if (file === undefined) return 'Choose an API-key or endpoint login for OpenCode';
           return file.store === 'environment'
             ? undefined

@@ -44,6 +44,7 @@ async function fixture(
     noInstall?: boolean;
     noManagers?: boolean;
     invalidState?: object;
+    files?: Readonly<Record<string, unknown>>;
   } = {},
 ) {
   const key = options.key ?? 'fourth';
@@ -140,7 +141,10 @@ async function fixture(
       judgeConfigWrite: () => (options.allowWrite === false ? ('hold' as const) : ('apply' as const)),
     }),
     config: {
-      runtimes: options.configured === false ? {} : { custom: { harness: key, login: 'key', profile: 'plain' } },
+      runtimes: {
+        ...(options.configured === false ? {} : { custom: { harness: key, login: 'key', profile: 'plain' } }),
+        ...options.files,
+      },
       profiles: { plain: { contents: [...(options.profile ?? [])] } },
       'model-sets': {
         pinned: { models: ['provider/model'], default: 'provider/model' },
@@ -330,6 +334,41 @@ test('unavailable registry, login, installation and malformed discovery are type
   f.logins.setLogins([]);
   expect(await f.start()).toEqual({ allow: false, reason: 'Login key does not exist' });
   expect((await f.host.request('GET', '/v1/runtimes')).status).toBe(200);
+});
+
+test('a malformed persisted harness never becomes a catalogue row or breaks healthy runtimes', async () => {
+  const f = await fixture({ files: { broken: { harness: 'bad key', login: 'key', profile: 'plain' } } });
+  const listed = await f.host.request('GET', '/v1/runtimes');
+  expect(listed.status).toBe(200);
+  expect(listed.json<{ runtimes: { name: string }[] }>().runtimes.map(row => row.name)).toContain('custom');
+  expect(listed.json<{ runtimes: { name: string }[] }>().runtimes.map(row => row.name)).not.toContain('broken');
+  expect(JSON.stringify((await f.host.request('GET', '/v1/runtimes/machine')).body)).toContain('broken');
+});
+
+test('a removed registration leaves an unreadable file, never an unregistered catalogue row', async () => {
+  const f = await fixture();
+  f.enabled(false);
+  const removed = await f.host.request('GET', '/v1/runtimes');
+  expect(removed.status).toBe(200);
+  expect(removed.json<{ runtimes: { name: string }[] }>().runtimes.map(row => row.name)).not.toContain('custom');
+  const machine = await f.host.request('GET', '/v1/runtimes/machine');
+  expect(machine.status).toBe(200);
+  expect(JSON.stringify(machine.body)).toContain('custom');
+});
+
+test('a malformed login id in a native runtime change returns a typed refusal', async () => {
+  const f = await fixture({ configured: false });
+  const result = await f.proposal({
+    kind: 'runtime.put',
+    name: 'custom',
+    credential: 'BAD ID',
+    profile: 'plain',
+    harness: 'fourth',
+    create: true,
+  });
+  expect(result.status).toBe(409);
+  expect(JSON.stringify(result.body)).toContain('runtime_refused');
+  expect(await f.api.get(RuntimeIdSchema.parse('custom'))).toBeUndefined();
 });
 
 test('a native default is used only on an exact discovery match; absent metadata is never invented', async () => {

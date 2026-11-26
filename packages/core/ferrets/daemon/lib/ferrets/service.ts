@@ -10,7 +10,7 @@ import { type DecidedFast, decideResume, launchFastOf, launchOptions } from './l
 import type { FerretsCore } from './core.ts';
 import { compactAt, setCompactAt } from './compact-at.ts';
 import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
-import { accountOf, repointRuntime, runtimeRecords } from './runtime-records.ts';
+import { accountOf, repointRuntime, runtimeRecords, withRuntimeModel } from './runtime-records.ts';
 import { lastSnapshot, prompt, turnObserved, turns } from './turns.ts';
 import { endOfExit } from './exit-cause.ts';
 import { KeyedSerialExecutor } from './serial.ts';
@@ -634,10 +634,7 @@ const canonicalFolder = (path: string): boolean =>
     .every(segment => segment !== '' && segment !== '.' && segment !== '..');
 
 /** The harness and login a runtime launches with, as Runtimes resolved them. */
-interface RuntimeAccount {
-  readonly harness: HarnessKey;
-  readonly login: string;
-}
+type RuntimeAccount = Pick<Extract<RuntimeStartResolution, { ok: true }>, 'harness' | 'login' | 'model'>;
 
 /** The record signed in on `login`: the one login a launch reads. */
 function withLogin(record: FerretRecord, login: string): FerretRecord {
@@ -1160,6 +1157,7 @@ export class FerretsService implements FerretsApi {
     const runtimeName = request.runtime ?? (await this.defaultRuntimeFor(request));
     const resolved = await this.resolveRuntime(runtimeName, { harness: request.harness, login: request.login });
     if (!resolved.ok) return resolved;
+    request = withRuntimeModel(request, resolved.value?.model);
     const login = resolved.value?.login ?? request.login;
     const harnessKey = resolved.value?.harness ?? request.harness ?? defaultHarnessKey(this.ports.harnessKeys());
     if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');

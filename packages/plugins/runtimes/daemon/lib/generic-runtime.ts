@@ -191,9 +191,11 @@ export class GenericRuntimes {
     if (this.deps.kernel.config.fileState(runtimeItems, name).state === 'invalid')
       return refused(`Runtime ${name} could not be read`);
     if (file.shell !== undefined) return unsupported(registered.label);
+    const loginId = LoginIdSchema.safeParse(file.login);
+    if (!loginId.success) return refused('A login id uses only lowercase letters, digits and dashes (at most 64)');
     const compatibility = await this.deps.logins.launchRefusal(file.login, registered.key);
     if (compatibility !== undefined) return refused(compatibility);
-    const login = await this.deps.logins.get(LoginIdSchema.parse(file.login)).catch(() => undefined);
+    const login = await this.deps.logins.get(loginId.data).catch(() => undefined);
     if (login === undefined) return refused(`Login ${file.login} does not exist`);
     if (!login.harnesses.includes(registered.key))
       return refused(`Login ${file.login} cannot be spent by ${registered.label}`);
@@ -270,36 +272,17 @@ export class GenericRuntimes {
       models: { choices: models.choices, ...(preferred === undefined ? {} : { default: preferred }) },
     };
   }
-  private async views(): Promise<readonly RuntimeView[]> {
+  private async views(notices: string[] = []): Promise<readonly RuntimeView[]> {
     const rows: RuntimeView[] = [];
     for (const [name, file] of this.deps.kernel.config.collection(runtimeItems)) {
       if (file.harness === undefined || supportedKindOfKey(file.harness) !== undefined) continue;
+      // Unregistered files are set aside and reported by the legacy config reader.
+      if (this.registered(file.harness) === undefined) continue;
       try {
         rows.push((await this.read(name, file)).view);
       } catch (error) {
         if (!(error instanceof ApiError)) throw error;
-        const login = await this.deps.logins.get(LoginIdSchema.parse(file.login)).catch(() => undefined);
-        if (login === undefined) continue;
-        rows.push({
-          id: name,
-          name,
-          wrapper: name,
-          harness: file.harness,
-          harnessDisplayName: this.registered(file.harness)?.label ?? file.harness,
-          credential: { id: file.login, store: login.store, status: login.status.word },
-          profile: file.profile,
-          stack: {
-            harness: file.harness,
-            available: { available: false, reason: error.message },
-            applied: [],
-            skipped: [],
-            conflicts: [],
-            partial: [],
-          },
-          modelSet: { source: 'harness-default' },
-          launch: { available: false, reason: error.message },
-          sameAs: [],
-        });
+        notices.push(`config/runtimes/${name}.yaml could not be read: ${error.message}`);
       }
     }
     return rows;
@@ -327,7 +310,8 @@ export class GenericRuntimes {
         const ids = new Set(logins.map(login => login.id as string));
         const generic: RuntimeSummary[] = [];
         for (const [name, file] of this.deps.kernel.config.collection(runtimeItems)) {
-          if (!this.nativeFile(name) || !ids.has(file.login)) continue;
+          if (!this.nativeFile(name) || !ids.has(file.login) || this.registered(file.harness ?? '') === undefined)
+            continue;
           const label = this.registered(file.harness ?? '')?.label ?? file.harness ?? name;
           generic.push({
             id: name as RuntimeId,
@@ -368,6 +352,17 @@ export class GenericRuntimes {
   start(base: RuntimeStartSource): RuntimeStartSource {
     return {
       ...base,
+      resolve: async (name, harness) => {
+        const answer = await base.resolve(name, harness);
+        if (!answer.ok || !this.nativeFile(name)) return answer;
+        try {
+          const model = (await this.read(name)).models.default;
+          return { ...answer, ...(model === undefined ? {} : { model }) };
+        } catch (error) {
+          if (!(error instanceof ApiError)) throw error;
+          return { ok: false, sentence: error.message };
+        }
+      },
       catalog: async name => {
         if (!this.nativeFile(name)) return await base.catalog?.(name);
         const row = await this.read(name);
@@ -518,6 +513,8 @@ export class GenericRuntimes {
       catalog: overlay(base.catalog, {
         machine: async governance => {
           const old = await base.catalog.machine(governance);
+          const notices = [...(old.notices ?? [])];
+          const rows = await this.views(notices);
           const tools = await Promise.all(
             this.registrations().map(async item => {
               const detected = await this.detect(item);
@@ -532,7 +529,8 @@ export class GenericRuntimes {
           return {
             ...old,
             tools: [...old.tools, ...tools],
-            runtimeCount: old.runtimeCount + (await this.views()).length,
+            runtimeCount: old.runtimeCount + rows.length,
+            ...(notices.length === 0 ? {} : { notices }),
           };
         },
         runtimes: async () => {

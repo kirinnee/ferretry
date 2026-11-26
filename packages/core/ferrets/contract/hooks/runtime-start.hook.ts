@@ -9,6 +9,8 @@ export type RuntimeStartResolution =
       readonly ok: true;
       readonly harness: z.infer<typeof HarnessKeySchema>;
       readonly login: string;
+      /** An exact discovery default or profile pin selected by a native runtime; a caller's model wins. */
+      readonly model?: string;
       /** The runtime is derived from its login (no runtime file holds the name), so the name follows whichever login now derives it. */
       readonly derived?: true;
     }
