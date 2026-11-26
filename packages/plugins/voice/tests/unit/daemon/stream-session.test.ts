@@ -266,6 +266,30 @@ describe('V1: entering voice mode', () => {
     expect(registry.enterVoice('fer-1', refused.clock.nowMs())).toBe(true);
   });
 
+  test('after a refused first entry the next renewal reacquires the claim AND tries the entry, never holding a claim it did not send', async () => {
+    const registry = new StreamRegistry();
+    const attempts: string[] = [];
+    let accept = false;
+    const late = await rig({
+      registry,
+      send: async (_ferretId, _message, sendId) => {
+        attempts.push(sendId);
+        return accept ? { ok: true } : { ok: false, code: 'send_refused' };
+      },
+    });
+    late.start(chat);
+    await late.talk(400);
+    expect(attempts).toHaveLength(1);
+    accept = true;
+    for (let second = 0; second < 64; second += 4) {
+      await late.clock.advance(4_000);
+      await late.talk(40);
+    }
+    expect(attempts).toHaveLength(2);
+    expect(late.closes).toEqual([]);
+    expect(registry.enterVoice('fer-1', late.clock.nowMs())).toBe(false);
+  });
+
   test('Talk to test, a refused grant and a missing Conversation send nothing, and a refused entry does not end the stream', async () => {
     const testing = await rig();
     testing.start(test_);

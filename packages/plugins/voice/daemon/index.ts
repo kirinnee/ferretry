@@ -27,7 +27,8 @@ import { ElevenLabsReplyVoice } from './lib/reply/elevenlabs.ts';
 import { routeReplyVoice } from './lib/reply/router.ts';
 import { StateReplySpend } from './adapters/state-reply-spend.ts';
 import { SpeechEngine } from './lib/engine/engine.ts';
-import { type VoiceStreamDeps, voiceStreamAccept } from './lib/stream/accept.ts';
+import type { CallerGovernance } from '@ferretry/core-gate/contract';
+import { mayUseFleet, type VoiceStreamDeps, voiceStreamAccept } from './lib/stream/accept.ts';
 import { enterVoiceChat } from './lib/stream/entry.ts';
 import { StreamRegistry } from './lib/stream/registry.ts';
 import { voiceRoutes } from './routes.ts';
@@ -168,6 +169,7 @@ export default implementDaemon(manifest, {
       const address = await ferrets.resolve(reference);
       return address.kind === 'ferret' ? address.id : undefined;
     };
+    const fleetUseGranted = (): boolean => gate.policy()?.grants.fleet.use === true;
     const sockets = {
       'GET /v1/voice/stream': voiceStreamAccept({
         engine,
@@ -176,14 +178,14 @@ export default implementDaemon(manifest, {
         registry,
         send,
         resolveFerret,
-        fleetUseGranted: () => gate.policy()?.grants.fleet.use === true,
+        fleetUseGranted,
         audit: async draft => await gate.audit(draft),
         log: { info: (message, fields) => streamLog.info(message, fields) },
       }),
     };
 
     return {
-      routes: voiceRoutes(enhancement, speedups, engine, reply, elevenlabs, body =>
+      routes: voiceRoutes(enhancement, speedups, engine, reply, elevenlabs, (body, call) =>
         enterVoiceChat(
           {
             registry,
@@ -191,6 +193,8 @@ export default implementDaemon(manifest, {
             send,
             resolveFerret,
             log: { info: (message, fields) => streamLog.info(message, fields) },
+            mayChat: () =>
+              mayUseFleet((call as { readonly governance?: CallerGovernance }).governance, fleetUseGranted),
           },
           body,
         ),

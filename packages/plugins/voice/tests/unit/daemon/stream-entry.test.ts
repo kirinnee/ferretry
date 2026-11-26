@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { ApiError } from '@ferretry/kernel/contract';
+import { ApiError, BodyTooLargeError } from '@ferretry/kernel/contract';
+import { cap } from '@ferretry/core-gate/contract';
+import plugin from '../../../manifest.ts';
 import { ENTRY_LEASE_MS, VOICE_ENTRY_MESSAGE } from '../../../contract/index.ts';
 import { enterVoiceChat, VoiceEntryRefused, type VoiceEntryDeps } from '../../../daemon/lib/stream/entry.ts';
 import { StreamRegistry } from '../../../daemon/lib/stream/registry.ts';
@@ -25,6 +27,7 @@ function rig(overrides: Partial<VoiceEntryDeps> & { refuse?: boolean } = {}) {
     },
     resolveFerret: async reference => (reference === 'nobody' ? undefined : `id-of-${reference}`),
     log: { info: () => undefined },
+    mayChat: () => true,
     ...overrides,
   };
   return {
@@ -131,3 +134,44 @@ describe('POST /v1/voice/entry', () => {
     }
   });
 });
+
+describe('who may ask, and how much', () => {
+  test('voice chat needs BOTH grants: the route is gated on voice.use and the machine asks for fleet.use as well', async () => {
+    const entry = plugin.actions?.routes?.find(route => route.key === 'POST /v1/voice/entry');
+    expect(entry?.capability).toEqual(cap('voice', 'use'));
+    const denied = rig({ mayChat: () => false });
+    await expect(enterVoiceChat(denied.deps, ask)).rejects.toMatchObject({ status: 403, code: 'fleet_not_granted' });
+    expect(denied.sent).toEqual([]);
+    // Nothing was claimed either: a refused device cannot hold the chat's entry against the ones that may.
+    expect(denied.registry.enterVoice('id-of-desk', 1_000_000)).toBe(true);
+  });
+
+  test('the body is read under a route-sized limit, and an oversize body is a 413', async () => {
+    let asked: number | undefined;
+    const handler = voiceRoutes(none, none, none, none, none, async body => enterVoiceChat(rig().deps, body))[
+      'POST /v1/voice/entry'
+    ];
+    const request = {
+      text: async (limit?: number) => {
+        asked = limit;
+        throw new BodyTooLargeError(limit ?? 0);
+      },
+    };
+    const failure = await handler({ request } as never).catch((error: unknown) => error);
+    expect(asked).toBeLessThanOrEqual(4_096);
+    expect((failure as ApiError).status).toBe(413);
+  });
+
+  test('a refused send is not retried at once: asking again inside the cool-down sends nothing', async () => {
+    const refused = rig({ refuse: true });
+    expect(await enterVoiceChat(refused.deps, ask)).toEqual({ sent: false });
+    expect(refused.sent).toHaveLength(1);
+    for (let again = 0; again < 5; again += 1) expect(await enterVoiceChat(refused.deps, ask)).toEqual({ sent: false });
+    expect(refused.sent).toHaveLength(1);
+    refused.advance(ENTRY_LEASE_MS);
+    expect(await enterVoiceChat(refused.deps, ask)).toEqual({ sent: false });
+    expect(refused.sent).toHaveLength(2);
+  });
+});
+
+const none = {} as never;

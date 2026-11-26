@@ -304,7 +304,12 @@ export class VoiceStream implements SocketHandler {
     this.begin('chat');
     // A client that named no session is one that predates the entry message: it gets the stream it always had.
     if (session === undefined) return;
-    this.cancels.push(this.parts.clock.every(milliseconds(ENTRY_RENEW_MS), () => void this.parts.entry?.enter(id)));
+    // A renewal keeps a live claim live; one that finds none (a refused first entry gave it up) takes it AND tells the ferret.
+    this.cancels.push(
+      this.parts.clock.every(milliseconds(ENTRY_RENEW_MS), () => {
+        if (!this.ended && this.parts.entry?.enter(id) !== false) void this.sendEntry(id, session);
+      }),
+    );
     if (this.parts.entry?.enter(id) !== false) void this.sendEntry(id, session);
   }
 

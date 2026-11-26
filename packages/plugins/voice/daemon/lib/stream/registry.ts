@@ -1,5 +1,8 @@
 import { ENTRY_LEASE_MS } from '../../../contract/index.ts';
 
+/** After a refused entry send, a phone's ask for the same ferret sends nothing for this long: a refusal is not a thing to hammer. */
+const ENTRY_COOLDOWN_MS = 10_000;
+
 /** One stream per device and two per machine (design §3.1, admission), and one voice chat per ferret. */
 const MACHINE_STREAMS = 2;
 
@@ -13,6 +16,8 @@ export class StreamRegistry {
   private readonly ferrets = new Set<string>();
   /** Per ferret, until when its entry claim stands. */
   private readonly entries = new Map<string, number>();
+  /** Per ferret, until when a phone's ask is held off after its entry send was refused. */
+  private readonly cooling = new Map<string, number>();
 
   /** Whether a stream from this device would be taken, without taking it (so the upgrade can answer 429 first). */
   wouldAdmit(device: string): 'ok' | 'device_busy' | 'machine_busy' {
@@ -43,6 +48,16 @@ export class StreamRegistry {
   /** Gives the claim up (the entry message was refused), so the next to enter sends it instead. */
   leaveVoice(ferret: string): void {
     this.entries.delete(ferret);
+  }
+
+  /** Starts the cool-down of a ferret whose entry send was just refused (a phone's ask only; the stream retries on its own renewal). */
+  coolEntry(ferret: string, nowMs: number): void {
+    for (const [held, until] of this.cooling) if (until <= nowMs) this.cooling.delete(held);
+    this.cooling.set(ferret, nowMs + ENTRY_COOLDOWN_MS);
+  }
+
+  entryCooling(ferret: string, nowMs: number): boolean {
+    return (this.cooling.get(ferret) ?? 0) > nowMs;
   }
 
   /** The one voice chat a ferret may have; `undefined` while another stream holds it. */

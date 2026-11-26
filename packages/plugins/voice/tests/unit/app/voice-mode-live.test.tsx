@@ -134,7 +134,10 @@ describe('V4: voice mode speaks while the ferret works', () => {
     await begin(r);
     const sink = r.store.live('ferret-1');
     expect(sink).toBeDefined();
-    await interact(() => void sink?.say({ text: 'Looking at the build.', kind: 'first' }, () => undefined));
+    await interact(
+      () =>
+        void sink?.say({ id: 'Looking at the build.', text: 'Looking at the build.', kind: 'first' }, () => undefined),
+    );
     expect(r.lineFrames()).toEqual([{ t: 'speak', id: 0, text: 'Looking at the build.' }]);
     expect(r.controller.getState().status).not.toBe('reading');
     await interact(() =>
@@ -151,10 +154,10 @@ describe('V4: voice mode speaks while the ferret works', () => {
     const sink = r.store.live('ferret-1');
     const none = (): void => undefined;
     await interact(() => {
-      sink?.say({ text: 'First.', kind: 'first' }, none);
-      sink?.say({ text: 'Step one.', kind: 'line' }, none);
-      sink?.say({ text: 'Step two.', kind: 'line' }, none);
-      sink?.say({ text: 'All done.', kind: 'line' }, none);
+      sink?.say({ id: 'First.', text: 'First.', kind: 'first' }, none);
+      sink?.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, none);
+      sink?.say({ id: 'Step two.', text: 'Step two.', kind: 'line' }, none);
+      sink?.say({ id: 'All done.', text: 'All done.', kind: 'line' }, none);
     });
     // Arrival alone takes nothing back: nobody said any of them was progress.
     expect(r.lineFrames().filter(frame => frame.t === 'drop')).toEqual([]);
@@ -170,7 +173,10 @@ describe('V4: voice mode speaks while the ferret works', () => {
     await begin(r);
     const told: string[] = [];
     await interact(
-      () => void r.store.live('ferret-1')?.say({ text: 'First.', kind: 'first' }, outcome => told.push(outcome)),
+      () =>
+        void r.store
+          .live('ferret-1')
+          ?.say({ id: 'First.', text: 'First.', kind: 'first' }, outcome => told.push(outcome)),
     );
     await mounted?.unmount();
     mounted = null;
@@ -181,7 +187,10 @@ describe('V4: voice mode speaks while the ferret works', () => {
     const r = rig();
     await begin(r);
     await interact(
-      () => void r.store.live('ferret-1')?.say({ text: 'A long line to talk over.', kind: 'first' }, () => undefined),
+      () =>
+        void r.store
+          .live('ferret-1')
+          ?.say({ id: 'A long line to talk over.', text: 'A long line to talk over.', kind: 'first' }, () => undefined),
     );
     await interact(() =>
       r.listeners().onFrame?.(unit({ audio: { id: 0, samples: 100, last: false } }, new Int16Array(100).fill(3))),
@@ -202,7 +211,11 @@ describe('V4: voice mode speaks while the ferret works', () => {
     await interact(() => r.store.start('ferret-1', 'desk'));
     await interact(() => r.listeners().onOpen?.());
     await interact(() => r.listeners().onFrame?.(unit({ reply: 'absent' })));
-    expect(r.store.live('ferret-1')?.say({ text: 'Nobody can say this.', kind: 'first' }, () => undefined)).toBe(false);
+    expect(
+      r.store
+        .live('ferret-1')
+        ?.say({ id: 'Nobody can say this.', text: 'Nobody can say this.', kind: 'first' }, () => undefined),
+    ).toBe(false);
     expect(r.lineFrames()).toEqual([]);
   });
 

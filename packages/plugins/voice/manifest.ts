@@ -156,7 +156,8 @@ export default definePlugin({
       route('POST /v1/voice/entry', {
         minimum: 'operator',
         caller: 'person',
-        capability: cap('fleet', 'use'),
+        // Voice chat needs BOTH use grants, as the stream does: this is the voice half, and the handler asks for `fleet.use`.
+        capability: cap('voice', 'use'),
         noStore: true,
         audit: {
           skip: "a fixed sentence of the machine's own, with none of the person's words; a stream sends it unrecorded as well",

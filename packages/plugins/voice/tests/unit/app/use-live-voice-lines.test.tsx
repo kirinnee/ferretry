@@ -140,13 +140,13 @@ describe('live voice lines on the page', () => {
     await mounted.render(
       r.tree(working('<voice>On it.</voice>\n\n<voice>Tests are running.</voice>\n\n<voice>All gre')),
     );
-    expect(r.said).toEqual([
+    expect(r.said.map(({ id: _id, ...line }) => line)).toEqual([
       { text: 'On it.', kind: 'first' },
       { text: 'Tests are running.', kind: 'line' },
     ]);
     const done = '<voice>On it.</voice>\n\n<voice>Tests are running.</voice>\n\n<voice>All green.</voice>';
     await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(done)], turn: 'your-turn', at: 10_000 }));
-    expect(r.said.at(-1)).toEqual({ text: 'All green.', kind: 'line' });
+    expect(r.said.map(({ id: _id, ...line }) => line).at(-1)).toEqual({ text: 'All green.', kind: 'line' });
   });
 
   test('the reading at the end of the turn does not say what the machine voice already said', async () => {
@@ -232,6 +232,60 @@ describe('live voice lines on the page', () => {
       expect(r.synth.spoken.map(each => each.text).join(' ')).toContain('Build is green');
     });
 
+    test('a result that opens with the sentence a progress line said is not dropped with it: only the progress line is', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      const first = ferret('<voice>I will check the release.</voice>');
+      await mounted.render(r.tree({ rows: [person('u0'), ask, first], turn: 'working', at: 1_000 }));
+      const progress = ferret('<voice>The build passed.</voice>', 'a2');
+      await mounted.render(r.tree({ rows: [person('u0'), ask, first, progress], turn: 'working', at: 1_000 }));
+      const result = ferret('<voice>The build passed.</voice>\n\n<voice>The release is ready.</voice>', 'a3');
+      await mounted.render(
+        r.tree({ rows: [person('u0'), ask, first, progress, tool(), result], turn: 'working', at: 1_000 }),
+      );
+      expect(SPOKEN(r)).toEqual([
+        'I will check the release.',
+        'The build passed.',
+        'The build passed.',
+        'The release is ready.',
+      ]);
+      // Line ids 0 and 1 are the first line and the progress line; the progress line is the one taken back.
+      expect(r.machine.dropped).toEqual([1]);
+    });
+
+    test('a synthesis failure AFTER the reading decided still gets the one-line reply read', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      const text = '<voice>The release is blocked by one failing check.</voice>';
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'working', at: 1_000 }));
+      // The turn ends while the machine is still making the line: the reading finds it being said and waits.
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'your-turn', at: 10_000 }));
+      await settle();
+      expect(r.synth.spoken).toHaveLength(0);
+      r.machine.heard(0, 'failed', 'reply_voice_failed');
+      await settle();
+      expect(r.synth.spoken.map(each => each.text).join(' ')).toContain('release is blocked');
+    });
+
+    test('a late failure after the person has sent something new says nothing', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      const text = '<voice>Build is green.</voice>';
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'working', at: 1_000 }));
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'your-turn', at: 10_000 }));
+      await settle();
+      // The conversation moved on to a new turn: the failed line of the old one is no longer anyone's to say.
+      await mounted.render(
+        r.tree({ rows: [person('u0'), ask, ferret(text), person('u2')], turn: 'working', at: 20_000 }),
+      );
+      r.machine.heard(0, 'failed', 'reply_voice_failed');
+      await settle();
+      expect(r.synth.spoken).toHaveLength(0);
+    });
+
     test('only the lines that did not play are read: the played one is not said twice', async () => {
       const r = rig({ sink: 'real' });
       mounted = await mount(r.tree(START));
@@ -290,6 +344,6 @@ describe('live voice lines on the page', () => {
         at: 1_000,
       }),
     );
-    expect(r.said).toEqual([{ text: 'Next.', kind: 'first' }]);
+    expect(r.said.map(({ id: _id, ...line }) => line)).toEqual([{ text: 'Next.', kind: 'first' }]);
   });
 });

@@ -4,12 +4,12 @@
  * the voice-mode store (`LiveSink`). While voice mode is on, each line the ferret finishes is handed to the machine at once;
  * while it is off this does nothing at all and forgets everything, so a later voice mode starts from the rows of that moment.
  *
- * It hands the end-of-turn reading one thing back: `unsaid(markdown)`, what of that text was not played live (the text itself
+ * It hands the end-of-turn reading one thing back: `unsaid(pick, again)`, what of that reply was not played live (the text itself
  * when nothing of it was, the lines not played when some were, nothing when all were), so Auto-read says every line once and
  * a line that failed to play, or was cut off, is still heard.
  */
 import { useEffect, useRef } from 'react';
-import { createLiveReader, type LiveReader, type LiveRow } from '../lib/voice-mode/live-reader.ts';
+import { createLiveReader, type LiveReader, type LiveRow, type ReplyWords } from '../lib/voice-mode/live-reader.ts';
 import type { LiveSink } from '../lib/voice-mode/live-lines.ts';
 
 export interface LiveVoiceLinesInput {
@@ -23,7 +23,9 @@ export interface LiveVoiceLinesInput {
   readonly sink: () => LiveSink | undefined;
 }
 
-export function useLiveVoiceLines(input: LiveVoiceLinesInput): { readonly unsaid: (markdown: string) => string } {
+export function useLiveVoiceLines(input: LiveVoiceLinesInput): {
+  readonly unsaid: (pick: ReplyWords, again?: () => void) => string;
+} {
   const reader = useRef<LiveReader | null>(null);
   reader.current ??= createLiveReader();
   const latest = useRef(input);
@@ -42,12 +44,14 @@ export function useLiveVoiceLines(input: LiveVoiceLinesInput): { readonly unsaid
     const looked = current.observe(rows, { live, visible });
     for (const line of looked.lines) {
       // A voice that cannot take the line leaves it to the reading at the end of the turn. One that can is told what became of it.
-      const settled = current.accepted(line.text);
+      const settled = current.accepted(line.id);
       if (sink?.say(line, settled) !== true) settled('unplayed');
     }
     if (looked.progress.length > 0) sink?.outdate(looked.progress);
   }, [active, rows, live, visible]);
 
-  const unsaid = useRef((markdown: string): string => reader.current?.unsaid(markdown) ?? markdown);
+  const unsaid = useRef(
+    (pick: ReplyWords, again?: () => void): string => reader.current?.unsaid(pick, again) ?? pick.markdown,
+  );
   return { unsaid: unsaid.current };
 }

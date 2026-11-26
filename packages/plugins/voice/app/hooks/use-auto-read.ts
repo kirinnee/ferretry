@@ -71,6 +71,7 @@ import {
   pickReply,
   pickReplyToSend,
   type QuestionLike,
+  type ReplyPick,
   type SendEvidence,
 } from '../lib/voice-chat/reply-picker.ts';
 import { useDocumentVisible } from '../shell-voice.ts';
@@ -108,7 +109,7 @@ export interface AutoReadInput {
    * True for a reply whose spoken lines were already said while the ferret worked (voice mode's live lines): the reading at
    * the end of the turn then leaves it alone instead of saying it twice. A question is never covered.
    */
-  readonly unsaid?: (markdown: string) => string;
+  readonly unsaid?: (pick: ReplyPick, again: () => void) => string;
   /** The clock, for tests. */
   readonly now?: () => number;
 }
@@ -175,14 +176,41 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
    * Null until this hook has read a prompt of the turn: a prompt already on screen when the page opened is never read.
    */
   const asked = useRef<AskedPrompt | null>(null);
+  /**
+   * The reading of a reply whose lines were still being said when the turn ended: if one of them then FAILS to be made, this
+   * is what says the reply instead. Anything that ends the reading (a new send, a tap, a new conversation, the tab hidden)
+   * takes it away, so a late failure never speaks at someone who has moved on.
+   */
+  const recovery = useRef<object | null>(null);
 
   const state = useSyncExternalStore(controller.subscribe, controller.getState, () => IDLE);
   const reading = mine.current !== null && state.status === 'reading' && state.key === mine.current;
 
   const stop = useCallback(() => {
+    recovery.current = null;
     if (mine.current !== null && controller.getState().key === mine.current) controller.stop();
     mine.current = null;
   }, [controller]);
+
+  /** The words of a picked reply that were not said live; a reply still being said when asked keeps the reading waiting for a failure. */
+  const unsaidOf = useCallback(
+    (pick: ReplyPick): string => {
+      const ticket = {};
+      recovery.current = ticket;
+      const again = (): void => {
+        if (recovery.current !== ticket) return;
+        recovery.current = null;
+        const current = latest.current;
+        if (!current.enabled || !current.visible || !controller.supported) return;
+        const words = unsaidOf(pick);
+        if (words === '') return;
+        mine.current = pick.key;
+        controller.read(pick.key, words, readOptionsOf(current.settings));
+      };
+      return latest.current.unsaid?.(pick, again) ?? pick.markdown;
+    },
+    [controller],
+  );
 
   const evaluate = useCallback(() => {
     if (timer.current !== null) clearTimeout(timer.current);
@@ -249,8 +277,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
             ? pickQuestion(current.question)
             : pickReply(current.entries, step.fire.startedAt, current.settings.whatToRead);
         // Voice mode said some of these lines live: only the ones not played are read.
-        const words =
-          step.fire.outcome === 'needs-input' ? pick.markdown : (current.unsaid?.(pick.markdown) ?? pick.markdown);
+        const words = step.fire.outcome === 'needs-input' ? pick.markdown : unsaidOf(pick);
         if (words === '') return;
         mine.current = pick.key;
         if (step.fire.outcome === 'needs-input')
@@ -276,7 +303,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
           timer.current = setTimeout(evaluate, Math.max(1, Math.ceil(TEXT_SETTLED_MS - Math.max(0, quiet))));
         } else {
           pending.current = null;
-          const words = current.unsaid?.(pick.markdown) ?? pick.markdown;
+          const words = unsaidOf(pick);
           if (words === '') return;
           mine.current = pick.key;
           controller.read(pick.key, words, readOptionsOf(current.settings));
@@ -285,7 +312,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
       return;
     }
     if (step.recheckInMs !== null) timer.current = setTimeout(evaluate, step.recheckInMs);
-  }, [controller, now]);
+  }, [controller, now, unsaidOf]);
 
   // A different conversation starts clean.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `scope` is the trigger.
@@ -294,6 +321,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     token.current = null;
     pending.current = null;
     asked.current = null;
+    recovery.current = null;
     mine.current = null;
     return () => {
       if (timer.current !== null) clearTimeout(timer.current);
@@ -332,6 +360,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
       const current = latest.current;
       // A newer send replaces whatever the older one was still waiting to read.
       pending.current = null;
+      recovery.current = null;
       if (
         !current.enabled ||
         !controller.supported ||
@@ -400,6 +429,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   // judged now, while nobody is looking — so it can never be read on return.
   useEffect(() => {
     if (visible) return;
+    recovery.current = null;
     controller.stop();
     evaluate();
   }, [visible, controller, evaluate]);

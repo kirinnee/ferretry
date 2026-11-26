@@ -10,14 +10,25 @@
  * conversation with history; a cached copy of the rows the daemon has not confirmed), a line of a tab nobody is looking at,
  * or a line still being written (the grammar's `open` line is drawn, never said). Those are consumed in silence, once.
  *
- * `unsaid` answers one question for the end-of-turn reading: which of this text's spoken lines were not said live? Each line
- * handed on is followed to what became of it: `played` and `dropped` are never read again, `unplayed` (a piece failed, the person
- * talked over it, the stream went away) is read, and a line still being said counts as said.
+ * A LINE IS KNOWN BY ITS ID: its row and its place in the row. Its words are not an identity (a result can open with the very
+ * sentence a progress line said), so progress, playback and the end-of-turn reading all follow ids.
+ *
+ * `unsaid` answers one question for the end-of-turn reading: which of the reply's spoken lines were not said live? Each line
+ * handed on is followed to what became of it: `played` and `dropped` are never read again, `failed` and `unplayed` (a piece
+ * failed, the person talked over it) are read, and a line still being said counts as said. When the answer is nothing only
+ * because lines are still being made or said, the reader keeps the reading waiting: if one of them then FAILS, the reading is
+ * handed back to be tried again with what is owed then (a late failure never silences a reply).
  */
 import { splitVoice } from '@ferretry/plugin-conversation/contract';
 import type { LineKind, LineOutcome } from './live-lines.ts';
 
 /** The part of a transcript row this reads: the chat's own rows satisfy it as they are. */
+/** The reply the end-of-turn reading picked: its words, and the rows they came from (none for a silent turn or a question). */
+export interface ReplyWords {
+  readonly markdown: string;
+  readonly rows?: readonly { readonly id: string; readonly text: string }[];
+}
+
 export interface LiveRow {
   readonly id: string;
   readonly kind: string;
@@ -36,8 +47,8 @@ interface LiveObservation {
 
 interface LiveLooked {
   /** Lines finished since the last look, oldest first. */
-  readonly lines: readonly { text: string; kind: LineKind }[];
-  /** Lines (by their words) that are now known to be progress, once each: the ferret went on working after them. */
+  readonly lines: readonly { id: string; text: string; kind: LineKind }[];
+  /** Lines (by id) that are now known to be progress, once each: the ferret went on working after them. */
   readonly progress: readonly string[];
 }
 
@@ -47,18 +58,23 @@ export interface LiveReader {
    * The line was taken by the voice. Returns what to tell the reader when it is settled (played, dropped, or not played);
    * a settlement of an earlier turn's line is ignored.
    */
-  accepted(text: string): (outcome: LineOutcome) => void;
+  accepted(id: string): (outcome: LineOutcome) => void;
   /**
-   * What the end-of-turn reading still has to say of this text: the text itself when nothing of it was said live, the
-   * lines not yet said (as `<voice>` lines) when some were, and nothing (an empty string) when all of them were.
+   * What the end-of-turn reading still has to say of this reply: the markdown itself when nothing of it was said live, the
+   * lines not yet said (as `<voice>` lines) when some were, and nothing (an empty string) when all of them were. What it
+   * returns is the reading's from now on (those lines count as said). `again` is called, once, when the answer was nothing
+   * only because some lines were still being said and one of them then failed: ask `unsaid` again then.
    */
-  unsaid(markdown: string): string;
+  unsaid(pick: ReplyWords, again?: () => void): string;
   /** Starts over (voice mode went off): the next look is a first look. */
   reset(): void;
 }
 
 const closedLines = (text: string): readonly string[] =>
   splitVoice(text).flatMap(piece => (piece.kind === 'voice' && !piece.open ? [piece.text] : []));
+
+/** The id of a line: its row, and its place among the row's closed lines. */
+const lineId = (rowId: string, index: number): string => `${rowId}#${String(index)}`;
 
 const isPerson = (row: LiveRow): boolean => row.kind === 'user' && row.peer === undefined;
 const isAssistantWords = (row: LiveRow): boolean =>
@@ -80,8 +96,10 @@ export function createLiveReader(): LiveReader {
   let seeded = false;
   let turnKey: string | undefined;
   let linesThisTurn = 0;
-  /** What became of each line handed to the voice this turn, by its words. A line not here was not said. */
+  /** What became of each line handed to the voice this turn, by id. A line not here was not said. */
   let said = new Map<string, Said>();
+  /** The reading that is waiting on lines still being said: told once when one of them fails. */
+  let waiting: { readonly ids: Set<string>; readonly again: () => void } | undefined;
   /** Per row, how many of its lines were already reported as progress. */
   let reported = new Map<string, number>();
   /** Bumped when a turn begins or the reader starts over, so a settlement of an earlier line is not taken for this turn's. */
@@ -92,7 +110,7 @@ export function createLiveReader(): LiveReader {
       const held = Array.isArray(rows) ? rows : [];
       const lastPerson = held.findLastIndex(isPerson);
       const key = lastPerson === -1 ? '' : (held[lastPerson]?.id ?? '');
-      const out: { text: string; kind: LineKind }[] = [];
+      const out: { id: string; text: string; kind: LineKind }[] = [];
       const progress: string[] = [];
       // The first look, and any look at a copy the daemon has not confirmed, only learns what is already there.
       const silent = !seeded || !live;
@@ -102,6 +120,7 @@ export function createLiveReader(): LiveReader {
         linesThisTurn = 0;
         said = new Map();
         reported = new Map();
+        waiting = undefined;
         epoch += 1;
       }
       const lastWork = held.findLastIndex(isWork);
@@ -112,33 +131,48 @@ export function createLiveReader(): LiveReader {
         consumed.set(row.id, Math.max(from, lines.length));
         // A row from before the person's last message belongs to an earlier turn: it is never said now.
         if (silent || index < lastPerson || !visible) return;
-        for (const text of lines.slice(from)) {
-          out.push({ text, kind: linesThisTurn === 0 ? 'first' : 'line' });
+        lines.slice(from).forEach((text, offset) => {
+          out.push({ id: lineId(row.id, from + offset), text, kind: linesThisTurn === 0 ? 'first' : 'line' });
           linesThisTurn += 1;
-        }
+        });
         // The ferret used a tool after these words: they were narration, not the end of the turn.
         if (lastWork > index) {
           const before = reported.get(row.id) ?? 0;
-          progress.push(...lines.slice(before));
+          progress.push(...lines.slice(before).map((_, offset) => lineId(row.id, before + offset)));
           reported.set(row.id, lines.length);
         }
       });
       return { lines: out, progress };
     },
-    accepted(text) {
-      said.set(text, 'pending');
+    accepted(id) {
+      said.set(id, 'pending');
       const mine = epoch;
       return outcome => {
         if (mine !== epoch) return;
-        if (outcome === 'unplayed') said.delete(text);
-        else said.set(text, outcome);
+        if (outcome === 'unplayed' || outcome === 'failed') said.delete(id);
+        else said.set(id, outcome);
+        const held = waiting;
+        if (held === undefined || !held.ids.has(id)) return;
+        held.ids.delete(id);
+        if (outcome === 'failed') {
+          waiting = undefined;
+          held.again();
+        } else if (held.ids.size === 0) waiting = undefined;
       };
     },
-    unsaid(markdown) {
-      const lines = closedLines(markdown);
-      const owed = lines.filter(text => !said.has(text));
-      if (lines.length === 0 || owed.length === lines.length) return markdown;
-      return owed.map(text => `<voice>${text}</voice>`).join('\n\n');
+    unsaid(pick, again) {
+      const lines = (pick.rows ?? []).flatMap(row =>
+        closedLines(row.text).map((text, index) => ({ id: lineId(row.id, index), text })),
+      );
+      if (lines.length === 0) return pick.markdown;
+      const owed = lines.filter(line => !said.has(line.id));
+      const pending = lines.filter(line => said.get(line.id) === 'pending').map(line => line.id);
+      waiting = again !== undefined && pending.length > 0 ? { ids: new Set(pending), again } : undefined;
+      if (owed.length === 0) return '';
+      // What is handed to the reading is the reading's: a failure later must not hand it out a second time.
+      for (const line of owed) said.set(line.id, 'played');
+      if (owed.length === lines.length) return pick.markdown;
+      return owed.map(line => `<voice>${line.text}</voice>`).join('\n\n');
     },
     reset() {
       consumed = new Map();
@@ -147,6 +181,7 @@ export function createLiveReader(): LiveReader {
       linesThisTurn = 0;
       said = new Map();
       reported = new Map();
+      waiting = undefined;
       epoch += 1;
     },
   };

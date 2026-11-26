@@ -46,6 +46,13 @@ function deviceKeyOf(call: {
 
 const FLEET_USE = cap('fleet', 'use');
 
+/**
+ * Whether a caller may use the fleet right now, for what voice chat sends: its own governance (a snapshot) AND, for a governed
+ * caller, the machine-wide grant read live. The stream asks at its start and before every send; the phone's entry route asks too.
+ */
+export const mayUseFleet = (governance: CallerGovernance | undefined, fleetUseGranted: () => boolean): boolean =>
+  governance?.decide(FLEET_USE).allowed === true && (!governance.governed || fleetUseGranted());
+
 /** The record a typed send leaves (`POST /v1/ferrets/:ferretId/send`): the ferret is the subject, never the words. */
 export function sentAuditDraft(actor: AuditDraft['actor'], ferretId: string): AuditDraft {
   return {
@@ -117,8 +124,7 @@ export function voiceStreamAccept(deps: VoiceStreamDeps): SocketAccept {
         streamId,
         nonce: deps.nonce ?? randomNonce,
         send: deps.send(),
-        mayChat: () =>
-          governance?.decide(FLEET_USE).allowed === true && (!governance.governed || deps.fleetUseGranted()),
+        mayChat: () => mayUseFleet(governance, deps.fleetUseGranted),
         resolveFerret: deps.resolveFerret,
         recordSent: sentRecorder(deps, auditActor, streamId),
         claimFerret: ferret => registry.claimFerret(ferret),

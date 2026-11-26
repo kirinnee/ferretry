@@ -57,6 +57,25 @@ async function readJson(call: CallContext): Promise<unknown> {
   }
 }
 
+/** An entry ask is a ferret name and a session name: nothing near this size is a real one. */
+const ENTRY_BODY_MAX_BYTES = 1_024;
+
+/** The entry's body, read under its own small limit (a bigger one is a 413); anything that is not JSON is read as nothing and refused as a bad ask. */
+async function readEntryBody(call: CallContext): Promise<unknown> {
+  let text: string;
+  try {
+    text = await call.request.text(ENTRY_BODY_MAX_BYTES);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 413) throw error;
+    return undefined;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 function pathProvider(call: CallContext): SpeedupProvider {
   const parsed = SpeedupProviderSchema.safeParse(decodeParameter(call.params.get('provider') ?? ''));
   if (!parsed.success) throw new ApiError(404, 'there is no speed-up provider by that name', 'unknown_provider');
@@ -75,7 +94,7 @@ export function voiceRoutes(
   engine: Pick<VoiceEngineApi, 'view' | 'install' | 'remove'>,
   reply: Pick<ReplyVoiceApi, 'view' | 'install' | 'remove'>,
   elevenlabs: { status(): Promise<ElevenLabsStatus>; voices(): Promise<ElevenLabsVoices> },
-  entry: (body: unknown) => Promise<VoiceEntryResult>,
+  entry: (body: unknown, call: CallContext) => Promise<VoiceEntryResult>,
 ): {
   readonly 'POST /v1/voice/entry': RouteHandler;
   readonly 'GET /v1/voice/engine': RouteHandler;
@@ -94,7 +113,7 @@ export function voiceRoutes(
     // A phone's own voice mode asks the machine to tell the ferret once (the same claim the stream uses).
     'POST /v1/voice/entry': async call => {
       try {
-        return jsonResponse(await entry(await readJson(call).catch(() => undefined)));
+        return jsonResponse(await entry(await readEntryBody(call), call));
       } catch (error) {
         if (error instanceof VoiceEntryRefused) throw new ApiError(error.status, error.message, error.code);
         throw error;

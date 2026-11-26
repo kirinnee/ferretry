@@ -111,7 +111,7 @@ const track = (): { outcomes: Record<string, string>; ended: (text: string) => (
 describe('live lines: speaking while the ferret works', () => {
   test('a line is handed to the machine voice at once, with no wait for the turn', () => {
     const f = fake();
-    expect(f.lines.say({ text: 'Looking now.', kind: 'first' }, noop)).toBe(true);
+    expect(f.lines.say({ id: 'Looking now.', text: 'Looking now.', kind: 'first' }, noop)).toBe(true);
     expect(f.spoken).toEqual([{ id: 0, text: 'Looking now.' }]);
     expect(f.active).toEqual([true]);
   });
@@ -119,9 +119,9 @@ describe('live lines: speaking while the ferret works', () => {
   test('a newer line takes back a waiting line KNOWN to be progress, never the first line or an unmarked one', () => {
     const f = fake();
     const t = track();
-    f.lines.say({ text: 'First.', kind: 'first' }, t.ended('First.'));
-    f.lines.say({ text: 'Step one.', kind: 'line' }, t.ended('Step one.')); // waits behind the first line
-    f.lines.say({ text: 'Step two.', kind: 'line' }, t.ended('Step two.'));
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, t.ended('First.'));
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, t.ended('Step one.')); // waits behind the first line
+    f.lines.say({ id: 'Step two.', text: 'Step two.', kind: 'line' }, t.ended('Step two.'));
     // Nothing said that step one is progress: it is kept.
     expect(f.dropped).toEqual([]);
     f.lines.outdate(['First.', 'Step one.']);
@@ -133,11 +133,11 @@ describe('live lines: speaking while the ferret works', () => {
 
   test('the newest line is kept even when it is called progress: nothing is behind it', () => {
     const f = fake();
-    f.lines.say({ text: 'First.', kind: 'first' }, noop);
-    f.lines.say({ text: 'Step one.', kind: 'line' }, noop);
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, noop);
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, noop);
     f.lines.outdate(['Step one.']);
     expect(f.dropped).toEqual([]);
-    f.lines.say({ text: 'Step two.', kind: 'line' }, noop);
+    f.lines.say({ id: 'Step two.', text: 'Step two.', kind: 'line' }, noop);
     // The arrival of a newer line is what takes the older progress line back.
     f.lines.outdate(['Step one.']);
     expect(f.dropped).toEqual([1]);
@@ -145,10 +145,10 @@ describe('live lines: speaking while the ferret works', () => {
 
   test('a progress line already being heard is not taken back', () => {
     const f = fake();
-    f.lines.say({ text: 'First.', kind: 'first' }, noop);
-    f.lines.say({ text: 'Step one.', kind: 'line' }, noop);
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, noop);
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, noop);
     f.lines.onSpeech(heard(1, 'started'));
-    f.lines.say({ text: 'Step two.', kind: 'line' }, noop);
+    f.lines.say({ id: 'Step two.', text: 'Step two.', kind: 'line' }, noop);
     f.lines.outdate(['Step one.']);
     expect(f.dropped).toEqual([]);
   });
@@ -156,7 +156,7 @@ describe('live lines: speaking while the ferret works', () => {
   test('a line is PLAYED only once the player has finished with its sound', () => {
     const f = fake();
     const t = track();
-    f.lines.say({ text: 'Step one.', kind: 'first' }, t.ended('Step one.'));
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'first' }, t.ended('Step one.'));
     f.lines.onSpeech(heard(0, 'started'));
     f.remaining = 800;
     f.lines.onSpeech(heard(0, 'finished'));
@@ -168,24 +168,24 @@ describe('live lines: speaking while the ferret works', () => {
     expect(t.outcomes).toEqual({ 'Step one.': 'played' });
   });
 
-  test('a line whose sound failed is told as unplayed', () => {
+  test('a line whose sound failed is told as failed', () => {
     const f = fake();
     const t = track();
-    f.lines.say({ text: 'Step one.', kind: 'first' }, t.ended('Step one.'));
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'first' }, t.ended('Step one.'));
     f.lines.onSpeech({ id: 0, event: 'failed', code: 'reply_voice_failed' });
-    expect(t.outcomes).toEqual({ 'Step one.': 'unplayed' });
+    expect(t.outcomes).toEqual({ 'Step one.': 'failed' });
   });
 
   test('a machine voice that is absent, or no stream, takes nothing, so the end-of-turn reading keeps it', () => {
-    expect(fake({ reply: 'absent' }).lines.say({ text: 'x', kind: 'first' }, noop)).toBe(false);
-    expect(fake({ streamOpen: false }).lines.say({ text: 'x', kind: 'first' }, noop)).toBe(false);
+    expect(fake({ reply: 'absent' }).lines.say({ id: 'x', text: 'x', kind: 'first' }, noop)).toBe(false);
+    expect(fake({ streamOpen: false }).lines.say({ id: 'x', text: 'x', kind: 'first' }, noop)).toBe(false);
     // A voice still loading is not absent: the machine queues the line and speaks it as soon as it is ready.
-    expect(fake({ reply: 'loading' }).lines.say({ text: 'x', kind: 'first' }, noop)).toBe(true);
+    expect(fake({ reply: 'loading' }).lines.say({ id: 'x', text: 'x', kind: 'first' }, noop)).toBe(true);
   });
 
   test('it is active until its sound has been heard, then says so once', () => {
     const f = fake();
-    f.lines.say({ text: 'Step one.', kind: 'first' }, noop);
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'first' }, noop);
     f.lines.onSpeech(heard(0, 'started'));
     f.remaining = 800;
     f.lines.onSpeech(heard(0, 'finished'));
@@ -199,14 +199,14 @@ describe('live lines: speaking while the ferret works', () => {
   test('barge-in hushes the stream once, tells what waited as unplayed and goes quiet', () => {
     const f = fake();
     const t = track();
-    f.lines.say({ text: 'First.', kind: 'first' }, t.ended('First.'));
-    f.lines.say({ text: 'Step one.', kind: 'line' }, t.ended('Step one.'));
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, t.ended('First.'));
+    f.lines.say({ id: 'Step one.', text: 'Step one.', kind: 'line' }, t.ended('Step one.'));
     f.lines.hush();
     expect(f.hushes()).toBe(1);
     expect(f.active).toEqual([true, false]);
     expect(t.outcomes).toEqual({ 'First.': 'unplayed', 'Step one.': 'unplayed' });
     // Nothing is left to be outdated by the next line.
-    f.lines.say({ text: 'Step two.', kind: 'line' }, noop);
+    f.lines.say({ id: 'Step two.', text: 'Step two.', kind: 'line' }, noop);
     f.lines.outdate(['Step one.']);
     expect(f.dropped).toEqual([]);
     f.lines.hush();
@@ -217,7 +217,7 @@ describe('live lines: speaking while the ferret works', () => {
   test('when the panel goes away nothing stays polled, and what had not played is told as unplayed', () => {
     const f = fake();
     const t = track();
-    f.lines.say({ text: 'First.', kind: 'first' }, t.ended('First.'));
+    f.lines.say({ id: 'First.', text: 'First.', kind: 'first' }, t.ended('First.'));
     expect(f.polling()).toBe(true);
     f.lines.dispose();
     expect(f.polling()).toBe(false);
