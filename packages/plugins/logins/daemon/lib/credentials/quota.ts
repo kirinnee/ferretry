@@ -211,29 +211,47 @@ function codexWindow(
   };
 }
 
+type CodexSlot = 'short' | 'long';
+
+/** The slot a window's KNOWN length puts it in, or `undefined` when its length was not given. */
+function slotByLength(w: CodexWindow): CodexSlot | undefined {
+  if (w.lengthSeconds === undefined) return undefined;
+  return w.lengthSeconds >= ONE_DAY_SECONDS ? 'long' : 'short';
+}
+
 /**
- * Slots the two Codex windows by LENGTH, not by position: a plan with one window reports it as `primary`
- * whatever its length, so a lone weekly window must not be taken for the short one. A window whose length
- * is not given keeps its position's meaning (primary short, secondary long).
+ * Slots the Codex windows by what is KNOWN, and by position only where nothing is: a window whose length is given
+ * takes the slot that length names whatever its position (a plan with one window reports it as `primary` however
+ * long it is). A window with no length takes the slot a known one left free; with nothing known, the primary is
+ * the short window and the secondary the long one. If two windows of one class are given, the slot keeps the
+ * longer (long) or shorter (short) of them, the primary on a tie, and the other is left out rather than drawn
+ * under a name that is not its length.
  */
 function codexReading(primary: CodexWindow, secondary: CodexWindow, providerAtLimit: boolean): QuotaReading {
-  const isLong = (w: CodexWindow, positional: boolean): boolean =>
-    w.lengthSeconds === undefined ? positional : w.lengthSeconds >= ONE_DAY_SECONDS;
-  const primaryLong = isLong(primary, false);
-  const secondaryLong = isLong(secondary, true);
-  const both = primary.window !== undefined && secondary.window !== undefined;
-  // Two windows of one class cannot both take a slot, so they keep their position's meaning: only a long
-  // primary beside a short secondary is out of order.
-  const swapped = primaryLong && !secondaryLong;
-  const lone = primary.window === undefined ? secondary : primary;
-  const loneLong = primary.window === undefined ? secondaryLong : primaryLong;
-  const [short, long]: [CodexWindow, CodexWindow] = both
-    ? swapped
-      ? [secondary, primary]
-      : [primary, secondary]
-    : loneLong
-      ? [{}, lone]
-      : [lone, {}];
+  const entries = [
+    { window: primary, position: 'short' as const },
+    { window: secondary, position: 'long' as const },
+  ].filter(entry => entry.window.window !== undefined);
+  const placed: Partial<Record<CodexSlot, CodexWindow>> = {};
+  for (const { window: candidate } of entries) {
+    const slot = slotByLength(candidate);
+    if (slot === undefined) continue;
+    const held = placed[slot];
+    const wins =
+      held === undefined ||
+      (slot === 'long'
+        ? (candidate.lengthSeconds ?? 0) > (held.lengthSeconds ?? 0)
+        : (candidate.lengthSeconds ?? 0) < (held.lengthSeconds ?? 0));
+    if (wins) placed[slot] = candidate;
+  }
+  for (const { window: candidate, position } of entries) {
+    if (slotByLength(candidate) !== undefined) continue;
+    const free = (['short', 'long'] as const).filter(slot => placed[slot] === undefined);
+    const slot = free.includes(position) ? position : free[0];
+    if (slot !== undefined) placed[slot] = candidate;
+  }
+  const short = placed.short ?? {};
+  const long = placed.long ?? {};
   return {
     ...(short.window === undefined ? {} : { shortWindow: short.window }),
     ...(long.window === undefined ? {} : { longWindow: long.window }),

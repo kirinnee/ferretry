@@ -53,6 +53,17 @@ async function leftBehind(subject: BrowserProfileStore, chromePid: number): Prom
   );
 }
 
+/**
+ * The profile as a dead daemon left it after FERRETRY launched `chromePid`: the lease carries the launch record the
+ * store stamped when the live daemon reported that pid, then its daemon died.
+ */
+async function leftBehindByFerretry(subject: BrowserProfileStore, chromePid: number): Promise<void> {
+  const seed = await subject.acquire({ sessionId: 'seed' });
+  await seed.updateChromePid(chromePid);
+  const record = JSON.parse(await readFile(subject.leaseFile, 'utf8')) as Record<string, unknown>;
+  await writeFile(subject.leaseFile, JSON.stringify({ ...record, sessionId: 'dead', daemonPid: await exitedPid() }));
+}
+
 async function gone(pid: number): Promise<boolean> {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (!alive(pid)) return true;
@@ -71,7 +82,7 @@ describe('BrowserProfileStore orphaned Chrome', () => {
     // Arrange
     const subject = await store();
     const orphan = idleProcess(`--user-data-dir=${subject.profile}`);
-    await leftBehind(subject, orphan);
+    await leftBehindByFerretry(subject, orphan);
 
     // Act
     const lease = await subject.acquire({ sessionId: 'next' });
@@ -81,20 +92,44 @@ describe('BrowserProfileStore orphaned Chrome', () => {
     should(await gone(orphan)).be.true();
   });
 
-  it('should stop a Chrome that still holds the profile lock though no lease names it', async () => {
-    // Arrange
+  it('should NEVER signal the owner own Chrome on the profile when the lease holds no Ferretry launch record', async () => {
+    // Arrange: a dead daemon's lease names a pid, but no start time was ever stamped: nothing proves it is Ferretry's.
     const subject = await store();
-    const orphan = idleProcess(`--user-data-dir=${subject.profile}`);
-    const seed = await subject.acquire({ sessionId: 'seed' });
-    await seed.release();
-    await symlink(`test-host-${orphan}`, path.join(subject.profile, 'SingletonLock'));
+    const owners = idleProcess(`--user-data-dir=${subject.profile}`);
+    await leftBehind(subject, owners);
+
+    // Act + Assert
+    await should(subject.acquire({ sessionId: 'next' })).be.rejectedWith(BrowserProfileBusyError);
+    should(alive(owners)).be.true();
+  });
+
+  it('should NEVER signal a Chrome whose start time differs from the one Ferretry recorded', async () => {
+    // Arrange: the recorded pid is now the owner's browser, started after the one Ferretry launched.
+    const subject = await store();
+    const owners = idleProcess(`--user-data-dir=${subject.profile}`);
+    await leftBehindByFerretry(subject, owners);
+    const record = JSON.parse(await readFile(subject.leaseFile, 'utf8')) as Record<string, unknown>;
+    await writeFile(subject.leaseFile, JSON.stringify({ ...record, chromeStartedAt: 'an-earlier-boot:1' }));
 
     // Act
     const lease = await subject.acquire({ sessionId: 'next' });
 
-    // Assert
-    should(await gone(orphan)).be.true();
-    should(lease.sessionId).equal('next');
+    // Assert: the stale record is cleared as a recycled pid, and nothing was signalled.
+    should(lease.recoveredDeadOwner).be.true();
+    should(alive(owners)).be.true();
+  });
+
+  it('should NEVER signal a Chrome that holds the profile lock when no lease names it', async () => {
+    // Arrange: with no Ferretry record at all this is indistinguishable from the owner's own browser.
+    const subject = await store();
+    const owners = idleProcess(`--user-data-dir=${subject.profile}`);
+    const seed = await subject.acquire({ sessionId: 'seed' });
+    await seed.release();
+    await symlink(`test-host-${owners}`, path.join(subject.profile, 'SingletonLock'));
+
+    // Act + Assert
+    await should(subject.acquire({ sessionId: 'next' })).be.rejectedWith(BrowserProfileBusyError);
+    should(alive(owners)).be.true();
   });
 
   it('should never signal a process that is not on this profile, and still reclaim the lease from a recycled pid', async () => {
@@ -155,14 +190,15 @@ describe('BrowserProfileStore orphaned Chrome', () => {
     const subject = new BrowserProfileStore(path.join(root, 'daemon'), {
       hostname: 'test-host',
       orphans: {
-        readArguments: async () => undefined,
-        terminate: async pid => {
+        identify: async () => undefined,
+        signal: pid => {
           terminated.push(pid);
-          return true;
+          return 'delivered';
         },
+        sleep: async () => undefined,
       },
     });
-    await leftBehind(subject, orphan);
+    await leftBehindByFerretry(subject, orphan);
 
     // Act + Assert
     await should(subject.acquire({ sessionId: 'next' })).be.rejectedWith(BrowserProfileBusyError);

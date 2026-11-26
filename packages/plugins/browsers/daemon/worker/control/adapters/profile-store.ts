@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,7 +17,8 @@ import {
   passwordSavingOff,
   sameBrowserProfileLease,
 } from '../index.ts';
-import { type OrphanChromeInspector, profileHolder } from './orphan-chrome.ts';
+import { clearRecordedChrome, type OrphanChromeInspector } from './orphan-chrome.ts';
+import { systemOrphanChromeInspector } from '../../adapters/proc-chrome.ts';
 
 // GAP (kernel port, banned-globals stays visible here): Chrome takes a REAL `--user-data-dir`, so the agent profile, its
 // lease file and the symlink checks need a real state path and a lease no kernel port gives (`kernel.state` stores
@@ -43,72 +43,6 @@ const BrowserProfileMetadataSchema = z.object({
   latestChromeVersion: MetadataFieldSchema,
   latestAt: MetadataFieldSchema,
 }) satisfies z.ZodType<BrowserProfileMetadata>;
-
-// The system's way to read and stop a leftover Chrome: `/proc` (`ps` where there is none) and a signal, which need the
-// real process table and a real clock, so they sit beside the store's other real-host reads.
-async function readArgumentsFromProc(pid: number): Promise<readonly string[] | undefined> {
-  try {
-    return (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split('\0').filter(part => part !== '');
-  } catch {
-    return undefined;
-  }
-}
-
-/** macOS has no `/proc`; `ps` prints the command line as one string, which is enough to find the flag. */
-function readArgumentsFromPs(pid: number): Promise<readonly string[] | undefined> {
-  return new Promise(resolve => {
-    execFile('ps', ['-o', 'command=', '-p', String(pid)], (error, stdout) => {
-      const line = stdout.trim();
-      resolve(error || line === '' ? undefined : line.split(/\s+(?=--)/));
-    });
-  });
-}
-
-function aliveByProbe(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-async function goneWithin(pid: number, milliseconds: number, alive: (pid: number) => boolean): Promise<boolean> {
-  const deadline = Date.now() + milliseconds;
-  while (alive(pid)) {
-    if (Date.now() >= deadline) return false;
-    await Bun.sleep(25);
-  }
-  return true;
-}
-
-/** SIGTERM first so Chrome can flush its profile, SIGKILL only if it ignores that. */
-async function terminateProcess(
-  pid: number,
-  alive: (pid: number) => boolean = aliveByProbe,
-  termMilliseconds = 2_000,
-  killMilliseconds = 1_000,
-): Promise<boolean> {
-  try {
-    process.kill(pid, 'SIGTERM');
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ESRCH';
-  }
-  if (await goneWithin(pid, termMilliseconds, alive)) return true;
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ESRCH';
-  }
-  return await goneWithin(pid, killMilliseconds, alive);
-}
-
-function systemOrphanChromeInspector(alive: (pid: number) => boolean = aliveByProbe): OrphanChromeInspector {
-  return {
-    readArguments: async pid => (await readArgumentsFromProc(pid)) ?? (await readArgumentsFromPs(pid)),
-    terminate: pid => terminateProcess(pid, alive),
-  };
-}
 
 type SingletonLockState =
   | { readonly kind: 'missing' }
@@ -158,7 +92,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
           return (error as NodeJS.ErrnoException).code === 'EPERM';
         }
       });
-    this.orphans = options.orphans ?? systemOrphanChromeInspector(this.isProcessAlive);
+    this.orphans = options.orphans ?? systemOrphanChromeInspector();
     this.now = options.now ?? (() => new Date());
     this.sleep = options.sleep ?? (milliseconds => Bun.sleep(milliseconds));
   }
@@ -179,12 +113,9 @@ export class BrowserProfileStore implements BrowserProfilePort {
       };
       try {
         await this.createExclusive(this.leaseFile, desired);
-        let singleton = await this.singletonLockState();
-        // This daemon holds the one exclusive lease, so a live Chrome on the profile is nobody's session: when its
-        // own command line names this profile it is a leftover, and it is stopped rather than left to block us.
-        if (singleton.kind === 'live' && (await this.reapOrphan(singleton.pid))) {
-          singleton = await this.singletonLockState();
-        }
+        // A live Chrome holding the profile with no lease naming it is never signalled: with no Ferretry launch
+        // record it may be the owner's own browser, so it blocks (and is named) rather than being stopped.
+        const singleton = await this.singletonLockState();
         if (singleton.kind === 'live') {
           await this.releaseRecord(desired);
           throw new BrowserProfileBusyError(
@@ -231,15 +162,20 @@ export class BrowserProfileStore implements BrowserProfilePort {
           `shared browser profile is leased by session ${current.sessionId}`,
         );
       }
-      // The owning daemon is gone. A Chrome it named is only ever stopped when that very process still runs on this
-      // profile (a recycled pid is not it, and an unreadable one is never signalled); otherwise it is refused.
+      // The owning daemon is gone. A Chrome it named is only ever stopped when the lease's own launch record (pid AND
+      // start time) proves Ferretry started that very process; a recycled pid is cleared without a signal, and
+      // anything unproven or unreadable is refused.
       let chromeCleared: number | undefined;
       if (current.chromePid && this.isProcessAlive(current.chromePid)) {
-        const holder = await profileHolder(this.orphans, current.chromePid, this.profile);
-        const gone =
-          holder === 'other-process' ||
-          (holder === 'holds-profile' && (await this.orphans.terminate(current.chromePid)));
-        if (!gone) {
+        const outcome = await clearRecordedChrome(
+          this.orphans,
+          {
+            pid: current.chromePid,
+            ...(current.chromeStartedAt === undefined ? {} : { startedAt: current.chromeStartedAt }),
+          },
+          this.profile,
+        );
+        if (outcome === 'refused') {
           throw new BrowserProfileBusyError(
             'chrome',
             `shared browser profile has a live orphaned Chrome pid ${current.chromePid}`,
@@ -321,8 +257,13 @@ export class BrowserProfileStore implements BrowserProfilePort {
     }
     const current = await this.requireOwner(expected);
     if (chromeVersion !== undefined) await this.recordChromeVersion(chromeVersion);
-    const { chromePid: _previousChromePid, ...withoutChromePid } = current;
-    const updated = chromePid === undefined ? withoutChromePid : { ...withoutChromePid, chromePid };
+    const { chromePid: _previousChromePid, chromeStartedAt: _previousStart, ...withoutChromePid } = current;
+    // The launch record that later proves this process is Ferretry's: its start time, read now while it is ours.
+    const startedAt = chromePid === undefined ? undefined : (await this.orphans.identify(chromePid))?.startedAt;
+    const updated =
+      chromePid === undefined
+        ? withoutChromePid
+        : { ...withoutChromePid, chromePid, ...(startedAt === undefined ? {} : { chromeStartedAt: startedAt }) };
     await this.writeJson(this.leaseFile, updated);
   }
 
@@ -426,12 +367,6 @@ export class BrowserProfileStore implements BrowserProfilePort {
     } finally {
       await rm(guard, { force: true });
     }
-  }
-
-  /** Stops `pid` only when its own command line says it runs Chrome on this profile; true once it is gone. */
-  private async reapOrphan(pid: number): Promise<boolean> {
-    if ((await profileHolder(this.orphans, pid, this.profile)) !== 'holds-profile') return false;
-    return await this.orphans.terminate(pid);
   }
 
   private async singletonLockState(): Promise<SingletonLockState> {
