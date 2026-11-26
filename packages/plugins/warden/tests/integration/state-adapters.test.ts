@@ -6,7 +6,12 @@ import { StateWardenJevCheckLog } from '../../daemon/adapters/jev-checks.ts';
 import { FileWardenArtifacts } from '../../daemon/adapters/artifacts.ts';
 import { StateWardenReportFiles, reportInstantMs } from '../../daemon/adapters/report-files.ts';
 import { WardenReportReader } from '../../daemon/adapters/report-reader.ts';
-import { StateAutoMoveLedger, StateMachineMembers, StateWardenStateStore } from '../../daemon/adapters/state-store.ts';
+import {
+  StateAutoMoveLedger,
+  StateListedNotices,
+  StateMachineMembers,
+  StateWardenStateStore,
+} from '../../daemon/adapters/state-store.ts';
 import { WARDEN_STATE, effectiveWardenConfig } from '../../contract/index.ts';
 import { applyWardenConfigPatch, type WardenConfigPatch } from '../../daemon/lib/index.ts';
 import { wardenConfig, wardenState } from '../support/kernel.ts';
@@ -232,5 +237,24 @@ describe('warden.yaml through the kernel config write port', () => {
       () => should.fail('', '', 'should have been refused'),
       (error: unknown) => should((error as Error).message).containEql('caps.jevDaily'),
     );
+  });
+});
+
+describe('C-109 the members a machine notice last raised', () => {
+  it('C-109 are kept beside the sweep memory, the move ledger and the lists, and forgotten with their notice', async () => {
+    const state = wardenState();
+    const listed = new StateListedNotices(state);
+    const store = new StateWardenStateStore(state);
+    const input = new StateMachineMembers(state, 'warden:input-stuck');
+
+    await listed.write('warden:input-stuck', ['ryu', 'nelly']);
+    await store.write({ lastSweepAt: '2026-11-06T09:10:00.000Z' } as never);
+    await input.write({ nelly: ['nelly', 'a line', '2026-11-06T09:00:00.000Z'] });
+
+    should([...(await listed.read('warden:input-stuck'))]).eql(['nelly', 'ryu']);
+    should(await store.read()).not.have.property('listedNotices');
+    should(await input.read()).have.property('nelly');
+    await listed.forget('warden:input-stuck');
+    should((await listed.read('warden:input-stuck')).size).equal(0);
   });
 });

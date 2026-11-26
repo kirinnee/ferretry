@@ -2,7 +2,7 @@
  * The three Trusted Types policies: what each accepts, what each refuses, and that a browser without
  * Trusted Types gets the same strings by the same rules.
  */
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -16,6 +16,13 @@ import {
   trustedTypes,
   trustedWorkerUrl,
 } from '../../../src/security/trusted-types.ts';
+
+/**
+ * Where `vite` serves a speech worker in local development: Voice's workers live in its plugin folder, outside the app's
+ * root, so the dev server names them by absolute file path under `/@fs` (measured against a running dev server).
+ */
+const DEV = (engine: string, checkout = '/home/dev/ferretry'): string =>
+  `/@fs${checkout}/packages/plugins/voice/app/worker/${engine}-worker.ts?worker_file&type=module`;
 
 /** A factory that wraps each made value, so a test can tell a policy's value from a plain string. */
 const factory = () => {
@@ -70,23 +77,64 @@ describe('isHighlightMarkup', () => {
 });
 
 describe('isWorkerScriptUrl', () => {
+  // Bun reads `import.meta.env` from the process environment; Vite's dev server sets DEV the same way for the page.
+  beforeEach(() => {
+    process.env.DEV = 'true';
+  });
+  afterEach(() => {
+    delete process.env.DEV;
+  });
+
   it('accepts the speech worker the build emits, and its dev-server address', () => {
     expect(isWorkerScriptUrl('/assets/parakeet-worker-D-Ue--TH.js')).toBe(true);
-    expect(isWorkerScriptUrl('/src/worker/parakeet-worker.ts?worker_file&type=module')).toBe(true);
+    expect(isWorkerScriptUrl(DEV('parakeet'))).toBe(true);
     expect(isWorkerScriptUrl('/assets/whisper-worker-CgpPCptw.js')).toBe(true);
-    expect(isWorkerScriptUrl('/src/worker/whisper-worker.ts?worker_file&type=module')).toBe(true);
+    expect(isWorkerScriptUrl(DEV('whisper'))).toBe(true);
     expect(isWorkerScriptUrl('/assets/sherpa-worker-BxnMm6wE.js')).toBe(true);
-    expect(isWorkerScriptUrl('/src/worker/sherpa-worker.ts?worker_file&type=module')).toBe(true);
+    expect(isWorkerScriptUrl(DEV('sherpa'))).toBe(true);
     for (const url of [
       '/assets/parakeet-worker-.js',
       '/assets/parakeet-worker-abc.js?x=1',
       'https://evil.test/assets/parakeet-worker-abc.js',
       '/app/assets/parakeet-worker-abc.js',
       '/assets/other-worker-abc.js',
-      '/src/worker/parakeet-worker.ts',
+      DEV('parakeet').replace('?worker_file&type=module', ''),
     ]) {
       expect(isWorkerScriptUrl(url)).toBe(false);
     }
+  });
+
+  it('accepts the dev server\u2019s address of Voice\u2019s workers wherever the checkout is, and no other file or path', () => {
+    expect(isWorkerScriptUrl(DEV('parakeet', '/Users/jo-1/My Code/ferretry.worktrees/g22'))).toBe(true);
+    expect(isWorkerScriptUrl(DEV('whisper', '/home/dev/a.b_c-d'))).toBe(true);
+    // A URL parser writes a space as %20; any other escape is refused.
+    expect(isWorkerScriptUrl(DEV('whisper', '/home/dev/My%20Code'))).toBe(true);
+    // The shape measured from a running dev server in a worktree (a dot-led folder name).
+    expect(isWorkerScriptUrl(DEV('google', '/home/dev/Workspace/ferretry/.worktrees/g22'))).toBe(true);
+    for (const url of [
+      DEV('evil'),
+      DEV('parakeet', '/home/dev/../../etc'),
+      DEV('parakeet', '/home/dev/./x'),
+      DEV('parakeet', '/..'),
+      DEV('parakeet', '/home/dev/%2e%2e'),
+      DEV('parakeet', '/home/dev/a%2Fb'),
+      DEV('parakeet', '/home/dev//x'),
+      DEV('parakeet').replace('/@fs', '/@fsx'),
+      DEV('parakeet').replace('/plugins/voice/', '/plugins/other/'),
+      DEV('parakeet').replace('/app/worker/', '/app/lib/worker/'),
+      `https://evil.test${DEV('parakeet')}`,
+      `${DEV('parakeet')}&x=1`,
+      DEV('parakeet').replace('/@fs/', '/@fs/%2e%2e/'),
+      '/src/worker/parakeet-worker.ts?worker_file&type=module',
+    ]) {
+      expect(isWorkerScriptUrl(url)).toBe(false);
+    }
+  });
+
+  it('refuses the dev server address outside development mode (a release)', () => {
+    delete process.env.DEV;
+    expect(isWorkerScriptUrl(DEV('parakeet'))).toBe(false);
+    expect(() => trustedWorkerUrl(DEV('parakeet'))).toThrow(TypeError);
   });
 
   it('accepts the Durian worker chunk the build emits, and nothing near it', () => {
@@ -113,13 +161,13 @@ describe('isWorkerScriptUrl', () => {
 
   it('accepts the Google transcriber worker the build emits, and its dev-server address', () => {
     expect(isWorkerScriptUrl('/assets/google-worker-BTR2B3u1.js')).toBe(true);
-    expect(isWorkerScriptUrl('/src/worker/google-worker.ts?worker_file&type=module')).toBe(true);
+    expect(isWorkerScriptUrl(DEV('google'))).toBe(true);
     for (const url of [
       '/assets/google-worker-.js',
       '/assets/google-worker-abc.js?x=1',
       'https://evil.test/assets/google-worker-abc.js',
       '/assets/google-abc.js',
-      '/src/worker/google-worker.ts',
+      DEV('google').replace('?worker_file&type=module', ''),
     ]) {
       expect(isWorkerScriptUrl(url)).toBe(false);
     }
@@ -127,13 +175,13 @@ describe('isWorkerScriptUrl', () => {
 
   it('accepts the Vosk speech worker the build emits, and its dev-server address', () => {
     expect(isWorkerScriptUrl('/assets/vosk-worker-DonRcPBX.js')).toBe(true);
-    expect(isWorkerScriptUrl('/src/worker/vosk-worker.ts?worker_file&type=module')).toBe(true);
+    expect(isWorkerScriptUrl(DEV('vosk'))).toBe(true);
     for (const url of [
       '/assets/vosk-worker-.js',
       '/assets/vosk-worker-abc.js?x=1',
       'https://evil.test/assets/vosk-worker-abc.js',
       '/assets/vosk-abc.js',
-      '/src/worker/vosk-worker.ts',
+      DEV('vosk').replace('?worker_file&type=module', ''),
     ]) {
       expect(isWorkerScriptUrl(url)).toBe(false);
     }

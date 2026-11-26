@@ -26,6 +26,13 @@ export interface MachineMembersStore {
   write(members: Readonly<Record<string, readonly string[]>>): Promise<void>;
 }
 
+/** What each notice listed the last time it was raised, kept across a restart: a closed notice stays closed for those members. */
+export interface ListedNoticesStore {
+  read(ref: string): Promise<ReadonlySet<string>>;
+  write(ref: string, members: readonly string[]): Promise<void>;
+  forget(ref: string): Promise<void>;
+}
+
 /** Raise or refresh the notice for one cause; close it when the cause clears. */
 export interface MachineAgendaPort {
   raiseOrUpdate(ref: string, request: MachineRaise, members?: readonly string[]): Promise<unknown>;

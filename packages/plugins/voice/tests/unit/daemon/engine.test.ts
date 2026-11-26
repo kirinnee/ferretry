@@ -223,6 +223,17 @@ describe('the speech engine: use', () => {
     expect(threads[1]?.calls.filter(kind => kind === 'load')).toHaveLength(1);
   });
 
+  test('a model changed on disk at the same size is refused and deleted, not loaded', async () => {
+    const { engine, files, threads } = await ready();
+    await engine.unload();
+    const role = LOAD_ROLES[0];
+    files.held.set(role, new TextEncoder().encode('speech fil!'));
+    const loadsBefore = threads.length;
+    await expect(engine.transcribe(new Float32Array(16_000))).rejects.toMatchObject({ code: 'hash_mismatch' });
+    expect(threads).toHaveLength(loadsBefore);
+    expect(files.held.has(role)).toBe(false);
+  });
+
   test('finds the voice', async () => {
     const { engine } = await ready();
     expect(await engine.detectSpeech(new Float32Array(16_000))).toEqual([{ start: 100, end: 900 }]);

@@ -209,6 +209,34 @@ export const unfetched = (noun: string, paid: string, got: Unfetched): ToolAnswe
       : `The ${noun} was made and paid for (${paid}), but ${got.why}. Nothing more was spent; try the same request again and it will be charged again.`,
   );
 
+/** A body read to its end, or `too-large` the moment more than `maxBytes` has arrived (the rest is never read). */
+async function readCapped(
+  body: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+): Promise<Uint8Array | 'too-large'> {
+  if (body === null) return new Uint8Array(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return 'too-large';
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return bytes;
+}
+
 /** One file from fal's storage, of one of the `types` asked for, or why it was not taken. */
 export async function download(
   fetcher: FetchPort,
@@ -231,10 +259,10 @@ export async function download(
     if (!response.ok) return { why: `fal’s storage answered ${response.status}` };
     const declared = Number(response.headers.get('content-length') ?? 0);
     if (declared > limits.maxBytes) return { why: `the ${noun} is larger than Create will fetch`, permanent: true };
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    // The cap holds while the body comes down (a missing or wrong Content-Length proves nothing): past it the read stops.
+    const bytes = await readCapped(response.body, limits.maxBytes);
+    if (bytes === 'too-large') return { why: `the ${noun} is larger than Create will fetch`, permanent: true };
     if (bytes.byteLength === 0) return { why: 'fal’s storage sent an empty file' };
-    if (bytes.byteLength > limits.maxBytes)
-      return { why: `the ${noun} is larger than Create will fetch`, permanent: true };
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
     if (!types.includes(type)) return { why: `what fal’s storage sent was not a ${noun}`, permanent: true };
     return { bytes, type };

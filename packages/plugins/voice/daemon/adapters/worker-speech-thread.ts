@@ -1,6 +1,7 @@
-import type { WorkersPort } from '@ferretry/kernel/contract';
+import type { Clock, WorkersPort } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import { fileURLToPath } from 'node:url';
-import type { HostCommand } from './child-speech-thread.ts';
+import { deadlineOf, type HostCommand } from './child-speech-thread.ts';
 import type { SpeechReply, SpeechRequest } from '../lib/engine/protocol.ts';
 import type { ReplyReply, ReplyRequest } from '../lib/reply/protocol.ts';
 import type { RequestThread, ReplyThread, SpeechThread } from '../lib/engine/ports.ts';
@@ -13,9 +14,14 @@ export const REPLY_WORKER_URL = new URL('../worker/reply.worker.ts', import.meta
 const isReply = (value: unknown): value is { id: number; ok: boolean; sentence?: string } =>
   typeof value === 'object' && value !== null && typeof (value as { id?: unknown }).id === 'number';
 
-/** One worker thread behind `call`: replies are matched to requests by id, and a thread that ends fails what waits. */
+/**
+ * One worker thread behind `call`: replies are matched to requests by id, and a thread that ends fails what waits.
+ * EVERY CALL HAS A DEADLINE (`deadlineOf`, the native host's own): a worker that has not answered by then is stuck, so it is
+ * ended and everything waiting on it fails with a sentence, and the engine starts a new one at its next use.
+ */
 function startThread<Call extends object, Answer extends { id: number; ok: boolean }>(
   workers: Pick<WorkersPort, 'start'>,
+  clock: Pick<Clock, 'after'>,
   url: URL,
   name: string,
   words: string,
@@ -23,14 +29,17 @@ function startThread<Call extends object, Answer extends { id: number; ok: boole
   const handle = workers.start(url, { name, env: {} });
   const waiting = new Map<
     number,
-    { resolve: (reply: Answer & { ok: true }) => void; reject: (error: Error) => void }
+    { resolve: (reply: Answer & { ok: true }) => void; reject: (error: Error) => void; cancel: () => void }
   >();
   const ended: (() => void)[] = [];
   let next = 1;
   let over = false;
   const finish = (reason: string): void => {
     over = true;
-    for (const [, pending] of waiting) pending.reject(new Error(reason));
+    for (const [, pending] of waiting) {
+      pending.cancel();
+      pending.reject(new Error(reason));
+    }
     waiting.clear();
     for (const listener of ended) listener();
   };
@@ -39,6 +48,7 @@ function startThread<Call extends object, Answer extends { id: number; ok: boole
     const pending = waiting.get(message.id);
     if (pending === undefined) return;
     waiting.delete(message.id);
+    pending.cancel();
     if (message.ok) pending.resolve(message as unknown as Answer & { ok: true });
     else pending.reject(new Error(message.sentence));
   });
@@ -51,7 +61,13 @@ function startThread<Call extends object, Answer extends { id: number; ok: boole
           return;
         }
         const id = next++;
-        waiting.set(id, { resolve, reject });
+        const limit = deadlineOf((request as { kind?: string }).kind ?? '');
+        const cancel = clock.after(milliseconds(limit), () => {
+          if (!waiting.has(id)) return;
+          finish(`The ${words} worker did not answer in ${Math.round(limit / 1000)} seconds, so it was stopped.`);
+          void handle.terminate().catch(() => undefined);
+        });
+        waiting.set(id, { resolve, reject, cancel });
         handle.post({ ...request, id }, transfer);
       }),
     terminate: async () => {
@@ -62,17 +78,19 @@ function startThread<Call extends object, Answer extends { id: number; ok: boole
   };
 }
 
-export const startSpeechThread = (workers: Pick<WorkersPort, 'start'>): SpeechThread =>
+export const startSpeechThread = (workers: Pick<WorkersPort, 'start'>, clock: Pick<Clock, 'after'>): SpeechThread =>
   startThread<Omit<SpeechRequest, 'id'>, SpeechReply & { id: number; ok: boolean }>(
     workers,
+    clock,
     SPEECH_WORKER_URL,
     'speech',
     'speech',
   ) as SpeechThread;
 
-export const startReplyThread = (workers: Pick<WorkersPort, 'start'>): ReplyThread =>
+export const startReplyThread = (workers: Pick<WorkersPort, 'start'>, clock: Pick<Clock, 'after'>): ReplyThread =>
   startThread<Omit<ReplyRequest, 'id'>, ReplyReply & { id: number; ok: boolean }>(
     workers,
+    clock,
     REPLY_WORKER_URL,
     'reply',
     'reply voice',

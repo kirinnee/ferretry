@@ -61,8 +61,8 @@ export const SpeedupStatusSchema = z.strictObject({
   costNote: z.string().min(1),
   /** What leaves this machine when it is used. */
   privacyNote: z.string().min(1),
-  /** Where to get a key. Shown as text AND a link, because a link alone can be blocked. */
-  keyUrl: z.url(),
+  /** Where to get a key (HTTPS only: it is rendered as a link). Shown as text AND a link, because a link alone can be blocked. */
+  keyUrl: z.url({ protocol: /^https$/u }),
   /** What the Test button does, including whether it spends anything. */
   testNote: z.string().min(1),
   secretName: SecretNameSchema,

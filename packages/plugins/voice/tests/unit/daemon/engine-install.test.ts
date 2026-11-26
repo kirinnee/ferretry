@@ -280,3 +280,17 @@ describe('the engine files adapter reports free disk', () => {
     expect(await refusing.freeBytes()).toBeUndefined();
   });
 });
+
+describe('the engine files adapter says which file it is', () => {
+  const versioned = (version: { size: number; etag: string; settled?: boolean } | undefined) =>
+    new StateEngineFiles({ version: async () => version } as unknown as StatePort, {
+      diskFreeBytes: async () => undefined,
+    });
+
+  test('only a settled etag is an identity: one that could hide a write in the same tick, or no file, is none', async () => {
+    expect(await versioned({ size: 8, etag: 'a:b:8', settled: true }).identity({ role: 'encoder' })).toBe('a:b:8');
+    expect(await versioned({ size: 8, etag: 'a:b:8', settled: false }).identity({ role: 'encoder' })).toBeUndefined();
+    expect(await versioned({ size: 8, etag: 'a:b:8' }).identity({ role: 'encoder' })).toBeUndefined();
+    expect(await versioned(undefined).identity({ role: 'encoder' })).toBeUndefined();
+  });
+});

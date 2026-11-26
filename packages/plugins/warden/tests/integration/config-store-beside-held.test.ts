@@ -27,7 +27,7 @@ const quiet: Log = {
   child: () => quiet,
 } as unknown as Log;
 
-async function heldPrice() {
+async function heldPrice(ownerCalls = false) {
   const fs = state.createMemoryHostFs();
   const files = config.createConfigFiles({
     home: HOME,
@@ -37,7 +37,7 @@ async function heldPrice() {
     binary: 'fy',
     defs: [{ plugin: 'warden', def: WARDEN_CONFIG }],
     // Gate's judge never lets a plugin's own loosening into effect here: only the owner confirms one.
-    judge: () => false,
+    judge: () => ownerCalls,
   });
   await files.reload();
   const port = files.port('warden');
@@ -119,5 +119,38 @@ describe('an owner’s section save beside a held edit of warden.yaml, through t
 
     should(disk()).equal(before);
     should(port.fileState(WARDEN_CONFIG).state).equal('held');
+  });
+});
+
+describe('E-139 naming the Jev key beside a held edit of warden.yaml', () => {
+  it('should name the key in effect at once with the owner’s save, keep the held price held', async () => {
+    const { port, disk } = await heldPrice(true);
+    const store = new ConfigWardenConfigStore(port);
+    const inEffect = effectiveWardenConfig(port.file(WARDEN_CONFIG) ?? {});
+
+    const waiting = await store.write({ ...inEffect, enabled: false }, { enabled: false } as WardenConfigPatch, {
+      nameJevKey: true,
+    });
+
+    should(waiting).eql([]);
+    should(store.jevKeyNamed()).equal(true);
+    should(disk()).match(/usdPerMillionInputTokens: 0\.042 # per million/);
+    should(port.fileState(WARDEN_CONFIG).state).equal('held');
+  });
+});
+
+describe('E-139 a non-owner’s naming beside a held edit', () => {
+  it('should leave the saved answer in effect and hold only the naming, saying so', async () => {
+    const { port } = await heldPrice();
+    const store = new ConfigWardenConfigStore(port);
+    const inEffect = effectiveWardenConfig(port.file(WARDEN_CONFIG) ?? {});
+
+    const waiting = await store.write({ ...inEffect, enabled: false }, { enabled: false } as WardenConfigPatch, {
+      nameJevKey: true,
+    });
+
+    should(waiting.some(sentence => sentence.includes('JEV_API_KEY'))).equal(true);
+    should((port.file(WARDEN_CONFIG) as WardenFile).enabled).equal(false);
+    should(store.jevKeyNamed()).equal(false);
   });
 });

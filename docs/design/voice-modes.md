@@ -295,8 +295,8 @@ every reply had gaps. The native engine described above is now built for both en
   The host holds the engine's own worker program in a thread of ITS process, so the decode, speak and voice-detection code is the
   same one WebAssembly runs. They speak in **bounded frames** over stdin and stdout (`lib/native/frames.ts`: a 4-byte magic, a
   length, a JSON header and the binary parts; at most 128 MiB, the length checked before one more byte is kept; bytes that are not a
-  frame end the host). Every call has a **deadline** (load 180 s, decode and detect 120 s, speak 60 s, probe 30 s); a host that
-  misses it is killed. The size and SHA-256 of the addon and both libraries are checked immediately before every spawn, as they were
+  frame end the host). Every call has a **deadline** (load 180 s, decode and detect 120 s, speak 60 s, probe 30 s; a WebAssembly worker thread is held to the same ones and ended when it misses one); a host that
+  misses it is killed (a host the system ended with SIGKILL is reported as ended "probably for lack of memory", not as a crash). The size and SHA-256 of the addon and both libraries are checked immediately before every spawn, as they were
   before every load. The host is ended (SIGTERM, SIGKILL after 2 s) on unload, after 10 idle minutes and when the daemon stops, and it
   ends itself when its stdin closes, so a daemon killed outright leaves none behind. Ending a process returns ALL of its memory, so
   there is nothing to collect: the 0.5–0.7 GB a load used to keep when only a worker thread was ended is gone with the process.
