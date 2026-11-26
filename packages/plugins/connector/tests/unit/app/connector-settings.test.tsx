@@ -244,6 +244,34 @@ describe('Settings › Claude connector', () => {
     expect(root.querySelector('[data-setup-note="connector-failed"]')).toBeNull();
   });
 
+  it('says why the switch did not move, and leaves it where the daemon last said it was', async () => {
+    const { root } = await open({
+      ...read(OFF),
+      'PUT /v1/connector': refusal(409, 'connector_cannot_switch', 'Port 7461 is taken by another program.'),
+    });
+    await click(root, '[role="switch"]');
+    expect(text(root, '[data-connector-failure]')).toBe('Port 7461 is taken by another program.');
+    expect(switchOf(root).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('waits while the page is hidden and reads at once when it is shown again', async () => {
+    const shown = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      const { root, calls } = await open(read(ON));
+      expect(calls).toEqual([]);
+      expect(root.querySelector('[data-connector-url]')).toBeNull();
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await wait(40);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(root.querySelector('[data-connector-url]')).not.toBeNull();
+    } finally {
+      if (shown === undefined) Reflect.deleteProperty(document, 'visibilityState');
+      else Object.defineProperty(document, 'visibilityState', shown);
+    }
+  });
+
   it('reads again on its own while it is open, so a sign-in shows up without a reload', async () => {
     let status: ConnectorStatus = ON;
     let frozen = false;
