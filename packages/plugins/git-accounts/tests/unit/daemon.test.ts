@@ -97,7 +97,9 @@ describe('GitHub device flow', () => {
     ]);
     const form = new URLSearchParams(github.seen[0]?.body);
     expect(form.get('client_id')).toBe(CLIENT);
-    expect(form.get('scope')).toBe('read:user user:email write:public_key write:ssh_signing_key repo read:org');
+    expect(form.get('scope')).toBe(
+      'read:user user:email write:public_key write:ssh_signing_key write:gpg_key repo read:org',
+    );
     expect(form.has('client_secret')).toBe(false);
 
     const path = `/v1/git-accounts/github/device/${flow.flowId}`;

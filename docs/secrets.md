@@ -2195,6 +2195,39 @@ same OS user can connect to it (the folder is `0700` and the socket `0600`, so n
 **GAP — SAML single sign-on.** An organisation that enforces SSO needs the key authorised once on GitHub before a push
 to its repositories works; Ferretry cannot do that for the person.
 
+## A Git account's GPG signing key (G8: `git-accounts`)
+
+An account can sign its commits with **a GPG key instead of an SSH one** (an account signs with exactly one key; GitHub's
+"Verified" badge accepts either). `POST /v1/git-accounts/:id/keys` takes `{purpose: "signing", format: "gpg"}` (Ferretry makes
+an ed25519 key) or adds `keyBlock` (an armored OpenPGP secret key the person hands over, one key, no passphrase). The answer is
+`{format, publicKey, fingerprint, registered, source}`: the PUBLIC armored block, never the secret one. `DELETE
+…/keys/signing` removes it at GitHub (`DELETE /user/gpg_keys/<id>`) and forgets the secret half. The connect scope list gains
+`write:gpg_key`; an account connected before this must be connected again to register a GPG key.
+
+- **The secret key is sealed, and only goes to `gpg --import` on stdin.** It lives in the same private `keys.json` as the SSH
+  keys, under `<account id>:gpg`. No route, port method, log, audit row or environment variable carries it. The body of a refused
+  request is never quoted.
+- **One isolated `GNUPGHOME` per account**, `<state>/git-accounts/downloads/gha_<id>.gnupg` (`0700`, the same private folder as the
+  ssh-agent sockets). A launch for a project linked to the account gets `GNUPGHOME` for it and git settings `gpg.format
+openpgp`, `gpg.program` (the real `gpg`, by absolute path), `user.signingkey` (the fingerprint), `commit.gpgsign` and
+  `tag.gpgsign`. The person's own `~/.gnupg` and every other account's home are not reachable from that keyring.
+- **The key's user id is the account's noreply address** (`<id>+<login>@users.noreply.github.com`, which is also `user.email`):
+  that is how GitHub decides a commit is Verified. A key handed over that lacks the address gains it before it is registered.
+  A key that needs a passphrase, or cannot sign, is refused in words and nothing is registered or kept.
+- **`gpg` and `gpgconf` are found like `ssh-add`**: the real program outside the state home, by absolute path; with none found
+  nothing starts and the ask answers 503. A key already on the account at GitHub (422) is recorded without its GitHub id, so
+  removing it here never deletes what was not ours.
+- A recorded key that cannot be served at launch switches signing off for that ferret and says so, never falling back to the
+  machine's own signing key (the same rule as the SSH key).
+
+**GAP — GnuPG has no agent that signs without holding a readable key.** An ssh-agent can be asked to sign and never to hand the
+key over. `gpg-agent` serves a home, and the key sits in that home's `private-keys-v1.d` for as long as the account has the key
+(`0700` folder, `0600` files): a process of the same OS user that is told the path can read it, which a ferret is (it has
+`GNUPGHOME`). What holds is that Ferretry never returns, prints or logs it and that it is not in the ferret's environment; what
+does not is a ferret that goes looking in its own `GNUPGHOME`. The agent for a home is ended with the account and with the
+daemon (`gpgconf --kill gpg-agent`); the folder stays on a clean stop so a surviving ferret's path keeps its meaning.
+Use an SSH signing key where that matters.
+
 ## A ferret pushes and signs as the Git account its project is linked to (B4: `git-accounts`)
 
 A ferret whose work folder is inside a project linked to a Git account (Projects keeps the link) is started with that

@@ -31,6 +31,9 @@ import {
  * and fed to a per-account `ssh-agent` on stdin; only the public half is registered at GitHub and returned. A ferret
  * can use the agent's socket and can never read the key (docs/secrets.md, "A Git account's SSH key").
  *
+ * THE GPG KEY (G8). A signing key may be an OpenPGP one instead: sealed in the same `keys.json` under `<id>:gpg`, fed to `gpg --import`
+ * on stdin, and used by a ferret through an isolated per-account `GNUPGHOME` (docs/secrets.md, "A Git account's GPG signing key").
+ *
  * Capabilities: no new one. Connect and remove are `secrets.configure` (passkey step-up from a paired device); the
  * list is `secrets.use`.
  */
@@ -162,7 +165,7 @@ export default definePlugin({
     roots: ['downloads'],
     // `gh` runs as an account, with its token in that child's environment alone (`GitAccountsApi.run`).
     // `ps` lists the processes once at boot, so an agent an earlier unclean run left behind can be ended (`sweep.ts`).
-    spawn: ['gh', 'ssh-agent', 'ssh-add', 'ps'],
+    spawn: ['gh', 'ssh-agent', 'ssh-add', 'ps', 'gpg', 'gpgconf'],
     // Which `gh` gets a token (B10 SEC): the daemon's PATH minus any folder in the state home, resolved by the kernel, and an answer
     // inside the state home is refused. Nothing is executed to find out, and no PATH value is ever returned to a caller.
     hostFacts: true,

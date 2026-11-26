@@ -6,6 +6,8 @@ import {
   GitAccountDisconnected,
   GitAccountsConfigFile,
   GitAccountsConfigSchema,
+  isGpgKey,
+  keptHere,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { FetchGithubHttp } from './adapters/github-http.ts';
@@ -13,6 +15,8 @@ import { gitAccountRoutes } from './routes.ts';
 import { psAgentProcesses } from './adapters/agent-processes.ts';
 import { rootRunFolder } from './adapters/run-folder.ts';
 import { accountLaunchParts } from './features/launch/parts.ts';
+import { GnupgHomes } from './features/gpg-keys/gnupg.ts';
+import { GpgKeyService } from './features/gpg-keys/service.ts';
 import { AgentSupervisor, type RunFolder } from './features/ssh-keys/agents.ts';
 import type { AgentProcessTable } from './features/ssh-keys/sweep.ts';
 import { GhRunner } from './features/gh-run/gh-runner.ts';
@@ -68,6 +72,11 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         'ssh-agent': programLocator({ name: 'ssh-agent', trustedWith: 'an account key' }, locatorPorts),
         'ssh-add': programLocator({ name: 'ssh-add', trustedWith: 'an account key' }, locatorPorts),
       };
+      // `gpg` gets the account's SECRET KEY on its stdin: the real program only, never a file in the state home.
+      const gnupg = new GnupgHomes(kernel.spawn, runFolder, kernel.log, {
+        gpg: programLocator({ name: 'gpg', trustedWith: 'an account key' }, locatorPorts),
+        gpgconf: programLocator({ name: 'gpgconf', trustedWith: 'an account key' }, locatorPorts),
+      });
       // A daemon that died uncleanly left its agents running: the first start (and the warm below) ends this daemon's own.
       const agents = new AgentSupervisor(
         kernel.spawn,
@@ -82,6 +91,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         },
       );
       kernel.lifecycle.onStop(() => agents.stopAll());
+      kernel.lifecycle.onStop(() => gnupg.stopAll());
       // Ferretry's `gh` (B10): the shim is written at boot and again whenever a launch finds it was not (a failure is not kept).
       let shim: Promise<GhShimFolders | undefined> | undefined;
       const shimFolders = (): Promise<GhShimFolders | undefined> => {
@@ -101,7 +111,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
       void shimFolders();
       // Late-bound: the key service asks the account service (for the API on an account's behalf), which in turn tells
       // the key service when an account goes. Neither holds a token.
-      const keys: { service?: SshKeyService } = {};
+      const keys: { service?: SshKeyService; gpg?: GpgKeyService } = {};
       const service = new GitAccountsService(
         book,
         http,
@@ -110,17 +120,23 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         id => kernel.events.publish(GitAccountDisconnected, { id }),
         async id => {
           await keys.service?.forget(id);
+          await keys.gpg?.forget(id);
         },
         // The `gh` that gets a token is the real one: never a file in the state home, even if the daemon's own PATH names the shim folder.
         ghLocator(locatorPorts),
       );
-      const keyService = new SshKeyService(
-        service,
-        needs.sealed.open(kernel.state, GIT_ACCOUNT_KEYS),
-        agents,
-        () => kernel.identity.daemonName,
-      );
+      // One sealed document and one handle for both kinds of key: two handles over one file would race each other's writes.
+      const sealedKeys = needs.sealed.open(kernel.state, GIT_ACCOUNT_KEYS);
+      const keyService = new SshKeyService(service, sealedKeys, agents, () => kernel.identity.daemonName);
       keys.service = keyService;
+      const gpgService = new GpgKeyService(
+        service,
+        sealedKeys,
+        gnupg,
+        () => kernel.identity.daemonName,
+        (id, work) => keyService.exclusive(id, work),
+      );
+      keys.gpg = gpgService;
       const gh = new GhRunner({
         accounts: service,
         projects: async () => (await projects.current()?.list()) ?? [],
@@ -132,20 +148,27 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         .list()
         .then(async accounts => {
           const own = accounts.filter(
-            account => account.keys.ssh?.source === 'generated' || account.keys.signing?.source === 'generated',
+            account =>
+              account.keys.ssh?.source === 'generated' ||
+              (account.keys.signing?.source === 'generated' && !isGpgKey(account.keys.signing)),
           );
+          const gpgOwn = accounts.filter(account => isGpgKey(account.keys.signing) && keptHere(account.keys.signing));
           // Leftover agents first, so a warmed agent never meets (or is mistaken for) one an earlier run left behind.
           if (own.length > 0) await agents.sweepLeftovers();
           await keyService.warm(
             own.map(account => account.id),
             account => kernel.log.warn('git-accounts: an account agent was not brought back at boot', { account }),
           );
+          await gpgService.warm(
+            gpgOwn.map(account => account.id),
+            account => kernel.log.warn('git-accounts: an account GPG key was not brought back at boot', { account }),
+          );
         })
         .catch(() => undefined);
       return {
         routes: {
           ...gitAccountRoutes(flows, service, async draft => await needs.gate.audit(draft)),
-          ...sshKeyRoutes(keyService),
+          ...sshKeyRoutes(keyService, gpgService),
           ...ghRunRoutes(gh),
         },
         hooks: {
@@ -157,6 +180,7 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
                 projects: async () => (await projects.current()?.list()) ?? [],
                 accounts: () => service.list(),
                 kit: account => keyService.launchKit(account),
+                gpg: account => gpgService.launchKit(account),
               }),
             },
             { id: 'git-accounts-gh', item: ghShimLaunchParts(shimFolders) },

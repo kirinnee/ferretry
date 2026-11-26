@@ -15,6 +15,7 @@ import {
   type GitApiCall,
   type GitRunResult,
   type GitRunSpec,
+  isGpgKey,
 } from '../../contract/index.ts';
 import type { ScratchPort, SpawnPort } from '@ferretry/kernel/contract';
 import { checkGhArgs, scrubCut, scrubToken } from './gh-guard.ts';
@@ -177,7 +178,7 @@ export class GitAccountsService {
     const token = await this.book.token(id);
     const registered = [
       { key: account.keys.ssh, base: '/user/keys' },
-      { key: account.keys.signing, base: '/user/ssh_signing_keys' },
+      { key: account.keys.signing, base: isGpgKey(account.keys.signing) ? '/user/gpg_keys' : '/user/ssh_signing_keys' },
     ];
     for (const { key, base } of registered) {
       // A key the person already had (`source: own`) was never ours to delete.

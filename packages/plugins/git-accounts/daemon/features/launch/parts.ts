@@ -3,6 +3,7 @@ import type { LaunchPart, LaunchPartSource } from '@ferretry/core-ferrets/contra
 import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import type { GitAccount, GitAccountId } from '../../../contract/index.ts';
 import { accountForFolder } from '../../lib/account-for-folder.ts';
+import type { GpgKit } from '../gpg-keys/gnupg.ts';
 import { type AccountKit, gitEnvironment, noIdentityEnvironment } from './environment.ts';
 
 const GIT_ACCOUNTS_PLUGIN = 'git-accounts';
@@ -13,6 +14,8 @@ export interface AccountLaunchDeps {
   accounts(): Promise<readonly GitAccount[]>;
   /** The account's agent and files, started on first ask; `undefined` when it has no key Ferretry made. */
   kit(account: GitAccountId): Promise<AccountKit | undefined>;
+  /** The account's GPG signing key in its isolated home, started on first ask; `undefined` when it signs another way. */
+  gpg?(account: GitAccountId): Promise<GpgKit | undefined>;
 }
 
 const KEY_UNAVAILABLE =
@@ -34,8 +37,10 @@ export function accountLaunchParts(deps: AccountLaunchDeps): LaunchPartSource {
       const account = accounts.find(each => each.id === found?.account);
       if (account === undefined) return [];
       let kit: AccountKit | undefined;
+      let gpg: GpgKit | undefined;
       try {
         kit = await deps.kit(account.id);
+        gpg = await deps.gpg?.(account.id);
       } catch {
         // Without a word the pane would push with the machine's own ssh identity: say so, never why (no error text),
         // and give git no identity to fall back to.
@@ -47,8 +52,8 @@ export function accountLaunchParts(deps: AccountLaunchDeps): LaunchPartSource {
             : [{ kind: 'pane-env' as const, plugin: GIT_ACCOUNTS_PLUGIN, env: none }]),
         ];
       }
-      if (kit === undefined || (!kit.auth && !kit.signing)) return [];
-      return [{ kind: 'pane-env', plugin: GIT_ACCOUNTS_PLUGIN, env: gitEnvironment(account, kit) }];
+      if (gpg === undefined && (kit === undefined || (!kit.auth && !kit.signing))) return [];
+      return [{ kind: 'pane-env', plugin: GIT_ACCOUNTS_PLUGIN, env: gitEnvironment(account, kit, gpg) }];
     },
   };
 }

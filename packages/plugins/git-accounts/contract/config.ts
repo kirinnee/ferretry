@@ -8,7 +8,7 @@ import { z } from 'zod';
 export const GITHUB_DEVICE_CLIENT_ID = 'Ov23liHZjkFulWlicHXd';
 
 /**
- * What is asked at connect time (owner's answer, !A571): the profile, the emails, the two key scopes, `repo` and
+ * What is asked at connect time (owner's answer, !A571): the profile, the emails, the three key scopes, `repo` and
  * `read:org`. No `workflow`. One constant: changing what is asked is a one-line change here.
  */
 export const GITHUB_SCOPES = [
@@ -16,6 +16,7 @@ export const GITHUB_SCOPES = [
   'user:email',
   'write:public_key',
   'write:ssh_signing_key',
+  'write:gpg_key',
   'repo',
   'read:org',
 ] as const;
@@ -27,7 +28,7 @@ export const GITHUB_SCOPES = [
  */
 export const GITHUB_CONSENT = [
   'Ferretry will be able to read and write EVERY repository this GitHub account can reach, private ones included (the "repo" permission).',
-  'It will also read your profile, your email addresses and your organizations, and add and remove the SSH keys Ferretry registers for you.',
+  'It will also read your profile, your email addresses and your organizations, and add and remove the SSH and GPG keys Ferretry registers for you.',
   'It will not be able to change GitHub Actions workflow files, and it never sees your password.',
   'The access token is kept sealed on this machine. No page, command or ferret can read it: the daemon uses it for GitHub on your behalf, and a ferret can only ask the daemon to run narrowed GitHub commands as this account.',
   'To end the access completely, disconnect the account here and then revoke Ferretry at github.com/settings/applications.',

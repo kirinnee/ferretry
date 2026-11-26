@@ -22,8 +22,8 @@ export const CONSENT_ITEMS: readonly ConsentItem[] = [
     text: 'to sign your commits as you.',
   },
   {
-    title: 'Add SSH keys',
-    scopes: ['write:public_key', 'write:ssh_signing_key'],
+    title: 'Add SSH and GPG keys',
+    scopes: ['write:public_key', 'write:ssh_signing_key', 'write:gpg_key'],
     text: 'so ferrets can push and sign as you without a password.',
   },
   {

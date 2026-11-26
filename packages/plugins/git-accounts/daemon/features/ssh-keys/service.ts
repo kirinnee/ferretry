@@ -17,6 +17,7 @@ import {
   type GitKeyRemoved,
   type GitKeyRequest,
   type GitKeyResult,
+  isGpgKey,
 } from '../../../contract/index.ts';
 import type { AccountKit } from '../launch/environment.ts';
 import type { AgentSupervisor } from './agents.ts';
@@ -88,7 +89,8 @@ export class SshKeyService {
       }
       const left = without(account.keys, slot);
       await this.accounts.recordKeys(id, left);
-      if (left.ssh === undefined && left.signing === undefined) await this.#dropOwnKey(id);
+      // The sealed SSH key goes with its last SSH registration (a GPG signing key is not one).
+      if ([left.ssh, left.signing].every(each => each === undefined || isGpgKey(each))) await this.#dropOwnKey(id);
       return { id, purpose: kind, removed: true };
     });
   }
@@ -97,7 +99,9 @@ export class SshKeyService {
   agentSocket(id: GitAccountId): Promise<string | undefined> {
     return this.#serial(id, async () => {
       const account = await this.accounts.find(id);
-      const made = [account?.keys.ssh, account?.keys.signing].some(key => key !== undefined && key.source !== 'own');
+      const made = [account?.keys.ssh, account?.keys.signing].some(
+        key => key !== undefined && key.source !== 'own' && !isGpgKey(key),
+      );
       if (!made) return undefined;
       return await this.agents.socketFor(id, async () => (await this.#sealedKey(id))?.privateKey);
     });
@@ -112,7 +116,7 @@ export class SshKeyService {
     return this.#serial(id, async () => {
       const account = await this.accounts.find(id);
       const auth = account?.keys.ssh?.source === 'generated';
-      const signing = account?.keys.signing?.source === 'generated';
+      const signing = account?.keys.signing?.source === 'generated' && !isGpgKey(account.keys.signing);
       // No key Ferretry made: nothing to hand over, and the launch is what it always was.
       if (!auth && !signing) return undefined;
       const publicKey = (auth ? account?.keys.ssh : account?.keys.signing)?.publicKey;
@@ -284,7 +288,11 @@ export class SshKeyService {
     return account;
   }
 
-  /** One operation at a time per account, so two asks never make two keys or race a removal. */
+  /** One operation at a time per account, so two asks never make two keys or race a removal. The GPG key shares it. */
+  exclusive<T>(id: GitAccountId, work: () => Promise<T>): Promise<T> {
+    return this.#serial(id, work);
+  }
+
   #serial<T>(id: GitAccountId, work: () => Promise<T>): Promise<T> {
     const before = this.#queues.get(id) ?? Promise.resolve();
     const run = before.then(work, work);

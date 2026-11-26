@@ -83,7 +83,15 @@ describe('connecting an account', () => {
     await click(buttonNamed(root, 'Connect a GitHub account'));
     const consent = q(root, '[data-testid="git-consent"]');
     expect(consent.textContent).toContain('What Ferretry asks GitHub for');
-    for (const scope of ['read:user', 'user:email', 'write:public_key', 'write:ssh_signing_key', 'repo', 'read:org'])
+    for (const scope of [
+      'read:user',
+      'user:email',
+      'write:public_key',
+      'write:ssh_signing_key',
+      'write:gpg_key',
+      'repo',
+      'read:org',
+    ])
       expect(consent.textContent, scope).toContain(scope);
     expect(consent.textContent).toContain('every repository you can reach');
     expect(posted(calls)).toHaveLength(0);
