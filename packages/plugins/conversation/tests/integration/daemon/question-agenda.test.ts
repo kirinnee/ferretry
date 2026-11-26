@@ -109,8 +109,8 @@ function daemon(options: {
   files: Map<string, unknown>;
   asks: ReturnType<typeof fakeAsks>;
   events: { current: readonly TranscriptEvent[] };
-  /** The conversation file the ferret's transcript is now (a replaced conversation is a different one). */
-  file?: { current: string | undefined };
+  /** The native id of the conversation the ferret's transcript holds now (a replaced conversation has another). */
+  conversation?: { current: string | undefined };
   /** Another Ferrets (a live form to type into, more than one ferret): the default has one Codex ferret. */
   ferrets?: unknown;
 }) {
@@ -158,7 +158,7 @@ function daemon(options: {
     } as never,
     gate: CLOSED,
     questionEvents: async () => options.events.current,
-    questionFile: async () => options.file?.current,
+    questionConversation: async () => options.conversation?.current,
   });
   /** One 2 s tick of the question watch (the Agenda's reconcile, then a look), run to the end. */
   const tick = async (): Promise<void> => {
@@ -173,8 +173,8 @@ const world = () => {
   const files = new Map<string, unknown>();
   const asks = fakeAsks();
   const events = { current: [] as readonly TranscriptEvent[] };
-  const file = { current: 'rollout-a.jsonl' as string | undefined };
-  return { files, asks, events, file, boot: () => daemon({ files, asks, events, file }) };
+  const conversation = { current: 'conv-a' as string | undefined };
+  return { files, asks, events, conversation, boot: () => daemon({ files, asks, events, conversation }) };
 };
 
 describe('a stored question reaches the Agenda as one Asks obligation', () => {
@@ -324,7 +324,7 @@ describe('a stored question reaches the Agenda as one Asks obligation', () => {
     expect(d.stored()).toBeDefined();
   });
 
-  test('a conversation that changed under a stored question (another rollout file) closes the card (D-02)', async () => {
+  test('a conversation that changed under a stored question (another native id) closes the card (D-02)', async () => {
     const w = world();
     const d = w.boot();
     w.events.current = [callEvent('call_1')];
@@ -332,7 +332,7 @@ describe('a stored question reaches the Agenda as one Asks obligation', () => {
     expect(w.asks.open()).toHaveLength(1);
     // A new conversation: the ferret's transcript is another file, whose short history lacks the call that was asked.
     w.events.current = [resultEvent('call_unrelated')];
-    w.file.current = 'rollout-b.jsonl';
+    w.conversation.current = 'conv-b';
     await d.tick();
     expect(w.asks.items.map(item => [item.draft.entry, item.state, item.reason])).toEqual([
       ['cody:call_1', 'closed', 'answered'],

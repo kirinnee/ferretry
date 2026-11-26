@@ -42,8 +42,8 @@ function world(first: TranscriptEvent[]) {
     events: first as Read,
     wide: undefined as Read | undefined,
     current: undefined as Question | undefined,
-    /** The conversation file the ferret's transcript is now; a different one is a replaced conversation. */
-    file: 'rollout-a.jsonl' as string | undefined,
+    /** The native conversation id the ferret's transcript holds now; a different one is a replaced conversation. */
+    conversation: 'conv-a' as string | undefined,
   };
   const cleared: string[] = [];
   const limits: (number | undefined)[] = [];
@@ -66,8 +66,8 @@ function world(first: TranscriptEvent[]) {
         ? state.wide
         : state.events;
     },
-    transcriptFile: async () => state.file,
-    writeProjected: async (_ferret, pending) =>
+    conversation: async () => state.conversation,
+    writeProjected: async (_ferret, pending, _askedAt, conversation) =>
       (state.current = {
         format: 1,
         toolUseId: pending.toolUseId,
@@ -75,6 +75,7 @@ function world(first: TranscriptEvent[]) {
         options: [{ label: 'One' }, { label: 'Two' }],
         multiple: false,
         askedAt: ASKED,
+        ...(conversation === undefined ? {} : { conversation }),
       }),
   };
   return { state, cleared, limits, answered, watch: new QuestionWatch(deps) };
@@ -134,11 +135,11 @@ describe('a stored Codex question is retired by its exact result, wherever the t
     expect(w.state.current?.toolUseId).toBe('q1');
   });
 
-  it('retires it when the ferret is on a different conversation file and the tail holds neither (D-02, positive evidence)', async () => {
+  it('retires it when the ferret is on a different conversation and the tail holds neither (D-02, positive evidence)', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
     w.state.events = filler(5);
-    w.state.file = 'rollout-b.jsonl';
+    w.state.conversation = 'conv-b';
     await w.watch.sweep();
     expect(w.cleared).toEqual(['q1']);
     expect(w.answered).toEqual(['q1']);
@@ -189,12 +190,12 @@ describe('positive release recovery when both the call and the result left the n
     expect(w.state.current?.toolUseId).toBe('q1');
   });
 
-  it('releases when a wider read holds neither and the conversation file changed', async () => {
+  it('releases when a wider read holds neither and the conversation changed', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
     w.state.events = full();
     w.state.wide = filler(QUESTION_DEEP_EVENTS);
-    w.state.file = 'rollout-b.jsonl';
+    w.state.conversation = 'conv-b';
     await w.watch.sweep();
     expect(w.cleared).toEqual(['q1']);
     expect(w.answered).toEqual(['q1']);
@@ -210,11 +211,11 @@ describe('positive release recovery when both the call and the result left the n
     expect(w.state.current?.toolUseId).toBe('q1');
   });
 
-  it('decides nothing when the conversation file cannot be told', async () => {
+  it('decides nothing when the conversation cannot be told', async () => {
     const w = world([callEvent('q1')]);
     await w.watch.sweep();
     w.state.events = filler(5);
-    w.state.file = undefined;
+    w.state.conversation = undefined;
     await w.watch.sweep();
     expect(w.cleared).toEqual([]);
   });

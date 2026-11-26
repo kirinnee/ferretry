@@ -689,3 +689,24 @@ export class CodexTranscriptParser implements TranscriptParser {
     return { events, issues, recognized: true };
   }
 }
+
+/** How much of a rollout's start is read for its header: the header record carries the session's instructions, so it is long. */
+export const CODEX_HEADER_BYTES = 32 * 1024;
+
+/**
+ * The conversation a Codex rollout holds, named by Codex itself: the `id` of its `session_meta` header record. It
+ * is the rollout's own fact, so a renamed or moved file keeps it and a different conversation has another; the path
+ * never enters it. `undefined` when the header is not whole in `head` (an unfinished record is no identity).
+ */
+export function codexConversationId(head: string): string | undefined {
+  for (const line of head.split('\n').slice(0, 8)) {
+    try {
+      const record: unknown = JSON.parse(line);
+      const payload = transcriptObject((record as { payload?: unknown } | null)?.payload);
+      if ((record as { type?: unknown } | null)?.type === 'session_meta') return transcriptString(payload?.id);
+    } catch {
+      /* A line that is not a whole record is not identity evidence. */
+    }
+  }
+  return undefined;
+}

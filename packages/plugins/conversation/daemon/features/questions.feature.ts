@@ -112,7 +112,7 @@ export default {
       const read = await kernel.state.read(QUESTION_STATE, ferret);
       if (!read.ok || read.value === undefined) return undefined;
       // The transcript it was proved against stays in the file: the route and the port answer the question only.
-      const { transcript: _proof, ...question } = read.value;
+      const { transcript: _proof, conversation: _conversation, ...question } = read.value;
       return question;
     };
     f.late.askedQuestion = askedQuestion;
@@ -167,10 +167,18 @@ export default {
       // A Codex ferret's question is in its transcript (the reading feature reads it).
       transcriptEvents: async (ferret, limit) =>
         await built(f.late.reading, 'reading half').questionEvents(ferret, limit),
-      transcriptFile: async ferret => await built(f.late.reading, 'reading half').questionFile(ferret),
+      conversation: async ferret => await built(f.late.reading, 'reading half').questionConversation(ferret),
       paneForm: panePending(ferrets),
-      writeProjected: async (ferret, pending, askedAt) =>
-        await writeProjectedQuestion(kernel.state, questionSerial, ferret, pending, askedAt, () => kernel.clock.now()),
+      writeProjected: async (ferret, pending, askedAt, conversation) =>
+        await writeProjectedQuestion(
+          kernel.state,
+          questionSerial,
+          ferret,
+          pending,
+          askedAt,
+          () => kernel.clock.now(),
+          conversation,
+        ),
       asked: async (ferret, toolUseId) => {
         await raiseQuestionAsk(ferret, toolUseId);
         await kernel.events.publish(QuestionAsked, { ferret: parseSessionId(ferret), toolUseId });

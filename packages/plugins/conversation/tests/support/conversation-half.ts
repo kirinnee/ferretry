@@ -30,7 +30,7 @@ export function buildConversationA(deps: {
     ferret: string,
     limit?: number,
   ) => Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
-  readonly questionFile?: (ferret: string) => Promise<string | undefined>;
+  readonly questionConversation?: (ferret: string) => Promise<string | undefined>;
 }) {
   const context: ConversationContext = {
     daemon: undefined as never,
@@ -44,7 +44,7 @@ export function buildConversationA(deps: {
     late: {
       reading: {
         questionEvents: deps.questionEvents ?? (async () => undefined),
-        questionFile: deps.questionFile ?? (async () => undefined),
+        questionConversation: deps.questionConversation ?? (async () => undefined),
         download: deps.attachments?.download ?? (async () => undefined),
       } as unknown as ReadingHalf,
     },

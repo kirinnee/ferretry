@@ -71,6 +71,7 @@ async function persistQuestion(
   items: readonly AskedItem[],
   askedAt: Instant,
   transcript: string | undefined,
+  conversation?: string,
 ): Promise<Question | undefined> {
   const [first, ...more] = items;
   if (first === undefined) {
@@ -97,6 +98,7 @@ async function persistQuestion(
         }),
     askedAt,
     ...(transcript === undefined ? {} : { transcript }),
+    ...(conversation === undefined ? {} : { conversation }),
   };
   await state.write(QUESTION_STATE, question, ferret);
   return question;
@@ -114,6 +116,7 @@ export async function writeProjectedQuestion(
   pending: PendingQuestion,
   askedAt: string | undefined,
   now: () => Instant,
+  conversation?: string,
 ): Promise<Question | undefined> {
   const items = pending.questions.map(item => ({
     ...(item.header === undefined ? {} : { header: item.header }),
@@ -131,6 +134,7 @@ export async function writeProjectedQuestion(
         items,
         InstantSchema.safeParse(askedAt).data ?? now(),
         undefined,
+        conversation,
       ),
   );
 }

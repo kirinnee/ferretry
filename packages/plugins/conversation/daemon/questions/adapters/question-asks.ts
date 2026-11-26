@@ -117,7 +117,7 @@ export class QuestionAsks {
     const key = `raise:${entry}`;
     try {
       // The stored file's proof of its transcript is the daemon's own; the card carries the question only.
-      const { transcript: _proof, ...shown } = question;
+      const { transcript: _proof, conversation: _conversation, ...shown } = question;
       const fields = questionFields(question);
       await this.asks.raise({
         source: QUESTION_SOURCE,
