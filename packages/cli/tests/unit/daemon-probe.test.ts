@@ -87,6 +87,39 @@ describe('what systemd and launchd say about the daemon', () => {
     });
   });
 
+  it('reads a launchd job killed by a signal: the signal is named, and a crash loop is failed, not stopped', () => {
+    // The macOS 26.5 shape of a crash-looping job: no `last exit code`, a `last terminating signal` line instead.
+    const looping = [
+      'gui/501/com.ferretry.fyd = {',
+      '\tactive count = 0',
+      '\tstate = spawn scheduled',
+      '\truns = 14',
+      '\tlast terminating signal = Aborted: 6',
+      '}',
+    ].join('\n');
+    should(parseLaunchdPrint(looping)).deepEqual({ state: 'spawn scheduled', lastSignal: 'SIGABRT' });
+    should(readLaunchdReport(parseLaunchdPrint(looping), true)).deepEqual({
+      manager: 'launchd',
+      state: 'failed',
+      detail: 'launchd reports spawn scheduled; crashed (SIGABRT), restarting',
+    });
+    should(parseLaunchdPrint('state = waiting\nlast terminating signal = Killed: 9').lastSignal).equal('SIGKILL');
+    should(parseLaunchdPrint('state = waiting\nlast terminating signal = Segmentation fault: 11').lastSignal).equal(
+      'SIGSEGV',
+    );
+    // `launchctl list` documents a signal death as a negative status: -6 is SIGABRT.
+    should(parseLaunchdPrint('state = waiting\nlast exit status = -6')).deepEqual({
+      state: 'waiting',
+      lastSignal: 'SIGABRT',
+    });
+    // A signal number this fy has no name for is still said, never dropped.
+    should(parseLaunchdPrint('state = waiting\nlast terminating signal = Something odd: 77').lastSignal).equal(
+      'signal 77',
+    );
+    // A job that is running right now stays running; the signal is history.
+    should(readLaunchdReport({ state: 'running', pid: 5, lastSignal: 'SIGABRT' }, true).state).equal('running');
+  });
+
   it('turns a supervisor verdict into what a readiness wait should believe', () => {
     should(livenessOf({ manager: 'systemd', state: 'running', detail: '' })).equal('alive');
     should(livenessOf({ manager: 'systemd', state: 'failed', detail: '' })).equal('dead');

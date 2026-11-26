@@ -384,10 +384,37 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     const plist = present ? await this.#definitionText().catch(() => undefined) : undefined;
     const declared = plist === undefined ? {} : { processType: launchAgentProcessType(plist) ?? null };
     const outcome = await this.processes.run(['launchctl', 'print', this.layout.launchdServiceTarget]);
+    const file = present ? { definition: this.definitionPath } : {};
     if (outcome.code !== 0) {
-      return { manager: 'launchd', state: present ? 'stopped' : 'absent', detail: outcome.stderr.trim(), ...declared };
+      // 113 is launchd's "could not find service": the job is simply not loaded. Anything else (launchctl absent, a
+      // refusal) says nothing about the job, so it is reported as unreadable rather than as a stopped daemon.
+      const notLoaded = outcome.code === 113 || /could not find (?:specified )?service/iu.test(outcome.stderr);
+      const why = outcome.stderr.trim();
+      return {
+        manager: 'launchd',
+        state: present ? 'stopped' : 'absent',
+        detail: why,
+        loaded: false,
+        ...file,
+        ...(notLoaded
+          ? {}
+          : { unreadable: `launchctl print failed (exit ${String(outcome.code)})${why === '' ? '' : `: ${why}`}` }),
+        ...declared,
+      };
     }
-    return { ...readLaunchdReport(parseLaunchdPrint(outcome.stdout), present), ...declared };
+    const job = parseLaunchdPrint(outcome.stdout);
+    return {
+      ...readLaunchdReport(job, present),
+      loaded: true,
+      ...(job.lastExitStatus === undefined ? {} : { lastExit: job.lastExitStatus }),
+      ...(job.lastSignal === undefined ? {} : { lastSignal: job.lastSignal }),
+      ...file,
+      // Exit 0 with no `state` line is not a job listing: nothing in it can be believed.
+      ...(job.state === undefined
+        ? { unreadable: 'launchctl print answered, but not in a form this fy understands' }
+        : {}),
+      ...declared,
+    };
   }
 
   async #require(args: readonly string[]): Promise<void> {
