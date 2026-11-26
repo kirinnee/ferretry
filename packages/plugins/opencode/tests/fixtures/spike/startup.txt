@@ -1,0 +1,22 @@
+OpenCode v2.4.2, Linux x64, terminal 100 columns.
+Invocation: opencode --standalone --auto
+No prompt submitted; no API key passed to this TUI capture.
+Logo and blank lines omitted; scratch path scrubbed.
+
+┃  Ask anything… "Fix broken tests"
+┃
+┃  Build auto · DeepSeek V4.1 Flash 1017 DeepSeek
+╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+/fixture/opencode/a/project          shift+tab agents  ctrl+p commands
+
+2.4.2
+
+Observed before adding a default model to the synthetic project config:
+┃  Build auto · Seaglass Alpha Free OpenCode
+
+Observed after setting model: deepseek/deepseek-flash:
+┃  Build auto · DeepSeek V4.1 Flash 1017 DeepSeek
+
+Both launches reached the composer directly; no onboarding, login, trust,
+autonomy confirmation or permission screen appeared. Quit with Ctrl+C twice.
+This is a startup observation, not coverage of every possible TUI dialog.

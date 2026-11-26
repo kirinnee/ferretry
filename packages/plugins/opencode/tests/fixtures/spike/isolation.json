@@ -1,0 +1,34 @@
+{
+  "traceScope": "Successful standalone model call; strace -f -e trace=%file (no environment or file contents captured)",
+  "protectedHostPathSyscalls": 0,
+  "traceLines": 1677,
+  "realConfigPresence": "Not inspected; real OpenCode and harness configuration left untouched",
+  "environment": {
+    "HOME": "/fixture/opencode/a/home",
+    "FY_HOME": "/fixture/opencode/a/fy",
+    "XDG_CONFIG_HOME": "/fixture/opencode/a/config",
+    "XDG_DATA_HOME": "/fixture/opencode/a/data",
+    "XDG_STATE_HOME": "/fixture/opencode/a/state",
+    "XDG_CACHE_HOME": "/fixture/opencode/a/cache",
+    "OPENCODE_DB": "/fixture/opencode/a/data/private.db",
+    "TMPDIR": "/fixture/opencode/a/tmp"
+  },
+  "unset": [
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "OPENCODE_CONFIG",
+    "OPENCODE_CONFIG_CONTENT",
+    "OPENCODE_CONFIG_DIR",
+    "OPENCODE_SERVER",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY"
+  ],
+  "secondHome": {
+    "sessionList": [],
+    "exportExitCode": 1,
+    "exportStderr": "Session not found: ses_spike_001"
+  },
+  "sharedTmpBeforeSettingTmpdir": "/tmp/opencode"
+}
