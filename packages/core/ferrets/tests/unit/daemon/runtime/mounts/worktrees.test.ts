@@ -255,6 +255,7 @@ describe('the managed-worktree mount', () => {
       ['not_git_repository', 422],
       ['invalid_branch', 422],
       ['invalid_session_id', 422],
+      ['invalid_group', 422],
       ['ambiguous_remote_branch', 422],
       ['unresolved_base', 422],
       ['registry_damaged', 500],

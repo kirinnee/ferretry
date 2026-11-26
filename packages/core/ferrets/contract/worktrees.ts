@@ -279,6 +279,20 @@ const AbsoluteWorktreeSourcePath = Text.refine(isProtocolAbsolutePath, {
   message: 'a worktree source path must be absolute',
 });
 
+/** The longest group folder name a caller may ask for. */
+export const WORKTREE_GROUP_MAX_LENGTH = 64;
+
+/**
+ * Whether a caller-chosen group folder is one safe path segment under the managed root.
+ *
+ * THE ONE DECISION BOTH PROGRAMS MAKE: the request schema refuses it at the wire and the daemon refuses it again before
+ * it joins a path. A group is OPAQUE to Ferrets — a letter or digit first, then letters, digits, `.`, `_` or `-` —
+ * so `..`, a separator, an absolute path, an empty name, a control character and an overlong name all fail one rule.
+ */
+export function isPathSafeWorktreeGroup(value: string): boolean {
+  return value.length <= WORKTREE_GROUP_MAX_LENGTH && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value);
+}
+
 export const CreateWorktreeRequestSchema = z.strictObject({
   /** An absolute directory inside the Git checkout to fork from. Its relative depth is preserved. */
   sourcePath: AbsoluteWorktreeSourcePath,
@@ -286,6 +300,8 @@ export const CreateWorktreeRequestSchema = z.strictObject({
   base: WorktreeBaseSchema.default({ kind: 'auto' }),
   /** The session that will own it. Absent means the checkout is owned by nothing but the daemon. */
   sessionId: Text.optional(),
+  /** An opaque folder the caller files the checkout under: `<root>/<group>/<repo>-<hash>/<branch>-<hash>`. Absent: today's `<root>/<repo>-<hash>/…`. */
+  group: Text.refine(isPathSafeWorktreeGroup, { message: 'a worktree group must be one safe folder name' }).optional(),
 });
 export type CreateWorktreeRequest = z.infer<typeof CreateWorktreeRequestSchema>;
 

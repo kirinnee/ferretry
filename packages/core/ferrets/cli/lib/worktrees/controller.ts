@@ -43,6 +43,8 @@ export interface WorktreeForkOptions extends WorktreeCommandOptions {
   readonly from?: string;
   /** The session that will own the new checkout. */
   readonly session?: string;
+  /** The opaque folder to file the new checkout under, already resolved by the caller. */
+  readonly group?: string;
 }
 
 /** What the caller must type to confirm a removal by hand. */
@@ -135,6 +137,7 @@ export class WorktreeController {
       branch: location(branch),
       base: requestedBase(options),
       ...(options.session === undefined ? {} : { sessionId: options.session }),
+      ...(options.group === undefined ? {} : { group: options.group }),
     };
     const created = await this.gateway.create(request);
     this.#report(created, options, () => renderCreated(created));
