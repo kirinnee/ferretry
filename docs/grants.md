@@ -763,8 +763,7 @@ message to a ferret, sent as the person's own through the ordinary send path, so
 `fleet.use`** (Talk to test needs `voice.use` alone). A phone's own voice mode asks the machine to tell the ferret it entered (`POST /v1/voice/entry`, a person's route) and is held to the same two: the route is gated on `voice.use` and the handler refuses without `fleet.use` (`403 fleet_not_granted`), so a device narrowed on either cannot trigger the owner-voiced message. It reads a body of at most 1 KiB (a larger one is a `413`), and a refused send is not retried for 10 s. The stream asks for `fleet.use` when a chat starts (refused with a
 sentence and a `4403` close otherwise) and again before every message, and writes the same `agent.prompted` audit record a typed
 send writes (the ferret as subject, never the words). Narrowing `voice` closes an open stream at once; narrowing the machine-wide
-`fleet` stops the next message of an open stream; narrowing one device's own `fleet` takes effect on that device's next stream
-(declared GAP: the device half is read when the stream opens).
+`fleet` or one device's own `fleet` closes an active chat within that grant generation, releases its ferret claim, and sends `fleet_not_granted` with a `4403` close. Talk to test stays open with `voice.use` alone. The caller's governance re-reads the cached device standing before each decision and intersects it with the admission snapshot: it can only narrow. An unavailable or failed standing read closes the chat as well.
 
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
@@ -1174,6 +1173,8 @@ Permissive **defaults** settle what an operator's _silence_ meant. They say noth
 same provenance treatment every other value gets, because a person reading a permission report is
 usually asking which of these they chose and which something chose for them.
 
+Verification refusals are also recorded in the grant journal as `passkey.verification-refused=not-verified`, attributed to the proved device. A browser ceremony that ends before submission reports only a fixed ceremony and failure classification through `POST /v1/passkeys/failure`; the journal labels it `passkey.browser-failed`. The report confers no proof or unlock, and carries no exception text, credential id, challenge or signed bytes.
+
 ## Finding out without reading this document
 
 Every refusal names a command that fixes it. That is the point of the layer, not a nicety — a person
@@ -1281,6 +1282,17 @@ command says so at the moment somebody might be tempted to do that instead.
   `filesystem.configure` (which registering already needs) is the only gate on that choice. Registering `/` or `/home`
   does **not** widen it: those are outside the home, so the three file routes refuse a use-only device with the
   outside-home gate's `403` (the file routes never answer a partial index for a refused caller).
+- **The repository worktree list (`GET /v1/worktrees/repo?commonDir=`) is `filesystem.configure`**, at the `operator` minimum, `caller: any`,
+  `noStore`, audit skipped (a read lists nothing it did not already hold). It names an authorized repository by its git
+  common directory and answers the paths, branches, heads and ferret ids of every worktree Git lists for it, so it maps the
+  disk the way an outside-home folder read does and asks the same axis: a use-only or `--limited` device is refused, and a
+  remote device needs the passkey step-up. The absolute common directory must be inside the managed root or a ferret's
+  folder, without a symlink escape or redirected `commondir`. Its device/inode identity is held before Git reads it;
+  Git must also prove it is a common directory (`422 invalid_common_directory` otherwise, a missing query `400`).
+  Each checkout's metadata must belong to that same repository before inspection or a managed label. At most 500 rows.
+  A row whose folder this daemon may not reach (outside
+  every ferret's folder and the managed root) is still listed with Git's own facts and `live.undetermined` saying so.
+  The owner's `fy` with the admin token over loopback is ungoverned, as everywhere.
 - ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
   `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
   `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a

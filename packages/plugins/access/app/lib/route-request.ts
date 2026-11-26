@@ -92,6 +92,7 @@ export function routeRequestClient(
           ...(matched === undefined ? {} : { params: matched.params }),
           ...(search === '' ? {} : { query }),
           ...(body === undefined ? {} : { body }),
+          ...(init.signal == null ? {} : { signal: init.signal }),
           // A read the owner pressed for (a retry after a cancelled passkey prompt) is theirs, so it may ask again; a read
           // the page makes on its own (a notice mounting above every page) is quiet: a step-up it meets asks nobody.
           ...(init.pressed === true ? { quiet: false } : init.quiet === true ? { quiet: true } : {}),

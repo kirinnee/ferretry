@@ -87,6 +87,22 @@ export interface StepUpPrompt {
  */
 export type PromptOrigin = 'explicit' | 'background' | 'unasked';
 
+/** One machine may run one browser WebAuthn operation at a time. Network prerequisites hold no reservation. */
+export class PasskeyCeremonies {
+  readonly #running = new Set<string>();
+
+  async run<T>(daemonId: string, ceremony: () => Promise<T>): Promise<T> {
+    if (this.#running.has(daemonId))
+      throw new Error('A passkey confirmation is already running for this machine. Finish it, then try again.');
+    this.#running.add(daemonId);
+    try {
+      return await ceremony();
+    } finally {
+      this.#running.delete(daemonId);
+    }
+  }
+}
+
 export interface StepUpGateDependencies {
   /** Runs the whole ceremony for one machine: options, the passkey sheet, and the daemon's verdict. */
   readonly ceremony: (daemon: DaemonConnection, act?: StepUpAct, subject?: StepUpSubject) => Promise<void>;
@@ -140,6 +156,7 @@ export class StepUpGate {
   /** Machines with requests waiting, in the order they first asked. */
   readonly #waiting = new Map<DaemonId, Waiting>();
   #prompt: StepUpPrompt | null = null;
+  readonly #ceremonies = new Map<DaemonId, Promise<void>>();
   /** The machine on screen, whose background requests may ask. `null` until the shell says. */
   #focus: DaemonId | null = null;
   #waitingIds: readonly DaemonId[] = NOTHING_WAITING;
@@ -267,7 +284,7 @@ export class StepUpGate {
     this.#set({ ...kept, busy: true });
     try {
       const proof = this.#soleProof(prompt.daemon.daemonId);
-      await this.deps.ceremony(prompt.daemon, proof?.act, proof?.subject);
+      await this.#ceremony(prompt.daemon, proof?.act, proof?.subject);
     } catch (reason) {
       this.#set({
         ...kept,
@@ -286,12 +303,25 @@ export class StepUpGate {
    */
   async confirmInline(daemon: DaemonConnection): Promise<string | undefined> {
     try {
-      await this.deps.ceremony(daemon);
+      await this.#ceremony(daemon);
     } catch (reason) {
       return this.deps.describe(reason);
     }
     this.#settle(daemon.daemonId, true);
     return undefined;
+  }
+
+  /** Modal and inline presses on one machine share its in-flight result, including refusal. */
+  async #ceremony(daemon: DaemonConnection, act?: StepUpAct, subject?: StepUpSubject): Promise<void> {
+    const existing = this.#ceremonies.get(daemon.daemonId);
+    if (existing !== undefined) return await existing;
+    const running = this.deps.ceremony(daemon, act, subject);
+    this.#ceremonies.set(daemon.daemonId, running);
+    try {
+      await running;
+    } finally {
+      this.#ceremonies.delete(daemon.daemonId);
+    }
   }
 
   /** The prompt's cancel: every request waiting on this machine returns its refusal. */
@@ -331,12 +361,14 @@ export class StepUpGate {
 
   #settle(daemonId: DaemonId, stepped: boolean): void {
     const waiting = this.#waiting.get(daemonId);
-    this.#waiting.delete(daemonId);
     if (stepped) this.#dismissed.delete(daemonId);
     else this.#dismissed.add(daemonId);
+    if (waiting === undefined) return;
+    this.#waiting.delete(daemonId);
     for (const resolve of waiting?.resolvers ?? []) resolve(stepped);
-    this.#prompt = null;
-    this.#showNext();
+    if (this.#prompt?.daemon.daemonId === daemonId) this.#prompt = null;
+    if (this.#prompt === null) this.#showNext();
+    else this.#set(this.#prompt);
   }
 
   /** The first waiting machine allowed to ask, or nothing on screen. */

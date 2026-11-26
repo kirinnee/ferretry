@@ -1,15 +1,18 @@
 import { describe, it } from 'bun:test';
 import { ApiError, type ApiResponse } from '@ferretry/kernel/contract';
 import type {
+  AdoptWorktreeRequest,
   CreatedWorktree,
   CreateWorktreeRequest,
   ManagedWorktreeView,
   RemovedWorktree,
+  RepoWorktreeListResponse,
   WorktreeListResponse,
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
 } from '../../../../../contract/index.ts';
 import should from 'should';
+import actions from '../../../../../manifest/actions/90-worktrees.actions.ts';
 import {
   WORKTREE_ROUTE_KEYS,
   type WorktreeRouteKey,
@@ -47,9 +50,16 @@ const REMOVED: RemovedWorktree = {
 
 /** A subsystem that answers with fixtures and records what the routes asked of it. */
 class FakeWorktrees implements WorktreeSubsystem {
+  readonly adoptions: AdoptWorktreeRequest[] = [];
+  async adopt(request: AdoptWorktreeRequest): Promise<CreatedWorktree> {
+    this.adoptions.push(request);
+    if (this.failure) throw this.failure;
+    return { worktree: VIEW, cwd: PATH };
+  }
   readonly checks: { path: string; cwd?: string }[] = [];
   readonly removals: WorktreeRemovalRequest[] = [];
   readonly creations: CreateWorktreeRequest[] = [];
+  readonly listings: string[] = [];
 
   constructor(private readonly failure?: WorktreeError) {}
 
@@ -75,6 +85,12 @@ class FakeWorktrees implements WorktreeSubsystem {
     if (this.failure) throw this.failure;
     return { worktree: VIEW, cwd: `${PATH}/packages/cli` };
   }
+
+  async listRepo(commonDirectory: string): Promise<RepoWorktreeListResponse> {
+    this.listings.push(commonDirectory);
+    if (this.failure) throw this.failure;
+    return { commonDirectory, worktrees: [], total: 0, truncated: false };
+  }
 }
 
 /** Calls one handler directly; the route spine (operator, capability, no-store) is the kernel's. */
@@ -95,14 +111,44 @@ const thrownBy = async (work: Promise<unknown>): Promise<unknown> =>
   );
 
 describe('the managed-worktree mount', () => {
-  it('should key the four handlers exactly as the manifest declares them', () => {
+  it('should parse adoption through its strict path-only schema and preserve domain refusals', async () => {
+    const worktrees = new FakeWorktrees();
+    const response = await call(worktrees, 'POST /v1/worktrees/adopt', { body: { path: PATH } });
+    should(response.status).equal(200);
+    should(jsonOf(response)).match({ cwd: PATH, worktree: { path: PATH } });
+    should(worktrees.adoptions).eql([{ path: PATH }]);
+    const invalid = await refusalOf(
+      call(worktrees, 'POST /v1/worktrees/adopt', { body: { path: PATH, origin: 'adopted' } }),
+    );
+    should(invalid?.status).equal(400);
+    should(worktrees.adoptions).have.length(1);
+    const refused = await refusalOf(
+      call(new FakeWorktrees(new WorktreeError('unsafe_remove', 'foreign marker')), 'POST /v1/worktrees/adopt', {
+        body: { path: PATH },
+      }),
+    );
+    should(refused).match({ status: 409, code: 'unsafe_remove' });
+  });
+  it('should put adoption behind operator and filesystem.configure admission', () => {
+    const adoption = actions.routes?.find(route => route.path === '/v1/worktrees/adopt');
+    should(adoption).match({
+      method: 'POST',
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      capability: { capability: 'filesystem', axis: 'configure' },
+    });
+  });
+  it('should key the handlers exactly as the manifest declares them', () => {
     // Act
     const routes = worktreeRoutes(new FakeWorktrees());
 
     // Assert
     should(Object.keys(routes)).eql([...WORKTREE_ROUTE_KEYS]);
     should(Object.keys(routes)).eql([
+      'POST /v1/worktrees/adopt',
       'GET /v1/worktrees/removal',
+      'GET /v1/worktrees/repo',
       'POST /v1/worktrees/remove',
       'GET /v1/worktrees',
       'POST /v1/worktrees',
@@ -155,6 +201,46 @@ describe('the managed-worktree mount', () => {
     should([blank?.status, absent?.status]).eql([400, 400]);
     should(blank).match({ code: 'invalid_path' });
     should(worktrees.checks).be.empty();
+  });
+
+  it('should list a repository named by its common directory in the query string', async () => {
+    // Arrange
+    const worktrees = new FakeWorktrees();
+
+    // Act
+    const response = await call(worktrees, 'GET /v1/worktrees/repo', { query: { commonDir: ' /work/ferretry/.git ' } });
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonOf(response)).match({ commonDirectory: '/work/ferretry/.git', total: 0, truncated: false });
+    should(worktrees.listings).eql(['/work/ferretry/.git']);
+  });
+
+  it('should refuse a repository listing that names no common directory, before asking anyone', async () => {
+    // Arrange
+    const worktrees = new FakeWorktrees();
+
+    // Act
+    const blank = await refusalOf(call(worktrees, 'GET /v1/worktrees/repo', { query: { commonDir: '  ' } }));
+    const absent = await refusalOf(call(worktrees, 'GET /v1/worktrees/repo'));
+
+    // Assert
+    should([blank?.status, absent?.status]).eql([400, 400]);
+    should(blank).match({ code: 'invalid_common_directory' });
+    should(worktrees.listings).be.empty();
+  });
+
+  it('should answer a common directory the domain refused as a 422 with its own code', async () => {
+    // Arrange
+    const failure = new WorktreeError('invalid_common_directory', 'commonDir must be an absolute path');
+
+    // Act
+    const refused = await refusalOf(
+      call(new FakeWorktrees(failure), 'GET /v1/worktrees/repo', { query: { commonDir: 'x' } }),
+    );
+
+    // Assert
+    should(refused).match({ status: 422, code: 'invalid_common_directory' });
   });
 
   it('should carry every class of consent through to the removal', async () => {
@@ -303,6 +389,8 @@ describe('the managed-worktree mount', () => {
       checkRemoval: async () => DECISION,
       remove: async () => REMOVED,
       create: async () => ({ worktree: VIEW, cwd: PATH }),
+      adopt: async () => ({ worktree: VIEW, cwd: PATH }),
+      listRepo: async () => ({ commonDirectory: '/r/.git', worktrees: [], total: 0, truncated: false }),
     };
 
     // Act

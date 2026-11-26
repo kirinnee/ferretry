@@ -169,6 +169,7 @@ export type WorktreeLiveState = z.infer<typeof WorktreeLiveStateSchema>;
 
 /** One worktree the daemon created and still owns. */
 const ManagedWorktreeViewSchema = z.object({
+  origin: z.enum(['managed', 'adopted']).optional(),
   path: Text,
   branch: Text,
   repositoryRoot: Text,
@@ -317,6 +318,9 @@ export const CreatedWorktreeSchema = z.object({
 });
 export type CreatedWorktree = z.infer<typeof CreatedWorktreeSchema>;
 
+export const AdoptWorktreeRequestSchema = z.strictObject({ path: Text });
+export type AdoptWorktreeRequest = z.infer<typeof AdoptWorktreeRequestSchema>;
+
 /**
  * Which blockers survive the consent a caller gave.
  *
@@ -331,3 +335,64 @@ export function unclearedRemovalBlockers(
   const consented = new Set(granted);
   return blockers.filter(blocker => blocker.override === undefined || !consented.has(blocker.override));
 }
+
+/** The most rows one repository listing carries; a repository with more says so with `truncated`. */
+export const REPO_WORKTREE_LIMIT = 500;
+
+/**
+ * Whether a caller-supplied repository common directory is worth asking Git about.
+ *
+ * THE FIRST HALF OF THE ONE DECISION BOTH PROGRAMS MAKE (the daemon's Git check is the second): an absolute path with no
+ * control character and a sane length. A relative name, an empty one or a path carrying a NUL never reaches a child process.
+ */
+export function isListableCommonDirectory(value: string): boolean {
+  return (
+    value.length <= 4096 &&
+    isProtocolAbsolutePath(value) &&
+    ![...value].some(character => {
+      const code = character.charCodeAt(0);
+      return code < 0x20 || code === 0x7f;
+    })
+  );
+}
+
+/**
+ * Whether Ferretry holds a worktree of a repository on record.
+ *
+ * `managed`: Ferretry made it. `adopted`: it was made by hand and Ferretry took it over in place (never moved).
+ * `none`: Git lists it and Ferretry has no record of it.
+ */
+const RepoWorktreeTrackedSchema = z.enum(['managed', 'adopted', 'none']);
+export type RepoWorktreeTracked = z.infer<typeof RepoWorktreeTrackedSchema>;
+
+/** A ferret standing in a worktree. `active` false is a finished one: it does not hold the checkout. */
+const RepoWorktreeFerretSchema = z.object({ id: Text, active: z.boolean() });
+
+/** One row of `git worktree list`, with what Git says about it right now and who stands in it. */
+const RepoWorktreeSchema = z.object({
+  path: Text,
+  /** The repository's main checkout (Git lists it first). It is never removable. */
+  main: z.boolean(),
+  /** A bare repository has no checkout to inspect: `live` says nothing about files. */
+  bare: z.boolean(),
+  tracked: RepoWorktreeTrackedSchema,
+  /**
+   * Live Git state, read for this listing. A row that could not be inspected still has one: Git's own facts for the row
+   * and `undetermined` saying why the rest is missing, never a guessed default.
+   */
+  live: WorktreeLiveStateSchema,
+  /** The ferrets standing in it. ABSENT MEANS UNDETERMINED (the fleet could not be read), not "nobody". */
+  ferrets: z.array(RepoWorktreeFerretSchema).optional(),
+});
+export type RepoWorktreeRow = z.infer<typeof RepoWorktreeSchema>;
+
+export const RepoWorktreeListResponseSchema = z.object({
+  /** The common directory asked about, as given. */
+  commonDirectory: Text,
+  worktrees: z.array(RepoWorktreeSchema),
+  /** How many worktrees Git lists, which can exceed `worktrees.length` by the limit. */
+  total: NonNegativeIntegerSchema,
+  /** `total` is above {@link REPO_WORKTREE_LIMIT}: the rows after it are not listed. */
+  truncated: z.boolean(),
+});
+export type RepoWorktreeListResponse = z.infer<typeof RepoWorktreeListResponseSchema>;

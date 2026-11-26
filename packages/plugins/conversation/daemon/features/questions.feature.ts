@@ -62,12 +62,31 @@ export default {
     /** The questions an Agenda answer is typing into the form now: their card is the Agenda's to resolve, not the drive's. */
     const applying = new Set<string>();
     const applyingKey = (ferret: string, toolUseId: string): string => JSON.stringify([ferret, toolUseId]);
+    /** Closes the watch skipped while an Agenda answer was typing into that question: owed again if the answer fails. */
+    const deferred = new Set<string>();
+    /**
+     * An Agenda answer to the question failed: the card stays open (Asks leaves it), so a close skipped meanwhile is made now
+     * if that exact question is no longer the stored one. Detached on purpose: the apply runs inside Asks' own board
+     * mutation, and the close waits its turn behind it. A question still stored, or a file that cannot be read, is not over.
+     */
+    const closeIfReplaced = (ferret: string, toolUseId: string): void => {
+      if (!deferred.delete(applyingKey(ferret, toolUseId))) return;
+      void (async () => {
+        const read = await kernel.state.read(QUESTION_STATE, ferret);
+        if (!read.ok || read.value?.toolUseId === toolUseId) return;
+        await questionAsks.close(ferret, toolUseId, 'answered').catch(askFailure('close'));
+      })().catch(askFailure('close'));
+    };
     const closeQuestionAsk = async (
       ferret: string,
       toolUseId: string,
       reason: 'answered' | 'withdrawn',
     ): Promise<void> => {
-      if (reason === 'answered' && applying.has(applyingKey(ferret, toolUseId))) return;
+      if (reason === 'answered' && applying.has(applyingKey(ferret, toolUseId))) {
+        // Not the drive's to close: the Agenda resolves it if the answer lands. The close is owed if it does not.
+        deferred.add(applyingKey(ferret, toolUseId));
+        return;
+      }
       await questionAsks.close(ferret, toolUseId, reason).catch(askFailure('close'));
     };
     /**
@@ -93,7 +112,7 @@ export default {
       const read = await kernel.state.read(QUESTION_STATE, ferret);
       if (!read.ok || read.value === undefined) return undefined;
       // The transcript it was proved against stays in the file: the route and the port answer the question only.
-      const { transcript: _proof, ...question } = read.value;
+      const { transcript: _proof, conversation: _conversation, ...question } = read.value;
       return question;
     };
     f.late.askedQuestion = askedQuestion;
@@ -148,9 +167,18 @@ export default {
       // A Codex ferret's question is in its transcript (the reading feature reads it).
       transcriptEvents: async (ferret, limit) =>
         await built(f.late.reading, 'reading half').questionEvents(ferret, limit),
+      conversation: async ferret => await built(f.late.reading, 'reading half').questionConversation(ferret),
       paneForm: panePending(ferrets),
-      writeProjected: async (ferret, pending, askedAt) =>
-        await writeProjectedQuestion(kernel.state, questionSerial, ferret, pending, askedAt, () => kernel.clock.now()),
+      writeProjected: async (ferret, pending, askedAt, conversation) =>
+        await writeProjectedQuestion(
+          kernel.state,
+          questionSerial,
+          ferret,
+          pending,
+          askedAt,
+          () => kernel.clock.now(),
+          conversation,
+        ),
       asked: async (ferret, toolUseId) => {
         await raiseQuestionAsk(ferret, toolUseId);
         await kernel.events.publish(QuestionAsked, { ferret: parseSessionId(ferret), toolUseId });
@@ -244,9 +272,12 @@ export default {
                 answers: mapped.answers,
                 requestId: `agenda:${answer.id}`,
               });
+              // The Agenda records this answer and resolves the card: nothing is owed.
+              deferred.delete(key);
               return 'applied';
             } catch (error) {
               const why = error instanceof Error ? error.message : String(error);
+              closeIfReplaced(found.ferret, toolUseId);
               return { refused: `The answer did not reach the ferret, so the question stays open: ${why}` };
             } finally {
               applying.delete(key);

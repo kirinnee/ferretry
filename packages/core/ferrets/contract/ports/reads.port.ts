@@ -4,6 +4,7 @@ import type { FerretState, FerretSummary, HarnessKey, PackId } from '../ids.ts';
 import type { ConversationImport, HarnessFacts, SitrepLine } from '../kinds.ts';
 import type { HarnessRuntimeDescriptor } from '../kinds/runtime-descriptor.ts';
 import type { HarnessHistorySource } from '../history.ts';
+import type { RepoWorktreeListResponse } from '../worktrees.ts';
 
 /**
  * One checkout in the managed worktree registry (`<home>-worktrees`, `state/ferrets/worktrees.json`): the durable
@@ -12,6 +13,7 @@ import type { HarnessHistorySource } from '../history.ts';
  * cannot read Projects (§2.1), so a reader joins `commonDirectory` to a project's own (today's `projectForWorktree`).
  */
 export interface ManagedWorktreeSummary {
+  readonly origin?: 'managed' | 'adopted';
   readonly path: string;
   readonly branch: string;
   readonly repositoryRoot: string;
@@ -152,6 +154,14 @@ export interface ReadsApi {
    * managed worktree.
    */
   managedWorktrees?(): Promise<readonly ManagedWorktreeSummary[]>;
+  /**
+   * Every worktree of one repository, as `git worktree list` names them (`GET /v1/worktrees/repo?commonDir=`): each with
+   * its live state, whether Ferretry tracks it (`managed`, `adopted`, `none`) and the ferrets standing in it. At most 500
+   * rows; a row Git could not be read for says so (`live.undetermined`), never a guess. `commonDir` must be an absolute
+   * path to an existing git common directory: anything else is refused `422 invalid_common_directory`. Read only. Optional,
+   * so it is additive: absent on a host with no managed worktree root.
+   */
+  repoWorktrees?(commonDir: string): Promise<RepoWorktreeListResponse>;
   /**
    * The next free callsign of a session Ferretry starts ITSELF (additive; today's `SystemCallsignIssuer`): the
    * Learning miner and Pack clean-up take `learning-000001` / `pack-00002A`, never a pool name. The counter is

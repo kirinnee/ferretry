@@ -1,8 +1,11 @@
 import {
+  type AdoptWorktreeRequest,
+  AdoptWorktreeRequestSchema,
   type CreateWorktreeRequest,
   CreateWorktreeRequestSchema,
   type CreatedWorktree,
   type RemovedWorktree,
+  type RepoWorktreeListResponse,
   type WorktreeListResponse,
   type WorktreeRemovalDecision,
   type WorktreeRemovalRequest,
@@ -50,10 +53,13 @@ type RouteContext = CallContext;
 
 /** The whole surface, as the routes need it. The composition root supplies the real implementation. */
 export interface WorktreeSubsystem {
+  adopt(request: AdoptWorktreeRequest): Promise<CreatedWorktree>;
   list(): Promise<WorktreeListResponse>;
   checkRemoval(path: string, currentWorkingDirectory?: string): Promise<WorktreeRemovalDecision>;
   remove(request: WorktreeRemovalRequest): Promise<RemovedWorktree>;
   create(request: CreateWorktreeRequest): Promise<CreatedWorktree>;
+  /** Every worktree of the repository whose git common directory this is, hand-made ones included. */
+  listRepo(commonDirectory: string): Promise<RepoWorktreeListResponse>;
 }
 
 /**
@@ -76,6 +82,7 @@ const STATUS: Readonly<Record<WorktreeErrorCode, number>> = {
   invalid_branch: 422,
   invalid_session_id: 422,
   invalid_group: 422,
+  invalid_common_directory: 422,
   invalid_ownership_token: 500,
   ambiguous_remote_branch: 422,
   unresolved_base: 422,
@@ -90,7 +97,7 @@ const STATUS: Readonly<Record<WorktreeErrorCode, number>> = {
  * into "refused" would leave the caller with a verdict and no way to learn what would have been
  * destroyed, and the check route they would then have to ask is the one they just asked.
  */
-function refuse(error: unknown): never {
+export function refuse(error: unknown): never {
   if (!(error instanceof WorktreeError)) throw error;
   throw new ApiError(STATUS[error.code], error.message, error.code);
 }
@@ -122,14 +129,28 @@ async function remove(worktrees: WorktreeSubsystem, context: RouteContext): Prom
   return jsonResponse(await worktrees.remove(request).catch(refuse));
 }
 
+/**
+ * The repository a listing is about. Like a checkout it travels as a query parameter: the path has slashes, and it is
+ * validated twice (the contract's shape check here, Git's proof that it is a common directory in the adapter).
+ */
+async function listRepo(worktrees: WorktreeSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const commonDirectory = queryValue(context.request, 'commonDir')?.trim();
+  if (commonDirectory === undefined || commonDirectory === '') {
+    throw new ApiError(400, 'query parameter "commonDir" is required', 'invalid_common_directory');
+  }
+  return jsonResponse(await worktrees.listRepo(commonDirectory).catch(refuse));
+}
+
 async function create(worktrees: WorktreeSubsystem, context: RouteContext): Promise<ApiResponse> {
   const request = await parseBody(context.request, CreateWorktreeRequestSchema);
   return jsonResponse(await worktrees.create(request).catch(refuse));
 }
 
-/** The four route keys, exactly as `manifest.ts` declares them (R-… rows of the parity table, paths unchanged). */
+/** The five route keys, exactly as `manifest.ts` declares them (R-… rows of the parity table, paths unchanged). */
 export const WORKTREE_ROUTE_KEYS = [
+  'POST /v1/worktrees/adopt',
   'GET /v1/worktrees/removal',
+  'GET /v1/worktrees/repo',
   'POST /v1/worktrees/remove',
   'GET /v1/worktrees',
   'POST /v1/worktrees',
@@ -143,7 +164,10 @@ export type WorktreeRouteKey = (typeof WORKTREE_ROUTE_KEYS)[number];
  */
 export function worktreeRoutes(worktrees: WorktreeSubsystem): { readonly [K in WorktreeRouteKey]: RouteHandler } {
   return {
+    'POST /v1/worktrees/adopt': async context =>
+      jsonResponse(await worktrees.adopt(await parseBody(context.request, AdoptWorktreeRequestSchema)).catch(refuse)),
     'GET /v1/worktrees/removal': async context => await checkRemoval(worktrees, context),
+    'GET /v1/worktrees/repo': async context => await listRepo(worktrees, context),
     'POST /v1/worktrees/remove': async context => await remove(worktrees, context),
     'GET /v1/worktrees': async () => jsonResponse(await worktrees.list().catch(refuse)),
     'POST /v1/worktrees': async context => await create(worktrees, context),

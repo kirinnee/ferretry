@@ -145,6 +145,7 @@ describe('the routes a locked device may reach', () => {
     should(exempt).deepEqual([
       'GET /v1/passkeys',
       'POST /v1/passkeys',
+      'POST /v1/passkeys/failure',
       'POST /v1/passkeys/options',
       'POST /v1/unlock',
       'POST /v1/unlock/options',

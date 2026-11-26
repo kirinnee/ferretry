@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { deviceStanding, ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import type { FerretId } from '@ferretry/kernel/contract';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import {
   type AskAnswer,
@@ -13,8 +16,10 @@ import {
   type EntryId,
   type SourceKey,
 } from '../../../contract/index.ts';
-import { AGENDA_REPLY_RECHECK_MS, AGENDA_REPLY_SETTLE_MS } from '../../../daemon/lib/agenda/index.ts';
-import { asksHalf } from '../../support/daemon/asks-half.ts';
+import { AGENDA_FILES, AGENDA_REPLY_RECHECK_MS, AGENDA_REPLY_SETTLE_MS } from '../../../daemon/lib/agenda/index.ts';
+import { agendaLedgerDocument, applyAgendaCommandToSession } from '../../../daemon/lib/agenda/state-machine.ts';
+import { agendaFilesAt } from '../../support/daemon/agenda-state.ts';
+import { asksHalf, EVERY_FERRET } from '../../support/daemon/asks-half.ts';
 
 const BOARD = 'POST /v1/ferrets/:ferretId/agenda';
 const REPLIES = 'POST /v1/ferrets/:ferretId/agenda/replies';
@@ -63,6 +68,10 @@ const ferretAsk = async (half: Half): Promise<AskRef> => {
 const yes = { kind: 'multiple-choice', choice: 'Yes' } as const;
 const answer = (half: Half, id: string, extra: Record<string, unknown> = {}, standing = ownerStanding('ui')) =>
   half.call(BOARD, F1, { action: 'resolve', id, response: yes, ...extra }, standing);
+
+/** The owner closing an item with no answer (done, as `fy tidy` does): nothing rests, the close itself is told. */
+const close = (half: Half, id: string) =>
+  half.call(BOARD, F1, { action: 'resolve', id, note: 'tidied' }, ownerStanding('ui'));
 
 /** A conversation that records what it was asked, and behaves as told. */
 function conversation(options: { composer?: AskComposerState; receipt?: AskReceipt; send?: Error } = {}) {
@@ -187,12 +196,12 @@ describe('the owner’s answer reaching a ferret through the conversation', () =
     });
   }
 
-  it('should hand the answer back to the owner, with the reason, when the send is refused outright', async () => {
-    // Arrange
+  it('should hand a closing back to the owner, with the reason, when the send is refused and Ferrets says the ferret is live', async () => {
+    // Arrange: a refusal says nothing about why (a question the ferret will clear), so it is never read as "stopped"
     const { sent, delivery } = conversation({ send: new Error('terminal gone') });
     const half = await world(providers(delivery));
     const ref = await ferretAsk(half);
-    await answer(half, ref.id);
+    await close(half, ref.id);
 
     // Act
     await half.call(REPLIES, F1, {});
@@ -205,6 +214,111 @@ describe('the owner’s answer reaching a ferret through the conversation', () =
     expect(sent).toHaveLength(0);
     expect(board.items[0]?.undelivered?.reason).toBe('terminal gone');
   });
+
+  {
+    const name = 'stopped';
+    const ferrets = {
+      get: async () => ({ id: 'f1', mode: 'auto', updatedAt: '2026-11-06T09:00:00.000Z', live: false }),
+    };
+    it(`should close the owner's closing quietly, before any send, when Ferrets says the ferret is ${name}`, async () => {
+      // Arrange: a send that would fail (and, for a real stopped ferret, revive it)
+      const { sent, delivery } = conversation({ send: new Error('must not be sent') });
+      const half = await world({ ...providers(delivery), 'agenda.context:ferrets': { ...EVERY_FERRET, ...ferrets } });
+      const ref = await ferretAsk(half);
+      await close(half, ref.id);
+
+      // Act
+      await half.call(REPLIES, F1, {});
+      await Bun.sleep(50);
+      const board = (await half.call('GET /v1/ferrets/:ferretId/agenda', F1)).json<{
+        items: unknown[];
+        resolved: { id: string }[];
+        delivery?: unknown;
+      }>();
+
+      // Assert: the owner's resolution stands, nothing was sent, nothing reopens, nothing waits
+      expect(sent).toHaveLength(0);
+      expect(board.items).toEqual([]);
+      expect(board.resolved.map(each => each.id)).toEqual([ref.id]);
+      expect(board.delivery).toBeUndefined();
+    });
+  }
+
+  it('should still hand the answer back to the owner, with the reason, when the transcript shows it failed', async () => {
+    // Arrange: accepted by the send path, then proven not to have arrived
+    const { delivery } = conversation({ receipt: { state: 'failed', reason: 'the ferret was gone' } });
+    const half = await world(providers(delivery));
+    const ref = await ferretAsk(half);
+    await close(half, ref.id);
+
+    // Act
+    await half.call(REPLIES, F1, {});
+    for (let look = 0; look < 4; look += 1) {
+      await half.clock.advance(AGENDA_REPLY_RECHECK_MS);
+      await Bun.sleep(50);
+    }
+    const board = (await half.call('GET /v1/ferrets/:ferretId/agenda', F1)).json<{
+      items: { undelivered?: { reason: string } }[];
+    }>();
+
+    // Assert
+    expect(board.items[0]?.undelivered?.reason).toBe('the ferret was gone');
+  });
+});
+
+describe('the owner closing a question form a v4 home carried over', () => {
+  /** The daemon's own `question:<tool id>` row on ferret f1's board, planted as a carried home leaves it. */
+  async function carriedHalf(delivery: AskDelivery) {
+    const home = await mkdtemp(join(tmpdir(), 'asks-carried-'));
+    const raised = applyAgendaCommandToSession(null, 'f1', {
+      action: 'raise',
+      actor: { kind: 'daemon', cause: 'harness-prompt' },
+      at: '2026-11-06T09:00:00.000Z',
+      request: {
+        source: 'question',
+        sourceRef: 'question:toolu_01',
+        title: 'Question from the ferret',
+        subject: 'Which fix should I apply?',
+        why: 'The ferret stopped at a question form.',
+        context: '- The ferret is waiting on its own question form.',
+        premise: 'The ferret asked a question.',
+        howToResolve: 'Answer here.',
+        kind: 'choice',
+        ask: { kind: 'multiple-choice', options: [{ label: 'Patch' }, { label: 'Rewrite' }] },
+      },
+    });
+    if (!raised.ok) throw new Error(raised.error.message);
+    await agendaFilesAt(home).writeAtomic('f1', AGENDA_FILES.ledger, agendaLedgerDocument(raised.ledger));
+    const half = await asksHalf(providers(delivery), { home });
+    halves.push(half);
+    return half;
+  }
+
+  for (const [name, body] of [
+    ['Done', { action: 'resolve', id: 'A1', note: 'fine' }],
+    ['Skip', { action: 'dismiss', id: 'A1', note: 'not needed' }],
+  ] as const) {
+    it(`should hand ${name} back to the owner, as on the ferret's own row, when the ferret never got it`, async () => {
+      // Arrange
+      const { delivery } = conversation({ receipt: { state: 'failed', reason: 'the ferret was gone' } });
+      const half = await carriedHalf(delivery);
+      await half.call(BOARD, F1, body, ownerStanding('ui'));
+
+      // Act
+      await half.call(REPLIES, F1, {});
+      for (let look = 0; look < 4; look += 1) {
+        await half.clock.advance(AGENDA_REPLY_RECHECK_MS);
+        await Bun.sleep(50);
+      }
+      const board = (await half.call('GET /v1/ferrets/:ferretId/agenda', F1)).json<{
+        items: { id: string; undelivered?: { reason: string } }[];
+      }>();
+
+      // Assert
+      expect(board.items.map(each => each.id)).toEqual(['A1']);
+      expect(board.items[0]?.undelivered?.reason).toBe('the ferret was gone');
+    });
+  }
 });
 
 describe('a tell from the Vault joining the ferret’s reply batch', () => {

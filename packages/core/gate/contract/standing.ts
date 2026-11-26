@@ -112,6 +112,8 @@ export interface GrantDecision {
 export interface CallerGovernance {
   readonly governed: boolean;
   decide(demand: CapabilityDemand): GrantDecision;
+  /** A grant generation moved: re-ask this caller's extra demands. Cancel when the caller ends. */
+  watch?(listener: () => void): () => void;
 }
 
 /** The facts the grant layer reads about this caller (today's `CapabilityPresentation`). */

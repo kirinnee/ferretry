@@ -15,6 +15,7 @@ import type {
 } from '../../contract/ports.ts';
 import { detachedAsked, detachedHandle, plainEnvironment } from '../detached.ts';
 import { embeddedWorkerUrl } from './embedded-worker.ts';
+import { ABANDONED, readCapped } from './process-capture.ts';
 
 /**
  * The unrestricted spawn adapter; the host wraps it per plugin (`restrictSpawn`). The child sees the base the host
@@ -301,23 +302,39 @@ export function bunSpawn(
       const maxStdout = checkedLimit(options?.maxStdoutBytes, DEFAULT_STDOUT_LIMIT, 'maxStdoutBytes');
       const maxStderr = checkedLimit(options?.maxStderrBytes, DEFAULT_STDERR_LIMIT, 'maxStderrBytes');
       // The timeout is ours (SIGKILL, then stop reading): a grandchild holding the pipe cannot hang the caller.
-      const { timeout, ...rest } = options ?? {};
+      const { timeout, signal, ...rest } = options ?? {};
+      signal?.throwIfAborted();
       const child = start(program, args, rest as SpawnBytesOptions);
       let timedOut = false;
       const abandoned = Promise.withResolvers<typeof ABANDONED>();
+      const stop = () => {
+        child.kill('SIGKILL');
+        abandoned.resolve(ABANDONED);
+      };
+      signal?.addEventListener('abort', stop, { once: true });
+      if (signal?.aborted === true) stop();
       const timer =
         timeout === undefined
           ? undefined
           : setTimeout(() => {
               timedOut = true;
-              child.kill('SIGKILL');
-              abandoned.resolve(ABANDONED);
+              stop();
             }, timeout);
       try {
         const [exited, stdout, stderr] = await Promise.all([
           Promise.race([child.exited, abandoned.promise]),
-          readCapped(child.stdout, maxStdout, abandoned.promise),
-          readCapped(child.stderr, maxStderr, abandoned.promise),
+          readCapped(
+            child.stdout,
+            maxStdout,
+            abandoned.promise,
+            options?.killOnOutputLimit === true ? stop : undefined,
+          ),
+          readCapped(
+            child.stderr,
+            maxStderr,
+            abandoned.promise,
+            options?.killOnOutputLimit === true ? stop : undefined,
+          ),
         ]);
         return {
           exitCode: exited === ABANDONED || exited === null ? -1 : exited,
@@ -329,6 +346,7 @@ export function bunSpawn(
         };
       } finally {
         if (timer !== undefined) clearTimeout(timer);
+        signal?.removeEventListener('abort', stop);
       }
     },
     run: async (program, args, options): Promise<SpawnResult> => {
@@ -357,51 +375,6 @@ function checkedLimit(value: number | undefined, fallback: number, label: string
   const limit = value ?? fallback;
   if (!Number.isSafeInteger(limit) || limit < 0) throw new RangeError(`${label} must be a non-negative safe integer`);
   return limit;
-}
-
-const ABANDONED = Symbol('abandoned');
-
-/**
- * Reads at most `maxBytes`, and stops the moment `abandoned` settles (today's Git runner `readCapped`, copied).
- * Without that escape a grandchild inheriting the pipe would keep the stream open past the timeout.
- */
-async function readCapped(
-  stream: ReadableStream<Uint8Array>,
-  maxBytes: number,
-  abandoned: Promise<typeof ABANDONED>,
-): Promise<{ readonly bytes: Uint8Array; readonly truncated: boolean }> {
-  const chunks: Uint8Array[] = [];
-  let keptBytes = 0;
-  let truncated = false;
-  let abandonedRead = false;
-  const reader = stream.getReader();
-  try {
-    while (true) {
-      const result = await Promise.race([reader.read(), abandoned]);
-      if (result === ABANDONED) {
-        abandonedRead = true;
-        break;
-      }
-      if (result.done) break;
-      const chunk = result.value;
-      // `remaining` is never negative, so an empty chunk after the cap keeps `kept` empty and is not a truncation.
-      const remaining = maxBytes - keptBytes;
-      const kept = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
-      chunks.push(kept);
-      keptBytes += kept.byteLength;
-      truncated ||= kept.byteLength < chunk.byteLength;
-    }
-  } finally {
-    if (abandonedRead) await reader.cancel();
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(keptBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { bytes, truncated };
 }
 
 /** Plain values pass as they are; anything else must be a handle the bound opener recognises. */

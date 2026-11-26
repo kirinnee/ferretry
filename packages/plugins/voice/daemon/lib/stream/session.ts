@@ -87,10 +87,7 @@ export interface StreamParts {
         sendId: string,
       ) => Promise<{ readonly ok: true } | { readonly ok: false; readonly code: string }>)
     | undefined;
-  /**
-   * Whether this caller may use the agent fleet RIGHT NOW (`fleet.use`, the grant a typed send needs). Voice chat sends to
-   * a ferret, so it needs this as well as `voice.use`; asked at the start and again before every send.
-   */
+  /** Live `fleet.use`: checked at start, each grant generation, each tick and before every send. */
   readonly mayChat: () => boolean;
   /** The ferret a name or an id means (the same rule a typed send's path uses); `undefined` when none or several do. */
   readonly resolveFerret: (reference: string) => Promise<string | undefined>;
@@ -98,17 +95,12 @@ export interface StreamParts {
   readonly recordSent: (ferretId: string) => void;
   /** Takes the one voice chat a ferret may have; `undefined` when another stream holds it. Returns the release. */
   readonly claimFerret: (ferretId: string) => (() => void) | undefined;
-  /**
-   * The chat's entry claim, shared by every stream and phone engine of this machine (the registry holds it). `enter` is true
-   * only for the call that finds no live claim: that one sends the entry message. Absent (a suite): every entry sends.
-   */
+  /** Shared entry claim: only `enter: true` sends. Without a registry (a suite), every entry sends. */
   readonly entry?: {
     readonly enter: (ferretId: string) => boolean;
     readonly leave: (ferretId: string) => void;
   };
-  /**
-   * The machine's reply voice. `undefined` only where there is none to ask (a suite): a stream that asks for it is then told
-   * `absent`. A stream that does not ask for it never touches this.
+  /** Machine reply voice: an asking stream gets `absent` without it (a suite); other streams never touch it.
    */
   readonly reply?: ReplySpeakerApi | undefined;
   /** Called once when the stream is over, whatever ended it. */
@@ -169,13 +161,8 @@ const toPcm16 = (samples: Float32Array): Int16Array => {
 };
 
 /**
- * One open voice stream: the uplink's audio in, the downlink's snapshots out, and the one decision the machine makes on
- * its own, which is when a turn ends and whether to send it.
- *
- * WHY IT IS SAFE TO SEND WITHOUT ASKING (owner decision O1: no countdown): a turn is sent only after an echo of a nonce
- * the machine issued AFTER it heard the pause. A phone that died, lost its network or went into a tunnel cannot echo it,
- * so the turn is cancelled and nothing is sent. The kernel re-checks the device's `voice.use` on every uplink frame and
- * closes the stream the moment it is narrowed, so a device that lost the grant never reaches the send either.
+ * One open voice stream: audio in, snapshots out, and the machine deciding when a turn ends and whether to send it.
+ * A send needs an echo of a nonce issued AFTER the pause (O1). Gate rechecks `voice.use`; chat also watches `fleet.use`.
  */
 export class VoiceStream implements SocketHandler {
   private readonly assembler = new UnitAssembler(UPLINK_UNIT_BYTES);
@@ -238,8 +225,7 @@ export class VoiceStream implements SocketHandler {
     this.lastUnitAt = now;
     this.cancels.push(this.parts.clock.every(milliseconds(TICK_MS), () => this.tick()));
     this.cancels.push(this.parts.clock.after(milliseconds(STREAM_MAX_MS), () => this.endWith(STREAM_CLOSES.ended)));
-    // Nothing is sent until the start record has arrived: what it asks for decides the size of every unit after it (a
-    // stream that asked for the reply voice has a larger one), so a unit sent first could be the wrong size.
+    // The start record decides the downlink unit size; nothing is sent before it arrives.
   }
 
   fromClient(frame: SocketFrame): void {
@@ -255,6 +241,16 @@ export class VoiceStream implements SocketHandler {
 
   close(_ended?: SocketEnded): void {
     this.finish();
+  }
+
+  grantsChanged(): void {
+    if (this.ended || this.start?.purpose !== 'chat') return;
+    try {
+      if (this.parts.mayChat()) return;
+    } catch {
+      /* An unanswerable grant closes the chat too. */
+    }
+    this.refuse('fleet_not_granted');
   }
 
   // ─── uplink ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -603,6 +599,7 @@ export class VoiceStream implements SocketHandler {
   // ─── the loop ──────────────────────────────────────────────────────────────────────────────────────────────────
 
   private tick(): void {
+    this.grantsChanged(); // Bound missed notifications to one loop period; failed reads close too.
     if (this.ended) return;
     const now = this.parts.clock.nowMs();
     if (this.start === undefined && now - this.openedAt > NO_START_MS) {
@@ -768,8 +765,7 @@ export class VoiceStream implements SocketHandler {
     // A turn is handed over once. The send id is stable, so even a repeat of this very call would be ONE message.
     const ferretId = this.ferretId;
     if (this.ended || ferretId === undefined || this.sentTurns.has(turn) || this.parts.send === undefined) return;
-    // A grant can narrow while the stream is open: it is asked again for every message.
-    if (!this.parts.mayChat()) return this.settle({ turn, outcome: 'failed', code: 'fleet_not_granted' });
+    if (!this.parts.mayChat()) return this.refuse('fleet_not_granted');
     this.sentTurns.add(turn);
     const sendId = `${this.parts.streamId}:${turn}`;
     // A cut-off reply is told to the ferret in front of the person's next words: this message is the note's one way out until it is refused.
@@ -974,8 +970,11 @@ export class VoiceStream implements SocketHandler {
   private refuse(code: string): void {
     if (this.ended) return;
     this.fatal = { code, message: sentenceOf(code) };
-    this.emit();
-    this.endWith(CLOSE_FOR[code] ?? STREAM_CLOSES.failed);
+    try {
+      this.emit();
+    } finally {
+      this.endWith(CLOSE_FOR[code] ?? STREAM_CLOSES.failed);
+    }
   }
 
   private endWith(close: { readonly code: number; readonly reason: string }): void {

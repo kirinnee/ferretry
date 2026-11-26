@@ -1,6 +1,7 @@
 import type { GitAccountsApi } from '@ferretry/plugin-git-accounts/contract';
 import type { ProjectsApi } from '@ferretry/plugin-projects/contract';
 import type { GithubClient } from './adapters/github/client.ts';
+import { branchesRoutes } from './features/branches/index.ts';
 import { ciRoutes } from './features/ci/index.ts';
 import { threadsRoute } from './features/threads/routes.ts';
 import { detailRoutes } from './features/detail/index.ts';
@@ -24,6 +25,7 @@ export interface PullsServices {
 /** Each unit adds ONE line here, naming its routes. */
 export const pullsRoutes = (services: PullsServices, watch: ReturnType<typeof watchFeature>) => ({
   ...ciRoutes(services), // E8: CI runs, jobs, steps and timing
+  ...branchesRoutes(services), // G3 U5: the latest PR of each branch
   // E6 · review threads
   'GET /v1/pulls/:project/:repo/:number/threads': threadsRoute({
     github: services.github,

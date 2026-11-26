@@ -108,6 +108,8 @@ export interface ReadingHalf {
    * pane is over): `'unreadable'` when it cannot be read, `undefined` for any other harness.
    */
   questionEvents(ferret: string, limit?: number): Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
+  /** The harness's own id of the conversation the ferret's transcript holds now (a rename keeps it, another conversation has another); `undefined` when unknown. */
+  questionConversation(ferret: string): Promise<string | undefined>;
   readonly routes: Readonly<Record<string, RouteHandler>>;
   readonly tools: { readonly search_work: ToolHandler };
   readonly api: ReadingApi;
@@ -347,9 +349,14 @@ export function buildReading(deps: {
     const read = await reader.tail(ferret, limit).catch(() => undefined);
     return read?.kind === 'read' ? read.events : 'unreadable';
   };
+  const questionConversation: ReadingHalf['questionConversation'] = async ferret => {
+    const read = await reader.tail(ferret, QUESTION_TAIL_EVENTS).catch(() => undefined);
+    return read?.kind === 'read' ? read.conversation : undefined;
+  };
 
   return {
     questionEvents,
+    questionConversation,
     routes: {
       ...reader.routes,
       ...links.routes,

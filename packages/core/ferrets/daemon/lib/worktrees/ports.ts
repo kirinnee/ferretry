@@ -41,14 +41,17 @@ export interface WorktreeDirectoryPinner {
 }
 
 export interface GitInvocation {
+  readonly signal?: AbortSignal;
   readonly args: readonly string[];
   /**
    * Working directory for the child.
    *
    * A caller reached from HTTP MUST pass a {@link PinnedWorkingDirectory} rather than a configured
    * pathname, for the reason spelled out there.
+   *
+   * ABSENT only for a read that names its repository with `--git-dir` and so needs no folder (the repository listing).
    */
-  readonly cwd: GitWorkingDirectory;
+  readonly cwd?: GitWorkingDirectory;
   readonly timeoutMs?: number;
   readonly maxStdoutBytes?: number;
   /** Bytes piped to stdin. Used by the commands that take a NUL-separated batch of paths that way. */

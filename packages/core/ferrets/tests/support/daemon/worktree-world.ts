@@ -1,4 +1,5 @@
 import { mkdir } from 'node:fs/promises';
+import { isWithinDirectory } from '../../../daemon/lib/worktrees/policy.ts';
 import path from 'node:path';
 import should from 'should';
 import { ApiError } from '@ferretry/kernel/contract';
@@ -6,7 +7,8 @@ import { fixedClock, MemoryStateFolder } from '@ferretry/kernel/testing';
 import { WorktreesFile } from '../../../contract/index.ts';
 import { buildWorktrees } from '../../../daemon/modules/worktrees.ts';
 import type { WorktreeRouteKey } from '../../../daemon/lib/runtime/mounts/worktrees.ts';
-import type { FencedPath, FerretId, SpawnBytesResult } from '@ferretry/kernel/contract';
+import type { FencedPath, FerretId, SpawnBytesOptions } from '@ferretry/kernel/contract';
+import { bunSpawn } from '../../../../kernel/host/adapters/process.ts';
 import { PinRegistry } from '../../../../kernel/host/pins.ts';
 import { platformRootPinner } from '../../../../kernel/host/adapters/pinned/index.ts';
 import { nodeFs } from '../../../../kernel/host/adapters/node-fs.ts';
@@ -24,45 +26,16 @@ const WORLD_FERRET = 'F1' as FerretId;
 
 /** `kernel.spawn.runBytes` for Git over a real child: a fenced folder by string, a pin by its install. */
 const pins = new PinRegistry(() => platformRootPinner());
+const processes = bunSpawn({ PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' });
 
 const spawn = {
-  runBytes: async (
-    program: string,
-    args: readonly string[],
-    options: {
-      readonly cwd?: FencedPath | { install(): () => void };
-      readonly env?: Readonly<Record<string, string>>;
-      readonly stdin?: string | Uint8Array;
-    },
-  ): Promise<SpawnBytesResult> => {
+  runBytes: async (program: string, args: readonly string[], options: SpawnBytesOptions) => {
     const cwd = options.cwd;
     const alias = typeof cwd === 'object' ? pins.lookup('ferrets', cwd as never)?.alias : undefined;
-    const release = typeof cwd === 'object' ? cwd.install() : undefined;
-    let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
-    try {
-      child = Bun.spawn([program, ...args], {
-        cwd: typeof cwd === 'string' ? cwd : (alias ?? '.'),
-        env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '', ...options.env },
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-    } finally {
-      release?.();
-    }
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(child.stdout).arrayBuffer(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-    return {
-      exitCode,
-      stdout: new Uint8Array(stdout),
-      stderr,
-      stdoutTruncated: false,
-      stderrTruncated: false,
-      timedOut: false,
-    };
+    return await processes.runBytes(program, args, {
+      ...options,
+      cwd: alias === undefined ? cwd : (alias as FencedPath),
+    });
   },
 };
 
@@ -115,9 +88,12 @@ export async function worktreeRouteWorld(
   const world = await composeWorktreeWorld(label);
   if (world.io === undefined) throw new Error('the worktrees root named no folder');
   const state = new MemoryStateFolder();
+  const clock = fixedClock('2026-11-16T00:00:00.000Z');
   const built = buildWorktrees({
     state: state.port([WorktreesFile]),
-    clock: fixedClock('2026-11-16T00:00:00.000Z'),
+    clock,
+    stateHomeHolding: async folder =>
+      isWithinDirectory(path.join(world.parent, 'home'), folder) ? path.join(world.parent, 'home') : undefined,
     io: world.io,
     sessions: async () => [],
     terminalRoots,
@@ -146,5 +122,5 @@ export async function worktreeRouteWorld(
       return { status: error.status, headers: new Map(), json: { error: error.message, code: error.code } };
     }
   };
-  return { ...world, io: world.io, call };
+  return { ...world, io: world.io, call, state, built, clock };
 }

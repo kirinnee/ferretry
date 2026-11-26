@@ -1350,3 +1350,34 @@ describe('the buzz port', () => {
     expect(await clear([], 'device_1')).toBe(0);
   });
 });
+
+test('E-06 mounted verification refusal reaches the grant journal without assertion bytes', async () => {
+  const w = world();
+  const device = await paired(w);
+  const refused = await asDevice(w, 'POST /v1/step-up', device.deviceId, {
+    credentialId: 'c3ludGhldGlj',
+    clientDataJSON: 'c3ludGhldGlj',
+    authenticatorData: 'c3ludGhldGlj',
+    signature: 'c3ludGhldGlj',
+  });
+  expect(refused.status).toBe(401);
+  const journal = w.folder.raw(GrantAuditFile) ?? '';
+  expect(journal).toContain('passkey.verification-refused=not-verified');
+  expect(journal).toContain(`device:${device.deviceId}`);
+  expect(journal).not.toContain('c3ludGhldGlj');
+});
+
+test('E-24 mounted browser-failure report records only the fixed reason and proved device', async () => {
+  const w = world();
+  const device = await paired(w);
+  const response = await asDevice(w, 'POST /v1/passkeys/failure', device.deviceId, {
+    ceremony: 'unlock',
+    reason: 'cancelled',
+  });
+  expect(response.status).toBe(200);
+  const journal = w.folder.raw(GrantAuditFile) ?? '';
+  expect(journal).toContain('passkey.browser-failed=unlock:cancelled');
+  expect(journal).toContain(`device:${device.deviceId}`);
+  const wired = await w.runtime.ready();
+  expect(wired.stepUp.unlockRequired({ deviceId: device.deviceId, appSession: 'page' })).toBe(true);
+});

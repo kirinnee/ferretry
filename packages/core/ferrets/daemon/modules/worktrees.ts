@@ -1,4 +1,5 @@
 import type { Clock, RouteHandler, StatePort } from '@ferretry/kernel/contract';
+import { milliseconds } from '@ferretry/std';
 import { type GitByteSpawn, KernelGitRunner } from '../adapters/git/runner.ts';
 import {
   GitWorktreeGateway,
@@ -7,14 +8,19 @@ import {
   StateManagedWorktreeRegistry,
   WorktreeOperationQueue,
 } from '../adapters/worktrees/index.ts';
-import { type WorktreeRouteKey, worktreeRoutes } from '../lib/runtime/mounts/worktrees.ts';
+import { type WorktreeRouteKey, type WorktreeSubsystem, worktreeRoutes } from '../lib/runtime/mounts/worktrees.ts';
 import {
   type ManagedWorktreeOperations,
   ManagedWorktreeService,
   WorktreeError,
   type WorktreeSessionFact,
 } from '../lib/worktrees/index.ts';
+import { RepoWorktreeLister } from '../lib/worktrees/repo-list.ts';
 import type { WorktreeDirectoryPinner, WorktreeFileSystem } from '../lib/worktrees/ports.ts';
+import { GitRepoWorktreeRows } from '../adapters/worktrees/repo-git.ts';
+import type { RepoWorktreeListResponse } from '../../contract/index.ts';
+import type { RepoWorktreeAccess } from '../adapters/worktrees/repo-access.ts';
+import { InPlaceWorktrees } from '../adapters/worktrees/in-place.ts';
 
 /**
  * Managed worktrees: the checkouts this daemon creates and removes (`/v1/worktrees`), and the evidence a removal is
@@ -29,6 +35,7 @@ import type { WorktreeDirectoryPinner, WorktreeFileSystem } from '../lib/worktre
  * exactly as today's daemon did without a managed root.
  */
 interface WorktreeHostIo {
+  readonly repoAccess: RepoWorktreeAccess;
   readonly git: GitByteSpawn;
   readonly fileSystem: WorktreeFileSystem;
   readonly pinner: WorktreeDirectoryPinner;
@@ -38,6 +45,7 @@ interface WorktreeHostIo {
 
 /** What the worktrees module is built from. */
 export interface WorktreesNeeds {
+  readonly stateHomeHolding?: (folder: string) => Promise<string | undefined>;
   readonly state: StatePort;
   /** The SAME clock the Git adapter stamps records with. */
   readonly clock: Clock;
@@ -62,6 +70,8 @@ export interface BuiltWorktrees {
   readonly service: ManagedWorktreeService;
   /** Where managed checkouts live; `undefined` while this daemon hosts none. */
   readonly managedRoot: string | undefined;
+  /** Every worktree of the repository whose common directory this is (the repository listing). */
+  readonly listRepo: (commonDirectory: string) => Promise<RepoWorktreeListResponse>;
   readonly routes: { readonly [K in WorktreeRouteKey]: RouteHandler };
 }
 
@@ -75,23 +85,40 @@ const NO_HOST_OPERATIONS: ManagedWorktreeOperations = new Proxy({} as ManagedWor
 export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
   const clock = new KernelWorktreeClock(needs.clock);
   const io = needs.io;
-  const operations: ManagedWorktreeOperations =
-    io === undefined
+  const runner = io === undefined ? undefined : new KernelGitRunner(io.git);
+  const baseOperations: ManagedWorktreeOperations =
+    io === undefined || runner === undefined
       ? NO_HOST_OPERATIONS
       : new ManagedWorktreeAdapter(
-          new GitWorktreeGateway(new KernelGitRunner(io.git), io.fileSystem, clock),
+          new GitWorktreeGateway(runner, io.fileSystem, clock),
           io.fileSystem,
           clock,
           new WorktreeOperationQueue(),
           io.pinner,
         );
+  const inPlace =
+    io === undefined || runner === undefined
+      ? undefined
+      : new InPlaceWorktrees(
+          baseOperations,
+          new KernelGitRunner(io.git, { killOnOutputLimit: true }),
+          io.repoAccess,
+          io.fileSystem,
+          clock,
+          needs.stateHomeHolding ??
+            (async () => {
+              throw new WorktreeError('verification_failed', 'the state home fence is unavailable');
+            }),
+        );
+  const operations = inPlace?.operations() ?? baseOperations;
   // The evidence is read through the SAME collaborators the rest of the daemon serves from, so a refusal to
   // remove a checkout because a ferret or a shell is still in it cites the very records the client would see if
   // it asked. BOTH READS ANSWER `undefined` RATHER THAN THROWING, and neither swallows the failure: the domain
   // turns an absent answer into an un-forceable refusal, so a read still succeeds and a destructive write still
   // refuses.
+  const registry = new StateManagedWorktreeRegistry(needs.state);
   const service = new ManagedWorktreeService(
-    new StateManagedWorktreeRegistry(needs.state),
+    registry,
     operations,
     { sessions: async () => await needs.sessions().catch(() => undefined) },
     {
@@ -103,6 +130,54 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     clock,
     { next: needs.newId },
     io?.managedRoot,
+    inPlace === undefined
+      ? undefined
+      : async (folder, token, planned) => await inPlace.adoptExisting(folder, token, planned),
   );
-  return { service, managedRoot: io?.managedRoot, routes: worktreeRoutes(service) };
+  // The repository listing reads the managed list's own inspection, the registry and the fleet, and writes nothing.
+  const listRepo = async (commonDirectory: string): Promise<RepoWorktreeListResponse> => {
+    if (io === undefined || runner === undefined)
+      throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
+    const reader = new GitRepoWorktreeRows(new KernelGitRunner(io.git, { killOnOutputLimit: true }), io.repoAccess);
+    const lister = new RepoWorktreeLister({
+      rows: async (directory, signal) => await reader.rows(directory, signal),
+      examine: async (input, signal) =>
+        await reader.inCheckout(
+          input.managed.path,
+          signal,
+          async scoped =>
+            await new ManagedWorktreeAdapter(
+              new GitWorktreeGateway(scoped, io.fileSystem, clock),
+              io.fileSystem,
+              clock,
+              new WorktreeOperationQueue(),
+              io.pinner,
+            ).examine(input),
+        ),
+      records: async () => {
+        const state = await registry.read();
+        return state.worktrees.map(record => ({ ...record, commonDirectory: record.commonDir }));
+      },
+      sessions: async () => await needs.sessions(),
+      managedRoot: io.managedRoot,
+      clock: {
+        nowMs: () => needs.clock.nowMs(),
+        sleep: async (ms, signal) => await needs.clock.sleep(milliseconds(ms), signal),
+      },
+    });
+    try {
+      return await lister.list(commonDirectory);
+    } finally {
+      await reader.close();
+    }
+  };
+  const subsystem: WorktreeSubsystem = {
+    list: async () => await service.list(),
+    checkRemoval: async (path, cwd) => await service.checkRemoval(path, cwd),
+    remove: async request => await service.remove(request),
+    create: async request => await service.create(request),
+    adopt: async request => await service.adopt(request.path),
+    listRepo,
+  };
+  return { service, managedRoot: io?.managedRoot, listRepo, routes: worktreeRoutes(subsystem) };
 }

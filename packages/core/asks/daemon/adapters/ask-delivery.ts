@@ -11,7 +11,7 @@ export type AskDeliverySource = (key: typeof ASK_DELIVERY_KEY) => AskDelivery | 
  */
 export function askDelivery(source: AskDeliverySource): {
   readonly messenger: AgendaMessenger;
-  readonly ports: Omit<AgendaDeliveryPorts, 'undelivered'>;
+  readonly ports: Omit<AgendaDeliveryPorts, 'undelivered' | 'lifecycle'>;
 } {
   const provider = (): AskDelivery | undefined => {
     const found = source(ASK_DELIVERY_KEY);
