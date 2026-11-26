@@ -308,7 +308,8 @@ they reach a style.
   stops matching, so a Leaflet upgrade must be re-audited. `packages/app/tests/unit/build-trusted-types.test.ts` pins it.
 - **One remote origin.** `img-src` names `https://tile.openstreetmap.org` and nothing else remote
   (`public/_headers`; `scripts/validate/pages-config.sh` pins the line and still refuses a bare `https:`).
-  Markdown `![](url)` images remain requests the policy refuses. No API key exists anywhere in the client.
+  Markdown `![](url)` images remain requests the policy refuses. OpenStreetMap needs no key; the one key the
+  client can hold is the reader's own opt-in Google Maps key ([Map style](#map-style)), which this origin never sees.
 - **Tile provider and policy.** OpenStreetMap's standard tile layer needs no key and permits light
   interactive use under [its tile usage policy](https://operations.osmfoundation.org/policies/tiles/):
   visible attribution (the component's © OpenStreetMap contributors link), a valid `Referer` (the tile
@@ -323,6 +324,39 @@ they reach a style.
 - **Touch.** On a coarse pointer one finger scrolls the transcript and the map is dragged in Fullscreen
   (where the wheel zoom is also on); the Zoom buttons work inline.
 - **Dark mode** is a CSS filter on the tile pane, not a second tile source.
+
+#### Map style
+
+**OpenStreetMap is the default; Google Maps is an opt-in, per browser.** Settings › Appearance › Conversation › **Map
+style** chooses between them and holds the key Google needs. Choosing Google tells Google which places you open (the
+row says so in one line).
+
+- **Google's Maps Embed API, not the paid JavaScript API.** One marker (`place`) or a plain centred view (`view`) is a
+  framed embed; no Leaflet is mounted and no tile is requested. Several markers, a route, a polygon, or a centre away
+  from the marker stay on OpenStreetMap with one muted line under the map saying why. A lone marker's label and popup
+  are printed as a caption, because Google cannot draw them.
+- **The key is browser-visible by Google's design** (it is in the frame's address; you restrict it in Google Cloud to
+  your app's addresses and to the Maps Embed API only). So it is **not a daemon secret**: you type it once on each
+  device, it is stored in **this browser only** (`localStorage`, beside the style), and it is **never sent to the
+  daemon**, a log or any address but the frame's. Why not the daemon's stores: a configuration file refuses an `AIza…`
+  value (the raw-secret detector), and the secret store's contract is use, never read ([secrets.md](secrets.md)), but a
+  frame address has to be built in the browser. The setting row shows a stored key as a mask and offers Replace and
+  Remove.
+- **No key, no Google.** With Google chosen and nothing stored (storage empty, blocked or cleared), every map stays on
+  OpenStreetMap and says the key is needed on this device. A key this browser **will not keep** is not held in the
+  tab either: saving it reports "would not keep the key" and the maps stay on OpenStreetMap, so nothing looks stored
+  that a reload would lose. A **remove** that the browser refuses is reported ("may still be stored").
+- **The frame** is `credentialless` where the browser has it, `referrerpolicy="origin"` (the key is referrer-restricted;
+  the page itself sends none), `sandbox`ed without top navigation or forms, with no `allow=`. Under cross-origin
+  isolation ("Several cores") a Google frame is admitted only as `credentialless`; a browser without it falls back to
+  OpenStreetMap with a note.
+- **CSP.** `public/_headers`, rule `/*`, carries exactly one `frame-src`: `'self' https://www.google.com/maps/embed/v1/`
+  (origin plus path prefix, so nothing else on google.com and no other host can be framed). Before it there was none, so
+  `default-src 'self'` framed only same-origin pages. `scripts/validate/pages-config.sh` and the headers test pin the
+  line and refuse a bare `https:`, `*` or the whole google.com origin. The choice itself is one module,
+  `app/render/fy-render-map-style.ts`.
+- **Not proved:** the credentialless frame against Google's live embed under isolation. Nothing here makes a real
+  Google request; captures use a fake key and a stubbed frame.
 
 **It fails to something readable.** A payload that is too large, not JSON/YAML, off the globe or over the
 caps shows the reason and a **coordinates list** (`Point: 51.5, -0.12`, up to 200 lines) taken from

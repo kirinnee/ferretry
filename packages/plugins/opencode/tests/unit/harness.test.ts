@@ -96,6 +96,21 @@ harnessConformance('registered OpenCode V2', async () => {
 });
 
 describe('OpenCode private launches', () => {
+  test('native command arrays are preserved; malformed commands and unqualified models refuse before launch', async () => {
+    const f = await fixture();
+    await f.harness.prepareHome({
+      ...f.spec,
+      parts: [{ kind: 'mcp', name: 'native', config: { command: ['bun', 'server.ts'] } }],
+    });
+    const document = JSON.parse(f.host.rootText('agent-homes', 'f1/opencode.json') ?? 'null');
+    expect(document.mcp.servers.native.command).toEqual(['bun', 'server.ts']);
+    await expect(
+      f.harness.prepareHome({ ...f.spec, parts: [{ kind: 'mcp', name: 'broken', config: { command: 42 } }] }),
+    ).rejects.toThrow('unsupported MCP command');
+    await expect(f.harness.prepareHome({ ...f.spec, model: 'unqualified' })).rejects.toThrow('provider/model');
+    expect(f.runner.starts).toBe(0);
+  });
+
   test('writes native model/variant, instructions, skills and MCP only in the ferret home', async () => {
     const f = await fixture();
     await f.harness.prepareHome({

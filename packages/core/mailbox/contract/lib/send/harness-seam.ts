@@ -13,6 +13,8 @@ import type { TurnStopped } from './interrupt.ts';
 import { composerOccupiedRefusal, composerUnreadableRefusal } from './types.ts';
 import { SessionSendError } from './errors.ts';
 import { tryParseSessionId } from '../../session-id.ts';
+import type { SendSenderKind } from '../../stores.ts';
+import { heldForTyping } from '../queue/delivery.ts';
 
 /**
  * THE TERMINAL SEAM: what Conversation types into a ferret, and the stop it presses, go through Ferrets' harness seam
@@ -29,7 +31,7 @@ export interface TerminalSeam {
    * no seam (503), so a send records nothing then. It names no caller: sending and interrupting have no target rule
    * (the path names where the message goes, for every caller), so Ferrets' mayTouch is not asked.
    */
-  bind(ferret: string): Promise<BoundTerminal>;
+  bind(ferret: string, sender?: SendSenderKind): Promise<BoundTerminal>;
 }
 
 /**
@@ -184,6 +186,35 @@ export class UnreadableComposer extends SessionSendError {
   }
 }
 
+/** Said when a person is typing in the pane: the daemon's own write waits for their quiet. */
+export const TYPING_HELD_SENTENCE = "a person is typing in the ferret's terminal";
+
+/**
+ * A person is typing in the pane, so NOTHING was typed or pressed and the same write may go again. Like
+ * {@link UnreadableComposer} a send is not DROPPED for it: the typing send keeps it open as `untyped`.
+ */
+export class TypingHeld extends SessionSendError {
+  constructor() {
+    super('refused', `${TYPING_HELD_SENTENCE}, so nothing was typed; it is typed once they stop`);
+  }
+}
+
+/**
+ * THE TYPING HOLD AT THE WRITE BOUNDARY (owner idea A563): one fresh look, and the ONE common policy ({@link
+ * heldForTyping}), run immediately before a key, a paste or an Enter of the daemon's own reaches the pane, after every
+ * readiness wait that came before it. A person's own write (`human`) is never held, and a pane that cannot be read
+ * decides nothing here: the terminal's own checks do. `refusal` is the failure the caller reads as "wait and go again".
+ */
+export async function yieldToTyping(
+  look: () => Promise<Parameters<typeof heldForTyping>[0] | undefined>,
+  sender: SendSenderKind,
+  refusal: () => Error = () => new TypingHeld(),
+): Promise<void> {
+  if (sender === 'human') return;
+  const pane = await look().catch(() => undefined);
+  if (pane !== undefined && heldForTyping(pane, sender)) throw refusal();
+}
+
 /**
  * Every delivery failure Ferrets can answer, as the send routes answer it (today's `sendRefusal` over the classes these
  * replace): typed and not proven is {@link Unconfirmed} (409 `send_unconfirmed`, record kept); a pane that never came
@@ -209,6 +240,8 @@ export function deliveryAnswer(ferret: string, failure: HarnessDeliveryFailure):
 
 /** A rejection is a failure nobody could classify: what reached the pane is uncertain, so the record stays. */
 const uncertain = (error: unknown): never => {
+  // The typing hold ran before any key: nothing reached the pane, so this is no uncertainty.
+  if (error instanceof TypingHeld) throw error;
   throw new MaybeTyped(
     error instanceof ApiError || error instanceof SessionSendError
       ? error
@@ -226,26 +259,30 @@ export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam
     return harness;
   };
   return {
-    bind: async ferret => {
+    bind: async (ferret, sender = 'human') => {
       const harness = await open(ferret);
+      const look = async (): Promise<RunnerPaneObservation | undefined> => {
+        const seen = await harness.observe?.().catch(() => undefined);
+        return seen?.ok === true ? seen.value : undefined;
+      };
       return {
         deliver: async text => {
-          const delivered = await harness.deliver({ text }).catch(uncertain);
+          // After the readiness wait, immediately before the first key: a hold that began meanwhile is not missed.
+          const beforeWrite = async (): Promise<void> => await yieldToTyping(look, sender);
+          const delivered = await harness.deliver({ text, beforeWrite }).catch(uncertain);
           if (delivered.ok) return delivered.value;
           const answer = deliveryAnswer(ferret, delivered.error);
           const busy = 'refused' in delivered.error && delivered.error.refused === 'not_ready';
           throw busy && delivered.error.why === 'busy' ? new PaneBusy(answer) : answer;
         },
         queue: async (text, sendId) => {
+          await yieldToTyping(look, sender);
           const queued = await harness.queue(text, { sendId }).catch(uncertain);
           if (queued.ok) return queued.value;
           if ('refused' in queued.error && queued.error.refused === 'plugin_unavailable') return undefined;
           throw deliveryAnswer(ferret, queued.error);
         },
-        observe: async () => {
-          const seen = await harness.observe?.().catch(() => undefined);
-          return seen?.ok === true ? seen.value : undefined;
-        },
+        observe: look,
         stopActive: async () => {
           const stopped = await harness.stopActive?.();
           if (stopped === undefined)

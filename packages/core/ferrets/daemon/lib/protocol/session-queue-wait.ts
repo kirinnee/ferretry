@@ -25,4 +25,6 @@ export const QueueWaitReasonSchema = z.enum([
   'unreadable',
   /** The session is not running; it is delivered when it is revived. */
   'stopped',
+  /** A person is typing in the pane: the daemon's own messages wait for a few seconds of quiet. */
+  'typing',
 ]);
