@@ -30,7 +30,7 @@ interface Line {
 }
 
 /** The note waiting for the next message: `n` counts the cut-ins of this stream, and is the note's own send id. */
-export interface Note {
+interface Note {
   readonly n: number;
   readonly text: string;
   readonly heard: readonly string[];
@@ -41,7 +41,7 @@ export interface Note {
  * A note taken out of waiting to go to the ferret, by ONE path: carried by the person's next message ({@link Said.carry}) or sent
  * by itself ({@link Said.alone}). Nothing else can pick the same note up until it is given back ({@link Said.failed}).
  */
-export interface Sending {
+interface Sending {
   /** The note this send carries, if there was one waiting. */
   readonly note?: Note;
   /** The lines that were here when it left: a send that is answered forgets these and never a line that came after. */
