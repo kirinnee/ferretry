@@ -20,7 +20,8 @@ const SUGGESTION_ID = 'srg_dddddddddddddddd';
 export const SITE_SIGN_IN = 'si_0000000000000001';
 const SUDO_SIGN_IN = 'si_0000000000000003';
 const CREATED = '2026-10-30T09:00:00.000Z';
-const EXPIRES = '2026-11-29T09:00:00.000Z';
+/** A rule's end is 30 days from the real clock, so narrowing it by "N days" read against that clock never outruns a fixed date. */
+const EXPIRES = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 const STAGE_EXPIRES = '2026-11-01T10:00:00.000Z';
 
 export const sitePlace: Place = { kind: 'site', domains: ['github.com'], match: [] };
