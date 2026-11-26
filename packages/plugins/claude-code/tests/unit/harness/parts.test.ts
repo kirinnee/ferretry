@@ -34,6 +34,7 @@ const NOT_SERVED = [
   'fork',
   'inject',
   'provedConversation',
+  'runtime',
   'startFailure',
 ] as const satisfies readonly (keyof Harness)[];
 
@@ -82,6 +83,7 @@ describe('the Claude harness parts', () => {
       prepareHome: true,
       provedConversation: true,
       resume: true,
+      runtime: true,
       runtimeSwitch: true,
       start: true,
       startFailure: true,

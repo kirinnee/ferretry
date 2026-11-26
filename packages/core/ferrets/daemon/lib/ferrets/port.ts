@@ -119,6 +119,7 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     children: ferret => service.children(ferret),
     harnesses: () => service.harnesses(),
     harnessFacts: key => service.harnessFacts(key),
+    harnessRuntime: key => service.harnessRuntime(key),
     importConversation: async (harness, input) => {
       if (consumer !== CONVERSATION_PLUGIN)
         throw new ApiError(403, 'only the Conversation plugin copies a conversation into a harness pool', 'forbidden');

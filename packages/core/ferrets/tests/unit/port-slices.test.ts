@@ -49,6 +49,7 @@ interface FerretsApiAtBase {
   children(ferret: FerretId): readonly FerretId[];
   harnesses(): readonly HarnessKey[];
   harnessFacts(key: HarnessKey): HarnessFacts | undefined;
+  harnessRuntime?: FerretsApi['harnessRuntime'];
   importConversation?(
     harness: HarnessKey,
     input: ConversationImport,

@@ -62,7 +62,7 @@ const MIXED_WORD = 'Mixed';
 
 /** The scope a profile shows: its word, or "Mixed". */
 export const profileScopeWord = (scope: ProfileScope): string =>
-  scope.kind === 'mixed' ? MIXED_WORD : SCOPE_WORDS[scope.scope];
+  scope.kind === 'mixed' ? MIXED_WORD : (SCOPE_WORDS[scope.scope] ?? scope.scope);
 
 /** The six kinds in the order the tab lists them (the prototype's TYPE_ORDER). */
 export const COMPONENT_KINDS: readonly ComponentKind[] = [
@@ -110,7 +110,7 @@ const detailEnv = (component: ComponentView): readonly EnvEntry[] =>
 
 /** A scope's badge: Generic reads quiet, one harness reads as the accent it narrows to. */
 const scopeBadge = (scope: HarnessScope): ComponentBadge => ({
-  text: SCOPE_WORDS[scope],
+  text: SCOPE_WORDS[scope] ?? scope,
   tone: scope === 'generic' ? 'pend' : 'accent',
 });
 

@@ -919,7 +919,7 @@ export class FerretsService implements FerretsApi {
     return this.ports.harnessKeys();
   }
   harnessFacts = (key: HarnessKey): Harness['facts'] | undefined => this.ports.harness(key)?.facts;
-
+  harnessRuntime = (key: HarnessKey): Harness['runtime'] => this.ports.harness(key)?.runtime;
   /** The harness's own copy of one conversation of the owner's history, in its shared pool (`Harness.importConversation`). */
   async importConversation(
     key: HarnessKey,

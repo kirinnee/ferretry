@@ -18,6 +18,7 @@ import {
 import { FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
+import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
 
 /**
  * The harness seam is OPEN (runtimes plan U4a): a harness the contract has never named (`fake-third`) boots, starts,
@@ -72,6 +73,21 @@ function fixture() {
 }
 
 describe('a harness the contract never named', () => {
+  test('projects only the registered harness runtime descriptor through FerretsPort', async () => {
+    const f = fixture();
+    const runtime = {
+      binary: 'third',
+      homeEnv: { THIRD_HOME: '' },
+      detect: () => f.third.discover(),
+      models: async () => ({ choices: [] }),
+    };
+    Object.assign(f.third, { runtime });
+    const port = ferretsPort(f.service, 'runtimes');
+    expect(port.harnessRuntime?.(THIRD_HARNESS_KEY)).toBe(runtime);
+    expect(port.harnessRuntime?.('claude-code')).toBeUndefined();
+    expect(port.harnessRuntime?.('unknown')).toBeUndefined();
+    expect(await port.harnessRuntime?.(THIRD_HARNESS_KEY)?.models('fixture')).toEqual({ choices: [] });
+  });
   test('is in the registry, and says what it is as data through the one facts port', () => {
     const f = fixture();
 

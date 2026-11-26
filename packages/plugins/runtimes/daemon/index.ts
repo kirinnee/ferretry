@@ -72,6 +72,7 @@ import type { FleetSetupService } from './lib/service/setup-service.ts';
 import { ferretRuntimeRoutes } from './routes/ferret-runtime.ts';
 import { fleetCatalogRoutes } from './routes/fleet-catalog.ts';
 import { fleetSetupRoutes } from './routes/fleet-setup.ts';
+import { GenericRuntimes } from './lib/generic-runtime.ts';
 
 // The contract widens its config defs so `manifest.data.config` accepts them (`contract/config-def.ts`); these put the shapes back.
 const runtimeItems = RUNTIME_ITEMS as unknown as ConfigCollectionDef<RuntimeFile>;
@@ -311,48 +312,53 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
   return implementDaemon(manifest, {
     build(ctx) {
       const { config, events, clock } = ctx.kernel;
-      const assembly = assemble(ctx);
+      const generic = new GenericRuntimes({ kernel: ctx.kernel, ferrets: ctx.needs.ferrets, logins: ctx.needs.logins });
+      const assembly = generic.assembly(assemble({ ...ctx, kernel: generic.accountKernel() }));
 
-      const { listFor, ...api } = createRuntimesApi({
-        runtimes: () => config.collection(runtimeItems),
-        profiles: () => config.collection(profileItems),
-        defaultSetting: () => config.file(runtimesFile)?.defaultRuntime,
-        // Every harness the registry holds; the API refuses (by name) the ones Runtimes has no behaviour for.
-        harnesses: () => ctx.needs.ferrets.harnesses(),
-        logins: ctx.needs.logins,
-        now: () => clock.nowMs(),
-        currentName: async former => await assembly.catalog.currentRuntimeName?.(former),
-        installed: () => assembly.installed?.(),
-        primeInstalled: async () => await assembly.primeInstalled?.(),
-      });
+      const { listFor, ...api } = generic.api(
+        createRuntimesApi({
+          runtimes: () => config.collection(runtimeItems),
+          profiles: () => config.collection(profileItems),
+          defaultSetting: () => config.file(runtimesFile)?.defaultRuntime,
+          // Every harness the registry holds; the API refuses (by name) the ones Runtimes has no behaviour for.
+          harnesses: () => ctx.needs.ferrets.harnesses(),
+          logins: ctx.needs.logins,
+          now: () => clock.nowMs(),
+          currentName: async former => await assembly.catalog.currentRuntimeName?.(former),
+          installed: () => assembly.installed?.(),
+          primeInstalled: async () => await assembly.primeInstalled?.(),
+        }),
+      );
       // What a runtime's profile stack names, and the one act that edits a profile's layers: read live, written through
       // the kernel's config writer, never kept. The etag is the profile file's own, read when asked.
-      const layers = createProfileLayers({
-        runtimes: () => config.collection(runtimeItems),
-        profiles: () => config.collection(profileItems),
-        etag: async name => {
-          if (assembly.profileEtag === undefined)
-            throw new Error('Runtimes cannot read its profile files on this daemon right now');
-          return await assembly.profileEtag(name);
-        },
-        state: name => config.fileState(profileItems, name),
-        writeAll: async documents => await config.writeAll(documents),
-        // The same one-at-a-time section as an apply (S67). A daemon whose catalogue cannot be opened has no apply to
-        // run beside, so the act stands alone there (and its etag read refuses in a sentence).
-        serialise: async act => {
-          let entered = false;
-          try {
-            return await assembly.catalog.serialise(async () => {
-              entered = true;
+      const layers = generic.layers(
+        createProfileLayers({
+          runtimes: () => config.collection(runtimeItems),
+          profiles: () => config.collection(profileItems),
+          etag: async name => {
+            if (assembly.profileEtag === undefined)
+              throw new Error('Runtimes cannot read its profile files on this daemon right now');
+            return await assembly.profileEtag(name);
+          },
+          state: name => config.fileState(profileItems, name),
+          writeAll: async documents => await config.writeAll(documents),
+          // The same one-at-a-time section as an apply (S67). A daemon whose catalogue cannot be opened has no apply to
+          // run beside, so the act stands alone there (and its etag read refuses in a sentence).
+          serialise: async act => {
+            let entered = false;
+            try {
+              return await assembly.catalog.serialise(async () => {
+                entered = true;
+                return await act();
+              });
+            } catch (error) {
+              // The section itself could not be reached: stand alone. Whatever the act itself threw is not caught here.
+              if (entered) throw error;
               return await act();
-            });
-          } catch (error) {
-            // The section itself could not be reached: stand alone. Whatever the act itself threw is not caught here.
-            if (entered) throw error;
-            return await act();
-          }
-        },
-      });
+            }
+          },
+        }),
+      );
 
       // A change to the files wakes the views, once per change and naming what moved. The first reading is the baseline.
       let runtimes = config.collection(runtimeItems);
@@ -647,17 +653,19 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           }),
           // A start that names a runtime spends that runtime's login: its harness and login, or why it cannot start now.
           'runtime.start:runtimes': {
-            ...runtimeStartAnswer({
-              resolve: async id => await api.resolve(id),
-              default: async () => await api.default(),
-              logins: ctx.needs.logins,
-              // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.
-              catalog: facts.catalog,
-            }),
+            ...generic.start(
+              runtimeStartAnswer({
+                resolve: async id => await api.resolve(id),
+                default: async () => await api.default(),
+                logins: ctx.needs.logins,
+                // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.
+                catalog: facts.catalog,
+              }),
+            ),
           },
           // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read
           // here; with no facts to read, a Claude start of a runtime is refused.
-          'start.decide': launchGate.decide,
+          'start.decide': async input => (await generic.decide(input)) ?? (await launchGate.decide(input)),
           // The secret NAMES a runtime's profile binds (the manifest account's `secretEnv`), for the Vault to let a check
           // put them into the one command it starts for that runtime. Names only; none when the fleet is unreadable.
           'secrets.profile-references:profiles': {

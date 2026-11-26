@@ -209,7 +209,7 @@ function ScopeTag({ scope }: { scope: ProfileItem['scope'] }) {
   const words = { 'claude-code': 'Claude only', codex: 'Codex only', mixed: 'Mixed' } as const;
   return (
     <span className="kt-badge shrink-0" data-tone={scope === 'mixed' ? 'warn' : 'accent'} data-item-scope={scope}>
-      {words[scope]}
+      {Object.hasOwn(words, scope) ? words[scope as keyof typeof words] : scope}
     </span>
   );
 }
