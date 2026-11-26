@@ -66,6 +66,8 @@ export interface CliWorld {
   readonly io: TerminalIo;
   readonly environment: Environment;
   readonly identity: Identity;
+  /** The state home this `fy` resolved (`FY_HOME`): what a verb that must work with no daemon answers from. */
+  readonly home: string;
   readonly registry: CommandRegistry;
   probe(): Promise<Probe>;
   /** Opens the connection on first use; starts the daemon first when none answers and this is a person's shell. */

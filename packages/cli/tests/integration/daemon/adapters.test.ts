@@ -118,6 +118,20 @@ describe('launching the daemon', () => {
     should(findDaemonBinary(ports({ exists: () => false }))).be.undefined();
   });
 
+  it('C-49: should start the daemon FY_DAEMON_BIN names, before anything beside fy or on PATH', async () => {
+    const launch = ports({ environment: { FY_DAEMON_BIN: '/opt/pinned/fyd' }, exists: () => true });
+    should(await launchDaemon(launch)).deepEqual({ started: true, baseUrl: 'http://127.0.0.1:7431' });
+    should(launch.spawned).deepEqual([['/opt/pinned/fyd']]);
+  });
+
+  it('C-49: should refuse, spawning nothing, when FY_DAEMON_BIN names a file that is not there (no silent fallback)', async () => {
+    const launch = ports({ environment: { FY_DAEMON_BIN: '/gone/fyd' } });
+    const result = await launchDaemon(launch);
+    should(result.started).be.false();
+    should(result.started === false && result.why).containEql('FY_DAEMON_BIN names /gone/fyd');
+    should(launch.spawned).deepEqual([]);
+  });
+
   it('should start it and report the address it answers on', async () => {
     const launch = ports();
     should(await launchDaemon(launch)).deepEqual({ started: true, baseUrl: 'http://127.0.0.1:7431' });

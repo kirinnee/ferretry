@@ -23,6 +23,12 @@ export interface LaunchPorts {
   readonly environment: Readonly<Record<string, string | undefined>>;
 }
 
+/** `FY_DAEMON_BIN`, the daemon an operator pinned, as the environment gave it; `undefined` when unset or empty. */
+const pinnedBinary = (environment: LaunchPorts['environment']): string | undefined =>
+  environment.FY_DAEMON_BIN === undefined || environment.FY_DAEMON_BIN.trim() === ''
+    ? undefined
+    : environment.FY_DAEMON_BIN.trim();
+
 export function findDaemonBinary(ports: Pick<LaunchPorts, 'selfPath' | 'exists' | 'which'>): string | undefined {
   const beside = join(dirname(ports.selfPath), DAEMON_BINARY);
   if (ports.exists(beside)) return beside;
@@ -31,7 +37,15 @@ export function findDaemonBinary(ports: Pick<LaunchPorts, 'selfPath' | 'exists' 
 
 /** Starts the daemon and waits for it to answer. The daemon's own lock refuses a second one, so a race is harmless. */
 export async function launchDaemon(ports: LaunchPorts): Promise<LaunchResult> {
-  const binary = findDaemonBinary(ports);
+  // A pinned daemon is the daemon: one that is not there is refused, never replaced by whatever PATH finds (the same
+  // rule `fy daemon restart` follows), so nobody believes they started the one they named.
+  const pinned = pinnedBinary(ports.environment);
+  if (pinned !== undefined && !ports.exists(pinned))
+    return {
+      started: false,
+      why: `FY_DAEMON_BIN names ${pinned}, which is not there; install ${DAEMON_BINARY} there or unset it`,
+    };
+  const binary = pinned ?? findDaemonBinary(ports);
   if (binary === undefined)
     return {
       started: false,

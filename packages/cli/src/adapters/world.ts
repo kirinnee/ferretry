@@ -77,6 +77,7 @@ export function createWorld(inputs: WorldInputs): CliWorld {
     io,
     environment,
     identity,
+    home,
     registry,
     probe,
     launch,

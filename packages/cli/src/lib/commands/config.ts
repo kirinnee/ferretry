@@ -8,8 +8,9 @@
  * validation, the hold on a loosening and the refusal of a raw secret are the daemon's, so this can only ever say what
  * the daemon said. `guide` and `path` of the directory are the shell's alone.
  *
- * GAP: v4 checked and read schemas WITHOUT a daemon. Here the daemon owns the checker, so `check` asks it (any `fy`
- * command starts one); `schema` reads the file the daemon publishes under `config/.schema/`.
+ * `path` and `schema <name>` need no daemon: the directory is `<home>/config` and a schema is the file the daemon
+ * published under `config/.schema/`. GAP: `check` and the schema LIST still ask the daemon (any `fy` command starts
+ * one), because only it holds the plugins' declarations that say which files exist and what each must contain.
  */
 import { z } from 'zod';
 import { DaemonRefusal, EXIT } from '../errors.ts';
@@ -109,6 +110,8 @@ const readStatus = async (ctx: ShellContext): Promise<Status> =>
 const readFile = async (ctx: ShellContext, path: string): Promise<z.infer<typeof FileSchema>> =>
   FileSchema.parse(await ctx.client(KERNEL).call('GET /v1/config/file', { query: { path } }));
 
+const configDirectory = (ctx: ShellContext): string => `${ctx.world.home}/config`;
+
 const binary = (ctx: ShellContext): string => ctx.world.identity.binary;
 
 const needs = (ctx: ShellContext, what: string, example: string): undefined => {
@@ -142,7 +145,7 @@ const SAFE_RELATIVE = /^(?!\/)(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._/-]+$/u;
 
 /** `fy config path [file]`: the directory, or one file in it. */
 export const configPathVerb: ShellVerb = async ctx => {
-  const { directory } = await readStatus(ctx);
+  const directory = configDirectory(ctx);
   const file = ctx.invocation.args[0];
   if (file === undefined) {
     ctx.world.io.out(`${directory}\n`);
@@ -158,6 +161,9 @@ export const configPathVerb: ShellVerb = async ctx => {
   return EXIT.ok;
 };
 
+/** A schema named by its stem (`runtimes--item`, `warden.json`), never by a path. */
+const SCHEMA_STEM = /^[a-z0-9-]+(?:\.json)?$/u;
+
 /** The schema's file stem a person named: `runtimes--item`, `runtimes--item.json`, or a file the daemon holds. */
 const schemaFileOf = (status: Status, named: string): string | undefined => {
   const byFile = status.files.find(file => file.path === named && file.schema !== undefined);
@@ -168,8 +174,18 @@ const schemaFileOf = (status: Status, named: string): string | undefined => {
 
 /** `fy config schema [name|file]`: the JSON Schema of one kind of file, or the list of schemas. */
 export const configSchemaVerb: ShellVerb = async ctx => {
-  const status = await readStatus(ctx);
   const named = ctx.invocation.args[0];
+  if (named !== undefined && SCHEMA_STEM.test(named)) {
+    // A schema named by its stem is read straight from the home: no daemon is asked, none is started.
+    const body = await ctx.world.host
+      .readText(`${configDirectory(ctx)}/${SCHEMA_FOLDER}/${named.endsWith('.json') ? named : `${named}.json`}`)
+      .catch(() => undefined);
+    if (body !== undefined) {
+      ctx.world.io.out(body.endsWith('\n') ? body : `${body}\n`);
+      return EXIT.ok;
+    }
+  }
+  const status = await readStatus(ctx);
   if (named === undefined) {
     const seen = new Map<string, string>();
     for (const file of status.files)

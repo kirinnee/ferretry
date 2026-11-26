@@ -167,6 +167,19 @@ describe('fy config status / path / schema (V-0196, V-0193, V-0194)', () => {
     should(file.io.stdout()).equal(`${DIRECTORY}/logins/work.yaml\n`);
   });
 
+  it('C-100: `path` and `schema <name>` answer from the home alone, sending nothing to a daemon that may be down', async () => {
+    const files = { [`${DIRECTORY}/.schema/warden.json`]: '{"title":"warden"}\n' };
+    const path = world({}, files);
+    should(await runFy(['config', 'path'], path.world)).equal(0);
+    should(path.io.stdout()).equal(`${DIRECTORY}\n`);
+    should(await runFy(['config', 'path', 'logins/work.yaml'], path.world)).equal(0);
+    const schema = world({}, files);
+    should(await runFy(['config', 'schema', 'warden'], schema.world)).equal(0);
+    should(schema.io.stdout()).equal('{"title":"warden"}\n');
+    should(path.transport.sent).have.length(0);
+    should(schema.transport.sent).have.length(0);
+  });
+
   it('should refuse a path that leaves the directory or is not a yaml file', async () => {
     for (const bad of ['../machine.yaml', '/etc/passwd', 'notes.txt']) {
       const { world: w, io } = world({ 'GET /v1/config/status': STATUS() });

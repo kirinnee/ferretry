@@ -86,8 +86,7 @@ export function parseDaemonRun(documentText: string | undefined): DaemonRun | un
 export function resolveDaemonUrl(explicitUrl: string, run: DaemonRun | undefined, homePort?: number): string {
   if (explicitUrl.trim() !== '') return explicitUrl.trim();
   if (run !== undefined) return recordedBindAddress(run);
-  // A configured 0 asks the OS for a port: there is nothing to dial until the daemon records the one it got.
-  return homePort === undefined || homePort === 0
-    ? DEFAULT_DAEMON_URL
-    : recordedBindAddress({ host: LOOPBACK, port: homePort });
+  // A configured 0 asks the OS for a port: there is nothing to dial until the daemon records the one it got. Dial the
+  // port that cannot answer, never 7457, which is another home's daemon.
+  return homePort === undefined ? DEFAULT_DAEMON_URL : recordedBindAddress({ host: LOOPBACK, port: homePort });
 }
