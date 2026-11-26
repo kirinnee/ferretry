@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HarnessSchema } from './session-base.ts';
+import { HarnessKeySchema } from '../ids.ts';
 
 /**
  * Changing what a RUNNING ferret is running, and reading what it may be changed to: the shapes the Ferrets port's
@@ -38,7 +38,7 @@ export const RuntimeModelChoiceSchema = RuntimeModelOptionSchema.extend({
 export type RuntimeModelChoice = z.infer<typeof RuntimeModelChoiceSchema>;
 
 export const RuntimeModelCatalogSchema = z.object({
-  harness: HarnessSchema,
+  harness: HarnessKeySchema,
   source: z.enum(['wrapper-inventory', 'codex-app-server']),
   choices: z.array(RuntimeModelChoiceSchema),
   /**

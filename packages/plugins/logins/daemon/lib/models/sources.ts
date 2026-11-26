@@ -8,6 +8,7 @@ import type { ModelCatalogSources } from '../catalog/catalog.ts';
 
 export function modelCatalogSourcesView(sources: ModelCatalogSources): ModelCatalogSourcesView {
   return ModelCatalogSourcesSchema.parse({
+    ...(sources.discovery === undefined ? {} : { discovery: sources.discovery }),
     catalogs: sources.catalogs,
     presets: sources.presets.map(preset => ({
       id: preset.id,

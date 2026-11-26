@@ -6,7 +6,8 @@ import type { HarnessHistorySource } from '../history.ts';
 import type { LaunchSpec } from './launch.ts';
 import type { AdoptedConversation, PortableConversation } from './portable-conversation.ts';
 import type { HarnessRuntimeSwitch, RuntimeSwitchPane } from './runtime-switch.ts';
-import type { HarnessStop, Runner, RunnerHandle, RunningFerret, StartRefusal } from './runner.ts';
+import type { HarnessScreenReader, HarnessStop, Runner, RunnerHandle, RunningFerret, StartRefusal } from './runner.ts';
+import type { HarnessRuntimeDescriptor } from './runtime-descriptor.ts';
 
 // ─── harness (§4.3) ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -315,9 +316,12 @@ export type HarnessLaunchSettings =
 
 /** The value of `harnesses:<key>` (§4.3). */
 export interface Harness {
+  /** Registered native reader, also used when adopting a persisted pane after a restart. */
+  readonly screenReader?: HarnessScreenReader;
   readonly key: HarnessKey;
   /** What this harness says about itself as data (`FerretsApi.harnessFacts`); see {@link HarnessFacts}. */
   readonly facts: HarnessFacts;
+  readonly runtime?: HarnessRuntimeDescriptor;
   /** Binary and version; never reads its sign-in files. */
   discover(): Promise<HarnessInstall | HarnessMissing>;
   update?(): Promise<UpdateResult>;

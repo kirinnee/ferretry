@@ -10,6 +10,7 @@ import {
   DOWNLINK_UNIT_BYTES,
   REPLY_DOWNLINK_UNIT_BYTES,
   type ReplyState,
+  type SpeechCut,
   STREAM_CLOSES,
   StreamProtocolError,
   type StreamControl,
@@ -39,7 +40,13 @@ export interface MicSource {
 
 /** The machine's sound for a reply line, played as it arrives: 16 kHz mono PCM, in order, with no gap the machine did not make. */
 export interface ReplyPlayer {
-  play(pcm: Int16Array): void;
+  /** `line` is the id the machine gave the line this sound belongs to. */
+  play(pcm: Int16Array, line: number): void;
+  /**
+   * Where the person's ears are in what was played since the last `stop`: the line sounding now and how many of its samples
+   * were heard (every line before it whole), or the newest line wholly heard, or `undefined` when nothing has played.
+   */
+  position(): SpeechCut | undefined;
   /** Silences everything queued at once. */
   stop(): void;
   /** How much sound is still waiting to be heard, in milliseconds. */
@@ -105,6 +112,11 @@ export interface VoiceStreamHandle {
    * lines it has not spoken, and the sound of every line sent so far is ignored if it still arrives.
    */
   hush(): void;
+  /**
+   * The PERSON stops the reply (they talked over it, or said stop): a hush that also tells the machine where their ears were,
+   * so it can tell the ferret what was heard and what was not. Where nothing had played yet, that is "nothing heard".
+   */
+  interrupt(): void;
   /** Leaves on purpose: tells the machine, then closes. */
   stop(): void;
   setMuted(muted: boolean): void;
@@ -150,7 +162,7 @@ export function openVoiceStream(
   const hear = (audio: NonNullable<StreamSnapshot['audio']>, pcm: Int16Array | undefined): void => {
     if (audio.id < hushedBelow || droppedIds.has(audio.id)) return;
     if (pcm !== undefined && pcm.length > 0) {
-      options.player?.play(pcm);
+      options.player?.play(pcm, audio.id);
       if (!began.has(audio.id)) {
         began.add(audio.id);
         const at = sentAt.get(audio.id);
@@ -236,6 +248,18 @@ export function openVoiceStream(
     },
   );
 
+  const hush = (person: boolean): void => {
+    if (ended) return;
+    const cut = person ? (options.player?.position() ?? { id: 0, samples: 0 }) : undefined;
+    options.player?.stop();
+    hushedBelow = nextLine;
+    sentAt.clear();
+    began.clear();
+    // Lines still held never reached the machine: dropping them is the whole hush.
+    held = [];
+    if (wantsReply && opened) socket.send(encodeHushFrame(cut));
+  };
+
   const handle: VoiceStreamHandle = {
     speak: text => {
       if (!wantsReply || ended) return [];
@@ -261,16 +285,8 @@ export function openVoiceStream(
         else if (opened) socket.send(encodeDropFrame(id));
       }
     },
-    hush: () => {
-      if (ended) return;
-      options.player?.stop();
-      hushedBelow = nextLine;
-      sentAt.clear();
-      began.clear();
-      // Lines still held never reached the machine: dropping them is the whole hush.
-      held = [];
-      if (wantsReply && opened) socket.send(encodeHushFrame());
-    },
+    hush: () => hush(false),
+    interrupt: () => hush(true),
     stop: () => {
       if (ended) return;
       // The machine hears "end" in a unit of its own, then the close: it stops listening at once and frees its place.

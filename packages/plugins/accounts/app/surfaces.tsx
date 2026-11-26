@@ -11,6 +11,7 @@ import { SignInRulesSurface } from './features/secure-copy/sign-in-rules-surface
 import { TaskPlanHost } from './features/secure-copy/task-plan-host.tsx';
 import { TaskPlansSurface } from './features/secure-copy/task-plans-surface.tsx';
 import { PhoneApprovalHost } from './features/sign-in-approval/phone-approval-host.tsx';
+import { RecipeProposalHost } from './features/sign-in-approval/recipe-proposal-host.tsx';
 import { InputCodesPanel } from './features/two-factor/input-codes-panel.tsx';
 import { TwoFactorSeedHost } from './features/two-factor/two-factor-seed-host.tsx';
 import type { RuleLinkHold } from './lib/rule-link.ts';
@@ -103,15 +104,14 @@ export function alwaysUsePanel(client: AccountsClient) {
 /** Where to answer an ask whose kind has no card of its own. */
 const ANSWER_ELSEWHERE = {
   'rule-suspended': 'Approve it again under Settings › Secure copy › Standing sign-in rules, or answer it with fy.',
-  'recipe-proposal': 'Review the proposal under Settings › Accounts, on the sign-in it names, or answer it with fy.',
 } as const;
 const PLAIN_FALLBACK = 'Answer it with fy.';
 
 /**
  * `ask:sign-in-approval`: the daemon's own approval cards, drawn only from the daemon-set ref. A staged 2FA seed is the
- * owner's seed card; a task plan, a ferret's rule suggestion and an approve-on-phone push each have their
- * card, read from the daemon by id (never from the ask's text). A suspended rule and a recipe proposal are shown as the
- * daemon's words and where to act, as today's agenda showed them. A ref this half does not know draws plain.
+ * owner's seed card; a task plan, a ferret's rule suggestion, an approve-on-phone push and a ferret's recipe proposal
+ * (Approve / Decline, pinned to the text drawn) each have their card, read from the daemon by id (never from the ask's text).
+ * A suspended rule is shown as the daemon's words and where to act, as today's agenda showed it. A ref this half does not know draws plain.
  */
 export function signInApprovalRenderer(client: AccountsClient) {
   return function SignInApproval({ value }: RendererProps) {
@@ -157,11 +157,10 @@ export function signInApprovalCard(client: AccountsClient, value: unknown, asks:
       );
     if (card.kind === 'phone-approval')
       return <PhoneApprovalHost client={client} approvalId={card.id} ferret={ferret} />;
+    if (card.kind === 'recipe-proposal')
+      return <RecipeProposalHost client={client} signIn={card.signIn} proposal={card.proposal} />;
   }
-  const where =
-    ref.success && (ref.data.kind === 'rule-suspended' || ref.data.kind === 'recipe-proposal')
-      ? ANSWER_ELSEWHERE[ref.data.kind]
-      : PLAIN_FALLBACK;
+  const where = ref.success && ref.data.kind === 'rule-suspended' ? ANSWER_ELSEWHERE[ref.data.kind] : PLAIN_FALLBACK;
   return (
     <section className="kt-panel p-panel" role="status" aria-label="Sign-in approval">
       <h3 className="m-0 text-row font-semibold text-fg">{subject}</h3>

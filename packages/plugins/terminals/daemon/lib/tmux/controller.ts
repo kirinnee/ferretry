@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from 'node:util';
 import {
   capturePaneArguments,
   captureRowsArguments,
@@ -23,6 +24,7 @@ import {
 } from './commands.ts';
 import type { PaneActivity, PaneState, TmuxCommandPort, TmuxCommandResult, TmuxLaunch } from './contracts.ts';
 import type { TmuxLaunchGuard } from './harness-guard.ts';
+import type { HarnessScreenReader, HarnessScreenReading } from '@ferretry/core-ferrets/contract';
 import {
   type PaneIdentity,
   paneStateFrom,
@@ -46,6 +48,7 @@ export class TmuxController {
   constructor(
     private readonly commands: TmuxCommandPort,
     private readonly guard?: TmuxLaunchGuard,
+    private readonly screenReader?: HarnessScreenReader,
   ) {}
 
   async alive(session: string): Promise<boolean> {
@@ -76,14 +79,44 @@ export class TmuxController {
     const [metadataResult, historyResult, visibleResult] = await Promise.all([
       this.commands.execute(paneMetadataArguments(session)),
       history ? this.commands.execute(capturePaneArguments(session, true)) : undefined,
-      this.commands.execute(capturePaneArguments(session, false)),
+      this.commands.execute([
+        ...capturePaneArguments(session, false),
+        ...(this.screenReader === undefined ? [] : ['-e']),
+      ]),
     ]);
     const metadata = parsePaneMetadata(metadataResult.code === 0 ? metadataResult.stdout : '1|||||');
-    return paneStateFrom(
+    const state = paneStateFrom(
       metadata,
-      visibleResult.code === 0 ? visibleResult.stdout : '',
+      visibleResult.code === 0
+        ? this.screenReader === undefined
+          ? visibleResult.stdout
+          : stripVTControlCharacters(visibleResult.stdout)
+        : '',
       historyResult?.code === 0 ? historyResult.stdout : '',
     );
+    if (this.screenReader === undefined) return state;
+    // Native text and ink come from ONE capture; cursor metadata must still agree after that capture.
+    const after = await this.commands.execute(paneMetadataArguments(session));
+    let screen: HarnessScreenReading;
+    try {
+      screen =
+        visibleResult.code === 0 && after.code === 0 && after.stdout === metadataResult.stdout
+          ? this.screenReader.read({
+              visible: state.visible,
+              attributed: visibleResult.stdout,
+              cursorX: state.cursorX,
+              cursorY: state.cursorY,
+            })
+          : { working: true, atPrompt: false, composer: null };
+    } catch {
+      screen = { working: true, atPrompt: false, composer: null };
+    }
+    return {
+      ...state,
+      screen,
+      promptReady:
+        !state.dead && screen.atPrompt && (screen.composer?.text === '' || screen.composer?.placeholder === true),
+    };
   }
 
   /**

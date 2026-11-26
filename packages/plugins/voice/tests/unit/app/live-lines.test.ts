@@ -64,7 +64,7 @@ function fake(options: { reply?: 'ready' | 'absent' | 'loading' | undefined; str
               return [{ id, text }];
             },
             drop: ids => void dropped.push(...ids),
-            hush: () => {
+            interrupt: () => {
               hushed += 1;
             },
           },

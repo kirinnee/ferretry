@@ -161,6 +161,34 @@ describe('raising through the Asks port', () => {
     );
   });
 
+  it('should keep the ref a registered source validated on the ask it raised, and none on a ferret’s own', async () => {
+    // Arrange: the source's owner draws its card from this ref (G7: a recipe proposal's Approve and Decline), so the item must carry it.
+    const spec: AskSourceSpec = {
+      schema: z.looseObject({ kind: z.literal('recipe-proposal'), signIn: z.string() }),
+      title: 'Recipe {signIn}',
+      form: false,
+    };
+    const half = await world({ 'ask.sources:sign-in-approval': spec });
+
+    // Act
+    const owned = await half.asks.raise(
+      draft('rp_1', 'f1', {
+        source: 'sign-in-approval' as SourceKey,
+        ref: { kind: 'recipe-proposal', signIn: 'si_0000000000000001' },
+        raisedBy: { kind: 'daemon' },
+      }),
+    );
+    const plain = await half.asks.raise(draft('e2', 'f1'));
+    const [snapshot] = await half.asks.snapshots({ ferret: 'f1' });
+
+    // Assert
+    expect(snapshot?.items.find(item => item.id === owned.id)?.askRef).toEqual({
+      kind: 'recipe-proposal',
+      signIn: 'si_0000000000000001',
+    });
+    expect(snapshot?.items.find(item => item.id === plain.id)?.askRef).toBeUndefined();
+  });
+
   it('should answer a raise retried on another board with the ask it already made, even with its source off', async () => {
     // Arrange
     const spec: AskSourceSpec = { schema: z.strictObject({}), title: 'Card', form: false };

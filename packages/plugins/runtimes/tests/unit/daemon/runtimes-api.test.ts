@@ -11,6 +11,51 @@ import { createRuntimesApi, type RuntimesApiDeps } from '../../../daemon/lib/ser
 
 const NOW = Date.parse('2026-11-08T12:00:00Z');
 
+it('a configured default or renamed runtime refuses incompatible login metadata before any status read', async () => {
+  let reads = 0;
+  let configuredDefault: string | undefined = 'work';
+  const runtimes = createRuntimesApi({
+    runtimes: () =>
+      new Map([
+        ['work', { login: 'subscription', harness: 'opencode', profile: 'plain' }],
+        ['inferred', { login: 'subscription', profile: 'plain' }],
+        ['claude-default', { login: 'subscription', harness: 'opencode', profile: 'plain' }],
+      ]),
+    profiles: () => new Map(),
+    defaultSetting: () => configuredDefault,
+    harnesses: () => ['opencode'],
+    currentName: async name => (name === 'old' ? 'work' : undefined),
+    logins: {
+      launchRefusal: async () => 'subscription refused',
+      list: async () => {
+        reads++;
+        throw new Error('must not read status');
+      },
+    },
+    now: () => NOW,
+  });
+  should(await runtimes.default()).equal('work');
+  for (const name of ['work', 'old'])
+    should(await runtimes.resolve(name as never)).deepEqual({
+      ok: false,
+      refusal: 'not_signed_in',
+      sentence: 'subscription refused',
+    });
+  should(await runtimes.resolve('inferred' as never, 'opencode')).deepEqual({
+    ok: false,
+    refusal: 'not_signed_in',
+    sentence: 'subscription refused',
+  });
+  configuredDefault = undefined;
+  should(await runtimes.default()).equal('claude-default');
+  should(await runtimes.resolve(undefined)).deepEqual({
+    ok: false,
+    refusal: 'not_signed_in',
+    sentence: 'subscription refused',
+  });
+  should(reads).equal(0);
+});
+
 const runtimeFile = (over: Partial<RuntimeFile> = {}): RuntimeFile => ({
   login: 'main',
   profile: 'default',
@@ -183,6 +228,11 @@ describe('createRuntimesApi — why a start cannot happen', () => {
 });
 
 describe('createRuntimesApi — default runtime', () => {
+  it('keeps a saved derived default while its login is ready', async () => {
+    should(
+      await api({ runtimes: {}, logins: [loginView({ id: 'derived' })], defaultSetting: 'derived' }).default(),
+    ).equal('derived');
+  });
   it('should use the named default over everything', async () => {
     should(
       await api({ defaultSetting: 'zed', runtimes: { zed: runtimeFile(), 'claude-default': runtimeFile() } }).default(),
@@ -205,6 +255,9 @@ describe('createRuntimesApi — default runtime', () => {
     // No runtime file: the ready login's own runtime is the default.
     should(await api({ runtimes: {} }).default()).equal('main');
     should(await api({ runtimes: {}, logins: [] }).default()).be.undefined();
+  });
+  it('skips an implicit fallback whose missing login cannot identify its harness', async () => {
+    should(await api({ runtimes: { 'claude-default': runtimeFile({ login: 'missing' }) } }).default()).equal('main');
   });
 });
 

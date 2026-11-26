@@ -1,0 +1,97 @@
+{
+  "generated": "2026-11-26",
+  "sources": {
+    "modelsDev": "https://models.dev/api.json"
+  },
+  "providers": {
+    "deepseek": {
+      "name": "DeepSeek",
+      "api": "https://api.deepseek.com",
+      "env": ["DEEPSEEK_API_KEY"],
+      "models": {
+        "deepseek-v4-flash-vision-exp": {
+          "name": "DeepSeek V4 Flash Vision Exp",
+          "reasoning": true,
+          "tool_call": true,
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 393216
+          },
+          "cost": {
+            "input": 0.15,
+            "output": 0.6,
+            "cache_read": 0.003,
+            "reasoning": 0.6
+          },
+          "status": "retiring",
+          "release_date": "2026-10-17"
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro",
+          "reasoning": true,
+          "tool_call": true,
+          "modalities": {
+            "input": ["text"],
+            "output": ["text"]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 393216
+          },
+          "cost": {
+            "input": 0.66,
+            "output": 1.98,
+            "cache_read": 0.022,
+            "reasoning": 1.98
+          },
+          "release_date": "2026-08-13"
+        },
+        "deepseek-flash": {
+          "name": "DeepSeek V4.1 Flash 1017",
+          "reasoning": true,
+          "tool_call": true,
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 393216
+          },
+          "cost": {
+            "input": 0.15,
+            "output": 0.6,
+            "cache_read": 0.003,
+            "reasoning": 0.6
+          },
+          "release_date": "2026-10-17"
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash",
+          "reasoning": true,
+          "tool_call": true,
+          "modalities": {
+            "input": ["text", "image"],
+            "output": ["text"]
+          },
+          "limit": {
+            "context": 1048576,
+            "output": 393216
+          },
+          "cost": {
+            "input": 0.15,
+            "output": 0.6,
+            "cache_read": 0.003,
+            "reasoning": 0.6
+          },
+          "status": "retiring",
+          "release_date": "2026-10-17"
+        }
+      }
+    }
+  }
+}

@@ -43,6 +43,9 @@ function rig() {
   const played: Int16Array[] = [];
   let stops = 0;
   const fakePlayer: ReplyPlayer = {
+    // The person has heard half of what was played, all of it line 0.
+    position: () =>
+      played.length === 0 ? undefined : { id: 0, samples: played.reduce((all, pcm) => all + pcm.length, 0) / 2 },
     play: pcm => void played.push(pcm),
     stop: () => {
       stops += 1;
@@ -201,7 +204,7 @@ describe('V4: voice mode speaks while the ferret works', () => {
     expect(r.stops()).toBe(stopsBefore);
     await talk(r, SPEECH, 1);
     expect(r.stops()).toBeGreaterThan(stopsBefore);
-    expect(r.lineFrames().at(-1)).toEqual({ t: 'hush' });
+    expect(r.lineFrames().at(-1)).toEqual({ t: 'hush', cut: { id: 0, samples: 50 } });
     expect(q('[data-voice-mode-status]')?.textContent).toContain('Stopped');
   });
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import {
   checkAccountPickerHealth,
   pickerAccount,
@@ -124,6 +125,35 @@ describe('readAccountPickerCatalog', () => {
 });
 
 describe('pickerAccount', () => {
+  it('offers a registered native discovery list with its display name and requires an exact default or explicit choice', () => {
+    const runtime = runtimeView({
+      wrapper: 'opencode-default',
+      harness: HarnessKeySchema.parse('opencode'),
+      harnessDisplayName: 'OpenCode',
+      discovery: {
+        choices: [{ id: 'deepseek/deepseek-flash', label: 'DeepSeek Flash', available: true, efforts: [] }],
+      },
+    });
+    const account = pickerAccount(runtime);
+    expect(account).toMatchObject({
+      available: true,
+      kind: 'opencode',
+      harnessDisplayName: 'OpenCode',
+      requiresModel: true,
+      defaultModel: null,
+      models: [{ id: 'deepseek/deepseek-flash', label: 'DeepSeek Flash', available: true, efforts: [], fast: false }],
+      modelCatalog: { id: 'opencode', customIds: false, discovery: true },
+    });
+    const defaulted = pickerAccount({
+      ...runtime,
+      discovery: { ...runtime.discovery!, default: 'deepseek/deepseek-flash' },
+    });
+    expect(defaulted.defaultModel).toBe('deepseek/deepseek-flash');
+    expect(defaulted.requiresModel).toBeUndefined();
+    expect(
+      pickerAccount({ ...runtime, launch: { available: false, reason: 'Install OpenCode' } }).unavailableReason,
+    ).toBe('Install OpenCode');
+  });
   it('reads a runtime’s id, wrapper, name, harness and login verbatim', () => {
     expect(pickerAccount(runtimeView({ wrapper: 'claude-auto-a', name: 'Claude Atelier' }))).toEqual({
       id: 'rt-claude-auto-a',

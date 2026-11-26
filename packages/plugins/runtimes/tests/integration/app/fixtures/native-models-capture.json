@@ -1,0 +1,21 @@
+{
+  "source": "https://models.dev/api.json",
+  "captured": "2026-11-26",
+  "projection": "opencodeModels; DeepSeek curated catalog has no opencode half or default",
+  "models": {
+    "choices": [
+      {
+        "id": "deepseek/deepseek-v4-pro",
+        "label": "DeepSeek V4 Pro",
+        "context": 1048576,
+        "reasoning": true
+      },
+      {
+        "id": "deepseek/deepseek-flash",
+        "label": "DeepSeek V4.1 Flash 1017",
+        "context": 1048576,
+        "reasoning": true
+      }
+    ]
+  }
+}

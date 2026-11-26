@@ -9,7 +9,7 @@ import { harnessName } from '../../../contract/harness-words.ts';
 
 /** A profile's scope badge: "Generic", "Claude only", "Codex only", or "Mixed" for one written before P7. */
 const scopeBadge = (scope: ProfileScope): string =>
-  scope.kind === 'mixed' ? 'Mixed' : HARNESS_SCOPE_WORDS[scope.scope];
+  scope.kind === 'mixed' ? 'Mixed' : (HARNESS_SCOPE_WORDS[scope.scope] ?? scope.scope);
 
 /** The Profiles tab in a terminal. */
 export function renderProfileList(catalog: LayeredProfileCatalog, binaryName: string): string {

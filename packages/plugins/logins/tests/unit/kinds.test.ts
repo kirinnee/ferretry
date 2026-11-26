@@ -68,6 +68,21 @@ describe('the five login kinds', () => {
     expect(JSON.stringify(env)).not.toContain(RAW);
   });
 
+  test('Qwen Coding Plan spends the same reference under OpenCode’s native variable only for OpenCode', async () => {
+    const env = { ANTHROPIC_AUTH_TOKEN: '${secret:FIXTURE_QWEN_KEY}' };
+    files.set('qwen', { harness: 'claude-code', store: 'environment', preset: 'qwen-coding-plan', env } as LoginFile);
+    try {
+      expect(await kinds.endpoint.env('qwen', 'opencode')).toEqual({
+        ...env,
+        ALIBABA_CODING_PLAN_API_KEY: '${secret:FIXTURE_QWEN_KEY}',
+      });
+      expect(await kinds.endpoint.env('qwen', 'claude-code')).toEqual(env);
+      expect(await kinds.endpoint.env('qwen', 'codex')).toEqual(env);
+    } finally {
+      files.delete('qwen');
+    }
+  });
+
   test('exactly one kind holds a login: its own, never another’s, and none holds a name nobody wrote', () => {
     const holders = (login: string) => LOGIN_KINDS.filter(kind => kinds[kind].holds(login));
 

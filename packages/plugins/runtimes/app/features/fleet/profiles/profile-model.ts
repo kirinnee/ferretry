@@ -142,7 +142,8 @@ export function contentScope(items: readonly ProfileItem[]): ContentScope {
   return { scope: 'generic', because: [] };
 }
 
-export const scopeWord = (scope: ContentScope['scope']): string => (scope === 'mixed' ? 'Mixed' : SCOPE_WORDS[scope]);
+export const scopeWord = (scope: ContentScope['scope']): string =>
+  scope === 'mixed' ? 'Mixed' : (SCOPE_WORDS[scope] ?? scope);
 
 const named = (items: readonly ProfileItem[]): string => listed(items.map(item => item.name));
 

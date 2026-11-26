@@ -1068,6 +1068,9 @@ export type AgendaConfirms = z.infer<typeof AgendaConfirmsSchema>;
 const AgendaInputRefSchema = z.strictObject({ requestId: z.string().regex(/^[0-9a-f]{32}$/u) });
 export type AgendaInputRef = z.infer<typeof AgendaInputRefSchema>;
 
+/** The ref an ask source registered (`AgendaItem.askRef`): its kind and whatever its own schema reads. */
+export const AgendaAskRefSchema = z.looseObject({ kind: z.string() });
+
 /**
  * The paste plan a card presents (docs/secure-copy.md): a ferret's planned pastes, answered with the plan's own
  * Allow and Decline, which only the owner's plan route carries. Only the daemon raises one.
@@ -1373,6 +1376,8 @@ const AgendaItemBaseShape = {
   twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
   /** A ferret's suggested standing rule: its card opens the create sheet with nothing ticked, never the generic answer. */
   signInRuleSuggestion: AgendaSignInRuleSuggestionRefSchema.optional(),
+  /** The ref the Asks port kept for the ask's source (ids only: agenda text is every ferret's to read); the daemon alone sets it. */
+  askRef: AgendaAskRefSchema.optional(),
   /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
   /** The task asks this agenda carries, oldest first (`AgendaTaskAsk`); only the daemon writes them. */

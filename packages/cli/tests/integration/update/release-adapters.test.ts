@@ -397,7 +397,6 @@ describe('verifying and swapping in a standalone release', () => {
     const behaviour = { status: undefined as undefined | number, fail: false, tar: 0, stderr: '' };
     const subject = (keys = [signer.key]): StandaloneRelease =>
       new StandaloneRelease({
-        product: 'ferretry',
         clientName: 'fy',
         platform: options.platform ?? 'linux',
         arch: options.arch ?? 'x64',

@@ -30,7 +30,6 @@ class World {
 
   service(): HarnessUpdateService {
     return new HarnessUpdateService({
-      product: 'ferretry',
       location: { locate: async () => this.location },
       facts: {
         facts: async launchedPath => ({

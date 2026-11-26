@@ -52,6 +52,7 @@ function realSink() {
       },
       drop: (ids: readonly number[]) => void dropped.push(...ids),
       hush: () => void pending.splice(0),
+      interrupt: () => void pending.splice(0),
     }),
     replyState: () => 'ready' as const,
     player: { remainingMs: () => 0 },

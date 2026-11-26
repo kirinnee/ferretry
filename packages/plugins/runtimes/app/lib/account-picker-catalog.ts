@@ -40,6 +40,8 @@ export interface PickerAccount {
   /** The runtime's name, as the Runtimes tab shows it. */
   readonly displayName: string;
   readonly kind: HarnessKey;
+  readonly harnessDisplayName?: string;
+  readonly requiresModel?: true;
   /** The login it uses, which is what its health is read from. */
   readonly credentialId: string;
   /** Where the login's sign-in lives; a terminal (`host`) one Ferretry cannot see is never called "ready". */
@@ -52,6 +54,7 @@ export interface PickerAccount {
     readonly id: string;
     readonly label: string;
     readonly customIds: boolean;
+    readonly discovery?: true;
     /** Set when the catalog also reads the models a local server has installed (`ollama`). */
     readonly detect?: 'ollama';
     /** What the daemon last read from that server; absent until it has read once. */
@@ -91,41 +94,59 @@ export const pickerAccount = (
   wrapper: runtime.wrapper,
   displayName: runtimeDisplayName(runtime, others, accounts),
   kind: runtime.harness,
+  ...(runtime.harnessDisplayName === undefined ? {} : { harnessDisplayName: runtime.harnessDisplayName }),
   credentialId: runtime.credential.id,
   credentialStore: runtime.credential.store,
-  ...(runtime.models === undefined
+  ...(runtime.discovery !== undefined
     ? {
-        defaultModel: runtime.modelSet.source === 'model-set' ? (runtime.modelSet.default ?? null) : null,
-        models: runtime.modelSet.source === 'model-set' ? runtime.modelSet.models : [],
-      }
-    : {
-        defaultModel: runtime.models.default ?? null,
-        models: runtime.models.choices.map(choice => ({
-          id: choice.id,
-          available: choice.available,
-          label: choice.label,
-          ...(choice.tier === undefined ? {} : { tier: choice.tier }),
-          ...(choice.context === undefined ? {} : { context: choice.context }),
-          efforts: choice.efforts,
-          ...(choice.defaultEffort === undefined ? {} : { defaultEffort: choice.defaultEffort }),
-          ...(choice.fast === undefined ? {} : { fast: choice.fast }),
-          ...(choice.local === true ? { local: true as const } : {}),
+        defaultModel: runtime.discovery.default ?? null,
+        ...(runtime.discovery.default === undefined ? { requiresModel: true as const } : {}),
+        models: runtime.discovery.choices.map(({ local, ...choice }) => ({
+          ...choice,
+          ...(local === true ? { local: true as const } : {}),
+          fast: false,
         })),
         modelCatalog: {
-          id: runtime.models.catalog.id,
-          label: runtime.models.catalog.label,
-          customIds: runtime.models.catalog.customIds,
-          ...(runtime.models.catalog.detect === undefined ? {} : { detect: runtime.models.catalog.detect }),
-          ...(runtime.models.local === undefined ? {} : { local: runtime.models.local }),
+          id: runtime.harness,
+          label: `${runtime.harnessDisplayName ?? runtime.harness} models`,
+          customIds: false,
+          discovery: true as const,
         },
-      }),
+      }
+    : runtime.models === undefined
+      ? {
+          defaultModel: runtime.modelSet.source === 'model-set' ? (runtime.modelSet.default ?? null) : null,
+          models: runtime.modelSet.source === 'model-set' ? runtime.modelSet.models : [],
+        }
+      : {
+          defaultModel: runtime.models.default ?? null,
+          models: runtime.models.choices.map(choice => ({
+            id: choice.id,
+            available: choice.available,
+            label: choice.label,
+            ...(choice.tier === undefined ? {} : { tier: choice.tier }),
+            ...(choice.context === undefined ? {} : { context: choice.context }),
+            efforts: choice.efforts,
+            ...(choice.defaultEffort === undefined ? {} : { defaultEffort: choice.defaultEffort }),
+            ...(choice.fast === undefined ? {} : { fast: choice.fast }),
+            ...(choice.local === true ? { local: true as const } : {}),
+          })),
+          modelCatalog: {
+            id: runtime.models.catalog.id,
+            label: runtime.models.catalog.label,
+            customIds: runtime.models.catalog.customIds,
+            ...(runtime.models.catalog.detect === undefined ? {} : { detect: runtime.models.catalog.detect }),
+            ...(runtime.models.local === undefined ? {} : { local: runtime.models.local }),
+          },
+        }),
   // A runtime on a harness Runtimes has no behaviour for is never offered to start on, whatever the daemon said.
-  available: runtime.launch.available && isSupportedHarnessKey(runtime.harness),
-  unavailableReason: !isSupportedHarnessKey(runtime.harness)
-    ? unsupportedHarnessSentence(runtime.harness)
-    : runtime.launch.available
-      ? null
-      : runtime.launch.reason,
+  available: runtime.launch.available && (runtime.discovery !== undefined || isSupportedHarnessKey(runtime.harness)),
+  unavailableReason:
+    runtime.discovery === undefined && !isSupportedHarnessKey(runtime.harness)
+      ? unsupportedHarnessSentence(runtime.harness)
+      : runtime.launch.available
+        ? null
+        : runtime.launch.reason,
 });
 
 /** Read this machine's runtimes through the client bound to it. */

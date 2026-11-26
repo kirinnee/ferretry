@@ -125,13 +125,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   });
   const tokens = new FerretTokenDirectory();
   const workFolders = new RegistryWorkFolders(registry);
-
-  // Load what is held. Sync answers (`mayTouch`, `bearers:ferret`, `WorkFolders`) see nothing until this lands,
-  // which fails closed: an unknown ferret is refused, an unknown digest is no ferret.
-  // Whether every record the state lists was read whole (its record, and its details file): a roster with one missing
-  // is not the truth about who exists, and a reader that would CLEAR something for a ferret not in it must be able to ask.
-  // `hydrated` flips only once the load below has finished: a roster still loading (or one whose load failed) is not whole, and
-  // a caller asking must get that answer AT ONCE (it is a flag, never a wait).
+  const runnerOf = (): Runner | undefined => {
+    const found = hooks.provider(Runners, 'tmux');
+    return found === 'unavailable' ? undefined : found;
+  };
+  const harnessOf = (key: HarnessKey) => {
+    const found = hooks.provider(Harnesses, key);
+    return found === 'unavailable' ? undefined : found;
+  };
+  // Sync answers fail closed until records load. A roster missing any record or details file is not whole.
+  // `hydrated` answers immediately: never clear a ferret's state on the strength of an incomplete roster.
   let hydrated = false;
   let missingRecord = false;
   const loaded = (async () => {
@@ -142,6 +145,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!read.ok || read.value === undefined) {
         missingRecord = true;
         continue;
+      }
+      // A fresh runner has no launch bindings. Restore the persisted registered key before any pane reads or sends.
+      if (read.value.handle !== undefined) {
+        const attached = await runnerOf()?.attach(
+          read.value.handle as RunnerHandle,
+          read.value.harness,
+          harnessOf(read.value.harness)?.screenReader,
+          read.value.id,
+        );
+        if (attached !== undefined && !attached.ok)
+          log.warn('a persisted pane could not be attached', { ferret: read.value.id, reason: attached.error });
       }
       // Its start options and title, kept beside the record so a list or a read stays memory-only.
       const details = await kernel.state.read(FerretDetailsFile, name);
@@ -162,8 +176,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     if (held.ok && held.value !== undefined) for (const entry of held.value.tokens) tokens.add(entry as TokenEntry);
     hydrated = true;
   })();
-  // Whether the load has FINISHED, well or badly: the tokens are then as known as they will be, so a digest the directory
-  // names nothing for is a stranger's. Until then a ferret bearer cannot be judged, and Gate answers it a retryable 503.
+  // Until loading settles, Gate answers a ferret bearer retryable 503; afterwards an unknown digest is a stranger's.
   let settled = false;
   void loaded.then(
     () => {
@@ -176,7 +189,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   const ready = async (): Promise<void> => {
     await loaded;
   };
-
   // The owner's sidebar pins (agent-pins.json): the service marks `pinnedAt` on each summary from them.
   const pinClock = { now: () => kernel.clock.now() };
   const agentPins = new AgentPinService(
@@ -268,13 +280,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       format: 1,
       tokens: entries.map(entry => ({ ...entry })) as never,
     });
-  // The token directory's half of an owner's cut-off, as the lifecycle's hash store reaches it: after the held tokens
-  // load (an unloaded directory would read "not cut off"), and each write persists `tokens.json`.
+  // Owner cut-off waits for held tokens to load (unknown is not "not cut off"); every write persists `tokens.json`.
   const tokenCutOff = new DirectoryCutOff({ ready, tokens, save: saveTokens, now: () => kernel.clock.now() });
-  const runnerOf = (): Runner | undefined => {
-    const found = hooks.provider(Runners, 'tmux');
-    return found === 'unavailable' ? undefined : found;
-  };
   // One set of conversation leases for the whole daemon: the lifecycle claims through it before a pane exists, and Ferrets'
   // launch (the ONE place every pane opens) holds the pane's conversation on it and frees it when the ferret stops.
   const conversationLeases = new ConversationLeases(
@@ -300,6 +307,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // built below; every call here is made after it exists.
     launcher: heldLifecycleLauncher(() => service, {
       handleOf: ferret => registry.get(ferret)?.handle as RunnerHandle | undefined,
+      harnessOf: ferret => registry.get(ferret)?.harness,
       runner: runnerOf,
       sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
       nowMs: () => kernel.clock.nowMs(),
@@ -478,10 +486,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       const id = tryParseSessionId(ferret);
       return id !== undefined && stopUnconfirmedIn(await sessionStore.readState(id));
     },
-    harness: key => {
-      const found = hooks.provider(Harnesses, key);
-      return found === 'unavailable' ? undefined : found;
-    },
+    harness: harnessOf,
     harnessKeys: () => [...hooks.providers(Harnesses).keys()] as HarnessKey[],
     runner: runnerOf,
     decide: async input => {
@@ -498,14 +503,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
     // Which harness and login a runtime starts with: Runtimes alone answers. With no Runtimes a start that names a
     // runtime is refused here, never launched signed out.
-    runtimeStart: async runtime => {
+    runtimeStart: async (runtime, harness) => {
       const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
       return found === 'unavailable'
         ? {
             ok: false,
             sentence: `runtime ${runtime} cannot be started: the Runtimes plugin is not running, so its login cannot be found`,
           }
-        : await found.resolve(runtime);
+        : await found.resolve(runtime, harness);
     },
     // The machine's default runtime, for a start that chose nothing: Runtimes alone answers; with no provider there is none.
     defaultRuntime: async () => {
@@ -513,14 +518,14 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return found === 'unavailable' ? undefined : await found.defaultRuntime?.();
     },
     // Whether a login named with no runtime may be spent: Runtimes alone answers, the same check a runtime's login passes.
-    loginStart: async login => {
+    loginStart: async (login, harness) => {
       const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
       return found === 'unavailable'
         ? {
             ok: false,
             sentence: `login ${login} cannot be started: the Runtimes plugin is not running, so it cannot be checked`,
           }
-        : await found.login(login);
+        : await found.login(login, harness);
     },
     launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
     daemonPath: () => kernel.hostFacts.launchGuard().searchPath,

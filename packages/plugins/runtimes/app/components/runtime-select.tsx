@@ -101,7 +101,7 @@ const harnessGroups = (options: readonly AccountPickerOption[]) =>
   harnessOrder(options)
     .map(kind => ({
       kind,
-      label: fleetHarnessLabel(kind),
+      label: options.find(option => option.kind === kind)?.harnessDisplayName ?? fleetHarnessLabel(kind),
       options: options.filter(option => option.kind === kind),
     }))
     .filter(group => group.options.length > 0);

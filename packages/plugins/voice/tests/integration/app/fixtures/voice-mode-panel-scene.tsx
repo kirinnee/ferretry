@@ -42,6 +42,8 @@ const fake = {
   reads: 0,
   lines: [] as string[],
   hushes: 0,
+  /** What each hush said about where the person's ears were (`null`: nothing, a reading only replaced). */
+  cuts: [] as ({ id: number; samples: number } | null)[],
   sent: [] as string[],
   /** The asks to the machine to tell the ferret (`POST /v1/voice/entry`), kept apart from what the person said. */
   entries: [] as { ferretId: string; session: string }[],
@@ -150,6 +152,7 @@ const client = {
           const line = decodeLineFrame(frame);
           if (line.t === 'hush') {
             fake.hushes += 1;
+            fake.cuts.push(line.cut ?? null);
             if (tone !== undefined) clearInterval(tone);
             tone = undefined;
             return;

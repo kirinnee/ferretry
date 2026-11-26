@@ -47,6 +47,9 @@ function rig() {
   const played: Int16Array[] = [];
   const player = { stops: 0, closed: 0 };
   const fakePlayer: ReplyPlayer = {
+    // The person has heard half of what was played, all of it line 0.
+    position: () =>
+      played.length === 0 ? undefined : { id: 0, samples: played.reduce((all, pcm) => all + pcm.length, 0) / 2 },
     play: pcm => void played.push(pcm),
     stop: () => {
       player.stops += 1;
@@ -179,7 +182,7 @@ describe('voice mode speaks with the machine and can be talked over', () => {
     await talk(r, SPEECH, 1);
     expect(r.controller.getState().status).toBe('stopped');
     expect(r.player.stops).toBeGreaterThan(stopsBefore);
-    expect(r.lineFrames().at(-1)).toEqual({ t: 'hush' });
+    expect(r.lineFrames().at(-1)).toEqual({ t: 'hush', cut: { id: 0, samples: 50 } });
     expect(needed * UNIT_MS).toBeLessThanOrEqual(320);
     // What the machine heard is the person's voice, untouched: it sends it after the pause as usual.
     const heard = r.uplinks().slice(unitsBefore);

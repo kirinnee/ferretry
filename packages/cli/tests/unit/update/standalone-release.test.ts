@@ -29,7 +29,6 @@ async function fixture() {
   const ran: string[][] = [];
   const subject = (keys = [b64(publicKey)]) =>
     new StandaloneRelease({
-      product: 'ferretry',
       clientName: 'fy',
       platform: 'linux',
       arch: 'x64',

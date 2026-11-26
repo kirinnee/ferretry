@@ -1,7 +1,8 @@
 import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
+import { withRuntimeModel } from '../../../../daemon/lib/ferrets/runtime-records.ts';
 import { ok } from '@ferretry/std';
-import type { RunnerHandle } from '../../../../contract/index.ts';
+import type { RunnerHandle, StartRequest } from '../../../../contract/index.ts';
 import {
   emptyChildEnvironment,
   FakeHarness,
@@ -18,6 +19,7 @@ import {
 import { FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
+import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
 
 /**
  * The harness seam is OPEN (runtimes plan U4a): a harness the contract has never named (`fake-third`) boots, starts,
@@ -72,6 +74,21 @@ function fixture() {
 }
 
 describe('a harness the contract never named', () => {
+  test('projects only the registered harness runtime descriptor through FerretsPort', async () => {
+    const f = fixture();
+    const runtime = {
+      binary: 'third',
+      homeEnv: { THIRD_HOME: '' },
+      detect: () => f.third.discover(),
+      models: async () => ({ choices: [] }),
+    };
+    Object.assign(f.third, { runtime });
+    const port = ferretsPort(f.service, 'runtimes');
+    expect(port.harnessRuntime?.(THIRD_HARNESS_KEY)).toBe(runtime);
+    expect(port.harnessRuntime?.('claude-code')).toBeUndefined();
+    expect(port.harnessRuntime?.('unknown')).toBeUndefined();
+    expect(await port.harnessRuntime?.(THIRD_HARNESS_KEY)?.models('fixture')).toEqual({ choices: [] });
+  });
   test('is in the registry, and says what it is as data through the one facts port', () => {
     const f = fixture();
 
@@ -123,4 +140,17 @@ describe('a harness the contract never named', () => {
     expect(f.runner.starts).toBe(0);
     expect(f.service.harnessFacts('gemini')).toBeUndefined();
   });
+});
+
+const request: StartRequest = { folder: '/work', by: 'owner' };
+
+test("a start records the runtime's selected model, unless there is none or the caller chose one", () => {
+  expect(withRuntimeModel(request, 'provider/model')).toEqual({ ...request, options: { model: 'provider/model' } });
+  expect(withRuntimeModel({ ...request, options: { effort: 'high' } } as StartRequest, 'provider/model')).toEqual({
+    ...request,
+    options: { effort: 'high', model: 'provider/model' },
+  });
+  expect(withRuntimeModel(request, undefined)).toBe(request);
+  const chosen = { ...request, options: { model: 'caller/model' } } as StartRequest;
+  expect(withRuntimeModel(chosen, 'provider/model')).toBe(chosen);
 });

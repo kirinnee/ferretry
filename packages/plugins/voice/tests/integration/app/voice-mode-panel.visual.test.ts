@@ -68,6 +68,7 @@ interface Fake {
   reads: number;
   lines: string[];
   hushes: number;
+  cuts: ({ id: number; samples: number } | null)[];
   sent: string[];
   entries: { ferretId: string; session: string }[];
 }
@@ -189,6 +190,11 @@ describe('Voice mode panel', () => {
             'stopped',
           );
           expect((await fakeOf(tab)).hushes).toBe(1);
+          // The person's own stop tells the machine where their ears were: line 0, and some of its sound had played.
+          const { cuts } = await fakeOf(tab);
+          expect(cuts).toHaveLength(1);
+          expect(cuts[0]?.id).toBe(0);
+          expect(cuts[0]?.samples).toBeGreaterThan(0);
           expect(await overflow(tab)).toBeLessThanOrEqual(0);
           await shot(tab, 'on-interrupted');
         } finally {

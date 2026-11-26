@@ -12,6 +12,7 @@ import {
   updatePlan,
   updateRecipe,
   VERIFIED_CLAUDE_CODE_VERSION,
+  verificationUrl,
   verification,
 } from '../../../daemon/lib/update/recipes.ts';
 
@@ -302,5 +303,13 @@ describe('versions', () => {
         lastKnown: { checkedAt: '2026-10-19T09:00:00.000Z' as never, latest },
       }),
     ).eql(latest);
+  });
+});
+
+describe('verificationUrl', () => {
+  it('points at the contract guard README of THIS repository, whatever the product is called', () => {
+    should(verificationUrl()).equal(
+      'https://github.com/kirinnee/ferretry/blob/main/packages/plugins/claude-code/tests/contract/README.md',
+    );
   });
 });
