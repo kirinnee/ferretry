@@ -182,6 +182,8 @@ export interface CreateManagedWorktreeInput {
   readonly ownerSessionId?: string;
   readonly ownershipToken: string;
   readonly managedRoot: string;
+  /** An opaque folder under the managed root this checkout is filed in; absent files it directly under the root. */
+  readonly group?: string;
   readonly base?: ManagedWorktreeBase;
   readonly timeoutMs?: number;
   readonly onPlanned?: (plan: ManagedWorktreePlan) => Promise<void>;

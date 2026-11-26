@@ -1,5 +1,6 @@
 import { WorktreeController } from '../lib/worktrees/controller.ts';
 import { ClientWorktreeGateway } from '../lib/worktrees/gateway.ts';
+import { PROJECTS_ROUTE, resolveProjectGroup } from '../lib/worktrees/project-group.ts';
 import { on, text } from '../lib/verb-io.ts';
 import { defineVerbs } from './context.ts';
 
@@ -33,12 +34,18 @@ export default defineVerbs(({ client, environment, verb, json, first }) => {
     const base = text(invocation, 'base');
     const from = text(invocation, 'from');
     const session = text(invocation, 'session');
+    const project = text(invocation, 'project');
+    const group =
+      project === undefined
+        ? undefined
+        : await resolveProjectGroup(project, async () => await client.call(PROJECTS_ROUTE));
     await worktrees(io).fork(first(invocation, 'branch'), {
       ...(base === undefined ? {} : { base }),
       ...(on(invocation, 'from-default') ? { fromDefault: true } : {}),
       ...(on(invocation, 'from-head') ? { fromHead: true } : {}),
       ...(from === undefined ? {} : { from }),
       ...(session === undefined ? {} : { session }),
+      ...(group === undefined ? {} : { group }),
       ...json(invocation),
     });
   });

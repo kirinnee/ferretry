@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { unclearedRemovalBlockers, type WorktreeLiveState } from '../../../contract/index.ts';
+import { isPathSafeWorktreeGroup, unclearedRemovalBlockers, type WorktreeLiveState } from '../../../contract/index.ts';
 import { WorktreeError, WorktreeRemovalRefusal } from '../../lib/worktrees/errors.ts';
 import { verifyWorktreeOccupancy } from '../../lib/worktrees/occupancy.ts';
 import { assessBranchDeletion, assessWorktreeRemoval, isWithinDirectory } from '../../lib/worktrees/policy.ts';
@@ -55,6 +55,9 @@ function assertSafeInput(input: CreateManagedWorktreeInput): void {
   // occupied destination cannot recover from either.
   if (!/^[a-zA-Z0-9._-]+$/.test(input.sessionId)) {
     throw new WorktreeError('invalid_session_id', 'session id is unsafe for a managed checkout path');
+  }
+  if (input.group !== undefined && !isPathSafeWorktreeGroup(input.group)) {
+    throw new WorktreeError('invalid_group', 'group is not one safe folder name for a managed checkout path');
   }
   if (!/^[a-zA-Z0-9._-]{8,128}$/.test(input.ownershipToken)) {
     throw new WorktreeError('invalid_ownership_token', 'ownership token must be an opaque 8-128 character id');
@@ -171,7 +174,12 @@ async function resolveCreationPlan(
   await fileSystem.makeDirectory(input.managedRoot, 0o700);
   const managedRoot = await fileSystem.realPath(input.managedRoot);
   const repoName = path.basename(source.repositoryRoot);
-  const repoDirectory = path.join(managedRoot, `${pathSlug(repoName, 32)}-${stableHash(source.commonDir, 10)}`);
+  let groupDirectory = managedRoot;
+  if (input.group !== undefined) {
+    groupDirectory = path.join(managedRoot, input.group);
+    await ensurePlainDirectory(fileSystem, groupDirectory);
+  }
+  const repoDirectory = path.join(groupDirectory, `${pathSlug(repoName, 32)}-${stableHash(source.commonDir, 10)}`);
   await ensurePlainDirectory(fileSystem, repoDirectory);
   const destination = path.join(repoDirectory, `${pathSlug(branch, 48)}-${stableHash(branch, 8)}-${input.sessionId}`);
   if ((await fileSystem.type(destination)) !== 'missing') {
