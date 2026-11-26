@@ -1,6 +1,9 @@
 import { describe, it } from 'bun:test';
 import { builtInModelCatalogs } from '../../../daemon/lib/catalog/catalog.ts';
 import { publishedModelCatalogFiles } from '../../../daemon/lib/catalog/published.ts';
+import type { Suggestions } from '../../../daemon/lib/catalog/suggestions.ts';
+import { ModelCatalogService } from '../../../daemon/lib/models/service.ts';
+import { modelCatalogSourcesView } from '../../../daemon/lib/models/sources.ts';
 import should from 'should';
 import {
   type Bytes,
@@ -16,14 +19,14 @@ const b64url = (bytes: Uint8Array): string => b64(bytes).replaceAll('+', '-').re
 const sha = async (bytes: Bytes) => b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)));
 
 /** A throwaway release key, a hosted app signed with it, and the PEM a build would compile in. */
-async function hostedApp(version: number, options: { tamper?: 'catalog' | 'version' } = {}) {
+async function hostedApp(version: number, options: { tamper?: 'catalog' | 'version'; suggestions?: Suggestions } = {}) {
   const keys = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
     'sign',
     'verify',
   ])) as unknown as CryptoKeyPair;
   const spki = new Uint8Array(await crypto.subtle.exportKey('spki', keys.publicKey));
   const pem = `-----BEGIN PUBLIC KEY-----\n${b64(spki)}\n-----END PUBLIC KEY-----\n`;
-  const files = publishedModelCatalogFiles(version, builtInModelCatalogs());
+  const files = publishedModelCatalogFiles(version, builtInModelCatalogs(), options.suggestions);
   const catalog = encode(files['catalog/models.json'] as string);
   const list = encode(JSON.stringify({ version: '1.0.0', files: { 'catalog/models.json': await sha(catalog) } }));
   const signature = `${b64url(new Uint8Array(await crypto.subtle.digest('SHA-256', spki)))}.${b64url(
@@ -155,6 +158,68 @@ describe('verifyPublishedCatalog with a key the platform cannot use', () => {
 
 describe('PublishedModelCatalogService', () => {
   const NOW = Date.parse('2026-10-19T00:00:00.000Z');
+  it('projects separate discovery only after the signed snapshot checks, without changing curated defaults', async () => {
+    const app = await hostedApp(12, {
+      suggestions: {
+        generated: '2026-10-19',
+        sources: { modelsDev: 'https://models.dev/api.json' },
+        providers: {
+          deepseek: {
+            name: 'DeepSeek',
+            env: ['DEEPSEEK_API_KEY'],
+            models: {
+              'deepseek-flash': {
+                name: 'DeepSeek Flash',
+                tool_call: true,
+                reasoning: true,
+                limit: { context: 131072 },
+                cost: { input: 0.1 },
+              },
+            },
+          },
+        },
+      },
+    });
+    const fetch = fetchOf(app.served);
+    const published = new PublishedModelCatalogService({
+      fetch: fetch.port,
+      cache: memoryCache(),
+      publicKeyPem: app.pem,
+      nowMs: () => NOW,
+    });
+    should(await published.discovery()).be.undefined();
+    should(await published.refresh(true)).match({ outcome: 'updated' });
+    const expected = {
+      providers: {
+        deepseek: {
+          name: 'DeepSeek',
+          env: ['DEEPSEEK_API_KEY'],
+          models: {
+            'deepseek-flash': { name: 'DeepSeek Flash', tool_call: true, reasoning: true, limit: { context: 131072 } },
+          },
+        },
+      },
+    };
+    should(await published.discovery()).deepEqual(expected);
+    const service = new ModelCatalogService({
+      files: async () => ({}),
+      presets: async () => [],
+      published: () => published.catalogs(),
+      discovery: () => published.discovery(),
+    });
+    const view = modelCatalogSourcesView(await service.sources());
+    should(view.discovery).deepEqual(expected);
+    should(view.catalogs.deepseek?.opencode).deepEqual(builtInModelCatalogs().deepseek?.opencode);
+    const tampered = await hostedApp(12, { tamper: 'catalog' });
+    const refused = new PublishedModelCatalogService({
+      fetch: fetchOf(tampered.served).port,
+      cache: memoryCache(),
+      publicKeyPem: tampered.pem,
+      nowMs: () => NOW,
+    });
+    should(await refused.refresh(true)).match({ outcome: 'refused' });
+    should(await refused.discovery()).be.undefined();
+  });
 
   it('should take a newer published catalog, keep it, and say so once', async () => {
     // Arrange

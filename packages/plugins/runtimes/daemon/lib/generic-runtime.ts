@@ -44,11 +44,7 @@ type RuntimeApi = ReturnType<typeof createRuntimesApi>;
 type NativeChange = Extract<AccountChange, { kind: 'runtime.put' | 'runtime.remove' }>;
 interface Staged {
   readonly documents: readonly ConfigWriteAllDocument[];
-  readonly dependencies: readonly {
-    readonly def: ConfigCollectionDef<any>;
-    readonly name: string;
-    readonly etag: string;
-  }[];
+  readonly dependencies: readonly ConfigWriteAllDocument[];
 }
 interface Registered {
   readonly key: string;
@@ -186,6 +182,7 @@ export class GenericRuntimes {
   private async read(
     name: string,
     file: RuntimeFile = this.file(name) ?? refused(`Runtime ${name} does not exist`),
+    plainProfile = false,
   ): Promise<Reading> {
     const registered = this.require(file.harness ?? '');
     if (this.deps.kernel.config.fileState(runtimeItems, name).state === 'invalid')
@@ -199,7 +196,7 @@ export class GenericRuntimes {
     if (login === undefined) return refused(`Login ${file.login} does not exist`);
     if (!login.harnesses.includes(registered.key))
       return refused(`Login ${file.login} cannot be spent by ${registered.label}`);
-    const pinned = this.profile(file.profile, registered.label);
+    const pinned = plainProfile ? undefined : this.profile(file.profile, registered.label);
     let models: HarnessRuntimeModels;
     let installed: Awaited<ReturnType<HarnessRuntimeDescriptor['detect']>>;
     try {
@@ -287,7 +284,6 @@ export class GenericRuntimes {
     }
     return rows;
   }
-
   api(base: RuntimeApi): RuntimeApi {
     const list = async () => {
       const generic = await this.views();
@@ -348,7 +344,6 @@ export class GenericRuntimes {
       },
     };
   }
-
   start(base: RuntimeStartSource): RuntimeStartSource {
     return {
       ...base,
@@ -421,7 +416,6 @@ export class GenericRuntimes {
       return { allow: false, reason: error.message };
     }
   }
-
   private view(record: FleetProposalRecord<Staged, NativeChange>): AccountChangeView {
     return {
       id: record.id,
@@ -435,7 +429,9 @@ export class GenericRuntimes {
         kind: 'apply',
         operations: [],
         documents: record.payload.documents.map(document => ({
-          path: Object.is(document.def, runtimesConfig) ? 'runtimes.yaml' : `runtimes/${document.name}.yaml`,
+          path: Object.is(document.def, runtimesConfig)
+            ? 'runtimes.yaml'
+            : `${Object.is(document.def, profileItems) ? 'profiles' : 'runtimes'}/${document.name}.yaml`,
           bytes:
             typeof document.edit === 'string'
               ? Buffer.byteLength(document.edit)
@@ -461,6 +457,7 @@ export class GenericRuntimes {
     const current = this.file(change.name);
     const revision = await config.etag(runtimeItems, change.name);
     const dependencies: Staged['dependencies'][number][] = [];
+    const documents: ConfigWriteAllDocument[] = [];
     let edit: ConfigWriteAllDocument['edit'];
     if (change.kind === 'runtime.remove') {
       if (current === undefined) return refused(`Runtime ${change.name} does not exist`);
@@ -475,23 +472,30 @@ export class GenericRuntimes {
         login: change.credential,
         profile: change.profile,
       };
-      this.profile(change.profile, registered.label);
-      dependencies.push({
-        def: profileItems,
-        name: change.profile,
-        etag: await config.etag(profileItems, change.profile),
-      });
-      for (const reference of new Set(config.collection(profileItems).get(change.profile)?.contents ?? [])) {
-        const name = reference.slice('modelSets/'.length);
-        dependencies.push({ def: modelSetItems, name, etag: await config.etag(modelSetItems, name) });
+      const profileEtag = await config.etag(profileItems, change.profile);
+      if (change.createPlainProfile === true) {
+        if (profileEtag !== 'absent') return refused(`Profile ${change.profile} already exists`);
+        documents.push({ def: profileItems, name: change.profile, edit: 'contents: []\n', ifMatch: profileEtag });
+      } else {
+        this.profile(change.profile, registered.label);
+        dependencies.push({ def: profileItems, name: change.profile, edit: { patch: {} }, ifMatch: profileEtag });
+        for (const reference of new Set(config.collection(profileItems).get(change.profile)?.contents ?? [])) {
+          const name = reference.slice('modelSets/'.length);
+          dependencies.push({
+            def: modelSetItems,
+            name,
+            edit: { patch: {} },
+            ifMatch: await config.etag(modelSetItems, name),
+          });
+        }
       }
-      await this.read(change.name, value);
+      await this.read(change.name, value, change.createPlainProfile === true);
       edit =
         current === undefined
           ? `${JSON.stringify(value, null, 2)}\n`
           : { patch: { harness: value.harness, login: value.login, profile: value.profile } };
     }
-    const documents: ConfigWriteAllDocument[] = [{ def: runtimeItems, name: change.name, edit, ifMatch: revision }];
+    documents.unshift({ def: runtimeItems, name: change.name, edit, ifMatch: revision });
     if (change.kind === 'runtime.remove' && config.file(runtimesConfig)?.defaultRuntime === change.name)
       documents.push({
         def: runtimesConfig,
@@ -539,6 +543,7 @@ export class GenericRuntimes {
         },
         propose: async (change, caller) => {
           if (this.nativeChange(change)) return await this.propose(change);
+          if (change.kind === 'runtime.put' && change.createPlainProfile === true) return unsupported('This harness');
           if (change.kind === 'profile.put' || change.kind === 'profile.remove')
             for (const [name, file] of this.deps.kernel.config.collection(runtimeItems))
               if (this.nativeFile(name) && file.profile === change.name)
@@ -570,12 +575,7 @@ export class GenericRuntimes {
               assertRequestLive(bracket);
               const outcome = await this.deps.kernel.config.writeAll([
                 ...record.payload.documents,
-                ...record.payload.dependencies.map(dependency => ({
-                  def: dependency.def,
-                  name: dependency.name,
-                  edit: { patch: {} },
-                  ifMatch: dependency.etag,
-                })),
+                ...record.payload.dependencies,
               ]);
               if (outcome.kind !== 'written') {
                 this.#changes.restore(record);

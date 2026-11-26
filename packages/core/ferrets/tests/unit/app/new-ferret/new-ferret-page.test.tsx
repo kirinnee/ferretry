@@ -55,6 +55,24 @@ const CODEX: ChosenFerretAccount = {
 };
 
 describe('NewFerretPage', () => {
+  it('requires an explicit model when a registered runtime has no exact discovery default', async () => {
+    const account: ChosenFerretAccount = {
+      ...CLAUDE,
+      defaultModel: null,
+      requiresModel: true,
+      models: [{ id: 'deepseek/deepseek-flash', label: 'DeepSeek Flash', available: true, fast: false }],
+    };
+    const h = page({ panel: slot => <StubPicker account={account} slot={slot} /> });
+    run(() => h.view.root.findByProps({ 'data-stub-runtime': account.wrapper }).props.onClick());
+    change(h.view, 'fy-new-ferret-folder', '/work/ferretry');
+    change(h.view, 'fy-new-ferret-prompt', 'Read the project');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeTrue();
+    expect(JSON.stringify(h.view.toJSON())).toContain('Choose a model before creating this ferret.');
+    change(h.view, 'fy-new-ferret-model', 'deepseek/deepseek-flash');
+    expect(button(h.view, 'Create ferret').props.disabled).toBeFalse();
+    await runAsync(async () => button(h.view, 'Create ferret').props.onClick());
+    expect(post(h)?.body).toMatchObject({ model: 'deepseek/deepseek-flash' });
+  });
   it('renders the typed fallback where no panel is contributed and keeps Create disabled until runtime, folder and prompt are present', () => {
     const { view } = page();
 

@@ -99,9 +99,12 @@ export type ProfileFit =
  * does not ("Codex only — this login is Claude Code"); a mixed one written before P7 does not either,
  * and says which layers disagree.
  */
-export const profileFit = (profile: LayeredProfileView, harness: HarnessKind): ProfileFit => {
+export const profileFit = (profile: LayeredProfileView, harness: HarnessKind, registered = false): ProfileFit => {
   // A harness Runtimes has no behaviour for fits nothing: said in the one sentence, never judged as Claude or Codex.
-  if (!isSupportedHarnessKey(harness)) return { fits: false, reason: unsupportedHarnessSentence(harness) };
+  if (!isSupportedHarnessKey(harness))
+    return registered && profile.layers.every(reference => reference.startsWith('modelSets/'))
+      ? { fits: true, notes: [] }
+      : { fits: false, reason: unsupportedHarnessSentence(harness) };
   if (profile.scope.kind === 'mixed') return { fits: false, reason: profile.scope.sentence };
   if (profile.scope.scope !== 'generic' && profile.scope.scope !== harness)
     return { fits: false, reason: `${SCOPE_WORDS[profile.scope.scope]} — this login is ${harnessName(harness)}` };
@@ -173,11 +176,15 @@ export const launchLabel = (
 
 /** The row under a runtime's name: "you@example.com (work) · Default profile · Sonnet 5.5". */
 export const runtimeDefaultModel = (runtime: RuntimeView): string =>
-  runtime.modelSet.source === 'model-set'
-    ? runtime.modelSet.default === undefined
-      ? 'No model available'
-      : modelDisplayName(runtime.modelSet.default, runtime.models?.choices)
-    : 'Harness default';
+  runtime.discovery !== undefined
+    ? runtime.discovery.default === undefined
+      ? 'Choose a model'
+      : modelDisplayName(runtime.discovery.default, runtime.discovery.choices)
+    : runtime.modelSet.source === 'model-set'
+      ? runtime.modelSet.default === undefined
+        ? 'No model available'
+        : modelDisplayName(runtime.modelSet.default, runtime.models?.choices)
+      : 'Harness default';
 
 export interface ModelRow {
   readonly id: string;
@@ -189,17 +196,28 @@ export interface ModelRow {
 
 /** The model set as rows: struck-through models this login cannot use, and the default marked (E23). */
 export const modelRows = (runtime: RuntimeView): readonly ModelRow[] =>
-  runtime.modelSet.source === 'model-set'
-    ? runtime.modelSet.models.map(model => ({
-        id: model.id,
-        name: modelDisplayName(model.id, runtime.models?.choices),
-        available: model.available,
-        isDefault: runtime.modelSet.source === 'model-set' && model.id === runtime.modelSet.default,
+  runtime.discovery !== undefined
+    ? runtime.discovery.choices.map(choice => ({
+        id: choice.id,
+        name: choice.label ?? choice.id,
+        available: choice.available,
+        isDefault: choice.id === runtime.discovery?.default,
       }))
-    : [];
+    : runtime.modelSet.source === 'model-set'
+      ? runtime.modelSet.models.map(model => ({
+          id: model.id,
+          name: modelDisplayName(model.id, runtime.models?.choices),
+          available: model.available,
+          isDefault: runtime.modelSet.source === 'model-set' && model.id === runtime.modelSet.default,
+        }))
+      : [];
 
 /** The sentence under the model list. */
 export const modelSetNote = (runtime: RuntimeView): string => {
+  if (runtime.discovery !== undefined)
+    return runtime.discovery.default === undefined
+      ? 'Choose a model when starting a ferret. No exact catalog default is available.'
+      : 'Models from the verified models.dev snapshot. The default matches this login’s curated catalog.';
   if (runtime.modelSet.source === 'harness-default')
     return 'No model set in this profile. The harness picks its own default.';
   const from = `From ${runtime.modelSet.name} in the ${runtime.profile} profile.`;

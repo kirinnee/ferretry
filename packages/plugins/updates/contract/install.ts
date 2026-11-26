@@ -131,7 +131,7 @@ export function classifyInstallMethod(facts: InstallFacts): InstallMethod {
   const resolved = facts.resolvedPath;
   const cask = resolved.split('/Caskroom/')[1]?.split('/')[0];
   if (cask === facts.product || cask === `${facts.product}@4`) {
-    return { kind: 'homebrew', cask: `${releaseTapName(facts.product)}/${cask}` };
+    return { kind: 'homebrew', cask: `${releaseTapName()}/${cask}` };
   }
   if (facts.systemPackage !== undefined) return { kind: 'system-package', manager: facts.systemPackage };
   if (isNixStoreFile(resolved)) return classifyNixStorePath(facts);
@@ -270,7 +270,7 @@ export interface UpdatePlanContext {
  */
 export function planUpdate(method: InstallMethod, context: UpdatePlanContext): UpdatePlan {
   const restart: UpdateStep = { command: `${context.clientName} daemon restart` };
-  const flake = releaseFlakeReference(context.product);
+  const flake = releaseFlakeReference();
   switch (method.kind) {
     case 'homebrew':
       return {

@@ -22,7 +22,6 @@ export class GitHubLatestRelease implements LatestReleaseSource {
   private readonly timeoutMs: number;
 
   constructor(
-    private readonly product: string,
     private readonly network: FetchPort,
     private readonly options: GitHubLatestReleaseOptions,
   ) {
@@ -32,7 +31,7 @@ export class GitHubLatestRelease implements LatestReleaseSource {
   async latest(): Promise<LatestReleaseAnswer> {
     let response: Response;
     try {
-      response = await this.network.request(latestReleaseApiUrl(this.product), {
+      response = await this.network.request(latestReleaseApiUrl(), {
         cache: 'no-store',
         headers: { accept: 'application/vnd.github+json', 'user-agent': this.options.userAgent },
         signal: AbortSignal.timeout(this.timeoutMs),

@@ -107,7 +107,6 @@ export default implementDaemon(manifest, {
     const probe = new HostCodexProbe(kernel.spawn, host, probeHome.value);
 
     const service = new HarnessUpdateService({
-      product: 'ferretry',
       homeDirectory,
       locate,
       facts: new HostCodexFacts(host),

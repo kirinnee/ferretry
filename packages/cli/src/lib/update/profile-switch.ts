@@ -55,7 +55,7 @@ export class NixProfileSwitch {
   ): Promise<{ readonly path: string } | { readonly failure: string }> {
     if (requireLocked && target === undefined)
       return { failure: 'no locked Nix revision was judged; refusing to install' };
-    const flake = target?.reference ?? releaseFlakeReference(this.deps.product);
+    const flake = target?.reference ?? releaseFlakeReference();
     const outcome = await this.deps.packages.nixProfileInstall(flake, undefined, target);
     if (outcome.code !== 0) {
       return {
@@ -79,7 +79,7 @@ export class NixProfileSwitch {
     if (!(await this.isNixShell(daemon))) return undefined;
     const plan = planUpdate({ kind: 'nix-shell', storePath: daemon.path }, this.deps);
     if (plan.kind === 'switch') this.deps.out.warn(plan.explanation);
-    const flake = releaseFlakeReference(this.deps.product);
+    const flake = releaseFlakeReference();
     if (!this.deps.interactive()) {
       this.deps.out.warn(
         `to fix it, run \`nix profile install ${flake}\`, then \`${this.deps.clientName} daemon install\` from a new shell`,

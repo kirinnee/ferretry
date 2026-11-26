@@ -16,6 +16,8 @@ export interface ChosenFerretAccount {
   readonly kind: HarnessKey;
   /** `null` = the harness's own default. */
   readonly defaultModel: string | null;
+  /** Discovery supplied no exact default, so a new start needs the person's explicit model choice. */
+  readonly requiresModel?: true;
   readonly models: readonly {
     readonly id: string;
     readonly label?: string;

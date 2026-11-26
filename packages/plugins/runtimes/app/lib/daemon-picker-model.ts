@@ -31,6 +31,8 @@ export interface AccountPickerOption {
   readonly wrapper: string;
   readonly displayName: string;
   readonly kind: PickerAccount['kind'];
+  readonly harnessDisplayName?: string;
+  readonly requiresModel?: true;
   /** The login it uses; its health is that login's status. */
   readonly credentialId: string;
   readonly credentialStore?: PickerAccount['credentialStore'];
@@ -109,6 +111,8 @@ const accountPickerOption = (
   wrapper: account.wrapper,
   displayName: account.displayName,
   kind: account.kind,
+  ...(account.harnessDisplayName === undefined ? {} : { harnessDisplayName: account.harnessDisplayName }),
+  ...(account.requiresModel === true ? { requiresModel: true as const } : {}),
   credentialId: account.credentialId,
   ...(account.credentialStore === undefined ? {} : { credentialStore: account.credentialStore }),
   defaultModel: account.defaultModel,

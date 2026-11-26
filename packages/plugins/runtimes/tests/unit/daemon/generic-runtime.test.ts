@@ -310,6 +310,57 @@ test('a held native config change remains pending and never creates a runtime or
   expect(await f.api.get(RuntimeIdSchema.parse('custom'))).toBeDefined();
 });
 
+test('a native runtime can explicitly create a plain profile in the same reviewed atomic change', async () => {
+  const f = await fixture({ configured: false });
+  f.host.setConfig('profiles', {
+    'claude-only': { contents: ['settings/claude-only'] },
+    'codex-only': { contents: ['settings/codex-only'] },
+  });
+  const staged = await f.proposal({
+    kind: 'runtime.put',
+    name: 'custom',
+    credential: 'key',
+    profile: 'fourth-plain',
+    harness: 'fourth',
+    create: true,
+    createPlainProfile: true,
+  });
+  expect(staged.status, JSON.stringify(staged.body)).toBe(200);
+  expect(
+    staged.json<{ preview: { documents: { path: string }[] } }>().preview.documents.map(document => document.path),
+  ).toEqual(['runtimes/custom.yaml', 'profiles/fourth-plain.yaml']);
+  expect(await f.api.get(RuntimeIdSchema.parse('custom'))).toBeUndefined();
+  expect(f.kernel.config.collection(PROFILE_ITEMS as never).has('fourth-plain')).toBe(false);
+  expect((await f.apply(staged.json<{ id: string }>().id)).status).toBe(200);
+  expect(f.kernel.config.collection(PROFILE_ITEMS as never).get('fourth-plain')).toEqual({ contents: [] });
+  expect(await f.start()).toEqual({ allow: true });
+  expect(f.spawns).toEqual([]);
+});
+
+test('plain-profile creation never overwrites a profile, including one created after review', async () => {
+  const f = await fixture({ configured: false });
+  const change = {
+    kind: 'runtime.put',
+    name: 'custom',
+    credential: 'key',
+    profile: 'plain',
+    harness: 'fourth',
+    create: true,
+    createPlainProfile: true,
+  };
+  expect((await f.proposal(change)).status).toBe(409);
+  expect((await f.proposal({ ...change, harness: 'claude-code' })).status).toBe(409);
+  const raced = await fixture({ configured: false });
+  const staged = await raced.proposal({ ...change, profile: 'fresh' });
+  expect(staged.status).toBe(200);
+  raced.host.setConfig('profiles', { fresh: { contents: ['modelSets/pinned'] } });
+  expect((await raced.apply(staged.json<{ id: string }>().id)).status).toBe(409);
+  expect(await raced.api.get(RuntimeIdSchema.parse('custom'))).toBeUndefined();
+  expect(raced.kernel.config.collection(PROFILE_ITEMS as never).get('fresh')).toEqual({
+    contents: ['modelSets/pinned'],
+  });
+});
+
 test('unavailable registry, login, installation and malformed discovery are typed refusals', async () => {
   const f = await fixture();
   f.enabled(false);
@@ -558,17 +609,30 @@ test('the generic port resolves the configured default and its catalog without l
     resolve: async () => ({ ok: true, harness: 'fourth', login: 'key' }),
     login: async () => ({ ok: true }),
   });
+  expect(await source.resolve('custom')).toEqual({
+    ok: true,
+    harness: 'fourth',
+    login: 'key',
+    model: 'provider/model',
+  });
   expect(await source.catalog?.('custom')).toMatchObject({
     harness: 'fourth',
     choices: [{ value: 'provider/model', context: 123_456, reasoningEfforts: [{ value: 'native' }], isDefault: true }],
   });
   expect(await source.catalog?.('missing')).toBeUndefined();
   f.models({ choices: [{ id: 'provider/model', label: 'Model' }] });
+  expect(await source.resolve('custom')).toEqual({ ok: true, harness: 'fourth', login: 'key' });
   expect(await source.catalog?.('custom')).toEqual({
     harness: 'fourth',
     source: 'wrapper-inventory',
     choices: [{ value: 'provider/model', label: 'Model', reasoningEfforts: [] }],
   });
+  f.modelFailure(true);
+  expect(await source.resolve('custom')).toEqual({
+    ok: false,
+    sentence: 'Fourth could not report its installation and models',
+  });
+  f.modelFailure(false);
   f.installed(false);
   expect((await f.api.resolve(RuntimeIdSchema.parse('custom'))).ok).toBe(false);
 });

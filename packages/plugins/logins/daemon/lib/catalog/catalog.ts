@@ -36,6 +36,7 @@ import vercelAiGateway from '../../data/models/vercel-ai-gateway.yaml' with { ty
 import xai from '../../data/models/xai.yaml' with { type: 'text' };
 import zai from '../../data/models/zai.yaml' with { type: 'text' };
 import type { LocalModels } from '../../../contract/index.ts';
+import type { ModelDiscovery } from '../../../contract/index.ts';
 import type { Credential } from '../shared/credential.ts';
 import { readConfigText } from '@ferretry/std/yaml';
 import { type HarnessKind, supportedKinds } from '../shared/harness.ts';
@@ -166,6 +167,7 @@ export function loginModelCatalogId(
 
 /** What a machine knows about catalogs when it decides a runtime's models. */
 export interface ModelCatalogSources {
+  readonly discovery?: ModelDiscovery;
   readonly catalogs: Readonly<Record<string, ModelCatalog>>;
   readonly presets: readonly ProviderPreset[];
   /** What the last read of each local server found, by the `detect` kind a catalog names. */

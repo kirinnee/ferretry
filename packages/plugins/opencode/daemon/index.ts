@@ -2,13 +2,16 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { OPENCODE_CONFIG, HarnessConfigSchema } from '../contract/index.ts';
 import { opencodeHarness } from './harness.ts';
+import { opencodeModels } from './lib/models.ts';
 
 export default implementDaemon(manifest, {
   build(ctx) {
     const config = () => HarnessConfigSchema.parse(ctx.kernel.config.file(OPENCODE_CONFIG) ?? {});
     return {
       hooks: {
-        'harnesses:opencode': opencodeHarness(ctx.kernel, config),
+        'harnesses:opencode': opencodeHarness(ctx.kernel, config, login =>
+          opencodeModels(ctx.uses.logins.current(), login, ctx.kernel.clock.nowMs()),
+        ),
         'start.decide': async input => {
           if (input.harness !== 'opencode') return { allow: true };
           const logins = ctx.uses.logins.current();

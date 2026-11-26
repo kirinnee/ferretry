@@ -4,6 +4,7 @@
   "version": "5.0.0",
   "description": "Bun workspaces monorepo — this name field is the product name; the CLI package's bin key is the binary name",
   "type": "module",
+  "repository": "github:kirinnee/ferretry",
   "workspaces": [
     "packages/*",
     "packages/core/*",

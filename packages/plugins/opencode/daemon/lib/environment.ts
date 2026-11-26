@@ -1,3 +1,15 @@
+/** Paths relative to one ferret's private home; the descriptor and every native process share these names. */
+export const OPENCODE_HOME_ENV = {
+  HOME: 'home',
+  XDG_CONFIG_HOME: 'config',
+  XDG_DATA_HOME: 'data',
+  XDG_STATE_HOME: 'state',
+  XDG_CACHE_HOME: 'cache',
+  OPENCODE_DB: 'data/opencode.db',
+  OPENCODE_CONFIG: 'opencode.json',
+  TMPDIR: 'tmp',
+};
+
 /** Every OpenCode process gets the same private storage, including its otherwise shared /tmp/opencode. */
 export function isolatedEnvironment(home: string): Readonly<Record<string, string>> {
   if (
@@ -5,16 +17,7 @@ export function isolatedEnvironment(home: string): Readonly<Record<string, strin
     home.split('/').some(part => part === '.' || part === '..')
   )
     throw new Error('OpenCode needs a canonical absolute private home');
-  return {
-    HOME: `${home}/home`,
-    XDG_CONFIG_HOME: `${home}/config`,
-    XDG_DATA_HOME: `${home}/data`,
-    XDG_STATE_HOME: `${home}/state`,
-    XDG_CACHE_HOME: `${home}/cache`,
-    OPENCODE_DB: `${home}/data/opencode.db`,
-    OPENCODE_CONFIG: `${home}/opencode.json`,
-    TMPDIR: `${home}/tmp`,
-  };
+  return Object.fromEntries(Object.entries(OPENCODE_HOME_ENV).map(([name, relative]) => [name, `${home}/${relative}`]));
 }
 
 /** These inherited selectors must never attach to a shared server or carry an Anthropic subscription. */

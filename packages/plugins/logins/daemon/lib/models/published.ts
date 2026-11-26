@@ -27,6 +27,7 @@ import {
   readPublishedModelCatalog,
 } from '../catalog/published.ts';
 import type { ModelCatalogRefreshResult } from '../../../contract/index.ts';
+import { ModelDiscoverySchema, type ModelDiscovery } from '../../../contract/index.ts';
 
 /** The signed release list and its signature, at the hosted app's root (docs/pwa-release-signing.md). */
 const RELEASE_LIST_FILE = 'release-manifest.json';
@@ -193,6 +194,13 @@ export class PublishedModelCatalogService {
   async catalogs(): Promise<Readonly<Record<string, ModelCatalog>> | undefined> {
     const held = await this.#read();
     return held.document === undefined ? undefined : readPublishedModelCatalog(held.document)?.catalogs;
+  }
+
+  /** Discovery is projected only from the same verified document as the curated catalog. */
+  async discovery(): Promise<ModelDiscovery | undefined> {
+    const held = await this.#read();
+    const suggestions = held.document === undefined ? undefined : readPublishedModelCatalog(held.document)?.suggestions;
+    return suggestions === undefined ? undefined : ModelDiscoverySchema.parse(suggestions);
   }
 
   /** The version held and when it was last fetched and checked. */

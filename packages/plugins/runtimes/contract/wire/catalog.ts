@@ -692,13 +692,12 @@ export const MAX_COMPONENT_CONTENT_BYTES = 256 * 1024;
 export const AccountChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('runtime.put'),
+    /** Native runtime only: create the named empty profile in the same reviewed, atomic write. */
+    createPlainProfile: z.literal(true).optional(),
     name: TypedNameSchema,
     credential: NonEmptyStringSchema,
     profile: ComponentNameSchema,
-    /**
-     * Which CLI it runs, for a login that drives both (docs/provider-presets.md). Absent: the one its
-     * profile is scoped to, else the login's own.
-     */
+    /** CLI for a multi-tool login; absent: the profile's scope, else the login's own (docs/provider-presets.md). */
     harness: HarnessKeySchema.optional(),
     create: z.boolean(),
     /** E15: the person saw "already uses this login and profile" and chose to add another anyway. */

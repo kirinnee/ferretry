@@ -27,7 +27,6 @@ import {
 } from '../lib/account-picker-catalog.ts';
 import { AccountPickerStore } from '../lib/account-picker-store.ts';
 import type { LiveRuntimesClient } from '../lib/client.ts';
-import { isSupportedHarnessKey } from '../../contract/harness-words.ts';
 import { useNow } from '../ui.ts';
 
 const noSubscribe = (): (() => void) => () => undefined;
@@ -51,6 +50,7 @@ export const chosenFerretAccount = (
     displayName: account.displayName,
     kind: account.kind,
     defaultModel: account.defaultModel,
+    ...(account.requiresModel === true ? { requiresModel: true as const } : {}),
     models: account.models.map(model => ({
       id: model.id,
       available: model.available,
@@ -105,7 +105,9 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
   const [chosen, setChosen] = useState<ChosenRuntime | null>(null);
   const live = useLiveModelList(
     client,
-    chosen?.account.modelCatalog === undefined ? undefined : chosen.account.credentialId,
+    chosen?.account.modelCatalog === undefined || chosen.account.modelCatalog.discovery === true
+      ? undefined
+      : chosen.account.credentialId,
   );
   const onChosen = useCallback((next: ChosenRuntime | null) => setChosen(next), []);
   // Told only when what the page would learn differs from what it was last told: a proposal that is merely a new object
@@ -141,12 +143,8 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
       usageError={error}
       value={slot.value}
       {...(preferred === undefined ? {} : { preferred })}
-      {...(move === null || !isSupportedHarnessKey(move.harness)
-        ? {}
-        : { harness: move.harness, offerHealthCheck: true })}
-      {...(move === null && slot.harness !== undefined && isSupportedHarnessKey(slot.harness)
-        ? { harness: slot.harness }
-        : {})}
+      {...(move === null ? {} : { harness: move.harness, offerHealthCheck: true })}
+      {...(move === null && slot.harness !== undefined ? { harness: slot.harness } : {})}
     />
   );
 }

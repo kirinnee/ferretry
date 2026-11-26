@@ -288,13 +288,16 @@ export function NewFerretPage({
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
   // Continue is a way in only while the list is offered (the switch is drawn); on it, nothing starts before a pick.
   const awaitingPick = continueOffered && starting === 'continue' && picked === null;
-  const canSubmit = canStartFerret(draft, submitting) && !awaitingPick;
+  const chosen = chosenForDraft(chosenRuntime, draft.runtime);
+  const needsModel = chosen?.requiresModel === true && draft.model.trim() === '';
+  const canSubmit = canStartFerret(draft, submitting) && !awaitingPick && !needsModel;
   const homePath = daemonHomeHref(daemon);
   const back = backPlace ?? { path: homePath, label: '← Home' };
-  const chosen = chosenForDraft(chosenRuntime, draft.runtime);
   const now = useNow();
   const models = modelSuggestions(chosen);
-  const blocker = createBlocker(draft, submitting, noRunnableAccount, awaitingPick, whereOffered);
+  const blocker = needsModel
+    ? 'Choose a model before creating this ferret.'
+    : createBlocker(draft, submitting, noRunnableAccount, awaitingPick, whereOffered);
   // A model the panel says has no fast mode cannot be launched with it, so the switch says why it is unavailable and
   // the request never carries it (the daemon would refuse it too).
   const fastReason = fastUnavailableReason(chosen, draft.model);
@@ -451,7 +454,11 @@ export function NewFerretPage({
           </FerretField>
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-            <FerretField hint="blank = runtime default" inputId={fieldId('model')} label="Model override">
+            <FerretField
+              hint={chosen?.requiresModel ? 'choose a model' : 'blank = runtime default'}
+              inputId={fieldId('model')}
+              label="Model override"
+            >
               {chosen?.modelCatalog === undefined ? (
                 <>
                   {models.length === 0 ? null : (
@@ -475,6 +482,7 @@ export function NewFerretPage({
                 <ModelSelect
                   customIds={chosen.modelCatalog.customIds}
                   defaultModel={chosen.defaultModel}
+                  defaultLabel={chosen.requiresModel ? 'Choose a model' : 'Login default'}
                   id={fieldId('model')}
                   models={chosen.models}
                   onChange={value => update('model', value)}

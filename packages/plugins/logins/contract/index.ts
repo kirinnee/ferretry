@@ -49,6 +49,7 @@ import {
 } from './wire.ts';
 
 export * from './wire.ts';
+export { ModelDiscoverySchema, type ModelDiscovery } from './model-discovery.ts';
 export * from './model-list.ts';
 export * from './slots.ts';
 export * from './env-import.ts';
