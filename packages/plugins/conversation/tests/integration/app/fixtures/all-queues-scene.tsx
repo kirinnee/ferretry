@@ -1,8 +1,9 @@
 /**
  * The browser entry for the All queues screen: the REAL `AllQueuesScreen` over a fake daemon (fixed fake data, no
- * network): three ferrets, two with messages waiting and one with an empty queue.
+ * network): three ferrets, two with messages waiting and one whose only message was already read.
  *
- *   ?theme=<family>-<mode>
+ *   ?theme=<palette>-<mode>
+ *   ?style=<style>        the look (default studio)
  *   ?refused=<ferretId>   the daemon refuses that ferret's queue (the others still read)
  */
 import { DaemonCallError } from '@ferretry/app';
@@ -11,7 +12,12 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import { AllQueues } from '../../../../app/queue/all-queues-screen.tsx';
 
 const params = new URLSearchParams(window.location.search);
-document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+const theme = params.get('theme') ?? 'studio-light';
+document.documentElement.dataset.theme = theme;
+// `?style=<style>` draws the page in another look (the roundest, for one); the palette and mode come from `theme`.
+document.documentElement.dataset.style = params.get('style') ?? 'studio';
+document.documentElement.dataset.palette = theme.split('-')[0] ?? 'studio';
+document.documentElement.dataset.mode = theme.endsWith('dark') ? 'dark' : 'light';
 
 const refused = params.get('refused') ?? undefined;
 
@@ -54,7 +60,12 @@ const queues: Record<string, readonly unknown[]> = {
     }),
   ],
   mira: [message('m1', 'The staging deploy is green — go ahead and tag the release.', minutesAgo(25))],
-  idle: [],
+  // Finished, so the page does not list it; the search still finds it.
+  idle: [
+    message('i1', 'The rollback notes were typed in and the ferret has read them.', minutesAgo(90), {
+      state: 'read',
+    }),
+  ],
 };
 
 const client = {

@@ -118,9 +118,10 @@ describe('the command bar at v4 parity', () => {
       try {
         await tab.waitForSelector(`${BAR} [role="option"]:has-text("Fixture running")`);
         const labels = await options(tab);
-        expect(labels.slice(0, 11)).toEqual([
+        expect(labels.slice(0, 12)).toEqual([
           'Ferrets',
           'Agenda',
+          'Queue',
           'Board',
           'Projects',
           'PRs & CI',
