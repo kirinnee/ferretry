@@ -47,7 +47,7 @@ export type KnownHarnessKey = (typeof KNOWN_HARNESS_KEYS)[number];
  * The plugins allowed to provide a harness under `harnesses` (the hook's `takers`, a security-path allowlist): the ids of
  * the harness plugins this build ships. A third harness plugin is added HERE, beside the keys it declares, and nowhere else.
  */
-export const HARNESS_PLUGIN_IDS: readonly string[] = [...KNOWN_HARNESS_KEYS];
+export const HARNESS_PLUGIN_IDS: readonly string[] = [...KNOWN_HARNESS_KEYS, 'opencode'];
 
 /**
  * The closed spelling of those two keys, for a consumer that has not been opened yet (runtimes plan U4b opens each plugin

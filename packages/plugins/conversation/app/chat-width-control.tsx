@@ -21,6 +21,7 @@ import {
   useDeviceControls,
 } from '@ferretry/app';
 import { ChatWidthPreview } from './composer/previews/index.ts';
+import { MapStyleRow } from './render/fy-render-map-style-row.tsx';
 
 export interface ChatWidthOption {
   readonly id: ChatWidth;
@@ -147,6 +148,7 @@ export function ChatWidthPanel() {
           </div>
         )}
       />
+      <MapStyleRow />
     </SettingGroup>
   );
 }
