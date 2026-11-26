@@ -27,6 +27,7 @@ import {
   ASK_REFERENCE_SIGIL_CLASS,
   type AgendaItem,
   type AgendaMessagePart,
+  type AgendaResponse,
   parseAgendaMessage,
 } from '@ferretry/core-asks/contract';
 import { bulletPoints, describePrevious, FIELD_LABEL, itemAtVersion, POINT_FIELDS } from './agenda-revisions.ts';
@@ -443,4 +444,53 @@ export const withDeviceEvents = (
     .map((event, order) => ({ event, order }))
     .sort((a, b) => a.event.at - b.event.at || a.order - b.order)
     .map(({ event }) => event);
+};
+
+/** One ask the owner answered, as the item itself records it: the History's count and its rows. */
+export interface AnsweredAsk {
+  readonly key: string;
+  readonly at: number;
+  /** Which ask: "this item" for the item's own question, "task &F12" for a task ask. */
+  readonly of: string;
+  readonly response: AgendaResponse;
+  readonly note?: string;
+}
+
+const noteOf = (note: string | undefined): { readonly note?: string } =>
+  note === undefined || note.trim() === '' ? {} : { note: note.trim() };
+
+/**
+ * The asks the owner answered, oldest first, read from the asks' OWN answered state: the item's stored answer
+ * (`ownerAnswer`) and every task ask that holds one (`cardAsks[].answer`). Never from the conversation: a message the
+ * owner sent that the machine has not taken (still on this device, or refused) answered nothing, and a stored answer
+ * with no transcript row is still an answer.
+ */
+export const answeredAsks = (item: AgendaItem): readonly AnsweredAsk[] => {
+  const own = item.ownerAnswer;
+  return [
+    ...(own === undefined
+      ? []
+      : [
+          {
+            key: `own:${own.at}`,
+            at: Date.parse(own.at) || 0,
+            of: 'this item',
+            response: own.response,
+            ...noteOf(own.note),
+          },
+        ]),
+    ...(item.cardAsks ?? []).flatMap(ask =>
+      ask.answer === undefined
+        ? []
+        : [
+            {
+              key: `ask:${ask.gate.cardId}:${ask.gate.laneId}:${String(ask.gate.entry)}`,
+              at: Date.parse(ask.answer.at) || 0,
+              of: `task &${ask.gate.cardId}`,
+              response: ask.answer.response,
+              ...noteOf(ask.answer.note),
+            },
+          ],
+    ),
+  ].toSorted((a, b) => a.at - b.at);
 };

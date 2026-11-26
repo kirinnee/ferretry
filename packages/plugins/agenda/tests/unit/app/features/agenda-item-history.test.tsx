@@ -2,12 +2,14 @@ import { type LedgerSendRecord } from '../../../../app/lib/transcript.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AgendaItemHistory } from '../../../../app/features/agenda/agenda-item-history.tsx';
 import {
+  answeredAsks,
   type DeviceWords,
   deviceEvents,
   type HistoryEvent,
   withDeviceEvents,
 } from '../../../../app/lib/agenda-history.ts';
 import { clockOfInstant } from '../../../../app/shell.ts';
+import { agendaItem } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 
 let view: Mounted | null = null;
@@ -17,6 +19,23 @@ afterEach(async () => {
 });
 
 const AT = Date.parse('2026-08-01T10:02:00.000Z');
+
+const taskGate = {
+  cardId: 'F12',
+  laneId: 'tested',
+  laneName: 'Try it',
+  entry: 3,
+  projectId: 'p1',
+  options: [
+    { id: 'o0', label: 'Done', outcome: 'close' },
+    { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+  ],
+} as const;
+const taskAnswer = (choice: string, at: string) => ({
+  at,
+  response: { kind: 'multiple-choice', choice },
+  receipt: 'a'.repeat(64),
+});
 
 const draw = async (events: readonly HistoryEvent[]): Promise<HTMLElement> => {
   view = await mount(
@@ -55,10 +74,81 @@ describe('the Conversation of an open agenda item', () => {
     const root = view.container;
     const toggle = must(root.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]'), 'fold toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.textContent).toBe('Conversation2 messages');
+    expect(toggle.textContent).toBe('History2 messages');
     expect(root.querySelector('[data-agenda-history]')).toBeNull();
     await interact(() => toggle.click());
     expect(root.querySelectorAll('[data-agenda-history] [data-history]')).toHaveLength(3);
+  });
+
+  test('A-29: the History counts the asks the owner answered, from the asks themselves', async () => {
+    const item = agendaItem('A5', {
+      ownerAnswer: {
+        at: '2026-08-01T10:00:00.000Z',
+        response: { kind: 'multiple-choice', choice: 'Blue' },
+        request: 1,
+      },
+      cardAsks: [
+        { gate: taskGate, at: '2026-08-01T09:00:00.000Z', answer: taskAnswer('Done', '2026-08-01T10:30:00.000Z') },
+        { gate: { ...taskGate, cardId: 'F13', entry: 4 }, at: '2026-08-01T09:05:00.000Z' },
+      ],
+    } as never);
+    expect(answeredAsks(item).map(ask => [ask.of, ask.response])).toEqual([
+      ['this item', { kind: 'multiple-choice', choice: 'Blue' }],
+      ['task &F12', { kind: 'multiple-choice', choice: 'Done' }],
+    ]);
+    view = await mount(
+      <AgendaItemHistory
+        answered={answeredAsks(item)}
+        events={[{ kind: 'ferret', key: 'f', at: AT, text: 'Blue or green?' }]}
+        ferret="Lizzette"
+        itemKey="history-test:answered"
+        renderProse={text => <p>{text}</p>}
+      />,
+    );
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]'), 'fold');
+    expect(toggle.textContent).toBe('History2 answered · 1 message');
+    await interact(() => toggle.click());
+    expect(view.container.querySelectorAll('[data-agenda-answered-ask]')).toHaveLength(2);
+  });
+
+  test('A-29: a stored task answer with no transcript still has its History fold', async () => {
+    const item = agendaItem('A5', {
+      cardAsks: [
+        { gate: taskGate, at: '2026-08-01T09:00:00.000Z', answer: taskAnswer('Done', '2026-08-01T10:30:00.000Z') },
+      ],
+    } as never);
+    view = await mount(
+      <AgendaItemHistory
+        answered={answeredAsks(item)}
+        events={[]}
+        ferret="Lizzette"
+        itemKey="history-test:stored"
+        renderProse={text => <p>{text}</p>}
+      />,
+    );
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]'), 'fold');
+    expect(toggle.textContent).toBe('History1 answered');
+    await interact(() => toggle.click());
+    const row = must(view.container.querySelector<HTMLElement>('[data-agenda-answered-ask]'), 'the answered ask');
+    expect(row.textContent).toContain('task &F12');
+    expect(row.textContent).toContain('Chose “Done”');
+  });
+
+  test('A-29: an owner answer the device never sent (refused) is not an answered ask', async () => {
+    const refused = deviceEvents('A5', [
+      { id: 's1', message: '!A5 Blue', references: ['!A5'], createdAt: '2026-08-01T10:00:00.000Z', refused: true },
+    ]);
+    view = await mount(
+      <AgendaItemHistory
+        answered={answeredAsks(agendaItem('A5'))}
+        events={refused}
+        ferret="Lizzette"
+        itemKey="history-test:refused"
+        renderProse={text => <p>{text}</p>}
+      />,
+    );
+    const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-fold="conversation"]'), 'fold');
+    expect(toggle.textContent).not.toContain('answered');
   });
 
   test('is drawn with the chat’s own rows, oldest first: the ferret’s name above its words, the owner as a bubble', async () => {
@@ -73,7 +163,7 @@ describe('the Conversation of an open agenda item', () => {
     expect(rows.map(row => row.getAttribute('data-history'))).toEqual(['ferret', 'owner', 'ferret']);
     expect(
       must(root.querySelector('[data-agenda-part="conversation"] h4 .fy-card__label'), 'heading').textContent,
-    ).toBe('Conversation');
+    ).toBe('History');
     // The chat's agent row: the name small above, the time at the foot — the chat's clock, not an age.
     const ferretRow = must(rows[0]?.querySelector('article.fy-message-assistant'), 'the chat’s agent row');
     expect(ferretRow.getAttribute('data-transcript-kind')).toBe('assistant');

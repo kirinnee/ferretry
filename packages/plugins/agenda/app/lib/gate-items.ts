@@ -75,13 +75,14 @@ export const gateWhySubject = (item: AgendaItem, action: InboxAction): string =>
 /**
  * The gate attached to a thread, drawn as the gate item it would be: the same options in the same directions, so the
  * thread's second answer row reads and swipes exactly like the task's own gate item. `undefined` for any other item.
+ * `gate` names which of the item's open asks to draw (the first open one when omitted).
  *
  * The thread's OWN answer shape is left behind (&B156): its questions, steps, form fields, option details and
  * recommendation are the thread's ask, not the task's. Carried over, a thread with several questions made the task
  * ask read as "several questions — answer in words", and its OK to build button was never drawn.
  */
-export const attachedGateView = (item: AgendaItem): GateItem | undefined => {
-  const gateAttached = firstOpenGate(item);
+export const attachedGateView = (item: AgendaItem, gate?: AgendaGate): GateItem | undefined => {
+  const gateAttached = gate ?? firstOpenGate(item);
   const {
     waitingOn: _waitingOn,
     questions: _questions,

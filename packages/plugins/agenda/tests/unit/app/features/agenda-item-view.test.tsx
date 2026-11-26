@@ -215,7 +215,7 @@ describe('the v6 layout: title, ONE card — one column', () => {
       'fy-card',
       'fy-item-view__dock',
     ]);
-    expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toBe('Conversation1 message');
+    expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toBe('History1 message');
     await interact(() => one<HTMLButtonElement>('[data-agenda-fold="conversation"]').click());
     expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toContain('Re ^A47: noted.');
     // The answer row is in the sticky dock at the foot of the column, not a strip of its own above the composer.

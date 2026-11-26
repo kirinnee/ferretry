@@ -2,6 +2,7 @@ import { milliseconds } from '@ferretry/std';
 import type { Clock, Log, SpawnPort, StatePort } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
 import type { AskToStopJobsResult, ConversionPreview } from '../../contract/move.ts';
+import { byRecordedHarness, UnsupportedHarnessFamilyError } from '../../contract/records.ts';
 import type { JobKeeperSource } from '../../contract/job-keeping.ts';
 import type { JobsMovePorts } from '../lib/moves/jobs-move.ts';
 import { KernelProcessProbe, type ProcessHostFacts } from '../adapters/moves/process-inventory.ts';
@@ -165,8 +166,11 @@ const CONVERSION_NOT_BUILT = 'converting a conversation onto another harness is 
  */
 function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsystem & AgentJobControl {
   /** The preflight's look at a session, shared by the move and by the ask that clears its way. */
-  const inspect = async (id: SessionId, { config, state }: MoveSubject, requesterPid?: number) =>
-    await parts.preflight.inspect(
+  const inspect = async (id: SessionId, { config, state }: MoveSubject, requesterPid?: number) => {
+    // A harness with no family is refused by name BEFORE anything is read or touched, as a preflight refusal: the route
+    // answers it as a stated 409 and the replay slot stays free, never a 500 that a destroyed pane would have earned.
+    const harness = transcriptHarnessOf(id, config.harness);
+    return await parts.preflight.inspect(
       {
         sessionId: id,
         harness: config.harness,
@@ -183,9 +187,13 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
       // with none reads as an empty tail, which classifies every open tool `unknown` and refuses
       // the move — the same fail-closed answer this call gave before, now reached only when
       // the evidence is genuinely absent rather than always.
-      await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
+      await parts.transcripts.tail({
+        sessionId: id,
+        harness,
+      }),
       requesterPid === undefined ? {} : { requesterPid },
     );
+  };
 
   /** Both documents, or a stated refusal. A session whose pair does not parse
    *  is one nothing may restamp: the write would merge new fields over a document already broken. */
@@ -409,6 +417,28 @@ function blockersOf(described: {
   return described.items
     .filter(item => item.blocks)
     .map(item => ({ title: item.title, ...(item.detail === undefined ? {} : { detail: item.detail }) }));
+}
+
+/**
+ * The transcript family a session's harness is read as, or a stated preflight refusal naming the harness.
+ *
+ * A harness with no family (a third harness stamped in a session document) is never read as Claude's transcript. The
+ * refusal is a `harness_mismatch` `SessionMoveError` — a 409 decided before anything is touched — so the replay guard
+ * frees the slot and a fresh request id is evaluated, instead of the unplaceable error a destroyed pane would be.
+ */
+type TranscriptHarness = Parameters<MoveTranscriptTail['tail']>[0]['harness'];
+
+function transcriptHarnessOf(id: SessionId, harness: string): TranscriptHarness {
+  try {
+    return byRecordedHarness(harness, { claude: () => 'claude' as const, codex: () => 'codex' as const });
+  } catch (error) {
+    if (error instanceof UnsupportedHarnessFamilyError)
+      throw new SessionMoveError(
+        'harness_mismatch',
+        `session ${id} runs the ${harness} harness, which a move cannot read yet; nothing was changed. ${error.message}`,
+      );
+    throw error;
+  }
 }
 
 /**

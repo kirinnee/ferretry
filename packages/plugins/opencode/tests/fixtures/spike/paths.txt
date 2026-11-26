@@ -1,0 +1,10 @@
+home       /fixture/opencode/a/home
+data       /fixture/opencode/a/data/opencode
+cache      /fixture/opencode/a/cache/opencode
+config     /fixture/opencode/a/config/opencode
+state      /fixture/opencode/a/state/opencode
+tmp        /fixture/opencode/a/tmp/opencode
+bin        /fixture/opencode/a/cache/opencode/bin
+log        /fixture/opencode/a/data/opencode/log
+repos      /fixture/opencode/a/data/opencode/repos
+db         /fixture/opencode/a/data/private.db

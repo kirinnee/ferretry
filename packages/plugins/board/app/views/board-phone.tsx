@@ -18,8 +18,9 @@ import {
   swipeStep,
   UNPLACED_LANE,
 } from '../lib/board-phone.ts';
-import type { BoardGroupOf } from '../lib/board-view.ts';
+import { type BoardGroupOf, groupTaskCount } from '../lib/board-view.ts';
 import { type BoardTaskEnv, PlacedTask } from './board-views.tsx';
+import { BoardProject, type BoardProjectFocus } from './board-project-head.tsx';
 
 export interface PhoneKanbanProps {
   readonly model: BoardModel;
@@ -29,6 +30,7 @@ export interface PhoneKanbanProps {
   /** The lane the URL names, or `null` for the first lane with a task. */
   readonly at: string | null;
   readonly onLane: (laneId: string) => void;
+  readonly focus?: BoardProjectFocus | undefined;
 }
 
 interface Touch {
@@ -170,19 +172,21 @@ function PhoneBoard({
   );
 }
 
-/** One strip per project (and machine); with a single project the heading is left out. */
-export function PhoneKanban({ model, env, projectName, hideClosed, at, onLane }: PhoneKanbanProps) {
-  const headed = model.groups.length > 1;
+/** One headed strip per project (and machine). */
+export function PhoneKanban({ model, env, projectName, hideClosed, at, onLane, focus }: PhoneKanbanProps) {
+  const several = model.groups.length > 1;
   return (
     <div className="fy-board-rows">
       {model.groups.map(group => (
-        <section aria-label={headed ? projectName(group) : 'Board'} className="fy-board-project" key={group.key}>
-          {headed ? (
-            <h2 className="fy-board-project__head">
-              {projectName(group)}
-              {model.multiMachine ? <span className="fy-board-project__machine">{group.machine}</span> : null}
-            </h2>
-          ) : null}
+        <BoardProject
+          count={groupTaskCount(group, hideClosed)}
+          focus={focus}
+          key={group.key}
+          machine={model.multiMachine ? group.machine : null}
+          name={projectName(group)}
+          projectId={group.projectId}
+          several={several}
+        >
           <PhoneBoard
             at={at}
             env={env}
@@ -191,7 +195,7 @@ export function PhoneKanban({ model, env, projectName, hideClosed, at, onLane }:
             onLane={onLane}
             title={projectName(group)}
           />
-        </section>
+        </BoardProject>
       ))}
     </div>
   );

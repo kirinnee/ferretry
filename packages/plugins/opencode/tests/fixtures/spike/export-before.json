@@ -1,0 +1,85 @@
+{
+  "info": {
+    "id": "ses_spike_001",
+    "projectID": "project_spike_001",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "cost": 0.0009854999999999998,
+    "tokens": {
+      "input": 6534,
+      "output": 9,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1795666788045,
+      "updated": 1795666789603,
+      "busy": 1795666788340,
+      "idle": 1795666789609
+    },
+    "title": "Ferretry isolation spike",
+    "location": {
+      "directory": "/fixture/opencode/a/project"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_spike_002",
+      "time": {
+        "created": 1795666788359
+      },
+      "text": "Reply exactly: FERRETRY_SPIKE_OK. Do not use tools.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_spike_001",
+      "time": {
+        "created": 1795666788378,
+        "firstToken": 1795666789588,
+        "streamed": 1795666789600,
+        "completed": 1795666789603
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "deepseek-flash",
+        "providerID": "deepseek",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "FERRETRY_SPIKE_OK"
+        }
+      ],
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0.0009854999999999998,
+      "tokens": {
+        "input": 6534,
+        "output": 9,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_spike_003",
+      "time": {
+        "created": 1795666789609
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

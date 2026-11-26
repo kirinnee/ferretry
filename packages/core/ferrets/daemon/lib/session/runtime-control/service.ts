@@ -31,6 +31,7 @@ import type {
   SessionView,
 } from '../../protocol/session.ts';
 import type { RuntimeSwitchAccount } from '../../../../contract/kinds/runtime-switch.ts';
+import { byRecordedHarness } from '../../../../contract/records.ts';
 import { runtimeRequestFingerprint } from './ledger.ts';
 import {
   documentRefusal,
@@ -68,6 +69,9 @@ import {
 export const HARNESS_PICKER_COMMAND = '/model';
 /** The harness-native context command. It is not a message and never advances the turn. */
 export const HARNESS_COMPACT_COMMAND = '/compact';
+
+/** Whether the session runs Codex. A harness with no case is refused by name, never read as the other one. */
+const runsCodex = (harness: string): boolean => byRecordedHarness(harness, { claude: () => false, codex: () => true });
 
 /**
  * Merge picker quarantine fields without weakening a verified failed-stop verdict.
@@ -184,7 +188,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
 
   async #catalogFor(id: SessionId): Promise<RuntimeModelCatalog> {
     const current = await this.#view(id);
-    if (current.config.harness !== 'codex') {
+    if (!runsCodex(current.config.harness)) {
       const account = await this.#accountFor(current.config.agent);
       const claude = this.ports.catalogs.claudeRuntimeCatalog(account);
       // AN EMPTY CLAUDE CATALOG IS A FAILURE, NOT AN ANSWER. `servableModels` empties for an account
@@ -293,7 +297,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
     }
 
     const wanted = switchRequest(current, request);
-    const account = current.config.harness === 'codex' ? undefined : await this.#accountFor(current.config.agent);
+    const account = runsCodex(current.config.harness) ? undefined : await this.#accountFor(current.config.agent);
     // A fast request reads the catalog as the picker shows it (labels included), on either harness.
     const fastCatalog = needsFastFacts(wanted) ? await this.#catalogFor(id) : undefined;
     const plan = this.ports.harness.planSwitch(wanted, {

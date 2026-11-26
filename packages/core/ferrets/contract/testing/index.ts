@@ -19,6 +19,7 @@ import {
   type FerretState,
   type FerretSummary,
   FerretSummarySchema,
+  HARNESS_PLUGIN_IDS,
   type HarnessKey,
   type LoginKindKey,
   type PackId,
@@ -982,7 +983,7 @@ export class FakeFerrets implements FerretsApi {
     return false;
   }
   harnesses(): readonly HarnessKey[] {
-    return ['claude-code', 'codex'];
+    return [...HARNESS_PLUGIN_IDS];
   }
   harnessFacts(key: HarnessKey): HarnessFacts | undefined {
     return this.harnesses().includes(key) ? FAKE_HARNESS_FACTS : undefined;

@@ -1,0 +1,205 @@
+{
+  "info": {
+    "id": "ses_spike_001",
+    "projectID": "project_spike_001",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "cost": 0.0012671819999999997,
+    "tokens": {
+      "input": 7253,
+      "output": 134,
+      "reasoning": 118,
+      "cache": {
+        "read": 9344,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1795666788045,
+      "updated": 1795666818486,
+      "busy": 1795666815421,
+      "idle": 1795666818491
+    },
+    "title": "Ferretry isolation spike",
+    "location": {
+      "directory": "/fixture/opencode/a/project"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_spike_002",
+      "time": {
+        "created": 1795666788359
+      },
+      "text": "Reply exactly: FERRETRY_SPIKE_OK. Do not use tools.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_spike_001",
+      "time": {
+        "created": 1795666788378,
+        "firstToken": 1795666789588,
+        "streamed": 1795666789600,
+        "completed": 1795666789603
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "deepseek-flash",
+        "providerID": "deepseek",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "text",
+          "text": "FERRETRY_SPIKE_OK"
+        }
+      ],
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0.0009854999999999998,
+      "tokens": {
+        "input": 6534,
+        "output": 9,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_spike_003",
+      "time": {
+        "created": 1795666789609
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
+      "id": "msg_spike_006",
+      "time": {
+        "created": 1795666815436
+      },
+      "text": "Use the shell tool once to run exactly: printf FERRETRY_TOOL_OK. Then reply with its output. Do not use other tools.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_spike_004",
+      "time": {
+        "created": 1795666815453,
+        "firstToken": 1795666816530,
+        "streamed": 1795666816606,
+        "completed": 1795666816700
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "deepseek-flash",
+        "providerID": "deepseek",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "tool",
+          "id": "call_spike_001",
+          "name": "shell",
+          "executed": false,
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "printf FERRETRY_TOOL_OK"
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "FERRETRY_TOOL_OK"
+              }
+            ],
+            "metadata": {
+              "status": "completed",
+              "truncated": false,
+              "exit": 0
+            }
+          },
+          "time": {
+            "created": 1795666816532,
+            "ran": 1795666816604,
+            "completed": 1795666816697
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0.00007215,
+      "tokens": {
+        "input": 177,
+        "output": 44,
+        "reasoning": 0,
+        "cache": {
+          "read": 6400,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_spike_005",
+      "time": {
+        "created": 1795666816716,
+        "firstToken": 1795666817322,
+        "streamed": 1795666818485,
+        "completed": 1795666818486
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "deepseek-flash",
+        "providerID": "deepseek",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "The system is telling me max steps reached. But actually the task is done: printf output was FERRETRY_TOOL_OK and I just need to reply with its output. The instruction says respond with text only, summarize. But the actual user request was to reply with its output. I should follow the harness system message while giving the answer. Be brief: state steps reached, summary, remaining tasks none, output.\n\nActually the system message demands a summary format. But it conflicts with user's simple request. Best: report the output, note max steps reached, no remaining tasks.",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1795666817323,
+            "completed": 1795666818481
+          }
+        },
+        {
+          "type": "text",
+          "text": "The maximum step limit for this agent has been reached.\n\n**Work completed:** I ran the shell command `printf FERRETRY_TOOL_OK` exactly once, with no other tools used.\n\n**Command output:** `FERRETRY_TOOL_OK`\n\n**Remaining tasks:** None.\n\n**Recommendation:** Nothing further is needed; the requested command was executed and its output is shown above."
+        }
+      ],
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0.00020953199999999999,
+      "tokens": {
+        "input": 542,
+        "output": 81,
+        "reasoning": 118,
+        "cache": {
+          "read": 2944,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_spike_007",
+      "time": {
+        "created": 1795666818491
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}
