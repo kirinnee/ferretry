@@ -1,0 +1,147 @@
+{
+  "info": {
+    "id": "ses_spike_002",
+    "projectID": "project_spike_001",
+    "model": {
+      "id": "deepseek-flash",
+      "providerID": "deepseek",
+      "variant": "default"
+    },
+    "cost": 0.00041149799999999994,
+    "tokens": {
+      "input": 1267,
+      "output": 143,
+      "reasoning": 180,
+      "cache": {
+        "read": 9216,
+        "write": 0
+      }
+    },
+    "outcome": "succeeded",
+    "time": {
+      "created": 1795666822850,
+      "updated": 1795666826146,
+      "busy": 1795666823143,
+      "idle": 1795666826151
+    },
+    "title": "Read denied.txt permission test",
+    "location": {
+      "directory": "/fixture/opencode/a/project"
+    }
+  },
+  "messages": [
+    {
+      "id": "msg_spike_010",
+      "time": {
+        "created": 1795666823159
+      },
+      "text": "Use the read tool once to read denied.txt. If permission is denied, stop immediately and reply DENIED. Never use other tools or retry.",
+      "files": [],
+      "type": "user"
+    },
+    {
+      "id": "msg_spike_008",
+      "time": {
+        "created": 1795666823179,
+        "firstToken": 1795666824050,
+        "streamed": 1795666824122,
+        "completed": 1795666824128
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "deepseek-flash",
+        "providerID": "deepseek",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "tool",
+          "id": "call_spike_002",
+          "name": "read",
+          "executed": false,
+          "state": {
+            "status": "error",
+            "input": {
+              "path": "denied.txt"
+            },
+            "error": {
+              "type": "permission.rejected",
+              "message": "Permission denied: read"
+            }
+          },
+          "time": {
+            "created": 1795666824053,
+            "ran": 1795666824120,
+            "completed": 1795666824126
+          }
+        }
+      ],
+      "finish": "tool-calls",
+      "rawFinish": "tool_calls",
+      "cost": 0.000083466,
+      "tokens": {
+        "input": 275,
+        "output": 39,
+        "reasoning": 0,
+        "cache": {
+          "read": 6272,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_spike_009",
+      "time": {
+        "created": 1795666824144,
+        "firstToken": 1795666824757,
+        "streamed": 1795666826145,
+        "completed": 1795666826146
+      },
+      "type": "assistant",
+      "agent": "build",
+      "model": {
+        "id": "deepseek-flash",
+        "providerID": "deepseek",
+        "variant": "default"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "The user's instruction said: read denied.txt once, if permission denied, stop immediately and reply DENIED. Never use other tools or retry. The tool call was denied. Now there's a system-injected instruction saying maximum steps reached and to summarize. But this conflicts with user instruction to reply DENIED. However the system instruction is a harness constraint overriding. But actually the \"CRITICAL - MAXIMUM STEPS REACHED\" appears as user message content? It's a user turn. Hmm, it's injected as user message. Regardless, my response should be brief. The task: reply DENIED. But now instructed to summarize instead. The safest: comply with latest instruction while noting the outcome. I should not call tools. I'll say maximum steps reached, the read was denied, nothing else was done, and the requested response was DENIED.\n\nKeep short.",
+          "native": {
+            "reasoningField": "reasoning_content"
+          },
+          "time": {
+            "created": 1795666824758,
+            "completed": 1795666826141
+          }
+        },
+        {
+          "type": "text",
+          "text": "Maximum steps for this agent have been reached.\n\nSummary: I attempted exactly one action, reading `denied.txt` with the read tool. The permission was rejected (`Permission denied: read`), so I stopped immediately without retrying or using any other tools.\n\nRemaining tasks: None, per the original instruction to stop on denial.\n\nResult: **DENIED**\n\nRecommendation: If file access is actually needed, grant read permission for `denied.txt` and re-run the request."
+        }
+      ],
+      "finish": "stop",
+      "rawFinish": "stop",
+      "cost": 0.00025453199999999997,
+      "tokens": {
+        "input": 522,
+        "output": 99,
+        "reasoning": 180,
+        "cache": {
+          "read": 2944,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_spike_011",
+      "time": {
+        "created": 1795666826151
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    }
+  ]
+}

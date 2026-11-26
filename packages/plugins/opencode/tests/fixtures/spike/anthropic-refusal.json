@@ -1,0 +1,21 @@
+{
+  "evidence": "Proposed U9 acceptance cases; not a captured OpenCode refusal or an implemented Ferretry guard",
+  "existingBoundary": "packages/plugins/logins/daemon/lib/kinds.ts HARNESSES.anthropic permits only harnessKey('claude')",
+  "guardOrder": [
+    "Resolve login kind",
+    "Refuse kind anthropic before asking for env or SharedCredential",
+    "Only then prepare home and spawn OpenCode"
+  ],
+  "cases": [
+    {
+      "login": { "id": "login_spike_subscription", "kind": "anthropic" },
+      "harness": "opencode",
+      "expected": { "allowed": false, "envCalls": 0, "credentialCalls": 0, "spawnCalls": 0 }
+    },
+    {
+      "login": { "id": "login_spike_key", "kind": "api-key", "provider": "anthropic" },
+      "harness": "opencode",
+      "expected": { "subscriptionRefusalApplies": false }
+    }
+  ]
+}
