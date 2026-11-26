@@ -348,9 +348,7 @@ function tagOf(domain: SessionTranscriptMessageTokenDomain, token: string): Uint
  */
 export function readSessionTranscriptMessageCursor(cursor: string): ConversationMessagePoint | undefined {
   const parts = cursor.split('.');
-  // A well-formed legacy cursor still names a point, but never verifies under v2. Reading it here
-  // routes an open page across an update through message_cursor_stale (reload), rather than a 400.
-  if (parts.length !== 3 || (parts[0] !== CURSOR_PREFIX && parts[0] !== 'c1')) return undefined;
+  if (parts.length !== 3 || parts[0] !== CURSOR_PREFIX) return undefined;
   const encodedPoint = parts[1] ?? '';
   if (!POINT_TEXT.test(encodedPoint) || !TAG_TEXT.test(parts[2] ?? '')) return undefined;
   const bytes = Buffer.from(encodedPoint, 'base64url');

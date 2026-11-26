@@ -3,12 +3,7 @@ import { type KeyValueStore, readRecord, removeRecord, writeRecord } from '../st
 import { type Layout, type LayoutOverrides, parseOverrides, setDeviceOverride } from './layout.ts';
 import { z } from 'zod';
 
-/**
- * The stamp a record carries once it was written under the v4-style default shell (ferret list on the left, a compact
- * nav along the top). A record WITHOUT it was saved before that default and is moved once, in the constructor: see
- * {@link DeviceLayoutStore}. This is the only place that knows the move exists; delete it with the stamp when no
- * browser can hold an unstamped record.
- */
+/** The stamp every stored record carries: the shape of `fy:app:layout` on a device that has saved a layout. */
 const SHELL_STAMP = 'v4';
 
 const StoredLayoutSchema = z.strictObject({ shell: z.literal(SHELL_STAMP), overrides: z.unknown() });
@@ -20,11 +15,6 @@ export const storedOverrides = (overrides: LayoutOverrides) => ({ shell: SHELL_S
  * THIS DEVICE'S LAYOUT CHANGES (`--device`, §5.3), kept in the app (`fy:app:layout`, §9.4) and never on a daemon. A
  * layout applies to the owner on every device by default; these keys sit on top of it here only, so a phone and a
  * laptop can differ. Shaped for `useSyncExternalStore`: `snapshot()` is identity-stable between commits.
- *
- * ONE-TIME MOVE. The default shell became v4's, but a browser that saved a layout before then kept drawing the old
- * one, though its owner never chose it. A record without the {@link SHELL_STAMP} is dropped once when the store is
- * made, so the device follows the (v4) default; every record written after carries the stamp, so what the owner
- * changes later is kept.
  */
 export class DeviceLayoutStore {
   readonly #storage: KeyValueStore | null;
@@ -33,8 +23,6 @@ export class DeviceLayoutStore {
 
   constructor(storage: KeyValueStore | null) {
     this.#storage = storage;
-    const saved = readRecord(storage, APP_STORAGE.layout, z.unknown());
-    if (saved !== undefined && !StoredLayoutSchema.safeParse(saved).success) removeRecord(storage, APP_STORAGE.layout);
   }
 
   snapshot = (): LayoutOverrides => {
