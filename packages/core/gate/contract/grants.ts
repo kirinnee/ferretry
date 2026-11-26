@@ -17,6 +17,8 @@ import {
  * `policy.ts`.
  */
 
+const OFF = Object.freeze({ use: false, configure: false });
+
 /**
  * How a CLIENT reads grants off the wire from a daemon on another version. A capability this build knows and the
  * answer omits (an older daemon) reads as OFF, a narrowing; a key this build does not know (a newer daemon) is
@@ -26,11 +28,24 @@ export const ReadCapabilityGrantsSchema = z.preprocess(raw => {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
   const given = raw as Record<string, unknown>;
   return Object.fromEntries(
-    CAPABILITY_NAMES.map(capability => [
-      capability,
-      capability in given ? given[capability] : { use: false, configure: false },
-    ]),
+    CAPABILITY_NAMES.map(capability => [capability, capability in given ? given[capability] : OFF]),
   );
+}, CapabilityGrantsSchema);
+
+/**
+ * How a STORED grant set is read (a device record in `devices.json`): a capability this build knows and the file
+ * was written without (the file predates it) reads as OFF, a narrowing, so a new capability can never make an
+ * older record unreadable. Unlike the wire reader, a key this build does not know is KEPT and so refused by the
+ * closed `CapabilityGrantsSchema`: a stored file written by a different build is damage, not something to guess at
+ * (fail closed). Every stored document that embeds a full grant set reads it through this schema.
+ */
+export const StoredCapabilityGrantsSchema = z.preprocess(raw => {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
+  const given = raw as Record<string, unknown>;
+  return {
+    ...Object.fromEntries(CAPABILITY_NAMES.filter(name => !(name in given)).map(name => [name, OFF])),
+    ...given,
+  };
 }, CapabilityGrantsSchema);
 
 /** One capability as the UI is told about it. */
