@@ -203,6 +203,20 @@ describe('fy daemon status: macOS reads launchd (a FAKE launchctl; this box neve
     expect(result.err).toContain('Liveness: dead');
   });
 
+  it('a SIGABRT crash loop (macOS 26.5 print shape): failed, the signal is said, never a bare stopped', async () => {
+    const launchctl = {
+      code: 0,
+      stdout: printed('spawn scheduled', '\truns = 14\n\tlast terminating signal = Aborted: 6\n'),
+    };
+    const result = await status({ platform: 'darwin', installed: true, launchctl });
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('  launchd: failed (launchd reports spawn scheduled; crashed (SIGABRT), restarting)');
+    expect(result.err).toContain(`loaded: yes; last signal: SIGABRT; plist: ${PLIST}`);
+    expect(result.err).toContain('Liveness: dead');
+    const { json } = await status({ platform: 'darwin', installed: true, launchctl }, '--json');
+    expect(json).toMatchObject({ supervisor: { manager: 'launchd', state: 'failed', lastSignal: 'SIGABRT' } });
+  });
+
   it('a plist on disk that launchd has not loaded: not loaded, stopped', async () => {
     const result = await status({
       platform: 'darwin',

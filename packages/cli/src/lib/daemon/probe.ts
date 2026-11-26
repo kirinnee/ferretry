@@ -64,7 +64,29 @@ export interface LaunchdJobProperties {
   readonly state?: string;
   readonly pid?: number;
   readonly lastExitStatus?: number;
+  /** The signal that last killed the job, named (`SIGABRT`); absent when it never died of one. */
+  readonly lastSignal?: string;
 }
+
+/** The signals a daemon realistically dies of, by number (the same on macOS and Linux for these). */
+const SIGNAL_NAMES: Readonly<Record<number, string>> = {
+  1: 'SIGHUP',
+  2: 'SIGINT',
+  3: 'SIGQUIT',
+  4: 'SIGILL',
+  5: 'SIGTRAP',
+  6: 'SIGABRT',
+  8: 'SIGFPE',
+  9: 'SIGKILL',
+  10: 'SIGBUS',
+  11: 'SIGSEGV',
+  12: 'SIGSYS',
+  13: 'SIGPIPE',
+  14: 'SIGALRM',
+  15: 'SIGTERM',
+};
+
+const signalName = (signal: number): string => SIGNAL_NAMES[signal] ?? `signal ${String(signal)}`;
 
 /** Parses the indented `key = value` block `launchctl print` emits. */
 export function parseLaunchdPrint(stdout: string): LaunchdJobProperties {
@@ -72,11 +94,16 @@ export function parseLaunchdPrint(stdout: string): LaunchdJobProperties {
     new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'mu').exec(stdout)?.[1];
   const pid = Number(field('pid'));
   const lastExitStatus = Number(/^-?\d+/u.exec(field('last exit (?:status|code)') ?? '')?.[0]);
+  // `launchctl print` says `last terminating signal = Aborted: 6`; the number after the colon is the signal.
+  const printed = Number(/:\s*(\d+)\s*$/u.exec(field('last terminating signal') ?? '')?.[1]);
+  // `launchctl list` documents a death by signal as a NEGATIVE status: -6 is SIGABRT.
+  const signal = printed > 0 ? printed : lastExitStatus < 0 ? -lastExitStatus : undefined;
   const state = field('state');
   return {
     ...(state === undefined ? {} : { state }),
     ...(Number.isSafeInteger(pid) && pid > 1 ? { pid } : {}),
-    ...(Number.isSafeInteger(lastExitStatus) ? { lastExitStatus } : {}),
+    ...(Number.isSafeInteger(lastExitStatus) && lastExitStatus >= 0 ? { lastExitStatus } : {}),
+    ...(signal === undefined || !Number.isSafeInteger(signal) ? {} : { lastSignal: signalName(signal) }),
   };
 }
 
@@ -99,6 +126,14 @@ export function readLaunchdReport(
       state: 'running',
       ...(properties.pid === undefined ? {} : { pid: properties.pid }),
       detail,
+    };
+  }
+  if (properties.lastSignal !== undefined) {
+    // A job launchd keeps killing is a crash loop: say the signal, and that launchd is bringing it back.
+    return {
+      manager: 'launchd',
+      state: 'failed',
+      detail: `${detail}; crashed (${properties.lastSignal}), restarting`,
     };
   }
   if (properties.lastExitStatus !== undefined && properties.lastExitStatus !== 0) {

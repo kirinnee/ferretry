@@ -407,6 +407,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
       ...readLaunchdReport(job, present),
       loaded: true,
       ...(job.lastExitStatus === undefined ? {} : { lastExit: job.lastExitStatus }),
+      ...(job.lastSignal === undefined ? {} : { lastSignal: job.lastSignal }),
       ...file,
       // Exit 0 with no `state` line is not a job listing: nothing in it can be believed.
       ...(job.state === undefined

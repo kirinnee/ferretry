@@ -137,6 +137,8 @@ export interface DaemonSupervisorReport {
   readonly loaded?: boolean | undefined;
   /** launchd only: the job's last exit status, when launchd names one. */
   readonly lastExit?: number | undefined;
+  /** launchd only: the signal that last killed the job (`SIGABRT`), when launchd names one. */
+  readonly lastSignal?: string | undefined;
   /** launchd only: the plist path, when the file is on disk. */
   readonly definition?: string | undefined;
   /** launchd only: why launchd could not be read (launchctl missing, refused, or unintelligible); the verdict above is then a guess. */

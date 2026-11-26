@@ -72,15 +72,16 @@ const reachabilityOf = (up: boolean, read: SupervisorRead): 'serving' | 'wedged'
 
 const supervisorKeys = (read: SupervisorRead): Readonly<Record<string, unknown>> => {
   if (read.kind === 'read') {
-    const { manager, state, pid, detail, loaded, lastExit, definition } = read.report;
+    const { manager, state, pid, detail, loaded, lastExit, lastSignal, definition } = read.report;
     return {
       manager,
       state,
       ...(pid === undefined ? {} : { pid }),
       ...(detail === undefined || detail === '' ? {} : { detail }),
-      // launchd's own facts, said once here and in the lines below: is the job loaded, how did it last exit, which plist.
+      // launchd's own facts, said once here and in the lines below: is the job loaded, how did it last exit or die, which plist.
       ...(loaded === undefined ? {} : { loaded }),
       ...(lastExit === undefined ? {} : { lastExit }),
+      ...(lastSignal === undefined ? {} : { lastSignal }),
       ...(definition === undefined ? {} : { definition }),
     };
   }
@@ -120,6 +121,7 @@ function launchdFacts(report: DaemonSupervisorReport): readonly string[] {
   const parts = [
     `loaded: ${report.loaded ? 'yes' : 'no'}`,
     ...(report.lastExit === undefined ? [] : [`last exit: ${String(report.lastExit)}`]),
+    ...(report.lastSignal === undefined ? [] : [`last signal: ${report.lastSignal}`]),
     `plist: ${report.definition ?? 'not installed'}`,
   ];
   return [`    ${parts.join('; ')}`];
