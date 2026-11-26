@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { MAX_ASK_DETAIL_LENGTH as MAX_AGENDA_DETAIL_LENGTH } from '@ferretry/core-asks/contract';
 import {
   type AccountId,
@@ -108,6 +108,15 @@ export class RecipeValueError extends Error {
   }
 }
 
+const STALE_PIN = 'this is not the proposal you were shown; reload it and read it again before approving';
+
+/** A proposal's pin: a SHA-256 over what an approval would write, so approving one means approving exactly that text. */
+function proposalPin(signIn: SignInId, proposal: LoginRecipeProposal): string {
+  return createHash('sha256')
+    .update(JSON.stringify([signIn, proposal.id, proposal.base ?? null, proposal.recipe]))
+    .digest('hex');
+}
+
 const HOLDS_VALUE = 'a recipe never holds a value, and this one contains a saved or secret value; take it out';
 
 export class LoginRecipeService {
@@ -179,11 +188,11 @@ export class LoginRecipeService {
   async scrubbedAccounts(listing: AccountListing): Promise<AccountListing> {
     return {
       accounts: listing.accounts,
-      signIns: await Promise.all(listing.signIns.map(async signIn => await this.scrubbedEntry(signIn))),
+      signIns: await Promise.all(listing.signIns.map(async signIn => await this.scrubbedEntry(signIn.id, signIn))),
     };
   }
 
-  private async scrubbedEntry<T extends RecipeBearing>(entry: T): Promise<T> {
+  private async scrubbedEntry<T extends RecipeBearing>(signIn: SignInId, entry: T): Promise<T> {
     if (entry.recipe === undefined && entry.proposals === undefined) return entry;
     const { recipe: _recipe, recipeBy: _by, recipeVersion: _version, proposals: _proposals, ...bare } = entry;
     try {
@@ -195,6 +204,8 @@ export class LoginRecipeService {
           : await Promise.all(
               entry.proposals.map(async proposal => ({
                 ...proposal,
+                // The pin is of the text ON FILE; the text served beside it is that text masked.
+                pin: proposalPin(signIn, proposal),
                 recipe: await redact(proposal.recipe),
                 why: await redact(proposal.why),
                 ...(proposal.base === undefined ? {} : { base: await redact(proposal.base) }),
@@ -221,17 +232,26 @@ export class LoginRecipeService {
    * The OWNER answers a proposal on one sign-in; its ask closes either way. An approval is checked for values again:
    * one the owner kept after the proposal was made must not become the recipe.
    */
-  async decideSignIn(id: SignInId, proposalId: string, decision: 'approve' | 'decline'): Promise<SignInSummary> {
+  async decideSignIn(
+    id: SignInId,
+    proposalId: string,
+    decision: 'approve' | 'decline',
+    pin?: string,
+  ): Promise<SignInSummary> {
     const accounts = this.ports.accounts;
     if (decision === 'approve') {
       const waiting = (await accounts.list()).signIns
         .find(each => each.id === id)
         ?.proposals?.find(proposal => proposal.id === proposalId);
-      if (waiting !== undefined) await this.assertNoValue(waiting.recipe);
+      if (waiting !== undefined) {
+        // What the owner approves is what they were shown: a pin they hold that the proposal on file no longer has is refused.
+        if (pin !== undefined && pin !== proposalPin(id, waiting)) throw this.ports.refuse('stale_proposal', STALE_PIN);
+        await this.assertNoValue(waiting.recipe);
+      }
     }
     const { signIn, proposal } = await accounts.decideSignIn(id, proposalId, decision);
     await this.closeCard(proposal, decision === 'approve' ? 'Approved: the recipe was updated.' : 'Declined.');
-    return await this.scrubbedEntry(signIn);
+    return await this.scrubbedEntry(id, signIn);
   }
 
   private async closeCard(proposal: LoginRecipeProposal, note: string): Promise<void> {

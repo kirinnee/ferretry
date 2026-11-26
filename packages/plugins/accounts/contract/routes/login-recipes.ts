@@ -212,6 +212,14 @@ export function foldObservation(
 /** A proposal's handle. */
 export const LoginRecipeProposalIdSchema = z.string().regex(/^rp_[0-9a-f]{16}$/u);
 
+/**
+ * A proposal's PIN: a SHA-256 the daemon computes over the sign-in, the proposal's id, the recipe it was made against and
+ * the recipe it proposes (`daemon/lib/secrets/login-recipes.ts`). It is served beside the proposal; an approval that names a
+ * pin the proposal on file no longer has is refused. It is a digest of text that never holds a value, owner-only like the
+ * proposal itself.
+ */
+const RecipePinSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
 const oneLine = (maximum: number) =>
   z
     .string()
@@ -239,6 +247,8 @@ export const LoginRecipeProposalSchema = z.strictObject({
   sessionId: z.string().min(1).max(128),
   agendaItemId: z.string().min(1).max(32).optional(),
   proposedAt: InstantSchema,
+  /** Served only, never stored: what an approval names, so the owner approves exactly the text they were shown. */
+  pin: RecipePinSchema.optional(),
 });
 export type LoginRecipeProposal = z.infer<typeof LoginRecipeProposalSchema>;
 
@@ -258,7 +268,11 @@ const LoginRecipeProposedSchema = z.strictObject({
 export type LoginRecipeProposed = z.infer<typeof LoginRecipeProposedSchema>;
 
 /** The owner's answer to a proposal (`POST /v1/secrets/logins/:id/recipe/proposals/:pid`). */
-export const LoginRecipeDecisionSchema = z.strictObject({ decision: z.enum(['approve', 'decline']) });
+export const LoginRecipeDecisionSchema = z.strictObject({
+  decision: z.enum(['approve', 'decline']),
+  /** The pin of the proposal the owner was shown: an approval naming another one is refused (`stale_proposal`). */
+  pin: RecipePinSchema.optional(),
+});
 
 /** One line of a recipe diff: kept, removed or added. */
 export interface RecipeDiffLine {

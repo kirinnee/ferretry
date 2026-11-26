@@ -107,10 +107,12 @@ export async function decideProposal(
   id: SignInId,
   proposalId: string,
   decision: 'approve' | 'decline',
+  /** The pin of the proposal the owner was shown (an approval from its ask card): the daemon refuses another. */
+  pin?: string,
 ): Promise<SignInSummary> {
   return await ask(client, 'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId', SignInSummarySchema, {
     params: { signIn: id, proposalId },
-    body: { decision },
+    body: pin === undefined ? { decision } : { decision, pin },
   });
 }
 
