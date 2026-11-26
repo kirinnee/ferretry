@@ -13,6 +13,10 @@ import {
   GitDeviceFlowSchema,
   type GitDeviceFlowStatus,
   GitDeviceFlowStatusSchema,
+  type GitKeyFormat,
+  GitGpgKeyResultSchema,
+  GitKeyResultSchema,
+  GitKeyRemovedSchema,
 } from '../../contract/index.ts';
 import type { GitAccountsClient } from '../shell.tsx';
 
@@ -28,8 +32,29 @@ export async function listAccounts(client: GitAccountsClient, pressed = false): 
   );
 }
 
-export async function startFlow(client: GitAccountsClient): Promise<GitDeviceFlow> {
-  return GitDeviceFlowSchema.parse(await client.call(START_ROUTE));
+export async function startFlow(
+  client: GitAccountsClient,
+  signingFormat: GitKeyFormat = 'ssh',
+): Promise<GitDeviceFlow> {
+  return GitDeviceFlowSchema.parse(await client.call(START_ROUTE, { body: { signingFormat } }));
+}
+
+export async function createSigningKey(
+  client: GitAccountsClient,
+  id: GitAccountId,
+  format: GitKeyFormat,
+): Promise<void> {
+  const answer = await client.call('POST /v1/git-accounts/:id/keys', {
+    params: { id },
+    body: { purpose: 'signing', format },
+  });
+  (format === 'gpg' ? GitGpgKeyResultSchema : GitKeyResultSchema).parse(answer);
+}
+
+export async function removeSigningKey(client: GitAccountsClient, id: GitAccountId): Promise<void> {
+  GitKeyRemovedSchema.parse(
+    await client.call('DELETE /v1/git-accounts/:id/keys/:purpose', { params: { id, purpose: 'signing' } }),
+  );
 }
 
 /** `pressed`: the person pressed to confirm with their passkey, so this poll may ask for the step-up; every other poll is a timer, so it is `quiet` and can never open a prompt. */

@@ -2195,6 +2195,55 @@ same OS user can connect to it (the folder is `0700` and the socket `0600`, so n
 **GAP — SAML single sign-on.** An organisation that enforces SSO needs the key authorised once on GitHub before a push
 to its repositories works; Ferretry cannot do that for the person.
 
+## A Git account's GPG signing key (G8: `git-accounts`)
+
+An account can sign its commits with **a GPG key instead of an SSH one** (an account signs with exactly one key; GitHub's
+"Verified" badge accepts either). `POST /v1/git-accounts/:id/keys` takes `{purpose: "signing", format: "gpg"}` (Ferretry makes
+an ed25519 key) or adds `keyBlock` (an armored OpenPGP secret key the person hands over, one key, no passphrase). The answer is
+`{format, publicKey, fingerprint, registered, source}`: the PUBLIC armored block, never the secret one. `DELETE
+…/keys/signing` stops local signing first and then removes its registration at GitHub (`DELETE /user/gpg_keys/<id>`).
+The Git accounts page offers **SSH or GPG** before consent, and offers creating or changing the connected account's signing
+key. SSH consent asks for no GPG permission. GPG consent adds `admin:gpg_key`, because GitHub requires that scope to delete
+a GPG key (a write-only token can only add one). The consent says this permits managing all GPG keys on the account;
+Ferretry only deletes its own registrations. An SSH-only connection must reconnect with GPG consent to create a GPG key.
+
+- **No key at rest outside the sealed vault.** The private packets are generated, imported and used by OpenPGP.js in daemon
+  memory. The only persistent private copy is ciphertext in `keys.json`, under `<account id>:gpg`, with the same vault
+  boundary as SSH. No unsealed private key is written anywhere, including during generation or import. No route, port,
+  log, audit row or environment variable carries it. A refused request never quotes the pasted key. The vault's existing
+  same-user limitation still applies: someone who can read both its ciphertext and its encryption key can decrypt it.
+- **An account socket and a public-only keyring.** A launch receives `gpg.format=openpgp`, `gpg.program` pointing to a tiny
+  signing shim, `user.signingkey` (the public fingerprint), `commit.gpgsign` and `tag.gpgsign`. The shim forwards Git's
+  payload over `<state>/git-accounts/downloads/gha_<id>.gpg.sock` to the in-memory signer and returns only its detached
+  signature and Git's status line. The socket lives in the same private `0700` parent as SSH's sockets. It exposes signing,
+  never export, and bounds request bytes, time and concurrency. A same-user caller who can open it can ask it to sign,
+  just as with SSH; it is not a per-process sandbox. `GNUPGHOME` names `gha_<id>.gpg-public`, which contains public keys only;
+  `git verify-commit` delegates to the real GnuPG with that keyring. GnuPG never imports a private key or starts a private
+  key agent. The person's keyring is not used.
+- **The key's user id is the account's noreply address** (`<id>+<login>@users.noreply.github.com`, which is also `user.email`):
+  that is how GitHub decides a commit is Verified. A key handed over that lacks the address gains it before it is registered.
+  A key that needs a passphrase, or cannot sign, is refused in words and nothing is registered or kept.
+- **`gpg` and `curl` are found like `ssh-add`**: real programs outside the state home, by absolute path; without them the
+  signer refuses to start. GnuPG sees public packets, curl sees signing payloads and signatures. A key already on the
+  account at GitHub is recorded without its GitHub id, so
+  removing it here never deletes what was not ours.
+- A recorded key that cannot be served at launch switches signing off for that ferret and says so, never falling back to the
+  machine's own signing key (the same rule as the SSH key).
+
+- **Revocation survives failure and restart.** The account records removal intent before deleting its sealed entry; startup
+  refuses to reload a key marked for removal. Remote failures retain the public registration id for retry, and public-file
+  cleanup failures are reported. Disconnect stops local capability before contacting GitHub and names remote keys the owner
+  must remove manually when remote cleanup fails. Connect, create, format selection, launch and disconnect share one account
+  lock; an SSH-only reconnect cannot replace the GPG grant while its key still needs revocation. An upload is preceded by a
+  non-signing registration intent: a final-record failure rolls back its known remote id, or retains that id for cleanup.
+  An upload with an unknown outcome is never deleted by fingerprint alone: the app asks the owner to check the key on
+  GitHub and establish ownership first. Disconnect lists those public fingerprints separately from confirmed keys that
+  need removal; an uncertain upload title is never an instruction to delete a key.
+  The narrowed `gh` seam refuses account-key endpoints and raw GraphQL mutations; ferrets cannot use the admin scope to
+  delete other account keys. A clean daemon stop closes the sockets, drops the memory keys and removes public signer files.
+
+The earlier GNUPGHOME design was never merged or installed; no migration needed.
+
 ## A ferret pushes and signs as the Git account its project is linked to (B4: `git-accounts`)
 
 A ferret whose work folder is inside a project linked to a Git account (Projects keeps the link) is started with that

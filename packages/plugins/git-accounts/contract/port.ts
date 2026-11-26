@@ -88,7 +88,11 @@ export const GITHUB_API_RULES = {
   GET: [REST],
   POST: [REST, /^\/graphql$/u],
   PATCH: [REST],
-  DELETE: [/^\/user\/keys\/[0-9]{1,20}$/u, /^\/user\/ssh_signing_keys\/[0-9]{1,20}$/u],
+  DELETE: [
+    /^\/user\/keys\/[0-9]{1,20}$/u,
+    /^\/user\/ssh_signing_keys\/[0-9]{1,20}$/u,
+    /^\/user\/gpg_keys\/[0-9]{1,20}$/u,
+  ],
 } as const satisfies Record<GitApiCall['method'], readonly RegExp[]>;
 
 /** A plain query string after the path: plain characters only, bounded. */

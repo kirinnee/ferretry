@@ -13,6 +13,7 @@ import {
   type GitAccountId,
   type GitAccountKeys,
 } from '../../contract/index.ts';
+import { AccountLocks } from './account-locks.ts';
 
 export interface AccountFacts {
   readonly id: GitAccountId;
@@ -28,6 +29,7 @@ export class AccountBook {
     private readonly state: StatePort,
     private readonly tokens: SealedDocumentHandle,
     private readonly now: () => string,
+    private readonly locks = new AccountLocks(),
   ) {}
 
   async list(): Promise<readonly GitAccount[]> {
@@ -41,7 +43,18 @@ export class AccountBook {
   }
 
   /** Adds an account, or, for one already connected, replaces its token and facts and keeps its keys and date. */
-  async upsert(facts: AccountFacts, token: string): Promise<GitAccount> {
+  upsert(facts: AccountFacts, token: string): Promise<GitAccount> {
+    return this.locks.run(facts.id, () => this.#upsertLocked(facts, token));
+  }
+
+  async #upsertLocked(facts: AccountFacts, token: string): Promise<GitAccount> {
+    const account = await this.find(facts.id);
+    if (account?.keys.signing?.format === 'gpg' && !facts.scopes.includes('admin:gpg_key'))
+      throw new ApiError(
+        409,
+        'this account has a GPG key; reconnect with GPG consent or remove its signing key first',
+        GIT_ACCOUNT_CODES.keyRefused,
+      );
     const name = facts.id as SealedName;
     const before = await this.tokens.get(name);
     await this.tokens.put(name, token);

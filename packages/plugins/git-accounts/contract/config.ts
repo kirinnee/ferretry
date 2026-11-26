@@ -8,7 +8,7 @@ import { z } from 'zod';
 export const GITHUB_DEVICE_CLIENT_ID = 'Ov23liHZjkFulWlicHXd';
 
 /**
- * What is asked at connect time (owner's answer, !A571): the profile, the emails, the two key scopes, `repo` and
+ * What is asked at connect time (owner's answer, !A571): the profile, the emails, the three key scopes, `repo` and
  * `read:org`. No `workflow`. One constant: changing what is asked is a one-line change here.
  */
 export const GITHUB_SCOPES = [
@@ -20,6 +20,10 @@ export const GITHUB_SCOPES = [
   'read:org',
 ] as const;
 
+/** Revocation needs admin:gpg_key; only an explicit GPG consent asks for it. */
+export const githubScopes = (signingFormat: 'ssh' | 'gpg'): readonly string[] =>
+  signingFormat === 'gpg' ? [...GITHUB_SCOPES, 'admin:gpg_key'] : GITHUB_SCOPES;
+
 /**
  * What the consent screen says about the scopes, in plain words. `repo` is the strong one and is said plainly: the
  * token can read AND write every repository the account can reach, private ones included. It stays in the sealed
@@ -27,7 +31,7 @@ export const GITHUB_SCOPES = [
  */
 export const GITHUB_CONSENT = [
   'Ferretry will be able to read and write EVERY repository this GitHub account can reach, private ones included (the "repo" permission).',
-  'It will also read your profile, your email addresses and your organizations, and add and remove the SSH keys Ferretry registers for you.',
+  'It will also read your profile, your email addresses and your organizations, and manage SSH keys. Choosing GPG also permits managing GPG keys (admin:gpg_key), including removal.',
   'It will not be able to change GitHub Actions workflow files, and it never sees your password.',
   'The access token is kept sealed on this machine. No page, command or ferret can read it: the daemon uses it for GitHub on your behalf, and a ferret can only ask the daemon to run narrowed GitHub commands as this account.',
   'To end the access completely, disconnect the account here and then revoke Ferretry at github.com/settings/applications.',
