@@ -7,12 +7,13 @@
  * Ferrets is core and cannot import a plugin's code (§2.1); this is the part the session code reads, injected by the
  * host.
  */
+import type { RecordedFamily } from '../../../../contract/records.ts';
 import type { SessionLaunchInstructions } from '../../protocol/session.ts';
 
 // --- packages/fleet/src/lib/manifest.ts -------------------------------------------------------------------------
 
 /** The agent harness an account drives. */
-export type HarnessKind = 'claude' | 'codex';
+export type HarnessKind = RecordedFamily;
 
 // --- packages/fleet/src/lib/defaults.ts -------------------------------------------------------------------------
 

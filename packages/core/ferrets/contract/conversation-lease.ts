@@ -13,6 +13,7 @@
  * store is written against that port and the daemon half binds its own.
  */
 import { z } from 'zod';
+import { byRecordedHarness, RecordedHarnessSchema } from './records.ts';
 
 /**
  * The exit status `fy history claim` answers when another session is writing the conversation: the ONE status a wrapper
@@ -27,7 +28,7 @@ import { z } from 'zod';
 export const HISTORY_CLAIM_HELD_EXIT_CODE = 75;
 
 /** The harnesses that keep a conversation history to lease. */
-export const HistoryHarnessSchema = z.enum(['claude', 'codex']);
+export const HistoryHarnessSchema = RecordedHarnessSchema;
 export type HistoryHarness = z.infer<typeof HistoryHarnessSchema>;
 
 /**
@@ -215,21 +216,25 @@ export function conversationFromArguments(
   harness: HistoryHarness,
   args: readonly string[],
 ): ConversationId | undefined {
-  if (harness === 'claude') {
-    const created = leasable(flagValue(args, ['--session-id']));
-    if (created !== undefined) return created;
-    if (args.includes('--fork-session')) return undefined;
-    return leasable(flagValue(args, ['--resume', '-r']));
-  }
-  const resume = args.indexOf('resume');
-  if (resume < 0) return undefined;
-  for (const arg of args.slice(resume + 1)) {
-    if (arg === '--last') return undefined;
-    if (arg.startsWith('-')) continue;
-    const id = leasable(arg);
-    if (id !== undefined) return id;
-  }
-  return undefined;
+  return byRecordedHarness(harness, {
+    claude: () => {
+      const created = leasable(flagValue(args, ['--session-id']));
+      if (created !== undefined) return created;
+      if (args.includes('--fork-session')) return undefined;
+      return leasable(flagValue(args, ['--resume', '-r']));
+    },
+    codex: () => {
+      const resume = args.indexOf('resume');
+      if (resume < 0) return undefined;
+      for (const arg of args.slice(resume + 1)) {
+        if (arg === '--last') return undefined;
+        if (arg.startsWith('-')) continue;
+        const id = leasable(arg);
+        if (id !== undefined) return id;
+      }
+      return undefined;
+    },
+  });
 }
 
 /**

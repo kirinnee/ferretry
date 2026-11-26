@@ -2,6 +2,7 @@ import { milliseconds } from '@ferretry/std';
 import type { Clock, Log, SpawnPort, StatePort } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
 import type { AskToStopJobsResult, ConversionPreview } from '../../contract/move.ts';
+import { byRecordedHarness } from '../../contract/records.ts';
 import type { JobKeeperSource } from '../../contract/job-keeping.ts';
 import type { JobsMovePorts } from '../lib/moves/jobs-move.ts';
 import { KernelProcessProbe, type ProcessHostFacts } from '../adapters/moves/process-inventory.ts';
@@ -183,7 +184,11 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
       // with none reads as an empty tail, which classifies every open tool `unknown` and refuses
       // the move — the same fail-closed answer this call gave before, now reached only when
       // the evidence is genuinely absent rather than always.
-      await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
+      await parts.transcripts.tail({
+        sessionId: id,
+        // A harness with no family is refused by name here, never read as Claude's transcript.
+        harness: byRecordedHarness(config.harness, { claude: () => 'claude' as const, codex: () => 'codex' as const }),
+      }),
       requesterPid === undefined ? {} : { requesterPid },
     );
 

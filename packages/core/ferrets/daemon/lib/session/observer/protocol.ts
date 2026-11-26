@@ -16,6 +16,7 @@
  * must see what the transcript says (`observe`), the live readout's frame (`pane`), the Warden's liveness
  * look (`liveness`) and the send tracker's evidence (`send-evidence`).
  */
+import type { RecordedFamily } from '../../../../contract/records.ts';
 import type { PaneState } from '../peers/tmux.ts';
 import type { ObservedHumanInput } from '../peers/transcript.ts';
 import type { AnswerOperationRecord } from '../peers/question.ts';
@@ -33,7 +34,7 @@ export interface SessionBinding {
     readonly target: string;
   };
   /** The transcript proved to be this session's, once one is; absent before. */
-  readonly transcript?: { readonly file: string; readonly harness: 'claude' | 'codex' } | undefined;
+  readonly transcript?: { readonly file: string; readonly harness: RecordedFamily } | undefined;
   /** Claude only: the file its question hook records an asked question in (`SessionPaths.questionAsked`). */
   readonly questionAsked?: string | undefined;
 }
