@@ -28,6 +28,15 @@ export class StateEngineFiles implements EnginePathsPort {
     return (await this.state.version(MODELS_STATE, this.name(file)))?.size;
   }
 
+  /**
+   * The state port's etag (device, inode, size and change times), but only when it is `settled`: one that could still
+   * hide a write made in the same clock tick is no identity at all, and the file is then simply hashed again.
+   */
+  async identity(file: Pick<EngineFile, 'role'>): Promise<string | undefined> {
+    const version = await this.state.version(MODELS_STATE, this.name(file));
+    return version?.settled === true ? version.etag : undefined;
+  }
+
   async read(file: Pick<EngineFile, 'role'>): Promise<Uint8Array | undefined> {
     const read = await this.state.read(MODELS_STATE, this.name(file));
     return read.ok ? (read.value as Uint8Array | undefined) : undefined;

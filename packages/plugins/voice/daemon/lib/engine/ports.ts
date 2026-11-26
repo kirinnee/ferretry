@@ -6,6 +6,12 @@ import type { SpeechCall, SpeechReply } from './protocol.ts';
 export interface EngineFilesPort {
   size(file: Pick<EngineFile, 'role'>): Promise<number | undefined>;
   read(file: Pick<EngineFile, 'role'>): Promise<Uint8Array | undefined>;
+  /**
+   * The file's identity on disk (device, inode, size, change times), or `undefined` when it is not there or the port cannot
+   * say. It moves whenever the file is written, replaced or touched, which is what lets a file proved pinned be trusted
+   * again without hashing it again.
+   */
+  identity?(file: Pick<EngineFile, 'role'>): Promise<string | undefined>;
   write(file: Pick<EngineFile, 'role'>, bytes: Uint8Array): Promise<void>;
   remove(file: Pick<EngineFile, 'role'>): Promise<void>;
   /**

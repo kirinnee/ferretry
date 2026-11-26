@@ -57,6 +57,18 @@ const SPEECH_CATALOG: readonly EngineFile[] = LOAD_ROLES.map(role => served(pin(
 
 class Files implements EnginePathsPort {
   readonly held = new Map<string, Uint8Array>();
+  /** Which files were read back, in order: verification reads a file it has not already proved. */
+  readonly reads: string[] = [];
+  /** A file's identity as the disk would give it: it moves when the file is written or replaced, not when it is read. */
+  private readonly stamps = new Map<string, number>();
+  async identity(file: { role: string }) {
+    return this.held.has(file.role) ? `${file.role}:${this.stamps.get(file.role) ?? 0}` : undefined;
+  }
+  /** Another program writes a file in place: its identity moves with its bytes. */
+  replaceOnDisk(role: string, bytes: Uint8Array) {
+    this.held.set(role, bytes);
+    this.stamps.set(role, (this.stamps.get(role) ?? 0) + 1);
+  }
   free: number | undefined = undefined;
   pathOf(file: { role: string }) {
     return `/state/voice/models/test/${file.role}`;
@@ -68,10 +80,11 @@ class Files implements EnginePathsPort {
     return this.held.get(file.role)?.byteLength;
   }
   async read(file: { role: string }) {
+    this.reads.push(file.role);
     return this.held.get(file.role)?.slice();
   }
   async write(file: { role: string }, bytes: Uint8Array) {
-    this.held.set(file.role, bytes);
+    this.replaceOnDisk(file.role, bytes);
   }
   async remove(file: { role: string }) {
     this.held.delete(file.role);
@@ -339,7 +352,7 @@ describe('the reply voice, native first', () => {
     await native.engine.install();
     await native.engine.settled();
     // Same length, different bytes: a size check would not see it. A daemon that starts later hashes the files before it loads.
-    native.files.held.set('libonnxruntime.so', body('the runtimX'));
+    native.files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     const later = replyEngine({ files: native.files });
     await expect(later.engine.speak('hello')).rejects.toBeInstanceOf(VoiceEngineError);
     expect(native.files.has('libonnxruntime.so')).toBe(false);
@@ -351,8 +364,8 @@ describe('the reply voice, native first', () => {
     await both.engine.install();
     await both.engine.settled();
     expect((await both.engine.view()).runtime?.kind).toBe('native');
-    for (const file of REPLY_CATALOG) both.files.held.set(file.role, body(`reply ${file.role}`));
-    both.files.held.set('libonnxruntime.so', body('the runtimX'));
+    for (const file of REPLY_CATALOG) both.files.replaceOnDisk(file.role, body(`reply ${file.role}`));
+    both.files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     const restarted = replyEngine({ files: both.files });
     await restarted.engine.speak('hello');
     expect((await restarted.engine.view()).runtime?.kind).toBe('wasm');
@@ -384,7 +397,7 @@ describe('the reply voice, native first', () => {
 
   test('a voice installed on WebAssembly can be upgraded: it says what that costs, and Install swaps the files', async () => {
     const { engine, files, requested } = replyEngine();
-    for (const file of REPLY_CATALOG) files.held.set(file.role, body(`reply ${file.role}`));
+    for (const file of REPLY_CATALOG) files.replaceOnDisk(file.role, body(`reply ${file.role}`));
     const before = await engine.view();
     expect(before.state).toBe('ready');
     expect(before.runtime?.kind).toBe('wasm');
@@ -405,7 +418,7 @@ describe('the reply voice, native first', () => {
   test('a saved library that is not the pinned file is found by the probe, deleted, and the install says so rather than running WebAssembly', async () => {
     const files = new Files();
     // The same length as the pinned file, so the size check sees nothing: only the hash does.
-    files.held.set('libonnxruntime.so', body('the runtimX'));
+    files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     const { engine } = replyEngine({ files });
     await engine.install();
     await engine.settled();
@@ -417,7 +430,7 @@ describe('the reply voice, native first', () => {
 
   test('a voice on WebAssembly whose upgrade could not start native stays on WebAssembly and names why', async () => {
     const { engine, files, requests } = replyEngine({ script: { nativeLoadFails: true } });
-    for (const file of REPLY_CATALOG) files.held.set(file.role, body(`reply ${file.role}`));
+    for (const file of REPLY_CATALOG) files.replaceOnDisk(file.role, body(`reply ${file.role}`));
     await engine.install();
     await engine.settled();
     const view = await engine.view();
@@ -587,7 +600,7 @@ describe('the speech engine, native first', () => {
 
   test('a saved library that is not the pinned file is found by the probe and deleted, and the install says so', async () => {
     const files = new Files();
-    files.held.set('libonnxruntime.so', body('the runtimX'));
+    files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     const { engine } = speechEngine({ files });
     await engine.install();
     await engine.settled();
@@ -602,9 +615,9 @@ describe('the speech engine, native first', () => {
     await both.engine.install();
     await both.engine.settled();
     expect((await both.engine.view()).runtime?.kind).toBe('native');
-    for (const file of SPEECH_CATALOG) both.files.held.set(file.role, body(`speech ${file.role}`));
-    both.files.held.set('sherpa-wasm', body('speech sherpa-wasm'));
-    both.files.held.set('libonnxruntime.so', body('the runtimX'));
+    for (const file of SPEECH_CATALOG) both.files.replaceOnDisk(file.role, body(`speech ${file.role}`));
+    both.files.replaceOnDisk('sherpa-wasm', body('speech sherpa-wasm'));
+    both.files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     const restarted = speechEngine({ files: both.files });
     expect((await restarted.engine.transcribe(new Float32Array(16_000))).text).toBe('hello');
     const view = await restarted.engine.view();
@@ -619,23 +632,47 @@ describe('the speech engine, native first', () => {
     const alone = speechEngine();
     await alone.engine.install();
     await alone.engine.settled();
-    alone.files.held.set('libonnxruntime.so', body('the runtimX'));
+    alone.files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     const later = speechEngine({ files: alone.files });
     await expect(later.engine.transcribe(new Float32Array(16_000))).rejects.toBeInstanceOf(VoiceEngineError);
   });
 
+  test('a file proved once is not read back again while it stays the same file, and a changed one is checked again', async () => {
+    const first = speechEngine();
+    await first.engine.install();
+    await first.engine.settled();
+    await first.engine.transcribe(new Float32Array(16_000));
+    const nativeRoles = TARGET.files.map(file => file.role);
+    // A later load in the same daemon (a restart of the engine on the same disk) finds every file as it was proved.
+    first.files.reads.length = 0;
+    const same = speechEngine({ files: first.files });
+    expect((await same.engine.transcribe(new Float32Array(16_000))).text).toBe('hello');
+    // Only the two small files the engine sends as bytes are read; no model and no library is hashed again.
+    expect(first.files.reads.filter(role => !['ort-wasm', 'vad'].includes(role))).toEqual([]);
+    expect(same.requests.filter(r => r.kind === 'load').map(r => (r as { engine: string }).engine)).toEqual(['native']);
+
+    // Same length, different bytes, and the file's identity moved: it is read, hashed, refused and deleted.
+    first.files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
+    first.files.reads.length = 0;
+    const changed = speechEngine({ files: first.files });
+    await expect(changed.engine.transcribe(new Float32Array(16_000))).rejects.toBeInstanceOf(VoiceEngineError);
+    expect(first.files.reads).toContain('libonnxruntime.so');
+    expect(first.files.has('libonnxruntime.so')).toBe(false);
+    expect(nativeRoles).toContain('libonnxruntime.so');
+  });
+
   test('a voice installed on WebAssembly can be upgraded; one whose native start failed stays on WebAssembly and says why', async () => {
     const { engine, files } = speechEngine();
-    for (const file of SPEECH_CATALOG) files.held.set(file.role, body(`speech ${file.role}`));
-    files.held.set('sherpa-wasm', body('speech sherpa-wasm'));
+    for (const file of SPEECH_CATALOG) files.replaceOnDisk(file.role, body(`speech ${file.role}`));
+    files.replaceOnDisk('sherpa-wasm', body('speech sherpa-wasm'));
     const before = await engine.view();
     expect(before.runtime?.kind).toBe('wasm');
     expect(before.runtime?.upgradeBytes).toBeGreaterThan(0);
     expect(before.runtime?.sentence).toContain('can be installed');
 
     const failing = speechEngine({ script: { nativeLoadFails: true } });
-    for (const file of SPEECH_CATALOG) failing.files.held.set(file.role, body(`speech ${file.role}`));
-    failing.files.held.set('sherpa-wasm', body('speech sherpa-wasm'));
+    for (const file of SPEECH_CATALOG) failing.files.replaceOnDisk(file.role, body(`speech ${file.role}`));
+    failing.files.replaceOnDisk('sherpa-wasm', body('speech sherpa-wasm'));
     await failing.engine.install();
     await failing.engine.settled();
     const view = await failing.engine.view();
@@ -678,9 +715,9 @@ describe('every native load is hashed, and Switch works on a loaded WebAssembly 
     await engine.unload();
     expect(loadsOf(requests)).toEqual(['native', 'native']);
     // Same length, different bytes, while the daemon keeps running: a once-per-process check would never look again.
-    files.held.set('libonnxruntime.so', body('the runtimX'));
+    files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     // With the WebAssembly files there as well, it carries on with them and says why in a plain sentence.
-    for (const file of REPLY_CATALOG) files.held.set(file.role, body(`reply ${file.role}`));
+    for (const file of REPLY_CATALOG) files.replaceOnDisk(file.role, body(`reply ${file.role}`));
     requests.length = 0;
     await engine.speak('hello');
     expect(loadsOf(requests)).toEqual(['wasm']);
@@ -696,7 +733,7 @@ describe('every native load is hashed, and Switch works on a loaded WebAssembly 
     await engine.settled();
     await engine.speak('hello');
     await engine.unload();
-    files.held.set('libonnxruntime.so', body('the runtimX'));
+    files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     requests.length = 0;
     await expect(engine.speak('hello')).rejects.toMatchObject({ code: 'hash_mismatch' });
     expect(requests).toEqual([]);
@@ -704,7 +741,7 @@ describe('every native load is hashed, and Switch works on a loaded WebAssembly 
 
   test('reply voice: Switch to the fast engine with the WebAssembly voice loaded keeps the files and ends native', async () => {
     const { engine, files, requests } = replyEngine();
-    for (const file of REPLY_CATALOG) files.held.set(file.role, body(`reply ${file.role}`));
+    for (const file of REPLY_CATALOG) files.replaceOnDisk(file.role, body(`reply ${file.role}`));
     await engine.speak('hello');
     expect((await engine.view()).loaded).toBe(true);
     expect(loadsOf(requests)).toEqual(['wasm']);
@@ -726,7 +763,7 @@ describe('every native load is hashed, and Switch works on a loaded WebAssembly 
     await engine.transcribe(new Float32Array(16_000));
     await engine.unload();
     expect(loadsOf(requests)).toEqual(['native', 'native']);
-    files.held.set('libonnxruntime.so', body('the runtimX'));
+    files.replaceOnDisk('libonnxruntime.so', body('the runtimX'));
     requests.length = 0;
     await expect(engine.transcribe(new Float32Array(16_000))).rejects.toMatchObject({ code: 'hash_mismatch' });
     expect(requests).toEqual([]);
@@ -741,7 +778,7 @@ describe('every native load is hashed, and Switch works on a loaded WebAssembly 
     await engine.unload();
     const original = files.held.get('encoder');
     expect(original).toBeDefined();
-    files.held.set('encoder', body('x'.repeat(original?.byteLength ?? 1)).slice(0, original?.byteLength));
+    files.replaceOnDisk('encoder', body('x'.repeat(original?.byteLength ?? 1)).slice(0, original?.byteLength));
     requests.length = 0;
     await expect(engine.transcribe(new Float32Array(16_000))).rejects.toMatchObject({ code: 'hash_mismatch' });
     expect(requests).toEqual([]);
@@ -756,7 +793,7 @@ describe('every native load is hashed, and Switch works on a loaded WebAssembly 
     await engine.unload();
     const original = files.held.get('model-fp32');
     expect(original).toBeDefined();
-    files.held.set('model-fp32', body('x'.repeat(original?.byteLength ?? 1)).slice(0, original?.byteLength));
+    files.replaceOnDisk('model-fp32', body('x'.repeat(original?.byteLength ?? 1)).slice(0, original?.byteLength));
     requests.length = 0;
     await expect(engine.speak('hello')).rejects.toMatchObject({ code: 'hash_mismatch' });
     expect(requests).toEqual([]);
@@ -765,8 +802,8 @@ describe('every native load is hashed, and Switch works on a loaded WebAssembly 
 
   test('speech engine: Switch to the fast engine with the WebAssembly models loaded keeps the files and ends native', async () => {
     const { engine, files, requests } = speechEngine();
-    for (const file of SPEECH_CATALOG) files.held.set(file.role, body(`speech ${file.role}`));
-    files.held.set('sherpa-wasm', body('speech sherpa-wasm'));
+    for (const file of SPEECH_CATALOG) files.replaceOnDisk(file.role, body(`speech ${file.role}`));
+    files.replaceOnDisk('sherpa-wasm', body('speech sherpa-wasm'));
     await engine.transcribe(new Float32Array(16_000));
     expect((await engine.view()).loaded).toBe(true);
     expect(loadsOf(requests)).toEqual(['wasm']);
