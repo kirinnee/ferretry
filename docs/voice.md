@@ -651,11 +651,25 @@ machine hears the same speech and sends it after the pause as usual, so the pers
 
 ### The reply voice (Kokoro, on the machine)
 
-Voice mode's reply voice is **Kokoro-82M (int8, Apache 2.0)**, run by sherpa-onnx's own WebAssembly build for Node and Bun
-(`sherpa-onnx` 2.0.3, owner decision O2) in a **worker thread of its own** (`daemon/worker/reply.worker.ts`), so the
-speech engine keeps listening while a reply is being made. It is installed **apart from speech to text**
-(`GET|POST|DELETE /v1/voice/reply-voice`, the same two grants and the same install/measure/unload rules as the engine's
-routes): five pinned, hash-checked files, **164 MB** (`daemon/lib/reply/catalog.ts`), in `state/voice/models/kokoro-82m-int8/`.
+Voice mode's default reply voice is **Kokoro-82M (fp32, Apache 2.0)** on **native sherpa-onnx 2.0.3**, in its own
+**child process** using the existing speech host (`daemon/worker/speech-host.ts`). The speech engine keeps listening while
+a reply is being made. The reply takes about a quarter of the machine's available CPUs, clamped to **2–8 threads** and
+reserving a CPU where possible (one thread on a one/two-core machine). On this 32-core Xeon that is eight threads; speech
+recognition keeps its separate four-thread cap. An unbroken 14-word sentence still lands on the one-second wire boundary
+at both eight and ten threads. Bounding clauses, as below, leaves room for the stream's 200 ms tick without taking more CPUs.
+
+It is installed **apart from speech to text** (`GET|POST|DELETE /v1/voice/reply-voice`, the same two grants and the same
+install/measure/unload rules as the engine's routes), in `state/voice/models/kokoro-82m-int8/`. Install chooses native
+first: **394 MB** on linux-x64, including the addon and its two neighbouring libraries. Every file is pinned by size and
+SHA-256, the model URL pins a Hugging Face commit, and the native libraries are hashed again before every load. The fp32
+model is **325,560,556 bytes**, below the existing largest speech-model download; no size limit needs raising
+(`daemon/lib/reply/catalog.ts`, `daemon/lib/native/catalog.ts`).
+
+**WebAssembly int8 (164 MB, one thread) is the fallback** on an unsupported platform or where native cannot load; the
+status line says which engine is running and why. In particular, Nix's source-run Bun may not find the machine's
+`libstdc++.so.6`: the native child deliberately does not inherit `LD_LIBRARY_PATH`. The release binary on this box loads
+native successfully with the same sealed child environment. An existing WebAssembly install offers **Switch to the fast
+engine**; changing the thread budget does not download anything on its own.
 Without it voice mode still listens, and the device's own voice reads the reply, with a sentence that says so.
 
 - **Who speaks what.** The browser already knows which lines of a reply are `<voice>` lines (the grammar is Conversation's
@@ -669,7 +683,10 @@ Without it voice mode still listens, and the device's own voice reads the reply,
   therefore arrives at exactly the speed it plays (**about 115 MB an hour more downlink**, as the plan guessed), and a relay
   sees nothing of when a reply is spoken beyond what the event stream already shows (design §3.4).
 - **How a line is made.** `splitForSpeech` cuts it into sentences, and a sentence of more than 12 words into clauses at its
-  commas, so the first sound does not wait for the last word. Each piece is turned into sound (24 kHz, resampled to 16 kHz by
+  commas. A clause longer than 12 words is bounded at a space, preferring a conjunction such as "because" or "while" and
+  keeping at least three words in its tail. A first sentence without commas therefore cannot hold up every word behind it.
+  The first finished piece reaches the downlink while the next
+  piece is still synthesizing; a slow later sentence never holds the first one back. Each piece is turned into sound (24 kHz, resampled to 16 kHz by
   a windowed-sinc filter, `resample.ts`) and queued; the pieces of one line are packed into consecutive slots so no slot but
   the line's last is part empty. A unit carries one line's sound only. At most 16 lines wait; a 17th is refused for that line
   (`queue_full`), and no more than 30 s of sound waits to be sent before the next line is made.
@@ -690,25 +707,27 @@ Without it voice mode still listens, and the device's own voice reads the reply,
   (`spokenNumbers`: "1,204" is "one thousand two hundred four") because the lexicon has no digits. Voices other than `af_heart` and speed are not here. The
   browser tells the machine to stop with a **`hush`** frame ([Barge-in](#barge-in-talking-over-a-reply)); a line already being made is made to its end and thrown away.
 
-**Measured here (2026-11-24; the same 32-core Linux x64 box, load average 9–12 from other agents, run under `nice`; one
-WebAssembly thread; `speak` times include the resample):**
+**Measured 2026-11-26, Xeon Platinum 8488C, 32 available CPUs, Bun 1.4.4, `nice -n 10`:** a scratch daemon on port 7486,
+outside the fleet slice, with a synthetic home and the test guard disabling limits. Native runs use the release compilation
+and its existing child host, with no loader environment added. The speech engine stays on WebAssembly in all three runs
+to hold that part constant. Each row is the median of three runs after one excluded first synthesis. First audio is a
+PCM-bearing WebSocket unit after sending the line to a ready stream, including its 200 ms cadence; model loading (about
+1.6 s) happens before Ready and is excluded. RTF is total synthesis time, including resampling, divided by audio length.
 
-| What                                                                    | Measured                                            |
-| ----------------------------------------------------------------------- | --------------------------------------------------- |
-| Install, real download from Hugging Face + jsDelivr                     | 164 MB, 5 files (a few seconds on this box)         |
-| Load Kokoro in its worker                                               | 1.5–1.9 s; the runtime's own heap **512 MB**        |
-| "Let me check the failing test." (1.6 s of speech)                      | 4.6–5.3 s: **real-time factor 2.8–3.3**             |
-| A 3.4 s line, three runs                                                | 10.3–10.7 s: real-time factor 3.0–3.2               |
-| **First sound of an 11-word, two-clause line, sent over a real stream** | **4.0 s** after the line was sent (3.6 s of speech) |
+| Line     | Source fallback: WASM int8, 1 thread | Release before: native fp32, 4 threads | Native fp32, 8 threads + bounded clauses |
+| -------- | ------------------------------------ | -------------------------------------- | ---------------------------------------- |
+| 6 words  | 4.803 s / RTF 2.883                  | 0.600 s / RTF 0.305                    | **0.400 s / RTF 0.218**                  |
+| 14 words | 11.008 s / RTF 2.565                 | 1.201 s / RTF 0.252                    | **0.600 s / RTF 0.183**                  |
+| 30 words | 5.604 s / RTF 2.712                  | 0.600 s / RTF 0.259                    | **0.407 s / RTF 0.186**                  |
 
-**The plan's target — first audio for a 12-word line in 1 s or less (a guess) — is NOT met**, and the miss is not close:
-the same model through sherpa-onnx's **native** Node addon (not shipped, measured only to size the next step) ran at a
-real-time factor of 1.5 on one thread and 1.0 on four, on this same loaded box. So even native is not 1 s here for a whole
-clause; the first clause being short is what helps (it is cut first), and a quiet machine, a GPU or a smaller voice would
-be the next levers. **A reply is still understandable**, because each piece's sound is queued and played gapless, but on
-this box a long reply is spoken **slower than it is made**, so there are pauses between pieces. That is why the device's
-own voice is the fallback and why `reply` is reported honestly. The next step, if the owner wants it, is the native
-sherpa-onnx path (plan risk 1) — with its NixOS `nix-ld` cost (design §2.3).
+The long line starts at its first clause; the whole line is not made before sound begins. The 14-word line now starts
+before "because", while the remaining clause is being made. **The first-audio target is met for the measured 6–14 word
+first sentences.** This is a measured host result, not a deadline guaranteed on an overloaded machine.
+
+Resident memory, loaded / peak, for the **whole daemon tree including the speech engine**: source fallback 2,098 / 2,434 MB;
+native before 2,678 / 2,891 MB; native after 2,704 / 2,832 MB. One-minute load average at start → end: 6.70 → 11.87,
+9.63 → 12.89, and 7.99 → 6.50 respectively. These include the unchanged speech engine and should not be read as Kokoro-only
+memory. Neither macOS nor ARM was benchmarked here.
 
 Proof: `packages/plugins/voice/tests/realworld/reply-voice.realworld.test.ts` (`FY_REPLY_VOICE_REAL=1`, and
 `FY_REPLY_VOICE_DIR` to keep the files between runs) refuses a file with a wrong pinned hash, then installs the real files,

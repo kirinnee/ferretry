@@ -1,11 +1,12 @@
 /**
  * A `<voice>` line as pieces to speak one after another, so the first sound does not wait for the last word to be
- * turned into sound. A sentence is one piece; a long sentence (more than {@link LONG_SENTENCE} words) is cut at its
- * commas, semicolons and colons into clauses, and a clause too short to stand alone joins its neighbour. Numbers are written
+ * turned into sound. A short sentence is one piece; a long sentence is cut into clauses, then bounded to
+ * {@link MAX_PIECE_WORDS} words, preferring conjunctions. A clause too short to stand alone joins its neighbour. Numbers are written
  * out first, because the voice's English lexicon has no digits and would skip them. Pure and total.
  */
-const LONG_SENTENCE = 12;
+const MAX_PIECE_WORDS = 12;
 const SHORT_CLAUSE = 3;
+const CLAUSE_STARTS = new Set(['and', 'but', 'because', 'so', 'when', 'while']);
 /** The model is not asked for more than this at once: a longer piece is cut at a space. */
 const MAX_PIECE_CHARS = 280;
 
@@ -24,7 +25,7 @@ function sentencesOf(text: string): string[] {
 }
 
 function clausesOf(sentence: string): string[] {
-  if (words(sentence) <= LONG_SENTENCE) return [sentence];
+  if (words(sentence) <= MAX_PIECE_WORDS) return [sentence];
   const clauses: string[] = [];
   let start = 0;
   for (const match of sentence.matchAll(/[,;:](?=\s)/gu)) {
@@ -52,6 +53,15 @@ function clausesOf(sentence: string): string[] {
 }
 
 function cut(piece: string): string[] {
+  const tokens = piece.split(' ');
+  if (tokens.length > MAX_PIECE_WORDS) {
+    // A long sentence with no comma must not delay first audio. Keep at least three words in the tail, and prefer
+    // "the build failed | because ..." to breaking a noun phrase at an arbitrary word count.
+    let boundary = Math.min(MAX_PIECE_WORDS, tokens.length - SHORT_CLAUSE);
+    for (let at = SHORT_CLAUSE; at <= Math.min(MAX_PIECE_WORDS, tokens.length - SHORT_CLAUSE); at += 1)
+      if (CLAUSE_STARTS.has((tokens[at] ?? '').toLowerCase())) boundary = at;
+    return [...cut(tokens.slice(0, boundary).join(' ')), ...cut(tokens.slice(boundary).join(' '))];
+  }
   if (piece.length <= MAX_PIECE_CHARS) return [piece];
   const space = piece.lastIndexOf(' ', MAX_PIECE_CHARS);
   const at = space > MAX_PIECE_CHARS / 2 ? space : MAX_PIECE_CHARS;

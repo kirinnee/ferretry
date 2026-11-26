@@ -1,6 +1,17 @@
 import type { EngineFile } from '../engine/catalog.ts';
 
 /**
+ * Spend roughly a quarter of the machine on a reply, capped at eight threads. On the measured 32-core Xeon this,
+ * together with bounded clauses (`chunks.ts`), leaves room for the stream's 200 ms tick within the first-audio target.
+ * More threads alone did not meet that wire target for an unbroken 14-word sentence. Small machines keep a CPU for
+ * the daemon (one thread on a one/two-core machine); two threads are the floor elsewhere. Speech keeps its own budget.
+ */
+export function replyNativeThreads(cores: number): number {
+  const available = Math.max(1, Math.floor(cores));
+  return Math.max(1, Math.min(8, available - 1, Math.max(2, Math.floor(available / 4))));
+}
+
+/**
  * THE REPLY VOICE'S FILES, pinned by size and SHA-256 exactly as the speech engine's are. The voice is Kokoro-82M (Apache
  * 2.0), the multi-language 1.0 build the sherpa-onnx project publishes; its English text front end is a lexicon
  * (sherpa-onnx 2.x no longer uses espeak-ng). Two engines can run it, and each has its own model file:
