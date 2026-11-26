@@ -251,6 +251,9 @@ test('a fourth registered harness lists its real discovery separately, and key c
       command: '/fixture/bin/fourth',
     });
     expect((await f.api.resolve(RuntimeIdSchema.parse('custom'))).ok).toBe(true);
+    expect((await f.host.request('GET', '/v1/runtimes/profiles')).json()).toMatchObject({
+      profiles: expect.arrayContaining([expect.objectContaining({ name: 'plain' })]),
+    });
     expect(await f.start()).toEqual({ allow: true });
   }
 });

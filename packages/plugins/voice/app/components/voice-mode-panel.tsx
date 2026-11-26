@@ -314,7 +314,7 @@ function VoiceModeSession({
         onMicUnit: pcm => {
           // The machine's voice is being heard, whether it reads a whole reply or says a line the ferret just finished.
           if (!detector.push(pcm, live.current.machineVoice)) return;
-          reader.stop();
+          reader.stop('person');
           lines?.hush();
           setInterrupted(true);
         },

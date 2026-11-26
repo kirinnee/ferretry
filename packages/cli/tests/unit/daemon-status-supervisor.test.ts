@@ -1,6 +1,6 @@
 /**
- * V-0243 `fy daemon status` says what supervises the daemon: the real controller and the real systemd supervisor, over a
- * FAKE process runner (no test ever runs `systemctl`), through the real verb. Both key sets of `--json` are pinned.
+ * V-0243 `fy daemon status` says what supervises the daemon: the real controller and the real systemd / launchd supervisor,
+ * over a FAKE process runner (no test ever runs `systemctl` or `launchctl`), through the real verb. Both key sets of `--json` are pinned.
  */
 import { describe, expect, it } from 'bun:test';
 import { PROTOCOL } from '@ferretry/kernel/contract';
@@ -24,6 +24,8 @@ interface Scene {
   readonly unitPid?: number;
   /** The pid the answering daemon reports for itself; absent = nothing answers. */
   readonly serving?: number;
+  /** What the FAKE `launchctl print` answers (macOS scenes). */
+  readonly launchctl?: { readonly code: number; readonly stdout?: string; readonly stderr?: string };
 }
 
 const SHOWN: Record<Unit, string> = {
@@ -51,6 +53,10 @@ async function status(scene: Scene, ...flags: string[]) {
   const processes: IDaemonProcessPort = {
     run: async argv => {
       ran.push(argv.join(' '));
+      if (argv[0] === 'launchctl') {
+        const said = scene.launchctl ?? { code: 113, stderr: 'Could not find service' };
+        return { code: said.code, stdout: said.stdout ?? '', stderr: said.stderr ?? '' };
+      }
       return {
         code: 0,
         stdout: SHOWN[scene.unit ?? 'inactive'].replace('7777', String(scene.unitPid ?? 7777)),
@@ -164,14 +170,94 @@ describe('fy daemon status: what supervises the daemon (Linux, systemd)', () => 
   });
 });
 
-describe('fy daemon status: macOS is the Mac end list', () => {
-  it('says launchd is not read in 5.0 and runs nothing', async () => {
-    const result = await status({ platform: 'darwin', installed: true, serving: 4321 });
+const PLIST = '/fake/user/Library/LaunchAgents/com.ferretry.fyd.plist';
+const printed = (state: string, extra: string) =>
+  `gui/1234/com.ferretry.fyd = {\n\tactive count = 1\n\tpath = ${PLIST}\n\tstate = ${state}\n${extra}}\n`;
+
+describe('fy daemon status: macOS reads launchd (a FAKE launchctl; this box never runs the real one)', () => {
+  it('loaded and running: the pid, the last exit, and the plist path', async () => {
+    const result = await status({
+      platform: 'darwin',
+      installed: true,
+      serving: 4321,
+      launchctl: { code: 0, stdout: printed('running', '\tpid = 4321\n\tlast exit code = 0\n') },
+    });
     expect(result.code).toBe(0);
-    expect(result.out).toContain(
-      'launchd: not read — launchd status is not reported in 5.0 yet (macOS is on the Mac end list)',
-    );
+    expect(result.out).toContain('pid      4321');
+    expect(result.out).toContain('  launchd: running (launchd reports running)');
+    expect(result.out).toContain(`loaded: yes; last exit: 0; plist: ${PLIST}`);
+    expect(result.out).toContain('Liveness: alive');
+    expect(result.out).not.toContain('not read');
+    expect(result.ran).toEqual(['launchctl print gui/1234/com.ferretry.fyd']);
+  });
+
+  it('loaded but not running, with a bad last exit: failed, and the exit is said', async () => {
+    const result = await status({
+      platform: 'darwin',
+      installed: true,
+      launchctl: { code: 0, stdout: printed('waiting', '\tlast exit status = 78\n') },
+    });
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('  launchd: failed (launchd reports waiting; last exit status 78)');
+    expect(result.err).toContain(`loaded: yes; last exit: 78; plist: ${PLIST}`);
+    expect(result.err).toContain('Liveness: dead');
+  });
+
+  it('a SIGABRT crash loop (macOS 26.5 print shape): failed, the signal is said, never a bare stopped', async () => {
+    const launchctl = {
+      code: 0,
+      stdout: printed('spawn scheduled', '\truns = 14\n\tlast terminating signal = Aborted: 6\n'),
+    };
+    const result = await status({ platform: 'darwin', installed: true, launchctl });
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('  launchd: failed (launchd reports spawn scheduled; crashed (SIGABRT), restarting)');
+    expect(result.err).toContain(`loaded: yes; last signal: SIGABRT; plist: ${PLIST}`);
+    expect(result.err).toContain('Liveness: dead');
+    const { json } = await status({ platform: 'darwin', installed: true, launchctl }, '--json');
+    expect(json).toMatchObject({ supervisor: { manager: 'launchd', state: 'failed', lastSignal: 'SIGABRT' } });
+  });
+
+  it('a plist on disk that launchd has not loaded: not loaded, stopped', async () => {
+    const result = await status({
+      platform: 'darwin',
+      installed: true,
+      launchctl: { code: 113, stderr: 'Could not find service "com.ferretry.fyd" in domain for user gui: 1234\n' },
+    });
+    expect(result.code).toBe(1);
+    expect(result.err).toContain('  launchd: stopped (Could not find service');
+    expect(result.err).toContain(`loaded: no; plist: ${PLIST}`);
+    expect(result.err).not.toContain('not read');
+  });
+
+  it('no plist: no service manager owns the daemon, and launchctl is never asked', async () => {
+    const result = await status({ platform: 'darwin', installed: false, serving: 4321 });
+    expect(result.out).toContain('  not managed by a service manager');
     expect(result.ran).toEqual([]);
+  });
+
+  it.each([
+    [
+      'launchctl cannot be run',
+      { code: 127, stderr: 'launchctl: not found' },
+      'launchctl print failed (exit 127): launchctl: not found',
+    ],
+    [
+      'launchd refuses the read',
+      { code: 1, stderr: 'Operation not permitted' },
+      'launchctl print failed (exit 1): Operation not permitted',
+    ],
+    [
+      'launchctl prints something that is not a job',
+      { code: 0, stdout: '<html>nope</html>' },
+      'launchctl print answered, but not in a form this fy understands',
+    ],
+  ])('%s: said plainly as not read, never guessed', async (_name, launchctl, why) => {
+    const result = await status({ platform: 'darwin', installed: true, serving: 4321, launchctl });
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(`  launchd: not read — ${why}`);
+    expect(result.out).toContain('not reported in 5.0: liveness, tunnel, firewall');
+    expect(result.out).not.toContain('Liveness:');
+    expect(result.out).not.toContain('OUTSIDE');
   });
 });
 
@@ -229,14 +315,47 @@ describe('fy daemon status --json carries both key sets', () => {
     expect(wedged).toMatchObject({ running: false, reachability: 'wedged' });
   });
 
-  it('macOS: the supervisor is named and marked not reported', async () => {
-    const { json } = await status({ platform: 'darwin', installed: true, serving: 4321 }, '--json');
+  it('macOS: launchd’s loaded, pid, last exit and plist ride in the supervisor key', async () => {
+    const { json } = await status(
+      {
+        platform: 'darwin',
+        installed: true,
+        serving: 4321,
+        launchctl: { code: 0, stdout: printed('running', '\tpid = 4321\n\tlast exit code = 0\n') },
+      },
+      '--json',
+    );
     expect(json).toMatchObject({
       running: true,
       reachability: 'serving',
       orphan: false,
-      supervisor: { manager: 'launchd', state: 'not-reported' },
-      // launchd is the Mac end list: no verdict on the process is guessed, and it is named instead.
+      supervisor: {
+        manager: 'launchd',
+        state: 'running',
+        pid: 4321,
+        loaded: true,
+        lastExit: 0,
+        definition: PLIST,
+      },
+      liveness: 'alive',
+      notReported: ['tunnel', 'firewall'],
+    });
+  });
+
+  it('macOS: a launchd that cannot be read is named and marked not reported', async () => {
+    const { json } = await status(
+      { platform: 'darwin', installed: true, serving: 4321, launchctl: { code: 127, stderr: 'launchctl: not found' } },
+      '--json',
+    );
+    expect(json).toMatchObject({
+      running: true,
+      reachability: 'serving',
+      orphan: false,
+      supervisor: {
+        manager: 'launchd',
+        state: 'not-reported',
+        detail: 'launchd could not be read: launchctl print failed (exit 127): launchctl: not found',
+      },
       notReported: ['liveness', 'tunnel', 'firewall'],
     });
     expect(json).not.toHaveProperty('liveness');

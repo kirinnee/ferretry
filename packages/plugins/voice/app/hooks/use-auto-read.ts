@@ -64,6 +64,7 @@ import {
   type WatchedTurn,
 } from '../lib/voice-chat/auto-read.ts';
 import { readOptionsOf } from '../lib/voice-chat/live-settings.ts';
+import type { StopReason } from '../lib/voice-chat/ports.ts';
 import { IDLE } from '../lib/voice-chat/read-aloud.ts';
 import {
   type PickerRow,
@@ -188,12 +189,17 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   const state = useSyncExternalStore(controller.subscribe, controller.getState, () => IDLE);
   const reading = mine.current !== null && state.status === 'reading' && state.key === mine.current;
 
-  const stop = useCallback(() => {
-    recovery.current = null;
-    fallback.current = null;
-    if (mine.current !== null && controller.getState().key === mine.current) controller.stop();
-    mine.current = null;
-  }, [controller]);
+  /** Stops a reading this hook started; `reason` is who stopped it, so a cut-off the person made is told to the ferret and no other is. */
+  const halt = useCallback(
+    (reason: StopReason) => {
+      recovery.current = null;
+      fallback.current = null;
+      if (mine.current !== null && controller.getState().key === mine.current) controller.stop(reason);
+      mine.current = null;
+    },
+    [controller],
+  );
+  const stop = useCallback(() => halt('person'), [halt]);
 
   /** The words of a picked reply that were not said live; a reply still being said when asked keeps the reading waiting for a failure. */
   const unsaidOf = useCallback(
@@ -435,15 +441,15 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
 
   // Switched off: silence what this hook started.
   useEffect(() => {
-    if (!enabled) stop();
-  }, [enabled, stop]);
+    if (!enabled) halt('automatic');
+  }, [enabled, halt]);
 
   // The tab goes to the background: speech stops, the timer is cancelled and anything that has ended is
   // judged now, while nobody is looking — so it can never be read on return.
   useEffect(() => {
     if (visible) return;
     recovery.current = null;
-    controller.stop();
+    controller.stop('automatic');
     evaluate();
   }, [visible, controller, evaluate]);
 

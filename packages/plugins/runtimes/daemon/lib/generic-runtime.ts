@@ -112,7 +112,7 @@ export class GenericRuntimes {
       return refused(`${item.label} could not report its installation`);
     }
   }
-  /** Native-only files never enter the legacy account-model validator or provisioner. Shared legacy profiles stay. */
+  /** Native runtime files and unsupported native-only profiles stay out of the account provisioner. */
   accountKernel(): KernelPorts {
     const original = this.deps.kernel;
     return {
@@ -143,7 +143,14 @@ export class GenericRuntimes {
               if (!native.has(name))
                 for (const reference of profile.contents)
                   if (reference.startsWith('profile/')) shared.add(reference.slice('profile/'.length));
-            return new Map([...held].filter(([name]) => !native.has(name) || shared.has(name)));
+            return new Map(
+              [...held].filter(
+                ([name, profile]) =>
+                  !native.has(name) ||
+                  shared.has(name) ||
+                  (profile as ProfileFile).contents.every(reference => reference.startsWith('modelSets/')),
+              ),
+            );
           }
           return held;
         }) as KernelPorts['config']['collection'],
