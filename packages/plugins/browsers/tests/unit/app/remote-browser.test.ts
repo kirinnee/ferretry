@@ -19,6 +19,7 @@ import {
   remotePointerButton,
   remoteViewportForContainer,
   runRemoteBrowserAction,
+  streamWantsConfirmation,
 } from '../../../app/lib/remote-browser.ts';
 import type { BrowserStatus } from '../../../contract/wire/browser.ts';
 import { encodeBrowserStreamChunks } from '../../../contract/wire/stream.ts';
@@ -341,6 +342,17 @@ const daemonFrameEnvelope = (pageId: string, jpeg: readonly number[]): ArrayBuff
   bytes.set(jpeg, 7 + id.length);
   return bytes.buffer;
 };
+
+describe('D-87 which stream refusals a passkey can answer', () => {
+  it('takes a 401 or 403 refusal to open as one, and nothing else', () => {
+    expect(streamWantsConfirmation('the daemon refused this stream: 403')).toBe(true);
+    expect(streamWantsConfirmation('the daemon refused this stream: 401')).toBe(true);
+    expect(streamWantsConfirmation('the daemon refused this stream: 404')).toBe(false);
+    expect(streamWantsConfirmation('the daemon refused this stream: 4030')).toBe(false);
+    expect(streamWantsConfirmation('browser use is not granted')).toBe(false);
+    expect(streamWantsConfirmation('')).toBe(false);
+  });
+});
 
 describe('remote browser frame and geometry helpers', () => {
   it('decodes a frame in the daemon wire shape, keeping only the JPEG payload', () => {

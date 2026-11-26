@@ -9,6 +9,9 @@ import { join } from 'node:path';
 import { sceneBuilder } from '@ferretry/app/testing/browser';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 
+/** The app's shipped faces, served to a scene by name. */
+const FONT_DIRECTORY = join(import.meta.dir, '../../../../../app/src/assets/fonts');
+
 export interface ServedScene {
   readonly origin: string;
   readonly stop: () => Promise<void>;
@@ -41,6 +44,10 @@ export const serveScene = async (cwd: string, entry: string, name: string): Prom
     fetch: request => {
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
+      // The app's own faces (`styles/theme-fonts.css` names them under `/assets/fonts/`): without them a box with no system fonts draws no text.
+      const face = /^\/assets\/fonts\/([a-z0-9-]+\.woff2)$/u.exec(path)?.[1];
+      if (face !== undefined)
+        return new Response(Bun.file(join(FONT_DIRECTORY, face)), { headers: { 'content-type': 'font/woff2' } });
       if (path === '/') return new Response(html, { headers: { 'content-type': 'text/html' } });
       return new Response('not here', { status: 404 });
     },

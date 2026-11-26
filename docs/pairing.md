@@ -454,6 +454,10 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   daemon compares two answers (the strictly parsed `NavigationEvidence`): a navigation or a swapped frame during a call that
   touched an app origin is treated as the call having read it. A committed address carrying the pairing-fragment grammar
   **taints the target for life** (the app screen it arrived on is refused outright, and `eval` on it, wherever it goes after).
+  **A document a pairing link opened is refused on ANY origin, while it is the page’s current document** (`NavigationEvidence.linked`, v4
+  #1598): the daemon cannot know every deployment’s app origin (another daemon’s app, a self-hosted one), and a link-entered page
+  is a pairing screen wherever it is served. It falls when a new document replaces that one (an in-document change of its
+  address does not), where the life-long taint does not.
   **The worker also keeps totals across every page it has ever watched** (`NavigationTotals`, in the worker, not on any page):
   how many addresses carrying the pairing grammar were committed under each origin, and how many navigations it **lost** track
   of. Every answer carries them, they only go up, and a page that closes or leaves the group takes none of it away. A call

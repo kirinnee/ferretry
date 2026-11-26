@@ -268,6 +268,73 @@ describe('RemoteBrowserViewer', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain('The daemon refused the remote display.');
   });
 
+  it('D-87 offers the passkey, not only Retry, when the daemon refused the display for want of it, and asks again once it went through', async () => {
+    const sockets: FakeSocket[] = [];
+    let confirmations = 0;
+    const renderer = render(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        status={running('session-a')}
+        reconnectAfterMs={1}
+        onConfirm={async () => {
+          confirmations += 1;
+          return true;
+        }}
+        socketFactory={() => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        }}
+      />,
+    );
+    run(() =>
+      sockets[0]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'the daemon refused this stream: 403' })),
+    );
+    const confirm = () => renderer.root.findAll(node => node.props['data-remote-browser-confirm'] !== undefined)[0];
+    expect(JSON.stringify(renderer.toJSON())).toContain('Confirm with passkey');
+    expect(sockets).toHaveLength(1);
+
+    await runAsync(async () => {
+      confirm()?.props.onClick();
+      await Promise.resolve();
+    });
+    expect(confirmations).toBe(1);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('D-87 asks again only after the confirmation went through, and offers it for no other refusal', async () => {
+    const sockets: FakeSocket[] = [];
+    const renderer = render(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        status={running('session-a')}
+        reconnectAfterMs={1}
+        onConfirm={async () => false}
+        socketFactory={() => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        }}
+      />,
+    );
+    // A refusal that is not about the passkey (the daemon's own sentence) offers Retry alone.
+    run(() => sockets[0]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'browser use is not granted' })));
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Confirm with passkey');
+
+    run(() => renderer.root.findAllByType('button')[0]?.props.onClick());
+    run(() =>
+      sockets[1]?.emit('close', new CloseEvent('close', { code: 1008, reason: 'the daemon refused this stream: 401' })),
+    );
+    await runAsync(async () => {
+      renderer.root.findAll(node => node.props['data-remote-browser-confirm'] !== undefined)[0]?.props.onClick();
+      await Promise.resolve();
+    });
+    // The confirmation did not go through: no new stream.
+    expect(sockets).toHaveLength(2);
+  });
+
   it('opens the display on the daemon’s guarded socket when no transport is injected', async () => {
     const sockets = socketClient();
     const paired = daemonConnection({ daemonId: 'daemon-a', client: sockets.client });

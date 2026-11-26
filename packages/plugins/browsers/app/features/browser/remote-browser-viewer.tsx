@@ -35,6 +35,7 @@ import {
   remoteKeyInput,
   remoteKeyRelease,
   remotePointerButton,
+  streamWantsConfirmation,
 } from '../../lib/remote-browser.ts';
 
 export type { RemoteBrowserSocket, RemoteBrowserSocketFactory };
@@ -82,6 +83,11 @@ export interface RemoteBrowserViewerProps {
   readonly showHeader?: boolean;
   readonly stallAfterMs?: number;
   readonly reconnectAfterMs?: number;
+  /**
+   * The person’s press for the passkey, offered when the daemon refused the display for want of it. Answers whether the
+   * confirmation went through; the display then asks again by itself. Absent: the refusal offers only Retry.
+   */
+  readonly onConfirm?: () => Promise<boolean>;
   /** The display's transport; the carrier router's stream session unless a host substitutes one. */
   readonly socketFactory?: RemoteBrowserSocketFactory;
   readonly createObjectUrl?: (frame: Blob) => string;
@@ -156,6 +162,7 @@ export function RemoteBrowserViewer({
   showHeader = true,
   stallAfterMs = 4_000,
   reconnectAfterMs = 1_200,
+  onConfirm,
   socketFactory: injectedSocketFactory,
   createObjectUrl = defaultCreateObjectUrl,
   revokeObjectUrl = defaultRevokeObjectUrl,
@@ -170,6 +177,7 @@ export function RemoteBrowserViewer({
   const [error, setError] = useState<string | null>(null);
   const [frameRevision, setFrameRevision] = useState(0);
   const [retry, setRetry] = useState(0);
+  const [confirmable, setConfirmable] = useState(false);
   const previousUrlRef = useRef<string | null>(null);
   const previousTransportRef = useRef(0);
   const previousPageRef = useRef<string | undefined>(undefined);
@@ -225,6 +233,7 @@ export function RemoteBrowserViewer({
     setFrameRevision(0);
     setDisplayState('idle');
     setError(null);
+    setConfirmable(false);
   } else if (renderedPageId !== currentPageId) {
     // A status commit naming page B must never retain page A's already-painted
     // pixels. Doing this during render prevents that stale frame from reaching
@@ -455,9 +464,11 @@ export function RemoteBrowserViewer({
       if (event instanceof CloseEvent && event.code === 1000) return;
       // A refusal asking again cannot change: say so, and leave the retry to the person.
       if (event instanceof CloseEvent && event.code === 1008) {
+        setConfirmable(streamWantsConfirmation(event.reason));
         setError(event.reason === '' ? 'The daemon refused the remote display.' : event.reason);
         return;
       }
+      setConfirmable(false);
       setError('Remote display disconnected; reconnecting…');
       reconnectTimer = setTimeout(() => {
         if (!disposed) setRetry(value => value + 1);
@@ -748,6 +759,19 @@ export function RemoteBrowserViewer({
           <button type="button" onClick={() => setRetry(value => value + 1)}>
             Retry display
           </button>
+          {confirmable && onConfirm !== undefined && (
+            <button
+              type="button"
+              data-remote-browser-confirm=""
+              onClick={() => {
+                void onConfirm().then(done => {
+                  if (done) setRetry(value => value + 1);
+                });
+              }}
+            >
+              Confirm with passkey
+            </button>
+          )}
         </div>
       )}
     </section>

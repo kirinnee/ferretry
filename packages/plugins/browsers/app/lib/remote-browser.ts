@@ -151,6 +151,12 @@ const refusalClose = (status: number): number => (status === 401 || status === 4
 /** What the session says when the daemon answers a stream open with a refusal (`the daemon refused this stream: 403`). */
 const REFUSED_STREAM = /refused this stream: (\d{3})/u;
 
+/**
+ * Whether a stream the daemon refused to open was refused for want of this device’s say-so (401 or 403): the one refusal a
+ * passkey confirmation can answer. Said in the sentence the stream ended with; it never names a credential.
+ */
+export const streamWantsConfirmation = (reason: string): boolean => /refused this stream: (?:401|403)\b/u.test(reason);
+
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
 const SOCKET_CLOSED = 3;

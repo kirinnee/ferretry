@@ -67,6 +67,8 @@ export interface RemoteBrowserModel {
   /** The last answer was the daemon asking for this device's passkey: the browser's state is unknown, not stopped. */
   readonly needsPasskey: boolean;
   readonly runAction: (action: BrowserAction) => void;
+  /** The person’s own press for the passkey: runs the one act that asks for it, and answers whether it went through. */
+  readonly confirm: () => Promise<boolean>;
   readonly refresh: () => void;
   readonly reportError: (message: string) => void;
   readonly clearError: () => void;
@@ -151,8 +153,8 @@ export function useRemoteBrowser({
       .catch((caught: unknown) => fail(generation, caught));
   }, [commit, daemon, fail, scope, transport]);
 
-  const runAction = useCallback(
-    (action: BrowserAction) => {
+  const perform = useCallback(
+    (action: BrowserAction): Promise<boolean> => {
       const generation = ++generationRef.current;
       // The mutation counter is reset to 0 on every re-scope AND every re-pair,
       // and thereafter belongs to the new pairing. An old connection's late
@@ -164,10 +166,16 @@ export function useRemoteBrowser({
       mutationsRef.current += 1;
       setBusy(true);
       setError(null);
-      void transport
+      return transport
         .runAction(daemon, scope, action)
-        .then(result => commit(generation, result.status))
-        .catch((caught: unknown) => fail(generation, caught))
+        .then(result => {
+          commit(generation, result.status);
+          return generation === generationRef.current && result.status.state === 'running';
+        })
+        .catch((caught: unknown) => {
+          fail(generation, caught);
+          return false;
+        })
         .finally(() => {
           if (scopeEpochAtLaunch !== scopeEpochRef.current) return;
           mutationsRef.current = Math.max(0, mutationsRef.current - 1);
@@ -176,6 +184,13 @@ export function useRemoteBrowser({
     },
     [commit, daemon, fail, scope, transport],
   );
+  const runAction = useCallback(
+    (action: BrowserAction): void => {
+      void perform(action);
+    },
+    [perform],
+  );
+  const confirm = useCallback(async (): Promise<boolean> => await perform({ action: 'start' }), [perform]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -192,5 +207,5 @@ export function useRemoteBrowser({
   const reportError = useCallback((message: string) => setError(message), []);
   const clearError = useCallback(() => setError(null), []);
 
-  return { status, error, busy, needsPasskey, runAction, refresh, reportError, clearError };
+  return { status, error, busy, needsPasskey, runAction, confirm, refresh, reportError, clearError };
 }

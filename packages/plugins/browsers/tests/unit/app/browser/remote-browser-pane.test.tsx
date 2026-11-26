@@ -518,6 +518,40 @@ describe('RemoteBrowserPane scoping', () => {
   });
 });
 
+describe('RemoteBrowserPane stream refusal', () => {
+  it('D-87 answers a display refused for want of the passkey with the one press that asks for it, then opens the display again', async () => {
+    const transport = new FakeTransport(runningStatus());
+    const stream = sockets();
+    const poll = pollSeam();
+    const renderer = await mountPane(
+      <RemoteBrowserPane
+        daemon={daemonA}
+        scope={scopeA}
+        transport={transport}
+        schedule={poll.schedule}
+        observeSize={sizeObserver().observeSize}
+        socketFactory={stream.factory}
+      />,
+      nodeMock,
+    );
+    expect(stream.opened).toHaveLength(1);
+
+    await runAsync(async () =>
+      stream.opened[0]?.emit(
+        'close',
+        new CloseEvent('close', { code: 1008, reason: 'the daemon refused this stream: 403' }),
+      ),
+    );
+    expect(json(renderer)).toContain('Confirm with passkey');
+    expect(transport.dispatched()).toEqual([]);
+
+    await runAsync(async () => control(renderer, 'Confirm with passkey').props.onClick());
+    // The press is the explicit act that may ask for the passkey; nothing before it did.
+    expect(transport.dispatched()).toEqual([{ action: 'start' }]);
+    expect(stream.opened).toHaveLength(2);
+  });
+});
+
 describe('RemoteBrowserPane viewport', () => {
   const mountResizable = async (extra: Record<string, unknown> = {}) => {
     const transport = new FakeTransport(runningStatus());
