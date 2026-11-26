@@ -121,7 +121,7 @@ export class InPlaceWorktrees {
     return {
       create: async input => await this.base.create(input),
       examine: async input =>
-        input.managed.origin === 'adopted'
+        input.managed.origin === 'adopted' || input.reviewIdentity
           ? await this.#scoped(input.managed, async adapter => await adapter.examine(input)).catch(error =>
               unknownInspection(input.managed, error),
             )
@@ -197,6 +197,7 @@ export class InPlaceWorktrees {
             pins.set(held.cwd, held);
             return {
               rootReal: held.rootReal,
+              identity: `${held.identity.device}:${held.identity.inode}`,
               policyCwd: held.cwd,
               close: async () => {
                 pins.delete(held.cwd);

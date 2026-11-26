@@ -258,6 +258,7 @@ export interface WorktreeRemovalEvidence {
 }
 
 export interface CheckManagedWorktreeRemovalInput {
+  readonly reviewIdentity?: boolean;
   readonly managed: ManagedWorktree;
   readonly managedRoot: string;
   readonly ownerActive: boolean;
@@ -284,6 +285,8 @@ export interface ManagedWorktreeInspection {
 
 export interface RemoveManagedWorktreeInput extends CheckManagedWorktreeRemovalInput {
   readonly recordRemovalIdentity?: (identity: WorktreeAdoptionIdentity) => Promise<void>;
+  readonly expectedHead?: string;
+  readonly expectedIdentity?: import('../../../contract/worktrees.ts').ReviewedWorktreeIdentity;
   readonly overrides: readonly WorktreeRemovalOverride[];
   readonly deleteBranch: boolean;
   /** Re-read host occupancy inside the repository queue, before preflight AND after pinning at the delete boundary. */

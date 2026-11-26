@@ -578,13 +578,31 @@ export class ManagedWorktreeAdapter {
       ...(integrated === undefined ? {} : { integrated }),
       undetermined,
     };
+    // A missing directory identity is never usable by Tidy. Read it from the held directory, not a path stat.
+    if (
+      input.reviewIdentity &&
+      decision.removable &&
+      live.head !== undefined &&
+      live.branch === input.managed.branch &&
+      !live.detached
+    ) {
+      const held = await this.pinner.pin(input.managed.path);
+      try {
+        if (held.identity !== undefined && held.rootReal === input.managed.path)
+          decision.reviewedIdentity = {
+            recordId: input.managed.ownershipToken,
+            branchRef: `refs/heads/${input.managed.branch}`,
+            checkout: held.identity,
+            head: live.head,
+          };
+      } finally {
+        await held.close();
+      }
+    }
     return { live, decision, ...(branchEvidence === undefined ? {} : { branchEvidence }) };
   }
 
-  /**
-   * Remove under the repository queue: repeat the Git preflight, refusing ANY blocker change.
-   * Re-read occupancy after pinning, immediately before deleting, to catch a late shell or ferret.
-   */
+  /** Recheck Git and occupancy under the repository queue, then pin before deleting. */
   async remove(input: RemoveManagedWorktreeInput): Promise<RemovedManagedWorktree> {
     return await this.queue.run(input.managed.commonDir, async () => {
       const identity =
@@ -615,11 +633,29 @@ export class ManagedWorktreeAdapter {
             `refusing to remove ${fresh.decision.path}: checkout identity changed at the mutation boundary`,
             fresh.decision.blockers,
           ),
-        async () => {
+        async (pinnedCwd, checkoutIdentity) => {
           await verifyWorktreeOccupancy(refreshed, input.refreshEvidence);
-          const status = await this.gateway.status(fresh.decision.path);
-          if (JSON.stringify(status) !== JSON.stringify(fresh.live.status))
-            throw new WorktreeRemovalRefusal('the checkout status changed at the mutation boundary');
+          if (input.expectedHead !== undefined) {
+            const head = await this.gateway.head(pinnedCwd);
+            const branch = await this.gateway.attachedBranch(pinnedCwd);
+            const status = await this.gateway.status(pinnedCwd);
+            if (
+              head !== input.expectedHead ||
+              branch !== `refs/heads/${input.managed.branch}` ||
+              Object.values(status).some(Boolean) ||
+              (input.expectedIdentity !== undefined && checkoutIdentity !== input.expectedIdentity.checkout)
+            )
+              throw new WorktreeRemovalRefusal('the reviewed checkout changed at the mutation boundary', [
+                {
+                  code: 'undetermined_evidence',
+                  message: 'the checkout identity, branch, head or files changed; refresh and review it again',
+                },
+              ]);
+          } else {
+            const status = await this.gateway.status(pinnedCwd);
+            if (JSON.stringify(status) !== JSON.stringify(fresh.live.status))
+              throw new WorktreeRemovalRefusal('the checkout status changed at the mutation boundary');
+          }
           await input.recordRemovalIdentity?.(identity);
           const quarantine = quarantinePath(input.managed);
           try {
@@ -647,6 +683,7 @@ export class ManagedWorktreeAdapter {
         input.managed.repositoryRoot,
         input.managed.branch,
         !evidence.integrated,
+        input.expectedHead,
       );
       if (deletion.branchRetained === undefined) {
         throw new WorktreeError(
@@ -667,6 +704,7 @@ export class ManagedWorktreeAdapter {
     repositoryRoot: string,
     branch: string,
     force: boolean,
+    expectedHead?: string,
   ): Promise<{ readonly branchRetained: boolean | undefined; readonly errors: readonly string[] }> {
     const errors: string[] = [];
     let branchRetained: boolean | undefined = true;
@@ -679,7 +717,7 @@ export class ManagedWorktreeAdapter {
       } else {
         attempted = true;
         try {
-          await this.gateway.deleteBranch(pinned.policyCwd, branch, force);
+          await this.gateway.deleteBranch(pinned.policyCwd, branch, force, expectedHead);
         } catch (error) {
           errors.push(`branch deletion failed: ${message(error)}`);
         }
@@ -717,12 +755,12 @@ export class ManagedWorktreeAdapter {
   async #withPinned<Result>(
     expected: string,
     mismatch: () => Error,
-    use: (cwd: GitWorkingDirectory) => Promise<Result>,
+    use: (cwd: GitWorkingDirectory, identity?: string) => Promise<Result>,
   ): Promise<Result> {
     const pinned = await this.pinner.pin(expected);
     try {
       if (path.resolve(pinned.rootReal) !== path.resolve(expected)) throw mismatch();
-      return await use(pinned.policyCwd);
+      return await use(pinned.policyCwd, pinned.identity);
     } finally {
       await pinned.close();
     }
