@@ -3,6 +3,7 @@ import { UnsupportedHarnessFamilyError } from '@ferretry/core-ferrets/contract';
 import {
   byHarnessFamily,
   harnessFamily,
+  hasClaudeChannel,
   handoffReadArguments,
   judgeWatchedSends,
   parseSessionId,
@@ -50,8 +51,19 @@ describe('a harness the mailbox has no family for', () => {
     const cases = { claude: () => 'c', codex: () => 'x', unknown: () => 'none' };
     expect(byHarnessFamily(THIRD, cases)).toBe('none');
     expect(byHarnessFamily(undefined, cases)).toBe('none');
-    expect(byHarnessFamily('claude-code', cases)).toBe('c');
+    expect(byHarnessFamily('claude', cases)).toBe('c');
     expect(byHarnessFamily('codex', cases)).toBe('x');
+  });
+
+  it('keeps a plugin KEY apart from a family TOKEN: a third harness registered under the key `claude` is no Claude', () => {
+    // `claude` is the family word Ferrets' records stamp, never a plugin key (the Claude plugin's key is `claude-code`).
+    expect(harnessFamily('claude')).toBeUndefined();
+    expect(hasClaudeChannel(harnessFamily('claude'))).toBe(false);
+    expect(hasClaudeChannel(harnessFamily('claude-code'))).toBe(true);
+    // A key is not a family token either: the family dispatch answers only to the token.
+    const cases = { claude: () => 'c', codex: () => 'x', unknown: () => 'none' };
+    expect(byHarnessFamily('claude-code', cases)).toBe('none');
+    expect(byHarnessFamily(harnessFamily('claude-code'), cases)).toBe('c');
   });
 
   it('is refused by name where the handoff arguments would have been "not Claude, so none"', () => {

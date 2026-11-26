@@ -1,21 +1,28 @@
-import { isRecordedHarness, recordedHarnessOf, type RecordedFamily } from '@ferretry/core-ferrets/contract';
+import {
+  isRecordedHarness,
+  isRecordedHarnessKey,
+  recordedHarnessOf,
+  type RecordedFamily,
+} from '@ferretry/core-ferrets/contract';
 
 /**
- * Ferrets' harness key as the send policy and the transcript readers name the family: `claude-code` is `claude`. A
- * harness the family table (Ferrets' `records.ts`) has no row for is NO family: it gets no inline paste and no transcript
- * evidence, so nothing is pasted whole or typed again on a guess.
+ * Ferrets' harness PLUGIN KEY as the send policy and the transcript readers name the family: `claude-code` is `claude`. The
+ * key must be a row of the family table (Ferrets' `records.ts`) EXACTLY: a harness the table has no row for is NO family, and
+ * so is the family word `claude` itself, which is not a key (a third harness may register under it). It gets no inline paste
+ * and no transcript evidence, so nothing is pasted whole or typed again on a guess.
  */
 export const harnessFamily = (key: string): RecordedFamily | undefined => {
+  if (!isRecordedHarnessKey(key)) return undefined;
   const family = recordedHarnessOf(key);
   return isRecordedHarness(family) ? family : undefined;
 };
 
 /**
- * Whether a harness is reached through the Claude channel (an MCP server the Claude CLI listens on). Only Claude's is: Codex
- * has no channel, and a harness this build has no family for is typed to, never pushed down a channel built for Claude.
+ * Whether a harness FAMILY is reached through the Claude channel (an MCP server the Claude CLI listens on). Only Claude's is:
+ * Codex has no channel, and a harness this build has no family for is typed to, never pushed down a channel built for Claude.
  */
-export const hasClaudeChannel = (harness: string | undefined): boolean =>
-  byHarnessFamily(harness, { claude: () => true, codex: () => false, unknown: () => false });
+export const hasClaudeChannel = (family: string | undefined): boolean =>
+  byHarnessFamily(family, { claude: () => true, codex: () => false, unknown: () => false });
 
 /** What each family does, and what a harness the table has no row for does: a case a caller must write out. */
 export interface FamilyCases<T> {
@@ -25,11 +32,12 @@ export interface FamilyCases<T> {
 }
 
 /**
- * Total over a harness: the family's case, or `unknown` for a harness with no family (and for no harness at all). Where a
- * caller must refuse instead, it uses Ferrets' `byRecordedHarness`, which throws; this one is for a policy whose honest
- * answer for a harness it cannot read is "no" (no channel, no retraction proof), written out where it is decided.
+ * Total over a family TOKEN (`claude`, `codex`, what {@link harnessFamily} answers and what records and parsers carry): the
+ * family's case, or `unknown` for anything else (a plugin key included, which {@link harnessFamily} turns into its family
+ * first) and for no harness at all. Where a caller must refuse instead, it uses Ferrets' `byRecordedHarness`, which throws;
+ * this one is for a policy whose honest answer for a harness it cannot read is "no" (no channel, no retraction proof),
+ * written out where it is decided.
  */
-export function byHarnessFamily<T>(harness: string | undefined, cases: FamilyCases<T>): T {
-  const family = harness === undefined ? undefined : harnessFamily(harness);
-  return family === undefined ? cases.unknown() : cases[family]();
+export function byHarnessFamily<T>(family: string | undefined, cases: FamilyCases<T>): T {
+  return family !== undefined && isRecordedHarness(family) ? cases[family]() : cases.unknown();
 }
