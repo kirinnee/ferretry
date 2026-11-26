@@ -276,12 +276,15 @@
   .fy-browser-bar [data-browser-bar-part='page'] {
     max-width: 5rem;
   }
+  /* The chip's word is never cut: its box is as wide as the longest word it speaks (ch grows with the text size), so
+     it neither clips "Working" at a larger text size nor widens and wraps the bar when the word changes. */
   .fy-browser-bar [data-browser-bar-part='chip'] {
-    max-width: 6.5rem;
     margin-inline-end: auto;
   }
   .fy-browser-bar [data-browser-bar-part='chip'] button {
-    max-width: 100%;
+    min-width: 11ch;
+    max-width: none;
+    justify-content: center;
   }
   .fy-browser-bar [data-browser-bar-part='forward'] {
     display: none;
