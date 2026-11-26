@@ -95,7 +95,9 @@ export function launchDetails(
   before: FerretDetails | undefined,
   fast: boolean | undefined,
   notice?: string,
-): FerretDetails {
+): FerretDetails | undefined {
+  // An ordinary relaunch has no outcome to record; leave all existing details writers and events alone.
+  if (notice === undefined && before?.notice === undefined) return undefined;
   const { notice: _previous, ...kept } = before ?? {};
   return {
     ...kept,

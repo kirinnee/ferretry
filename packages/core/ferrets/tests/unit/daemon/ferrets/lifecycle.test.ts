@@ -675,10 +675,10 @@ test('U0c a revive whose model cannot be verified fast launches WITHOUT the paid
   const revived = await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
 
   expect(revived.ok).toBe(true);
-  expect(f.harness.launched.at(-1)?.options?.fast).toBeUndefined();
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(false);
   expect(f.harness.launched.at(-1)?.model).toBe('gpt-plain');
   // The fast question, then the same start asked plainly so every other taker still has its say.
-  expect(asked.map(question => question.fast)).toEqual([true, undefined]);
+  expect(asked.map(question => question.fast)).toEqual([true, false]);
 });
 
 test('U0c a true observation for ANOTHER model never turns a start that set no fast into a paid launch of the original model', async () => {
@@ -695,7 +695,7 @@ test('U0c a true observation for ANOTHER model never turns a start that set no f
   await f.service.resume(id, undefined, { origin: PERSON_ORIGIN });
 
   expect(asked[0]).toEqual({ by: 'resume', model: 'gpt-plain', fast: true });
-  expect(f.harness.launched.at(-1)?.options?.fast).toBeUndefined();
+  expect(f.harness.launched.at(-1)?.options?.fast).toBe(false);
 });
 
 test('U0c a refusal that is not about fast mode still refuses the revive', async () => {
