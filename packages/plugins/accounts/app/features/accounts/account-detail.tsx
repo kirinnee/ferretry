@@ -272,7 +272,7 @@ function KeyRow({
   const stateWords = keyStateWords(keyOf);
   return (
     <li
-      className="flex min-w-0 flex-col gap-1 rounded-control border border-border bg-surface p-2"
+      className="flex min-w-0 flex-col gap-1 rounded-panel border border-border bg-surface p-panel"
       data-accounts-key={keyOf.id}
       {...(state === undefined ? {} : { 'data-accounts-key-state': state })}
     >
@@ -380,7 +380,7 @@ function AddKeyForm({
   return (
     <form
       aria-label="Add a 2FA key"
-      className="flex min-w-0 flex-col gap-3 rounded-control border border-border p-3"
+      className="flex min-w-0 flex-col gap-3 rounded-panel border border-border p-panel"
       data-accounts-key-form=""
       onSubmit={event => void submit(event)}
     >
@@ -480,7 +480,7 @@ function SitesTab({ account, accounts, signIns, ops, busy, error, onOpenSite }: 
           {signIns.map(signIn => (
             <li
               key={signIn.id}
-              className="flex min-w-0 items-center gap-2 rounded-control border border-border bg-surface p-2"
+              className="flex min-w-0 items-center gap-2 rounded-panel border border-border bg-surface p-panel"
               data-accounts-signin={signIn.id}
             >
               <button
@@ -553,7 +553,7 @@ function AddSiteForm({
   return (
     <form
       aria-label="Add a site"
-      className="flex min-w-0 flex-col gap-3 rounded-control border border-border p-3"
+      className="flex min-w-0 flex-col gap-3 rounded-panel border border-border p-panel"
       data-accounts-site-form=""
       onSubmit={event => void submit(event)}
     >

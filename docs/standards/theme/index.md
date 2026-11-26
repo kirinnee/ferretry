@@ -44,15 +44,38 @@ A centred figure is centred with `margin-inline: auto`, not by hoping the column
 [`tests/support/browser/round-safe.ts`](../../../packages/app/tests/support/browser/round-safe.ts) is geometric, not a human
 look. It reads every rounded, painted box on a page in a real browser and fails when the four corners of any content inside
 it (a line of text, an icon, a nested button) fall outside the box's **inner rounded rectangle**: the border box inset by
-its borders, with the used radii (scaled down together when two corners would overlap, as CSS does). It skips what it
-cannot judge: a box that paints nothing, a phrase that wraps over lines, content outside the box, a box under 28px a side,
-and anything a browser skips (a closed `<details>`).
+its borders, with the used radii (scaled down together when two corners would overlap, as CSS does).
 
-It runs at 390 and 1440, light and dark, in the default look (Studio) and the roundest looks:
+**Partly inside is a miss.** Content in the box's normal flow that is only part of the way inside (a button 4px past the
+banner's left edge near its bottom corner, the owner's bug) fails, whichever edge or corner it crosses. Content that sits
+outside the box altogether, or out of flow (`position: absolute` / `fixed`: a popover, a badge), or that a clipping or scrolling
+box cuts (`overflow` other than `visible`, an ellipsis: a truncated title is judged where it is seen), is judged only where it
+sits inside the box.
 
-- `packages/app/tests/integration/round-safe-settings.visual.test.ts`: every settings tab of every plugin, Studio, Gen Z and
-  Neumorphism.
+**Current limits (what it cannot judge):** a box that paints nothing (no fill, border or shadow), a phrase that wraps over
+lines, a box under 28px a side (a dot, a badge, a check mark), a painted child or icon in a box that clips to its own curve, and
+anything a browser skips (a closed `<details>`). It reads a page as drawn: a state nobody opens (a hover, a menu, a route with
+no fake data) is not judged. The gate is judged itself: `tests/unit/round-safe.test.ts` holds its arithmetic, and
+`daemons-round-safe.visual.test.ts` moves the banner's button 18px left and 8px down in a real browser and expects red.
+
+It runs at 390 and 1440, light and dark, in the default look (Studio) and the roundest looks (Gen Z, Neumorphism; the
+daemons page also Glass, Lucid and Briefing):
+
+- `packages/app/tests/integration/round-safe-routes.visual.test.ts`: the whole route inventory of the real app over one fake
+  machine: the machine's home, standalone Settings (this device), Ferrets, Chat, Agenda, Board, Projects, PRs & CI, Sharing,
+  Lessons, Insights, Warden, the machine's settings, and the pairing page. `NOT_DRAWN` in that file names what the fake
+  machine cannot draw (PR list rows and CI pages: no GitHub read; Sharing's other tabs).
+- `packages/app/tests/integration/round-safe-first-run.visual.test.ts`: the first run walked page by page (start, install,
+  daemon, open, pair, every page of the setup flow, the end page).
+- `packages/app/tests/integration/round-safe-settings.visual.test.ts`: every settings tab of every plugin.
+- `packages/app/tests/integration/round-safe-specimen.visual.test.ts`: the component specimen (panels, callouts, menus, fields,
+  tables, code blocks, buttons).
+- `packages/app/tests/integration/round-safe-machine-stop.visual.test.ts`: the full-page "cannot use this machine" screens, in
+  every end state.
 - `packages/plugins/access/tests/integration/app/daemons-round-safe.visual.test.ts`: the daemons page in each of its states
-  (plain, Back, device-refused notice, both) in Studio and every look that rounds, plus the ferret centred within 2px.
+  (plain, Back, device-refused notice, both), plus the ferret centred within 2px.
+- `packages/plugins/access/tests/integration/app/pair-round-safe.visual.test.ts`: the empty pair view and its opened
+  scanner, paste and help states, the confirm screen and the failure panel.
 
-A new surface that breaks the rule fails these at the look that shows it. Fix the surface (or the token), never the gate.
+A new surface that breaks the rule fails these at the look that shows it. Fix the surface (or the token), never the gate. A new
+route goes into `ROUTES` of the routes test, a new full-page state into its own scene test.

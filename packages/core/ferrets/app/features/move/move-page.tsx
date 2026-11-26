@@ -118,7 +118,7 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
       {load.status === 'loading' ? (
         <Loading kind="bar" label="Reading the ferret…" />
       ) : load.status === 'failed' ? (
-        <section className="m-4 rounded-control border border-err bg-surface-2 p-4" data-move-failed="" role="alert">
+        <section className="m-4 rounded-panel border border-err bg-surface-2 p-4" data-move-failed="" role="alert">
           <p className="m-0 break-words text-ui leading-base text-err">{load.message}</p>
           <div className="mt-3 flex gap-sm">
             <Button
@@ -136,7 +136,7 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
           </div>
         </section>
       ) : load.status === 'moved' ? (
-        <section className="m-4 rounded-control border border-border bg-surface-2 p-4" data-move-done="" role="status">
+        <section className="m-4 rounded-panel border border-border bg-surface-2 p-4" data-move-done="" role="status">
           <p className="m-0 text-title font-semibold text-fg">{load.notice}</p>
           <p className="mt-1 text-ui leading-base text-muted">
             {load.summary.name} is relaunching on {load.summary.runtime ?? 'its new account'}.
@@ -147,7 +147,7 @@ export function MovePage({ client, ferret, slot, onClose, initialMode = 'account
         </section>
       ) : !isConvertible(load.summary) ? (
         <section
-          className="m-4 rounded-control border border-border bg-surface-2 p-4"
+          className="m-4 rounded-panel border border-border bg-surface-2 p-4"
           data-move-unsupported=""
           role="status"
         >

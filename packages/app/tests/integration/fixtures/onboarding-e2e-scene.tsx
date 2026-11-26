@@ -4,7 +4,7 @@
  * no network. `window.__fake` is the test's window onto each machine's side of every answer.
  *
  *   /            a first visit: the shell sends a device with no daemon to the first run
- *   ?theme=<family>-<mode>
+ *   ?theme=<family>-<mode>      ?style=<id>&palette=<id>&mode=light|dark (open wearing a look)
  *   ?paused=<plugin>[,<plugin>…]   the machines report that plugin as off and list none of its steps, as a daemon with it switched off does
  *
  * Pairing is REAL up to the wire: Access's pairing page reads the link, mints its device key in the browser, and asks the
@@ -22,8 +22,8 @@ import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
-import { memoryStore } from '../../../src/storage/records.ts';
-import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
+import { THEME_PREFERENCES_KEY, ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
 import { FAKE_CODE, FakeDaemon, type FakeStep, MACHINES } from './onboarding-e2e-daemon.ts';
 import { extraRoutes } from './onboarding-e2e-routes.ts';
@@ -142,6 +142,14 @@ const runtime: ShellRuntime = new ShellRuntime({
   address: window,
 });
 const storage = memoryStore();
+// `?style=<id>&palette=<id>&mode=light|dark`: open the app already wearing that look (the stored preference the picker would write).
+if (params.get('style') !== null)
+  writeRecord(storage, THEME_PREFERENCES_KEY, {
+    style: params.get('style'),
+    palette: params.get('palette') ?? 'studio',
+    mode: params.get('mode') ?? 'light',
+    textScale: 'default',
+  });
 
 const root = document.getElementById('root');
 if (root !== null)

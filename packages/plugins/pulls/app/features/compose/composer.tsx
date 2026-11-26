@@ -131,7 +131,7 @@ export function Composer({
       </p>
       {phase.status === 'secret' && (
         <div
-          className="grid gap-xs rounded-control border-2 border-warn bg-warn/10 p-sm text-ui text-fg"
+          className="grid gap-xs rounded-panel border-2 border-warn bg-warn/10 p-panel text-ui text-fg"
           data-compose-secret=""
           role="alert"
         >
@@ -157,7 +157,7 @@ export function Composer({
       )}
       {phase.status === 'unknown' && (
         <div
-          className="grid gap-xs rounded-control border-2 border-warn bg-warn/10 p-sm text-ui text-fg"
+          className="grid gap-xs rounded-panel border-2 border-warn bg-warn/10 p-panel text-ui text-fg"
           data-compose-unknown=""
           role="status"
         >

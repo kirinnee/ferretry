@@ -71,7 +71,8 @@
   gap: 6px;
   max-width: none;
   min-height: 44px; /* the touch floor */
-  padding: 8px 4px;
+  /* Small by design, so the inline padding is the shared rule's floor (half the corner radius), not a literal that meets the curve at the roundest looks. */
+  padding: 8px max(4px, calc(var(--radius-panel-max) * 0.5));
 }
 /* A name is never broken mid-word: it wraps between words or it fits (the shared card breaks anywhere, which cut "Glassmorphism"). */
 :root:root .fy-astep .fy-cc .fy-cc__title {
@@ -97,8 +98,9 @@
 .fy-astep .fy-cc__check {
   block-size: 16px;
   inline-size: 16px;
-  inset-block-start: 4px;
-  inset-inline-end: 4px;
+  /* in from the card's corner by the curve it has: at 23px radius a badge on a 4px inset reaches the arc */
+  inset-block-start: max(4px, calc(var(--radius-panel-max) * 0.3));
+  inset-inline-end: max(4px, calc(var(--radius-panel-max) * 0.3));
 }
 
 /* ---- the little pictures: each is drawn IN its own style or palette (a [data-swatch] scope re-declares every token) ---- */

@@ -140,6 +140,26 @@ for (const look of LOOKS) {
             const misses = await roundSafeMisses(tabs.get(state.name) as Page);
             expect(misses, `\n${describeRoundMisses(misses)}`).toEqual([]);
           });
+          // The gate itself is judged against the owner's bug: a button that pokes 4px out of the banner near its bottom-left corner
+          // (the banner's "Pair again" moved 18px left and 8px down). A gate that skipped partly-protruding content stayed green here.
+          if (state.name.endsWith('refused') && look.style === 'genz' && scheme === 'light')
+            it(`${state.name}: the gate turns RED when "Pair again" is moved 18px left and 8px down`, async () => {
+              const tab = tabs.get(state.name) as Page;
+              expect(await roundSafeMisses(tab), 'the unmoved banner is round-safe').toEqual([]);
+              await tab.evaluate(() => {
+                const button = document.querySelector('[data-device-refused-pair]') as HTMLElement;
+                button.style.transform = 'translate(-18px, 8px)';
+              });
+              try {
+                const misses = await roundSafeMisses(tab);
+                expect(misses.length, 'a button poking out of its banner is a miss').toBeGreaterThan(0);
+                expect(misses.some(m => m.leaf.includes('Pair again'))).toBe(true);
+              } finally {
+                await tab.evaluate(() => {
+                  (document.querySelector('[data-device-refused-pair]') as HTMLElement).style.transform = '';
+                });
+              }
+            });
           it(`${state.name}: the ferret is centred over the column, within 2 px`, async () => {
             const { ferret, column } = await centres(tabs.get(state.name) as Page);
             expect(Math.abs(ferret - column), `ferret ${ferret}, column ${column}`).toBeLessThanOrEqual(2);

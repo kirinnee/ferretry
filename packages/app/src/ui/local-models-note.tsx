@@ -59,7 +59,7 @@ export function LocalModelsNote({ id, local, write = browserClipboardWriter() }:
   const tone = note.state === 'disabled' ? 'border-border-strong bg-surface-2' : 'border-warn-border bg-warn-bg';
   return (
     <div
-      className={`mt-2 flex min-w-0 flex-col gap-1 rounded-control border px-control-x py-row-y ${tone}`}
+      className={`mt-2 flex min-w-0 flex-col gap-1 rounded-panel border px-panel py-row-y ${tone}`}
       data-local-models-note={note.state}
       id={id}
       role="status"

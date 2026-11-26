@@ -22,7 +22,7 @@ export function SpendTodayPanel({ client, now }: { readonly client: UsageClient;
   const usd = useSpendToday(connection, client, now);
   return (
     <RouteLink
-      className="flex min-h-[88px] min-w-0 flex-col justify-between rounded-panel border border-border bg-surface px-3 py-2.5 text-fg no-underline transition-colors hover:bg-surface-2"
+      className="flex min-h-[88px] min-w-0 flex-col justify-between rounded-panel border border-border bg-surface px-panel py-2.5 text-fg no-underline transition-colors hover:bg-surface-2"
       data-home-tile="Spend today"
       to={daemonInsightsPath(connection.daemonId)}
       {...(router ? { onNavigate: router.navigate } : {})}

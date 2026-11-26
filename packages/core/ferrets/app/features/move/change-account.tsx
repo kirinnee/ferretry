@@ -308,7 +308,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
 
             {context.conversationTooLarge ? (
               <div
-                className="mt-3 rounded-control border border-err bg-surface-2 p-3 text-ui leading-base text-err"
+                className="mt-3 rounded-panel border border-err bg-surface-2 p-panel text-ui leading-base text-err"
                 role="alert"
               >
                 <div className="flex items-start gap-sm">
@@ -320,7 +320,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
                 </div>
               </div>
             ) : context.isDowngrade && context.currentWindow !== undefined && context.targetWindow !== undefined ? (
-              <div className="mt-3 rounded-control border border-warn-border bg-surface-2 p-3">
+              <div className="mt-3 rounded-panel border border-warn-border bg-surface-2 p-panel">
                 <div className="flex items-start gap-sm text-warn">
                   <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={17} />
                   <p className="m-0 text-ui leading-base">
@@ -378,7 +378,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
         {phase === 'refused' && failure ? (
           <section
             aria-labelledby={`${headingId}-refused-heading`}
-            className="rounded-control border border-err bg-surface-2 p-4"
+            className="rounded-panel border border-err bg-surface-2 p-4"
           >
             <div className="flex items-start gap-sm text-err">
               <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={19} />
@@ -390,7 +390,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
               </div>
             </div>
             <pre
-              className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-control border border-border bg-code-bg p-3 text-code leading-base text-code-fg"
+              className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-panel border border-border bg-code-bg p-panel text-code leading-base text-code-fg"
               role="alert"
             >
               {failure.message}
@@ -409,7 +409,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
         ) : phase === 'downgrade' && failure ? (
           <section
             aria-labelledby={`${headingId}-downgrade-heading`}
-            className="rounded-control border border-warn-border bg-surface-2 p-4"
+            className="rounded-panel border border-warn-border bg-surface-2 p-4"
           >
             <div className="flex items-start gap-sm text-warn">
               <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={19} />
@@ -432,7 +432,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
               Use {failure.suggestedModel ? <span className="mono">{failure.suggestedModel}</span> : 'a 1M model'}{' '}
               instead
             </Button>
-            <label className="mt-3 flex min-h-[52px] items-start gap-sm rounded-control border border-warn-border p-3 text-ui text-fg">
+            <label className="mt-3 flex min-h-[52px] items-start gap-sm rounded-panel border border-warn-border p-panel text-ui text-fg">
               <input
                 checked={downgradeAcknowledged}
                 className="mt-1 h-4 w-4 shrink-0"
@@ -445,7 +445,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
         ) : (
           <section
             aria-labelledby={`${headingId}-confirm-heading`}
-            className="rounded-control border border-warn-border bg-surface-2 p-4"
+            className="rounded-panel border border-warn-border bg-surface-2 p-4"
           >
             <div className="flex items-start gap-sm text-warn">
               <AlertTriangle aria-hidden="true" className="mt-0.5 shrink-0" size={19} />
@@ -467,7 +467,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
           <h2 id={`${headingId}-target-heading`} className="m-0 text-ui font-semibold text-fg">
             Requested runtime
           </h2>
-          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-sm rounded-control border border-border bg-surface-2 p-3 text-ui">
+          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-sm rounded-panel border border-border bg-surface-2 p-panel text-ui">
             {accountName(currentAgent, 'text-muted')}
             <ArrowRight aria-hidden="true" className="shrink-0 text-accent" size={15} />
             {accountName(target?.agent ?? agent.trim(), 'font-semibold text-fg')}
@@ -477,7 +477,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
 
         {busy ? (
           <div
-            className="flex items-center gap-sm rounded-control border border-warn bg-surface-2 p-3 text-ui font-semibold text-warn"
+            className="flex items-center gap-sm rounded-panel border border-warn bg-surface-2 p-panel text-ui font-semibold text-warn"
             role="alert"
           >
             <RefreshCw aria-hidden="true" className="shrink-0" size={17} />
@@ -486,7 +486,7 @@ export function ChangeAccount({ summary, slot, move, askToStopJobs, onCancel, on
         ) : null}
 
         {phase === 'confirm' && failure ? (
-          <div className="rounded-control border border-err bg-surface-2 p-4" role="alert">
+          <div className="rounded-panel border border-err bg-surface-2 p-4" role="alert">
             <h2 className="m-0 text-title font-semibold text-fg">{failure.title}</h2>
             <p className="mt-2 break-words text-ui leading-base text-err">{failure.message}</p>
             <p className="mt-2 text-ui leading-base text-muted">{failure.guidance}</p>
@@ -542,7 +542,7 @@ function AgentJobsAsk({
 }) {
   const asked = ask.state === 'asked' ? ask.result : null;
   return (
-    <div className="mt-3 rounded-control border border-border bg-surface p-3" data-agent-jobs-ask="">
+    <div className="mt-3 rounded-panel border border-border bg-surface p-panel" data-agent-jobs-ask="">
       <p className="m-0 text-ui font-semibold text-fg">
         {jobs.length === 1 ? 'This is a job the agent started itself' : 'These are jobs the agent started itself'}
       </p>

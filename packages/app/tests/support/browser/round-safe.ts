@@ -14,6 +14,11 @@
  * corners inside the box's INNER rounded rectangle (the border box inset by its borders, with the used radii: the
  * computed radii scaled down together when two corners would overlap, as CSS does).
  *
+ * In-flow content that is only PARTLY inside its box fails too, wherever it pokes out (a button 4px past a banner's left edge near
+ * its bottom corner is the owner's bug, and a gate that skipped it passed green): an edge it crosses is a miss, as is a corner it
+ * is past. Only content that sits outside the box altogether, or out of flow (absolute, fixed), or that a clipping or scrolling
+ * box cuts (`overflow` other than `visible`, an ellipsis), is judged just where it sits inside.
+ *
  * What it does not judge, on purpose: a box that paints nothing (no fill, border or shadow: it shows no curve), an inline phrase
  * that wraps over lines, content that sits outside the box altogether (a popover, an overflow: that is
  * the overflow checks' business), a box under 28px a side (a dot, a badge, a check mark), and a painted child or an
@@ -48,6 +53,12 @@ interface RawLeaf {
   readonly kind: 'text' | 'painted';
   readonly rect: Rect;
   readonly radii?: Corners;
+  /**
+   * True for content in the box's normal flow that nothing clips: it must stay inside the box altogether, so a part of it past
+   * an EDGE is a miss too (the owner's bug: a button poking out of a banner's corner). False for an out-of-flow or clipped
+   * piece (a popover, a badge, text a scroller cuts), which is judged only where it sits inside the box.
+   */
+  readonly inFlow?: boolean;
 }
 
 /** One rounded box, as the page reports it, with only the content that reaches one of its corner zones. */
@@ -55,6 +66,8 @@ export interface RawBox {
   readonly what: string;
   /** The padding box (the border box inset by its borders), in viewport px. */
   readonly inner: Rect;
+  /** The border box, in viewport px: what in-flow content may not leave. */
+  readonly outer?: Rect;
   /** The USED radii of the inner edge, in px (scaled, then reduced by the border widths). */
   readonly radii: Corners;
   readonly leaves: readonly RawLeaf[];
@@ -63,7 +76,8 @@ export interface RawBox {
 export interface RoundMiss {
   readonly box: string;
   readonly leaf: string;
-  readonly corner: 'tl' | 'tr' | 'br' | 'bl';
+  /** A corner the content is past the curve of, or the side of the box it pokes out of. */
+  readonly corner: 'tl' | 'tr' | 'br' | 'bl' | 'left' | 'right' | 'top' | 'bottom';
   /** How far past the curve the corner of the content is, in px. */
   readonly outsideBy: number;
   readonly radius: string;
@@ -71,6 +85,8 @@ export interface RoundMiss {
 
 /** Sub-pixel layout noise is not a miss. */
 const ROUND_TOLERANCE_PX = 0.75;
+/** How far in-flow content may sit past its box's border edge before it is a protrusion (borders and sub-pixel rounding). */
+const EDGE_TOLERANCE_PX = 1;
 
 /**
  * How far a point is OUTSIDE the inner rounded rectangle, measured along the corner arc's radius, in px; 0 or less when
@@ -150,6 +166,23 @@ export const roundMisses = (boxes: readonly RawBox[]): readonly RoundMiss[] => {
   const out: RoundMiss[] = [];
   for (const box of boxes) {
     for (const leaf of box.leaves) {
+      if (leaf.inFlow === true && box.outer !== undefined) {
+        const sides = [
+          ['left', box.outer.left - leaf.rect.left],
+          ['right', leaf.rect.right - box.outer.right],
+          ['top', box.outer.top - leaf.rect.top],
+          ['bottom', leaf.rect.bottom - box.outer.bottom],
+        ] as const;
+        for (const [side, past] of sides)
+          if (past > EDGE_TOLERANCE_PX)
+            out.push({
+              box: box.what,
+              leaf: leaf.what,
+              corner: side,
+              outsideBy: Math.round(past * 10) / 10,
+              radius: describeRadius(box.radii.tl),
+            });
+      }
       for (const corner of NAMES) {
         const [x, y] = cornerPoint(leaf.rect, corner, leaf.radii?.[corner]);
         const past = outsideCurveBy(x, y, box.inner, box.radii);
@@ -270,6 +303,22 @@ const collectRoundBoxes = (): RawBox[] => {
     // Content outside the box altogether (a popover, an overflow) is another check's business.
     const within = (rect: { left: number; top: number; right: number; bottom: number }): boolean =>
       rect.left >= r.left - 1 && rect.top >= r.top - 1 && rect.right <= r.right + 1 && rect.bottom <= r.bottom + 1;
+    const overlaps = (rect: { left: number; top: number; right: number; bottom: number }): boolean =>
+      rect.left < r.right && rect.right > r.left && rect.top < r.bottom && rect.bottom > r.top;
+    // In-flow content that nothing clips must stay inside the box: a part of it past an edge is a PROTRUSION, judged, not skipped
+    // (a button poking 4px out of a banner's corner is the owner's bug). Out-of-flow pieces (absolute, fixed, a popover) and
+    // content a clipping or scrolling box cuts are judged only where they sit inside the box.
+    const inFlowOf = (start: Element | null): boolean => {
+      for (let at = start; at !== null; at = at.parentElement) {
+        const s = getComputedStyle(at);
+        if (at !== element && (s.position === 'absolute' || s.position === 'fixed')) return false;
+        if (s.overflowX !== 'visible' || s.overflowY !== 'visible' || s.textOverflow === 'ellipsis') return false;
+        if (at === element) return true;
+      }
+      return false;
+    };
+    const judged = (rect: { left: number; top: number; right: number; bottom: number }, flows: boolean): boolean =>
+      flows ? overlaps(rect) && (within(rect) ? reachesACorner(rect) : true) : within(rect) && reachesACorner(rect);
 
     const leaves: RawLeaf[] = [];
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
@@ -287,8 +336,26 @@ const collectRoundBoxes = (): RawBox[] => {
           range.selectNodeContents(node);
           for (const line of Array.from(range.getClientRects())) {
             const rect = { left: line.left, top: line.top, right: line.right, bottom: line.bottom };
-            if (line.width > 0 && line.height > 0 && within(rect) && reachesACorner(rect))
-              leaves.push({ what: `text "${(node.textContent ?? '').trim().slice(0, 24)}"`, kind: 'text', rect });
+            // A line a descendant clips (a truncated title: its text runs on under an ellipsis) is judged where it is SEEN, not
+            // where it would run to. The box's own clipping is not taken: a clipped letter in the box itself is still cut off.
+            for (let at: Element | null = parent; at !== null && at !== element; at = at.parentElement) {
+              const cs = getComputedStyle(at);
+              if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+              const cr = at.getBoundingClientRect();
+              rect.left = Math.max(rect.left, cr.left);
+              rect.top = Math.max(rect.top, cr.top);
+              rect.right = Math.min(rect.right, cr.right);
+              rect.bottom = Math.min(rect.bottom, cr.bottom);
+            }
+            if (rect.right <= rect.left || rect.bottom <= rect.top) continue;
+            const flows = inFlowOf(parent);
+            if (judged(rect, flows))
+              leaves.push({
+                what: `text "${(node.textContent ?? '').trim().slice(0, 24)}"`,
+                kind: 'text',
+                rect,
+                inFlow: flows,
+              });
           }
         }
       } else {
@@ -302,7 +369,8 @@ const collectRoundBoxes = (): RawBox[] => {
         if (!clips && visible(child) && paint(child, childStyle) === 'all') {
           const cr = child.getBoundingClientRect();
           const rect = { left: cr.left, top: cr.top, right: cr.right, bottom: cr.bottom };
-          if (within(rect) && reachesACorner(rect)) {
+          const flows = inFlowOf(child);
+          if (judged(rect, flows)) {
             // A child that fills its parent's whole box is the same box, not content: skip a twin of the parent.
             const twin =
               Math.abs(cr.left - r.left) < 1 &&
@@ -315,13 +383,21 @@ const collectRoundBoxes = (): RawBox[] => {
                 kind: 'painted',
                 rect,
                 radii: used(childStyle, cr.width, cr.height),
+                inFlow: flows,
               });
           }
         }
       }
       node = walker.nextNode();
     }
-    if (leaves.length > 0) boxes.push({ what: describe(element), inner, radii: innerRadii, leaves });
+    if (leaves.length > 0)
+      boxes.push({
+        what: describe(element),
+        inner,
+        outer: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+        radii: innerRadii,
+        leaves,
+      });
   }
   return boxes;
 };

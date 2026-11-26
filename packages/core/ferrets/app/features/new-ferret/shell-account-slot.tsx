@@ -31,7 +31,7 @@ export function ShellAccountSlot({ daemon, slot, fallback }: AccountSlotProps): 
   // nothing below Runtime; the well can therefore be exactly as tall as what it holds: the picker, the typed fallback
   // or the "no runtime" notice. It is a quiet well so a short readout still reads as one field.
   return (
-    <div className="rounded-control border border-border bg-surface-2 p-2" data-runtime-slot="" ref={root}>
+    <div className="rounded-panel border border-border bg-surface-2 p-panel" data-runtime-slot="" ref={root}>
       <PanelSlot daemon={daemon} props={{ ...slot }} slot={NEW_FERRET_ACCOUNT_SLOT} />
       {picker ? null : fallback}
     </div>

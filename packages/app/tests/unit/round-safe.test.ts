@@ -66,4 +66,40 @@ describe('roundMisses', () => {
     const text = { what: 'text', kind: 'text' as const, rect: { left: 5.9, top: 5.9, right: 100, bottom: 30 } };
     expect(roundMisses([box(round(20), [text])])).toEqual([]);
   });
+
+  it('fails in-flow content that is only partly inside its box: a button 4px past the left edge near the bottom-left corner', () => {
+    // The owner's banner with "Pair again" moved 18px left and 8px down: its bottom-left corner is past the curve AND past the edge.
+    const button = {
+      what: 'button "Pair again"',
+      kind: 'painted' as const,
+      rect: { left: -4, top: 50, right: 80, bottom: 98 },
+      radii: round(22),
+      inFlow: true,
+    };
+    const found = roundMisses([{ ...box(round(20), [button]), outer: rect }]);
+    expect(found.map(m => m.corner)).toContain('left');
+    expect(found.find(m => m.corner === 'left')?.outsideBy).toBeCloseTo(4, 0);
+  });
+
+  it('fails in-flow content that pokes out of a straight edge, away from every corner', () => {
+    const text = {
+      what: 'text "long"',
+      kind: 'text' as const,
+      rect: { left: 60, top: 40, right: 230, bottom: 60 },
+      inFlow: true,
+    };
+    const found = roundMisses([{ ...box(round(20), [text]), outer: rect }]);
+    expect(found.map(m => m.corner)).toEqual(['right']);
+  });
+
+  it('does not call a protrusion for content that is out of flow or cut by its box', () => {
+    const badge = {
+      what: 'badge',
+      kind: 'painted' as const,
+      rect: { left: 180, top: 40, right: 230, bottom: 60 },
+      radii: round(10),
+      inFlow: false,
+    };
+    expect(roundMisses([{ ...box(round(20), [badge]), outer: rect }])).toEqual([]);
+  });
 });
