@@ -14,6 +14,7 @@ import { CatalogsConfigFile } from '@ferretry/plugin-catalogs/contract';
 import { CLAUDE_CODE_CONFIG, CLAUDE_CODE_HOOKS, CLAUDE_CODE_SETTINGS } from '@ferretry/plugin-claude-code/contract';
 import { CODEX_CONFIG, CODEX_HOOKS, CODEX_SETTINGS } from '@ferretry/plugin-codex/contract';
 import { ConnectionsConfigSchema } from '@ferretry/plugin-connections/contract';
+import { CONNECTOR_CONFIG } from '@ferretry/plugin-connector/contract';
 import { CONVERSATION_CONFIG } from '@ferretry/plugin-conversation/contract';
 import { LESSONS_CONFIG } from '@ferretry/plugin-lessons/contract';
 import { ENDPOINTS_CONFIG, LOGINS_CONFIG, MODELS_CONFIG } from '@ferretry/plugin-logins/contract';
@@ -61,6 +62,7 @@ export const CONFIG_TARGETS = {
   CODEX_SETTINGS: owned('codex', CODEX_SETTINGS),
   CODEX_HOOKS: owned('codex', CODEX_HOOKS),
   CONNECTIONS: file('connections', 'connections.yaml', ConnectionsConfigSchema),
+  CONNECTOR: owned('connector', CONNECTOR_CONFIG),
   CONVERSATION: owned('conversation', CONVERSATION_CONFIG),
   LESSONS: owned('lessons', LESSONS_CONFIG),
   LOGINS: owned('logins', LOGINS_CONFIG),

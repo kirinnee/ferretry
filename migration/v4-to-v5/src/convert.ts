@@ -69,6 +69,7 @@ export const CONFIG_STEPS: ReadonlySet<string> = new Set([
   'lessons',
   'packs',
   'archive-setting',
+  'connector',
 ]);
 
 /** What the plain passes share with the real run beyond the v4 and v5 paths. */
@@ -147,6 +148,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     v4: { ...v4Paths(options.from), fenced: await fenceV4(options.from) },
     v5: v5Writer(to, { dryRun: options.dryRun, anchor: checked.to.anchor, pins: checked.to.pins }),
     dryRun: options.dryRun,
+    now: options.now,
     ...(options.preview === true
       ? {
           preview: true,
