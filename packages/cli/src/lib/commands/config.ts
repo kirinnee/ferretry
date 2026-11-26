@@ -12,7 +12,9 @@
  * published under `config/.schema/`. GAP: `check` and the schema LIST still ask the daemon (any `fy` command starts
  * one), because only it holds the plugins' declarations that say which files exist and what each must contain.
  */
+import { SCHEMA_FOLDER, SCHEMA_MANIFEST } from '@ferretry/std/yaml';
 import { z } from 'zod';
+import { daemonUrlPinned } from '../address.ts';
 import { DaemonRefusal, EXIT } from '../errors.ts';
 import type { ShellContext, ShellVerb } from '../shell-context.ts';
 import { setUpFerretrySkill } from './config-guide.ts';
@@ -61,8 +63,6 @@ const ConfirmSchema = z.looseObject({ path: NonEmpty, confirmed: z.boolean() });
 
 const InvalidBodySchema = z.looseObject({ error: NonEmpty, issues: z.array(IssueSchema) });
 
-const SCHEMA_FOLDER = '.schema';
-
 const on = (ctx: ShellContext, name: string): boolean => {
   const value = ctx.invocation.options[name];
   return value === true || value === 'true';
@@ -110,7 +110,35 @@ const readStatus = async (ctx: ShellContext): Promise<Status> =>
 const readFile = async (ctx: ShellContext, path: string): Promise<z.infer<typeof FileSchema>> =>
   FileSchema.parse(await ctx.client(KERNEL).call('GET /v1/config/file', { query: { path } }));
 
-const configDirectory = (ctx: ShellContext): string => `${ctx.world.home}/config`;
+/**
+ * The configuration directory this invocation is about. With no `FY_URL` the daemon is this home's own, so the answer is
+ * `<home>/config` with no daemon asked. A pinned `FY_URL` names a daemon that may keep another home, and `check` and
+ * `write` go to it, so the directory is the one it reports.
+ */
+const configDirectory = async (ctx: ShellContext): Promise<string> =>
+  daemonUrlPinned(ctx.world.environment) ? (await readStatus(ctx)).directory : `${ctx.world.home}/config`;
+
+/**
+ * One schema the daemon published under `directory`, with no daemon asked: only a name its manifest lists, and only
+ * as a regular file (never through a link). `undefined` when it is not there, so the caller asks the daemon.
+ */
+const publishedSchema = async (ctx: ShellContext, directory: string, file: string): Promise<string | undefined> => {
+  const read = ctx.world.readRegularText;
+  if (read === undefined) return undefined;
+  const listed = await read(`${directory}/${SCHEMA_FOLDER}/${SCHEMA_MANIFEST}`);
+  const names = listed === undefined ? undefined : z.array(z.string()).safeParse(parseJson(listed));
+  return names?.success === true && names.data.includes(file)
+    ? await read(`${directory}/${SCHEMA_FOLDER}/${file}`)
+    : undefined;
+};
+
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
 
 const binary = (ctx: ShellContext): string => ctx.world.identity.binary;
 
@@ -145,7 +173,7 @@ const SAFE_RELATIVE = /^(?!\/)(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._/-]+$/u;
 
 /** `fy config path [file]`: the directory, or one file in it. */
 export const configPathVerb: ShellVerb = async ctx => {
-  const directory = configDirectory(ctx);
+  const directory = await configDirectory(ctx);
   const file = ctx.invocation.args[0];
   if (file === undefined) {
     ctx.world.io.out(`${directory}\n`);
@@ -175,11 +203,13 @@ const schemaFileOf = (status: Status, named: string): string | undefined => {
 /** `fy config schema [name|file]`: the JSON Schema of one kind of file, or the list of schemas. */
 export const configSchemaVerb: ShellVerb = async ctx => {
   const named = ctx.invocation.args[0];
-  if (named !== undefined && SCHEMA_STEM.test(named)) {
-    // A schema named by its stem is read straight from the home: no daemon is asked, none is started.
-    const body = await ctx.world.host
-      .readText(`${configDirectory(ctx)}/${SCHEMA_FOLDER}/${named.endsWith('.json') ? named : `${named}.json`}`)
-      .catch(() => undefined);
+  if (named !== undefined && SCHEMA_STEM.test(named) && !daemonUrlPinned(ctx.world.environment)) {
+    // A schema this home's daemon published is read straight from the home: no daemon is asked, none is started.
+    const body = await publishedSchema(
+      ctx,
+      `${ctx.world.home}/config`,
+      named.endsWith('.json') ? named : `${named}.json`,
+    );
     if (body !== undefined) {
       ctx.world.io.out(body.endsWith('\n') ? body : `${body}\n`);
       return EXIT.ok;
@@ -202,14 +232,13 @@ export const configSchemaVerb: ShellVerb = async ctx => {
     ctx.world.io.err(`no schema ${named}: run \`${binary(ctx)} config schema\` for the list\n`);
     return EXIT.failure;
   }
-  try {
-    const body = await ctx.world.host.readText(`${status.directory}/${SCHEMA_FOLDER}/${schema}`);
-    ctx.world.io.out(body.endsWith('\n') ? body : `${body}\n`);
-    return EXIT.ok;
-  } catch {
+  const body = await publishedSchema(ctx, status.directory, schema);
+  if (body === undefined) {
     ctx.world.io.err(`the daemon has not published ${schema} under ${status.directory}/${SCHEMA_FOLDER} yet\n`);
     return EXIT.failure;
   }
+  ctx.world.io.out(body.endsWith('\n') ? body : `${body}\n`);
+  return EXIT.ok;
 };
 
 /** `fy config show <file>`: one file as the daemon holds it, with its etag. */

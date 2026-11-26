@@ -1,4 +1,5 @@
 import { HOME_PORT_KEY, type HomePort } from '../contract/home-port.ts';
+import { withoutTrailingSlashes } from '../contract/run.ts';
 import type { LogLevel, RunOverrides } from './arguments.ts';
 import type { LogSink } from './log.ts';
 
@@ -31,7 +32,7 @@ export type SettingsOutcome =
 export function homeOf(env: Readonly<Record<string, string | undefined>>, userHome: string): Setting<string> {
   return env.FY_HOME === undefined
     ? { value: `${userHome}/.ferretry`, origin: 'default' }
-    : { value: env.FY_HOME.replace(/\/+$/, ''), origin: 'environment', source: 'FY_HOME' };
+    : { value: withoutTrailingSlashes(env.FY_HOME), origin: 'environment', source: 'FY_HOME' };
 }
 
 /**

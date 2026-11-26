@@ -1,5 +1,6 @@
 /** The production {@link CliWorld}: the real terminal, environment, disk and network, wired once. */
 import { existsSync } from 'node:fs';
+import { lstat } from 'node:fs/promises';
 import type { TerminalIo } from '@ferretry/kernel/manifest';
 import { isLocalDaemonUrl } from '../lib/address.ts';
 import { AS_OWNER_NOTE, credentialPlan, type Environment, ownFerretId } from '../lib/credential.ts';
@@ -24,7 +25,7 @@ import { createStatuslinePorts } from './statusline/index.ts';
 import { terminalHiddenPrompt } from './terminal/hidden-prompt.ts';
 import { terminalPrompt } from './terminal/prompt.ts';
 import { buildDaemonController } from './daemon/control.ts';
-import { buildUpdateMachine } from './update/machine.ts';
+import { buildUpdateMachine, executable } from './update/machine.ts';
 import { DaemonUpdater } from '../lib/update/updater.ts';
 
 export interface WorldInputs {
@@ -38,7 +39,7 @@ export interface WorldInputs {
   /** Where this program lives; the daemon binary is looked for beside it. */
   readonly selfPath: string;
   /** The process ports the daemon launcher uses. Production leaves this out; tests must pass fakes so no test starts a real daemon. */
-  readonly process?: Partial<Pick<LaunchPorts, 'exists' | 'which' | 'spawnDetached'>>;
+  readonly process?: Partial<Pick<LaunchPorts, 'exists' | 'executable' | 'which' | 'spawnDetached'>>;
   /** The network. Production leaves this out (the global `fetch`); tests pass a fake so no test reaches a socket. */
   readonly fetcher?: Fetcher;
 }
@@ -55,6 +56,7 @@ export function createWorld(inputs: WorldInputs): CliWorld {
     launchDaemon({
       selfPath: inputs.selfPath,
       exists: inputs.process?.exists ?? existsSync,
+      executable: inputs.process?.executable ?? executable,
       which: inputs.process?.which ?? (name => Bun.which(name)),
       spawnDetached:
         inputs.process?.spawnDetached ??
@@ -85,6 +87,13 @@ export function createWorld(inputs: WorldInputs): CliWorld {
     statusline: createStatuslinePorts(home),
     promptHidden: terminalHiddenPrompt,
     readText: path => Bun.file(path).text(),
+    readRegularText: async path => {
+      try {
+        return (await lstat(path)).isFile() ? await Bun.file(path).text() : undefined;
+      } catch {
+        return undefined;
+      }
+    },
     host: createPluginHost({ home }),
     daemon: reads =>
       buildDaemonController(

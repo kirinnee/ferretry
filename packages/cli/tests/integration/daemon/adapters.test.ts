@@ -97,6 +97,7 @@ describe('launching the daemon', () => {
     return {
       selfPath: '/opt/ferretry/bin/fy',
       exists: path => path === '/opt/ferretry/bin/fyd',
+      executable: path => path === '/opt/ferretry/bin/fyd',
       which: () => null,
       spawnDetached: command => {
         spawned.push([...command]);
@@ -119,7 +120,7 @@ describe('launching the daemon', () => {
   });
 
   it('C-49: should start the daemon FY_DAEMON_BIN names, before anything beside fy or on PATH', async () => {
-    const launch = ports({ environment: { FY_DAEMON_BIN: '/opt/pinned/fyd' }, exists: () => true });
+    const launch = ports({ environment: { FY_DAEMON_BIN: '/opt/pinned/fyd' }, executable: () => true });
     should(await launchDaemon(launch)).deepEqual({ started: true, baseUrl: 'http://127.0.0.1:7431' });
     should(launch.spawned).deepEqual([['/opt/pinned/fyd']]);
   });
@@ -129,6 +130,26 @@ describe('launching the daemon', () => {
     const result = await launchDaemon(launch);
     should(result.started).be.false();
     should(result.started === false && result.why).containEql('FY_DAEMON_BIN names /gone/fyd');
+    should(launch.spawned).deepEqual([]);
+  });
+
+  it("C-49: should refuse, spawning nothing, a relative FY_DAEMON_BIN (it would depend on this shell's directory)", async () => {
+    const launch = ports({ environment: { FY_DAEMON_BIN: './build/fyd' }, executable: () => true });
+    const result = await launchDaemon(launch);
+    should(result.started).be.false();
+    should(result.started === false && result.why).containEql('absolute path');
+    should(launch.spawned).deepEqual([]);
+  });
+
+  it('C-49: should refuse, spawning nothing, an FY_DAEMON_BIN that is there but not executable', async () => {
+    const launch = ports({
+      environment: { FY_DAEMON_BIN: '/opt/pinned/fyd' },
+      exists: () => true,
+      executable: () => false,
+    });
+    const result = await launchDaemon(launch);
+    should(result.started).be.false();
+    should(result.started === false && result.why).containEql('not an executable file');
     should(launch.spawned).deepEqual([]);
   });
 

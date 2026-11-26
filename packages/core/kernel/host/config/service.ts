@@ -74,7 +74,13 @@ import {
 import { assertDistinctSchemaNames, configJsonSchemaText, schemaFileName, schemaModeline } from './schemas.ts';
 import { type ConfigTreeEvents, watchConfigFiles } from './watcher.ts';
 import { readConfigDisk } from './disk.ts';
-import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigTextToEdit, SCHEMA_FOLDER } from '@ferretry/std/yaml';
+import {
+  CONFIG_FILE_MAX_BYTES,
+  editConfigText,
+  readConfigTextToEdit,
+  SCHEMA_FOLDER,
+  SCHEMA_MANIFEST,
+} from '@ferretry/std/yaml';
 import { isWithinList, patchedValue } from './patch.ts';
 import {
   ALREADY_HELD_ISSUE,
@@ -1545,12 +1551,17 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
     });
 
   const publishSchemas = async (): Promise<void> => {
-    for (const { def } of declarations) {
-      const target = `${root}/${SCHEMA_FOLDER}/${schemaFileName(def)}`;
-      const text = configJsonSchemaText(def);
+    const publish = async (name: string, text: string): Promise<void> => {
+      const target = `${root}/${SCHEMA_FOLDER}/${name}`;
       if ((await fs.readText(target).catch(() => undefined)) !== text)
         await fs.writeAtomic(target, text, PRIVATE_FILE_MODE);
-    }
+    };
+    for (const { def } of declarations) await publish(schemaFileName(def), configJsonSchemaText(def));
+    // Last, so a name is listed only once its file is there: `fy config schema` serves nothing the daemon did not write.
+    await publish(
+      SCHEMA_MANIFEST,
+      `${JSON.stringify(declarations.map(({ def }) => schemaFileName(def)).toSorted())}\n`,
+    );
   };
 
   const status = (): ConfigStatus => ({

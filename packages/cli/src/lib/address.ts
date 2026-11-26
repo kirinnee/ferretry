@@ -5,6 +5,10 @@
  */
 import { type DaemonRun, DaemonRunSchema, recordedBindAddress } from '@ferretry/kernel/contract';
 
+/** Whether `FY_URL` names the daemon: then the address is that one, whatever home this `fy` resolved. */
+export const daemonUrlPinned = (environment: { readonly FY_URL?: string | undefined }): boolean =>
+  (environment.FY_URL?.trim() ?? '') !== '';
+
 /** Loopback, never a routable interface: a daemon binds the machine it runs on and nothing else. */
 const LOOPBACK = '127.0.0.1';
 /** The port a daemon binds when its operator has named none: the same number as `DEFAULT_PORT` in the kernel's `host/fyd.ts`. */
