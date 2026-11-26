@@ -221,10 +221,12 @@ export function bunSpawn(
   managers: Readonly<Record<string, string>> = {},
 ): SpawnPort {
   const env = (program: string, options?: SpawnOptions): Record<string, string> =>
-    options?.sealed === true
-      ? // Never the tool overlay, whatever the program is called.
-        { ...sealedBase, ...resolveEnv(options.env, opener()) }
-      : childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()), managers);
+    options?.inheritEnv === false
+      ? resolveEnv(options.env, opener())
+      : options?.sealed === true
+        ? // Never the tool overlay, whatever the program is called.
+          { ...sealedBase, ...resolveEnv(options.env, opener()) }
+        : childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()), managers);
   /**
    * One piped child. `signalCode` is read from the Bun subprocess after `exited` settles: a killed child (Bun's
    * `timeout`, an abort `signal`, `kill`) resolves `exited` with `128 + n` while `signalCode` names the signal, and
