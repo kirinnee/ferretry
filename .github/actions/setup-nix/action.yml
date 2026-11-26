@@ -411,14 +411,10 @@ runs:
       if: steps.niximg.outputs.attached != 'true' && steps.linuxwarm.outputs.bootstrapped != 'true'
       uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
       with:
+        # Its default github.token is persisted in extra-conf. Cold installs and
+        # warm-bootstrap fallbacks must use anonymous fetches, like the warm path.
+        github-token: ''
         extra-conf: ${{ steps.nixconf.outputs.config }}
-
-    # Snapshot what the installer just wrote outside /nix onto the cache volume, so the
-    # next Namespace Linux job can take the warm fast path above.
-    - name: Capture Nix install state for warm jobs (Namespace Linux)
-      shell: bash
-      if: inputs.namespacelabs == 'true' && runner.os == 'Linux' && inputs.warm-bootstrap == 'true' && steps.linuxwarm.outputs.bootstrapped != 'true'
-      run: '"$GITHUB_ACTION_PATH/scripts/linux-warm-nix.sh" capture'
 
     - name: Bootstrap Nix from store image (macOS)
       shell: bash
@@ -491,6 +487,24 @@ runs:
         echo "NIX_SSL_CERT_FILE=/etc/ssl/cert.pem" >> "$GITHUB_ENV"
         "$profile/bin/nix" --version
         echo "✅ nix bootstrapped from store image (no installer)"
+
+    # Check the effective configuration (including included files and NIX_CONFIG)
+    # before any dev-shell evaluation, snapshot or checkout-code post hook. A stale
+    # cached configuration fails closed. Never print the configuration on failure.
+    - name: Refuse persisted Nix access tokens
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! nix config show --json 2>/dev/null | jq -e '."access-tokens".value == {}' >/dev/null; then
+          echo "::error::Nix configuration must contain no access tokens before running checkout code"
+          exit 1
+        fi
+
+    # Snapshot only a configuration that passed the credential check above.
+    - name: Capture Nix install state for warm jobs (Namespace Linux)
+      shell: bash
+      if: inputs.namespacelabs == 'true' && runner.os == 'Linux' && inputs.warm-bootstrap == 'true' && steps.linuxwarm.outputs.bootstrapped != 'true'
+      run: '"$GITHUB_ACTION_PATH/scripts/linux-warm-nix.sh" capture'
 
     # AUTOMATIC WRITE-BACK (Namespace macOS): register a post hook that pushes the realized
     # devShell closures back to the file:// cache at end of job (only on success). Composite

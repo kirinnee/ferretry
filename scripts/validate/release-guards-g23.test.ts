@@ -139,3 +139,72 @@ test('E-230 warm Nix configuration carries no GitHub credential into tests', () 
   expect(generated.stdout.toString()).not.toContain('access-tokens');
   expect(generated.stdout.toString()).toContain('experimental-features = nix-command flakes');
 });
+
+test('E-230 installer paths disable token persistence before shell and post hooks', () => {
+  const action = workflow('.github/actions/setup-nix/action.yml');
+  const steps = action.runs.steps;
+  const installers = steps.filter((step: any) => step.uses?.startsWith('DeterminateSystems/nix-installer-action@'));
+  expect(installers.length).toBe(1);
+  for (const installer of installers) expect(installer.with['github-token']).toBe('');
+  const wrapper = workflow('.github/actions/install-nix/action.yml').runs.steps;
+  expect(wrapper.filter((step: any) => step.uses === './.github/actions/setup-nix').length).toBe(2);
+  const guard = steps.findIndex((step: any) => step.name === 'Refuse persisted Nix access tokens');
+  expect(guard).toBeGreaterThan(steps.indexOf(installers[0]));
+  for (const [index, step] of steps.entries()) {
+    if (/Register .*hook|Pre-warm dev shells|Capture Nix install/.test(step.name ?? ''))
+      expect(guard).toBeLessThan(index);
+  }
+  const fakeBin = mkdtempSync(join(scratch, 'nix-bin-'));
+  const nix = join(fakeBin, 'nix');
+  writeFileSync(nix, '#!/bin/sh\nprintf \'%s\\n\' "$FIXTURE_NIX_CONFIG"\n', { mode: 0o755 });
+  for (const value of [{}, { 'github.com': 'synthetic-g23-token' }]) {
+    const result = Bun.spawnSync(['bash', '-c', steps[guard]?.run ?? 'exit 99'], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        FIXTURE_NIX_CONFIG: JSON.stringify({ 'access-tokens': { value } }),
+      },
+    });
+    expect(result.exitCode).toBe(Object.keys(value).length === 0 ? 0 : 1);
+    expect(result.stdout.toString() + result.stderr.toString()).not.toContain('synthetic-g23-token');
+  }
+});
+
+test('E-230 generated extra-conf and warm nix.conf contain no access-tokens line', () => {
+  const steps = workflow('.github/actions/setup-nix/action.yml').runs.steps;
+  const config = steps.find((step: any) => step.id === 'nixconf');
+  expect(JSON.stringify(config.env)).not.toMatch(/github\.token|secrets/i);
+  const output = join(scratch, 'nix-output');
+  const script = readFileSync(join(root, '.github/actions/setup-nix/scripts/linux-warm-nix.sh'), 'utf8');
+  const definitions = script.slice(0, script.lastIndexOf('\ncase "${1:-}" in'));
+  const fixture = join(scratch, 'warm-generated.sh');
+  writeFileSync(fixture, `${definitions}\nwrite_custom_conf`);
+  for (const [os, namespace] of [
+    ['Linux', 'true'],
+    ['Linux', 'false'],
+    ['macOS', 'true'],
+    ['macOS', 'false'],
+  ]) {
+    writeFileSync(output, '');
+    const result = Bun.spawnSync(['bash', '-c', config.run], {
+      env: {
+        ...process.env,
+        RUNNER_OS: os,
+        NAMESPACELABS: namespace,
+        ATTIC: 'false',
+        DARWIN_CACHE_PATH: '/tmp/synthetic-cache',
+        GITHUB_OUTPUT: output,
+        GITHUB_TOKEN: 'synthetic-g23-fetch-credential',
+      },
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    const extraConf = readFileSync(output, 'utf8').split('\n').slice(1, -2).join('\n');
+    expect(extraConf).toContain('lazy-trees = true');
+    expect(extraConf).not.toMatch(/access-tokens|synthetic-g23-fetch-credential/);
+    const generated = Bun.spawnSync(['bash', fixture], {
+      env: { ...process.env, NIX_CONF: extraConf, GITHUB_TOKEN_VALUE: 'synthetic-g23-fetch-credential' },
+    });
+    expect(generated.exitCode).toBe(0);
+    expect(generated.stdout.toString()).not.toMatch(/access-tokens|synthetic-g23-fetch-credential/);
+  }
+});

@@ -20,7 +20,8 @@ set -euo pipefail
 # and no define is passed, so an ordinary build is byte-for-byte what it was. A named app signs with its OWN key,
 # `packages/app/release-signing-key.preview.pub`, committed on the branch that deploys it and nowhere else.
 #
-# DEPENDENCY-FREE (bash, sed, awk, grep): the `sign` job of a Pages workflow installs nothing and runs this.
+# Path/origin queries need only shell tools (the Pages sign job uses them).
+# --defines also uses Bun, already required by every daemon build, to validate keys.
 
 repository="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source_module="${repository}/packages/core/kernel/contract/hosted-app.ts"
@@ -61,9 +62,21 @@ case "${1:-}" in
 --key-file) key_file ;;
 --next-key-file) key_file | sed 's/\.pub$/.next.pub/' ;;
 --defines)
+  key="$(key_file)"
+  if [[ -f ${key} ]]; then
+    # Validate before emitting ANY defines. createPublicKey alone also accepts a
+    # private key: require the public SPKI envelope as well as the Ed25519 type.
+    if ! bun -e '
+      const { createPublicKey } = require("node:crypto");
+      const pem = require("node:fs").readFileSync(process.argv[1], "utf8");
+      if (!pem.startsWith("-----BEGIN PUBLIC KEY-----") ||
+          createPublicKey(pem).asymmetricKeyType !== "ed25519") process.exit(1);
+    ' "${key}" >/dev/null 2>&1; then
+      fail "selected release signing key must be a valid Ed25519 public key"
+    fi
+  fi
   if [[ ${origin} != "${default_origin}" ]]; then
     printf '__FY_HOSTED_APP_ORIGIN__="%s"\n' "${origin}"
-    key="$(key_file)"
     if [[ -f ${key} ]]; then
       printf '__FY_HOSTED_APP_RELEASE_KEY__=%s\n' "$(json_string <"${key}")"
     else
