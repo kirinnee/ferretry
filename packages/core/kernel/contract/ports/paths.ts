@@ -37,6 +37,14 @@ export interface PathsPort {
    */
   which(name: string, options?: { readonly directories?: readonly string[] }): Promise<string | undefined>;
   /**
+   * Bind an installed executable to its canonical name and identity, without running it. The file AND every
+   * canonical ancestor must be root-owned and not writable by this process (ACLs included). Group/world write is
+   * refused except on root-owned sticky directories (the multi-user Nix store), which protect root-owned entries.
+   * Refuses user installs, worktrees, downloads and temporary folders. Requires permissions.which.
+   * The returned trusted stat command lets a shell shim recheck dev/inode/size/mtime/ctime immediately before exec.
+   */
+  bindProgram(absolutePath: string): Promise<BoundProgram | undefined>;
+  /**
    * Today's harness-paths rule for ONE command: the operator's override variable (`FY_CLOUDFLARED`), else
    * {@link which}. Only for a manifest with `permissions.which` AND `override` listed, exactly, in
    * `permissions.whichOverrides` (`^FY_[A-Z0-9_]{1,60}$`); any other variable is refused naming the plugin, and no
@@ -59,6 +67,12 @@ export interface PathsPort {
    * caller that must prove a negative fails closed. Never the PATH itself, never another variable.
    */
   whichFor(name: string, env: ChildEnvironment): Promise<HandleCommandLookup>;
+}
+
+/** A shell shim's installed executable and its trusted, absolute identity verifier. No executable was run to bind it. */
+export interface BoundProgram {
+  readonly program: string;
+  readonly check: { readonly argv: readonly string[]; readonly expected: string };
 }
 
 /** {@link PathsPort.locate}'s answer. `override_unusable` names the variable and the path it holds: NO fallback. */

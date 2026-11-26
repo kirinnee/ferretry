@@ -222,6 +222,7 @@ describe('K13 the override variable gate (permissions.whichOverrides)', () => {
         },
       }),
       stateHomeHolding: async () => undefined,
+      bindProgram: async () => undefined,
       which: async () => undefined,
       locate: async (name, options) => {
         calls.push(`${name}:${options.override}`);

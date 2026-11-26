@@ -13,7 +13,7 @@ import manifest from '../manifest.ts';
 import { FetchGithubHttp } from './adapters/github-http.ts';
 import { gitAccountRoutes } from './routes.ts';
 import { psAgentProcesses } from './adapters/agent-processes.ts';
-import { rootRunFolder } from './adapters/run-folder.ts';
+import { rootGhShimFolder, rootRunFolder } from './adapters/run-folder.ts';
 import { accountLaunchParts } from './features/launch/parts.ts';
 import { GpgSigners } from './features/gpg-keys/signer.ts';
 import { GpgKeyService } from './features/gpg-keys/service.ts';
@@ -97,18 +97,23 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
       );
       kernel.lifecycle.onStop(() => agents.stopAll());
       kernel.lifecycle.onStop(() => gnupg.stopAll());
-      // Pin the daemon's client, outside the state home: a preview pane need not have that client on its own PATH.
+      // Bind the canonical system-managed client, never a pane-writable executable found on PATH.
       const client = programLocator(
         { name: kernel.identity.binaries.client, trustedWith: "a ferret's session" },
         locatorPorts,
       );
+      const shimFolder = overrides.runFolder ?? rootGhShimFolder(kernel.roots);
       // Repair before each launch. Only overlapping installs share a promise; a completed install is never cached.
       let shim: Promise<GhShimFolders | undefined> | undefined;
       const shimFolders = (): Promise<GhShimFolders | undefined> => {
         shim ??= client()
-          .then(found => installGhShim(runFolder, found.program))
+          .then(async found => {
+            const pinned = await kernel.paths.bindProgram(found.program);
+            if (pinned === undefined) throw new Error('GitHub client unavailable');
+            return await installGhShim(shimFolder, pinned);
+          })
           .catch(() => {
-            kernel.log.warn("git-accounts: Ferretry's gh shim could not be set up, so ferrets keep no gh shim");
+            kernel.log.warn('git-accounts: GitHub client unavailable; ferret launch will be refused');
             return undefined;
           })
           .finally(() => {

@@ -1,10 +1,66 @@
 import { err, ok, type Result } from '@ferretry/std';
-import { isAbsolute } from 'node:path';
+import { dirname, isAbsolute } from 'node:path';
 import type { CheckedDirectory, DirectoryRefusal, PathsPort } from '../contract/ports.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { fencedReal, fenceOf, sameObject, walkPhysically, walkUnchanged } from './fence-guard.ts';
 import type { TruncationWatcher } from './fence-index.ts';
 import { mayReadOverride } from './which.ts';
+
+/** Only a system-managed canonical path can be handed a pane credential by a shim. Never executes a probe. */
+export async function bindProgram(fs: Pick<HostFs, 'realpath' | 'identity' | 'writable'>, path: string) {
+  const trusted = async (named: string) => {
+    if (!isAbsolute(named)) return undefined;
+    const real = await fs.realpath(named);
+    const file = await fs.identity(real);
+    if (file?.kind !== 'file' || (file.mode & 0o111) === 0) return undefined;
+    for (let at = real; ; at = dirname(at)) {
+      const found = await fs.identity(at);
+      // A root-owned sticky directory (the multi-user Nix store) cannot rename its root-owned children. It is safe
+      // only when the daemon itself cannot write there; /tmp still fails the access check.
+      const stickyDirectory = found?.kind === 'directory' && (found.mode & 0o1000) !== 0;
+      if (
+        found === undefined ||
+        found.owner !== 0 ||
+        ((found.mode & 0o022) !== 0 && !stickyDirectory) ||
+        (await fs.writable(at))
+      )
+        return undefined;
+      if (at !== real && found.kind !== 'directory') return undefined;
+      if (dirname(at) === at) break;
+    }
+    // Resolve again after the whole walk; a changing route is never a pin.
+    if ((await fs.realpath(real)) !== real) return undefined;
+    const again = await fs.identity(real);
+    if (
+      again?.device !== file.device ||
+      again.inode !== file.inode ||
+      again.size !== file.size ||
+      again.mtimeNs !== file.mtimeNs ||
+      again.ctimeNs !== file.ctimeNs
+    )
+      return undefined;
+    return { real, file };
+  };
+  try {
+    const bound = await trusted(path);
+    const stat = await trusted('/usr/bin/stat');
+    if (bound === undefined || stat === undefined) return undefined;
+    const file = bound.file;
+    const expected = [
+      file.device,
+      file.inode,
+      file.size,
+      file.mtimeNs / 1_000_000_000n,
+      file.ctimeNs / 1_000_000_000n,
+      file.owner,
+      (file.mode & 0o7777).toString(8),
+    ].join(':');
+    const args = process.platform === 'darwin' ? ['-Lf', '%d:%i:%z:%m:%c:%u:%Lp'] : ['-Lc', '%d:%i:%s:%Y:%Z:%u:%a'];
+    return { program: bound.real, check: { argv: [stat.real, ...args, bound.real], expected } };
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * `kernel.paths.checkDirectory` (today's session working-directory resolver, rule for rule): the path is trimmed; a
@@ -117,6 +173,7 @@ export function gatedPaths(plugin: string, declared: boolean, base: PathsPort): 
     },
     // Gated on their own permission ({@link gatedWhich}), never by this one.
     which: base.which,
+    bindProgram: base.bindProgram,
     locate: base.locate,
     whichFor: base.whichFor,
   });
@@ -138,6 +195,7 @@ export function gatedWhich(plugin: string, declared: boolean, base: PathsPort): 
     bindDirectory: base.bindDirectory,
     stateHomeHolding: base.stateHomeHolding,
     which: refused,
+    bindProgram: refused,
     locate: refused,
     whichFor: refused,
   });

@@ -22,14 +22,9 @@ import { testHost } from '@ferretry/kernel/testing';
 import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
 import { ghVerbs, GH_DOCTOR_ENV } from '../../cli/gh.ts';
 import { gitAccountsDaemon } from '../../daemon/index.ts';
-import {
-  CLOSED_CONFIG,
-  GH_INSTRUCTION,
-  GH_UNAVAILABLE,
-  ghShimLaunchParts,
-} from '../../daemon/features/gh-shim/parts.ts';
+import { GH_INSTRUCTION, ghShimLaunchParts } from '../../daemon/features/gh-shim/parts.ts';
 import { ghShimFolders, installGhShim, shimScript } from '../../daemon/features/gh-shim/shim.ts';
-import { tmpRunFolder } from './run-folder.ts';
+import { testClient, tmpRunFolder } from './run-folder.ts';
 import { ghHost } from './gh-host.ts';
 
 const cleanup: (() => void)[] = [];
@@ -48,15 +43,15 @@ const runFolder = () => {
 };
 
 describe('the gh shim file', () => {
-  test('is a two-line sh script that hands every argument to `fy gh --` untouched', () => {
-    expect(shimScript('fy')).toBe('#!/bin/sh\nexec fy gh -- "$@"\n');
+  test('checks the pinned client, then runs a sh script that hands every argument to `fy gh --` untouched', () => {
+    expect(shimScript(testClient('fy'))).toContain('\nexec fy gh -- "$@"\n');
     // A client name with an odd character is one shell word, never a command.
-    expect(shimScript("f y';x")).toBe(`#!/bin/sh\nexec 'f y'\\'';x' gh -- "$@"\n`);
+    expect(shimScript(testClient("f y';x"))).toContain(`\nexec 'f y'\\'';x' gh -- "$@"\n`);
   });
 
   test('is written 0755 in a private `shims` folder, beside an EMPTY 0500 pane config; no file of any kind is in it', async () => {
     const folder = runFolder();
-    const folders = await installGhShim(folder, 'fy');
+    const folders = await installGhShim(folder, testClient('fy'));
     expect(folders).toEqual(ghShimFolders(folder));
     expect(folders?.shims).toBe(`${folder.path}/shims`);
     expect(statSync(`${folder.path}/shims/gh`).mode & 0o777).toBe(0o755);
@@ -67,34 +62,34 @@ describe('the gh shim file', () => {
 
   test('anything found in the pane config at install is removed, and the folder is narrowed again', async () => {
     const folder = runFolder();
-    await installGhShim(folder, 'fy');
+    await installGhShim(folder, testClient('fy'));
     chmodSync(`${folder.path}/pane-gh-config`, 0o700);
     writeFileSync(`${folder.path}/pane-gh-config/hosts.yml`, 'oauth_token: x\n');
     mkdirSync(`${folder.path}/pane-gh-config/extensions`);
     writeFileSync(`${folder.path}/pane-gh-config/extensions/README`, 'x');
-    await installGhShim(folder, 'fy');
+    await installGhShim(folder, testClient('fy'));
     expect(readdirSync(`${folder.path}/pane-gh-config`)).toEqual([]);
     expect(statSync(`${folder.path}/pane-gh-config`).mode & 0o777).toBe(0o500);
   });
 
   test('is rewritten on the next boot, so an edited or stale shim never survives', async () => {
     const folder = runFolder();
-    await installGhShim(folder, 'fy');
+    await installGhShim(folder, testClient('fy'));
     writeFileSync(`${folder.path}/shims/gh`, '#!/bin/sh\necho hacked\n', { mode: 0o755 });
-    await installGhShim(folder, 'fy');
-    expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('fy'));
+    await installGhShim(folder, testClient('fy'));
+    expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript(testClient('fy')));
   });
 
   test('a run folder that is not private is given nothing and nothing is written', async () => {
     const folder = runFolder();
     chmodSync(folder.path, 0o755);
-    expect(await installGhShim(folder, 'fy')).toBeUndefined();
+    expect(await installGhShim(folder, testClient('fy'))).toBeUndefined();
     expect(readdirSync(folder.path)).toEqual([]);
   });
 
   test('keeps argv intact through a real sh: spaces, newlines, quotes, globs, `--`, empty words', async () => {
     const folder = runFolder();
-    const folders = await installGhShim(folder, 'fy');
+    const folders = await installGhShim(folder, testClient('fy'));
     // A stand-in `fy` that prints each argument on its own line, NUL-delimited so a newline inside one is visible.
     const bin = scratch();
     writeFileSync(join(bin, 'fy'), '#!/bin/sh\nfor a in "$@"; do printf \'%s\\0\' "$a"; done\n', { mode: 0o755 });
@@ -108,7 +103,7 @@ describe('the gh shim file', () => {
 
   test('a pane that puts the shim folder first finds the shim as `gh`, ahead of a host gh', async () => {
     const folder = runFolder();
-    const folders = await installGhShim(folder, 'fy');
+    const folders = await installGhShim(folder, testClient('fy'));
     const host = scratch();
     writeFileSync(join(host, 'gh'), '#!/bin/sh\necho host-gh\n', { mode: 0o755 });
     const found = Bun.spawnSync(['/bin/sh', '-c', 'command -v gh'], {
@@ -144,17 +139,8 @@ describe('every ferret’s launch gets the shim, and never a token', () => {
       expect(GH_INSTRUCTION).toContain(word);
   });
 
-  test('a shim that could not be written FAILS CLOSED: no PATH entry, a config nothing can read or write, and a sentence', async () => {
-    const parts = await ghShimLaunchParts(async () => undefined).parts(spec);
-    expect(parts).toEqual([
-      { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: CLOSED_CONFIG } },
-      { kind: 'instruction', id: 'git-accounts-gh', text: GH_UNAVAILABLE },
-    ] satisfies LaunchPart[]);
-    // Nothing can be read from, or written under, that path: `/dev/null` is not a folder.
-    expect(existsSync(CLOSED_CONFIG)).toBe(false);
-    expect(() => mkdirSync(CLOSED_CONFIG, { recursive: true })).toThrow();
-    expect(GH_UNAVAILABLE).toContain('not available');
-    expect(JSON.stringify(parts)).not.toMatch(/GH_TOKEN|pathPrepend/u);
+  test('a missing shim refuses launch even when an older shim remains on inherited PATH', async () => {
+    await expect(ghShimLaunchParts(async () => undefined).parts(spec)).rejects.toThrow('GitHub client unavailable');
   });
 });
 
@@ -631,6 +617,7 @@ describe('the daemon half', () => {
         daemonName: 'test-daemon',
         binaries: { client: clientName, daemon: 'fyd' },
       },
+      bindProgram: async path => testClient(path),
       ...ghHost(clients.map(path => path.slice(0, path.lastIndexOf('/'))).join(':') || '/preview/bin', clients),
       stateHomeHolding: async path => (path.startsWith('/synthetic-state/') ? '/synthetic-state' : undefined),
       gate: new StandInAdmission(() => ownerStanding()),
@@ -646,7 +633,7 @@ describe('the daemon half', () => {
     const { held } = await boot(folder);
     const gh = held.items.find(entry => entry.id === 'git-accounts-gh');
     const parts = await gh?.item.parts({ folder: '/anywhere' });
-    expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('/preview/bin/fy'));
+    expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript(testClient('/preview/bin/fy')));
     expect(parts).toEqual([
       {
         kind: 'pane-env',
@@ -671,10 +658,10 @@ describe('the daemon half', () => {
       await gh?.item.parts({ folder: '/anywhere' });
       writeFileSync(`${folder.path}/shims/gh`, '#!/bin/sh\necho edited\n');
       await gh?.item.parts({ folder: '/anywhere' });
-      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('/preview/bin/fy'));
+      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript(testClient('/preview/bin/fy')));
       rmSync(`${folder.path}/shims/gh`);
       await gh?.item.parts({ folder: '/anywhere' });
-      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('/preview/bin/fy'));
+      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript(testClient('/preview/bin/fy')));
     } finally {
       await host.stop();
     }
@@ -702,14 +689,11 @@ describe('the daemon half', () => {
     const { host, held } = await boot(folder, clients);
     try {
       const gh = held.items.find(entry => entry.id === 'git-accounts-gh');
-      expect(await gh?.item.parts({ folder: '/anywhere' })).toEqual([
-        { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: CLOSED_CONFIG } },
-        { kind: 'instruction', id: 'git-accounts-gh', text: GH_UNAVAILABLE },
-      ]);
+      await expect(gh!.item.parts({ folder: '/anywhere' })).rejects.toThrow('GitHub client unavailable');
       expect(existsSync(`${folder.path}/shims/gh`)).toBe(false);
       clients.push('/preview/bin/fy');
       expect((await gh?.item.parts({ folder: '/anywhere' }))?.[0]).toHaveProperty('pathPrepend');
-      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript('/preview/bin/fy'));
+      expect(readFileSync(`${folder.path}/shims/gh`, 'utf8')).toBe(shimScript(testClient('/preview/bin/fy')));
     } finally {
       await host.stop();
     }
@@ -719,11 +703,9 @@ describe('the daemon half', () => {
     const folder = runFolder();
     const { host, held } = await boot(folder, ['/synthetic-state/bin/fy']);
     try {
-      const parts = await held.items.find(entry => entry.id === 'git-accounts-gh')?.item.parts({ folder: '/anywhere' });
-      expect(parts).toEqual([
-        { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: CLOSED_CONFIG } },
-        { kind: 'instruction', id: 'git-accounts-gh', text: GH_UNAVAILABLE },
-      ]);
+      await expect(
+        held.items.find(entry => entry.id === 'git-accounts-gh')!.item.parts({ folder: '/anywhere' }),
+      ).rejects.toThrow('GitHub client unavailable');
       expect(existsSync(`${folder.path}/shims/gh`)).toBe(false);
     } finally {
       await host.stop();
@@ -765,9 +747,6 @@ describe('the daemon half', () => {
     const folder = runFolder();
     chmodSync(folder.path, 0o755);
     const { held } = await boot(folder);
-    expect(await held.items[1]?.item.parts({ folder: '/anywhere' })).toEqual([
-      { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: CLOSED_CONFIG } },
-      { kind: 'instruction', id: 'git-accounts-gh', text: GH_UNAVAILABLE },
-    ]);
+    await expect(held.items[1]!.item.parts({ folder: '/anywhere' })).rejects.toThrow('GitHub client unavailable');
   });
 });

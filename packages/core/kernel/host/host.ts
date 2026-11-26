@@ -87,7 +87,7 @@ import kernelManifest, {
 import { createActRunner, MintedIdRegistry } from './act.ts';
 import type { HostFs } from './adapters/node-fs.ts';
 import { bindDirectory } from './bound-directory.ts';
-import { checkDirectory, gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from './paths.ts';
+import { bindProgram, checkDirectory, gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from './paths.ts';
 import { type ExecutableProbe, handleReaders, locateCommand, whichCommand, whichForCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
 import { loadDataPlugins } from './data-plugins.ts';
@@ -870,6 +870,7 @@ async function bootLocked(
     const probe: ExecutableProbe = adapters.executable ?? (async () => false);
     return Object.freeze({
       ...ownerPaths,
+      bindProgram: async (path: string) => await bindProgram(adapters.fs, path),
       locate: async (
         name: string,
         locateOptions: { readonly override: string; readonly directories?: readonly string[] },

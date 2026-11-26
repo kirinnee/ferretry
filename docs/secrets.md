@@ -2391,18 +2391,26 @@ whose remote changed since reads the old one until Projects rescans.
 B9 is the daemon half of Ferretry's `gh`; B10 is what makes a ferret reach it. **Every** ferret is started (in a linked
 project or not, so the host's `gh` is ignored everywhere) with:
 
-- **A shim first on its `PATH`.** `<state>/git-accounts/downloads/shims/gh` (`0755`, in the plugin's own private
-  folder; repaired at every daemon boot and before each ferret launch) executes the absolute client path resolved on
-  the daemon's PATH, followed by `gh -- "$@"`. A preview pane need not find that client on its own PATH. `fy gh` sends the argument list and the folder to
+- **A shim first on its `PATH`.** `<state>/git-accounts/agent-homes/gh/shims/gh` (`0755`, in the plugin's own private
+  folder; repaired at every daemon boot and before each ferret launch) executes the canonical installed client,
+  followed by `gh -- "$@"`. The client and every canonical ancestor must be root-owned
+  and not writable by the daemon's user (ACLs included). Group/world write is refused except on root-owned sticky
+  directories such as the multi-user Nix store: those protect root-owned entries and must still be unwritable by
+  the pane user. An executable planted in a worktree, downloads, a state
+  folder or `/tmp`, and user-owned installs that the same user could chmod, are refused. A preview pane need not find that client on its own PATH. `fy gh` sends the argument list and the folder to
   `POST /v1/git-accounts/gh/run` on the ferret's own credential and prints the masked answer with `gh`'s exit code. It
   has **no policy of its own**: the daemon (B9, then the seam under it) decides, so nothing here can widen what runs.
   Outside a project linked to an account the shim answers with B9's sentence and starts nothing.
-- **An empty `GH_CONFIG_DIR`** (`…/downloads/pane-gh-config`: no file in it, mode `0500`, emptied again at every boot), so a
+- **An empty `GH_CONFIG_DIR`** (`…/agent-homes/gh/pane-gh-config`: no file in it, mode `0500`, emptied again at every launch), so a
   _real_ `gh` reached by accident (a shell rc that rewrites `PATH`) finds no sign-in and has nowhere to save one, instead
   of reading the host's `~/.config/gh`.
-- **It fails closed.** If the shim cannot be written (the plugin's folder is not private), the pane gets no `PATH` entry
-  but `GH_CONFIG_DIR` still points at a path nothing can read or write (`/dev/null/…`) and an instruction says `gh` is not
-  available. A pane never silently falls back to the host's `gh` and its config.
+- **It fails closed.** Discovery or repair failure refuses the pane launch with **GitHub client unavailable**. This
+  also covers an old shim already on the inherited PATH. Each invocation checks the canonical client's device,
+  inode, size, modification time, change time, owner and mode using an absolute, trusted system `stat` before exec;
+  a mismatch, a missing client or a symlink replacement refuses with the same sentence and executes no client.
+  The shim and config have separate exact managed directory scopes. Publication cannot follow a link into a sibling;
+  config cleanup removes one tree through its checked parent descriptor, rather than listing and separately
+  resolving each deletion. A parent swapped after a listing cannot redirect deletion into a sibling.
 - **One instruction**: `gh` here is Ferretry's; it acts as the linked account; it refuses `auth`, `config`, extensions,
   aliases, codespaces and commands that check out or clone; use `git`.
 
@@ -2449,10 +2457,13 @@ the pane. It prints the variable's NAME and never a value.
 - **GAP: no stdin and no files.** `fy gh` sends the argument list and the folder only. B9's seam refuses every flag that
   reads a local file, so there is nothing to send them to (`--body-file`, `-F`, `--input`, `-` for stdin): pass the text
   itself.
-- **The client must be discoverable by the daemon.** The client path is resolved without executing it, excluding state-home
-  folders and refusing an answer inside the state home. If no client can be found, a new launch gets the closed GH config
-  and the unavailable instruction. The next launch tries again. Repair is checked at launch, so an edit made afterwards
-  can still affect already-running panes until the next launch or restart; same-user filesystem writes are not a sandbox.
+- **The client must be discoverable and installed in a system-managed location.** Discovery runs no client and excludes
+  state-home folders. The installed client is pinned to its real path and rechecked before exec. A missing or
+  user-writable client refuses launch; the next launch tries again. **GAP:** the shim itself remains a same-user file,
+  so editing the shim after launch can affect already-running panes until the next launch or restart. Identity
+  checks are a pre-exec check, not an open-descriptor exec; the root-owned, non-writable canonical chain prevents a
+  pane from swapping the bound client in that interval. A privileged installer can still change it in that interval.
+  System `stat` timestamps are second-resolution in this fingerprint. Same-user filesystem writes are not a sandbox.
 - **GAP: the harness's own shell tool.** Whether Claude Code's and Codex's shell tools keep the shim first after they
   read the person's shell rc is **not measured here** (it needs a real signed-in harness; a test daemon refuses to start
   one). `fy gh-doctor` is the pane-side check, and the first real-machine check is owner step 5/6.

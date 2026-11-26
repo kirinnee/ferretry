@@ -161,8 +161,9 @@ export default definePlugin({
   },
 
   permissions: {
-    // `downloads`: this plugin's own kernel-made folder, the stable, private home of the agents' sockets and the pinned `known_hosts`.
-    roots: ['downloads'],
+    // `downloads`: agents' stable sockets and known_hosts. `agent-homes`: exact managed shim/config directory scopes.
+    roots: ['downloads', 'agent-homes'],
+    setMode: true,
     // `gh` runs as an account, with its token in that child's environment alone (`GitAccountsApi.run`).
     // `ps` lists the processes once at boot, so an agent an earlier unclean run left behind can be ended (`sweep.ts`).
     spawn: ['gh', 'ssh-agent', 'ssh-add', 'ps', 'gpg', 'curl'],
