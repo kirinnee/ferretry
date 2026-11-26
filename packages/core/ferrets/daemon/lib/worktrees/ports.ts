@@ -30,6 +30,7 @@ export type GitWorkingDirectory = string | PinnedWorkingDirectory;
 interface PinnedWorktreeDirectory {
   /** Realpath of the object that was actually opened, for identity comparison only. */
   readonly rootReal: string;
+  readonly identity?: string;
   /** The held object in the form the Git runner can inherit. */
   readonly policyCwd: GitWorkingDirectory;
   close(): Promise<void>;
