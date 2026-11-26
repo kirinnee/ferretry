@@ -66,10 +66,11 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
   if (workingText !== null) lastWorkingText.current = workingText;
   const activity = working ? lastWorkingText.current : page?.pageState === 'error' ? 'Page failed' : '';
   return (
-    // One line, always: the label slot below is reserved, so Working… appearing can neither wrap the
-    // row nor move the toolbar and page view beneath it.
+    // The row wraps by what it holds, never by what is happening: the badges take the first line and the
+    // label slot with the display link takes the next only when it cannot fit beside them. The label slot is
+    // reserved, so Working… appearing can neither wrap the row nor move the toolbar and page view beneath it.
     <div
-      className="flex shrink-0 flex-nowrap items-center gap-xs overflow-hidden border-b border-border-soft px-2 py-2"
+      className="flex shrink-0 flex-wrap items-center gap-x-xs gap-y-1 overflow-hidden border-b border-border-soft px-2 py-2"
       data-browser-status-row=""
     >
       <Badge
@@ -80,7 +81,7 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
       </Badge>
       <Badge
         tone={lastActor?.kind === 'human' ? 'accent' : 'pend'}
-        className="inline-flex min-w-0 shrink items-center gap-1 truncate"
+        className="inline-flex min-w-[7.5rem] max-w-full shrink items-center gap-1 truncate"
       >
         {lastActor?.kind === 'human' ? <UserRound size={13} /> : <Bot size={13} />}
         {lastActor ? `${lastActor.kind === 'human' ? 'You' : 'Agent'} · ${lastActor.action}` : 'No input yet'}
@@ -96,22 +97,27 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
           via proxy
         </Badge>
       ) : null}
-      <span
-        className={`min-w-[5.5rem] flex-1 truncate text-meta text-muted transition-opacity ${activity === '' ? 'opacity-0' : 'opacity-100'}`}
-        aria-live="polite"
-        data-browser-activity=""
-      >
-        {activity}
-      </span>
-      <span className="ml-auto max-w-[45%] shrink-0 truncate text-meta text-muted">
-        {connection === 'connected'
-          ? 'Live'
-          : connection === 'connecting'
-            ? 'Connecting…'
-            : connection === 'disconnected'
-              ? 'Display disconnected — reconnecting…'
-              : 'Display idle'}
-      </span>
+      {/* Words wrap, they are never cut: at a narrow width or a larger text size the display status drops under the
+          activity label. The label slot is as wide as its longest words (ch scales with the text) and as tall as one
+          line, so it holds its place whether or not it is speaking. */}
+      <div className="flex min-w-0 flex-1 basis-[16rem] flex-wrap items-center gap-x-xs gap-y-1">
+        <span
+          className={`min-h-[1lh] min-w-[14ch] shrink-0 text-meta text-muted transition-opacity ${activity === '' ? 'opacity-0' : 'opacity-100'}`}
+          aria-live="polite"
+          data-browser-activity=""
+        >
+          {activity}
+        </span>
+        <span className="ml-auto min-w-0 max-w-full text-meta text-muted">
+          {connection === 'connected'
+            ? 'Live'
+            : connection === 'connecting'
+              ? 'Connecting…'
+              : connection === 'disconnected'
+                ? 'Display disconnected — reconnecting…'
+                : 'Display idle'}
+        </span>
+      </div>
     </div>
   );
 }
