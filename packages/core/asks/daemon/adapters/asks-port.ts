@@ -4,6 +4,7 @@ import {
   type AnswerId,
   type AskAnswer,
   type AskDraft,
+  AgendaAskRefSchema,
   AskDraftSchema,
   type AskFilter,
   type AskId,
@@ -279,11 +280,12 @@ export function asksPort(
   tell?: NonNullable<AsksApi['tell']>,
 ): AsksApi {
   const raises = new SerialQueue();
-  const checkSource = (draft: { readonly source: string; readonly ref: unknown }): void => {
-    if ((BUILT_IN_SOURCES as readonly string[]).includes(draft.source)) return;
+  // A registered source's ref as its own schema read it, kept on the ask for the source's owner to draw; a built-in source has none.
+  const checkSource = (draft: { readonly source: string; readonly ref: unknown }): unknown => {
+    if ((BUILT_IN_SOURCES as readonly string[]).includes(draft.source)) return undefined;
     const spec = sources(draft.source as SourceKey);
     if (spec === 'unavailable') throw new UnknownAskSourceError(draft.source);
-    spec.schema.parse(draft.ref);
+    return spec.schema.parse(draft.ref);
   };
   const snapshot = async (ferret: string): Promise<AgendaSnapshot | undefined> => {
     const listed = await agenda.list(ferret);
@@ -319,7 +321,7 @@ export function asksPort(
     // (source, entry) identifies an obligation for life, even when retried on another board or with its source off.
     const known = await heldOn(ferret, sourceRef);
     if (known !== undefined) return known;
-    checkSource(parsed);
+    const owned = AgendaAskRefSchema.safeParse(checkSource(parsed));
     const kind = parsed.kind === 'notice' ? 'info' : parsed.kind;
     const ask = askForKind(kind, parsed.options ?? []);
     const request: RaiseAgendaRequest = {
@@ -332,6 +334,7 @@ export function asksPort(
       ...(parsed.context === undefined ? {} : { context: parsed.context }),
       ...(ask === undefined ? {} : { ask }),
       ...(parsed.fields === undefined ? {} : { fields: parsed.fields }),
+      ...(owned.success ? { askRef: owned.data } : {}),
       ...(notice ? { notice: true as const } : {}),
       ...(notice && parsed.blocking === true ? { ping: true as const } : {}),
       ...(!notice && parsed.blocking === true ? { blockingNow: true as const } : {}),

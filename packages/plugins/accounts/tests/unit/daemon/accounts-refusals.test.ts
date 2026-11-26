@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { AccountIndexDocument, LoginRecipeProposal, Place } from '../../../contract/routes/index.ts';
 import should from 'should';
-import { AccountDirectory, LoginDirectory, SecretStoreError } from './lib.ts';
+import { AccountDirectory, LoginDirectory, LoginEntryError, SecretStoreError } from './lib.ts';
 import { FakeSecretCipher, MemoryLoginIndex, plantSeed } from './support.ts';
 import { CLOCK, CountingSealed, daemonOver, SEED } from './support.ts';
 
@@ -215,13 +215,35 @@ describe('a merge, the rest of its rules', () => {
 });
 
 describe('a recipe proposal on one sign-in', () => {
+  it('should run an approval’s guard on the snapshot it applies to, and write nothing when the guard refuses', async () => {
+    const w = world();
+    await w.directory.putAccount('SITE', { label: 'Site' });
+    const { id } = await w.directory.addSignIn('SITE', { place: site('site.example'), recipe: 'old' });
+    await w.directory.proposeSignIn(id, proposal('rp_0000000000000001', 'new', 'old'));
+    await w.directory.putSignIn(id, { place: site('moved.example') });
+
+    const seen: string[] = [];
+    const refused = await failure(
+      w.directory.decideSignIn(id, 'rp_0000000000000001', 'approve', (signIn, waiting) => {
+        seen.push(`${signIn.place.kind === 'site' ? (signIn.place.domains[0] ?? '') : ''} ${waiting.id}`);
+        throw new LoginEntryError('stale_proposal', 'the place changed');
+      }),
+    );
+
+    should(seen).eql(['moved.example rp_0000000000000001']);
+    should(refused.refusal).equal('stale_proposal');
+    const kept = (await w.directory.list()).signIns[0];
+    should(kept?.recipe).equal('old');
+    should(kept?.proposals?.map(each => each.id)).eql(['rp_0000000000000001']);
+  });
+
   it('should file, card, approve and decline by sign-in, and refuse one that is gone', async () => {
     const w = world();
     await w.directory.putAccount('SITE', { label: 'Site' });
     const { id } = await w.directory.addSignIn('SITE', { place: site('site.example'), recipe: 'old' });
 
     should((await w.directory.proposeSignIn(id, proposal('rp_0000000000000001', 'new', 'old'))).applied).be.false();
-    await w.directory.proposalCardSignIn(id, 'rp_0000000000000001', 'A1');
+    await w.directory.proposalCardSignIn(id, 'rp_0000000000000001', { ferret: 'F1', id: 'A1' });
     should((await w.directory.list()).signIns[0]?.proposals?.[0]?.agendaItemId).equal('A1');
     const approved = await w.directory.decideSignIn(id, 'rp_0000000000000001', 'approve');
     should(approved.signIn.recipe).equal('new');

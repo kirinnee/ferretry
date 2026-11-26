@@ -133,6 +133,7 @@ const OWNER_ONLY_FIELDS = [
   'phoneApproval',
   'twoFactorSeed',
   'signInRuleSuggestion',
+  'askRef',
   'signInRuleSuspended',
   'cards',
   'fields',

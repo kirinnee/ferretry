@@ -710,13 +710,16 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   and one that signs in nowhere too. A rule suggestion (`preapprove`) resolves the sign-in with the same decision,
   codes and words, so the two halves of one call never answer differently. The audit names the sign-in it resolved to. The proposal waits on that sign-in (three at most;
   a fourth pushes out the oldest and closes its input) and on an agenda item, "Recipe change on github.com" (the place only: agenda text is every ferret's to
-  read, so no daemon input names an account's label or username), that shows the changed lines and "The ferret says: …". **The input's generic answer approves nothing.** The item names the proposal (`recipe-proposal`: a sign-in id and a proposal id,
-  set only by the daemon; a ferret's own raise cannot carry one), so the Accounts app draws the proposal's own form on it, in the chat's
+  read, so no daemon input names an account's label or username), that shows the changed lines and "The ferret says: …". **The input's generic answer approves nothing.** The item names the proposal (`recipe-proposal`: a sign-in id and a proposal id, kept
+  on the item as `askRef` by the daemon's Asks port when it raises the ask; a ferret's own raise cannot carry one), so the Accounts app draws the proposal's own form on it, in the chat's
   agenda and the Inbox: the account and the place, "The ferret says: …" and the WHOLE diff, all read from the owner-only
   `GET /v1/accounts` (masked there, never from the item's text), with **Approve** and **Decline**. The form's Approve sends the
-  proposal's **pin** (a SHA-256 the daemon serves beside it, over the sign-in, the proposal's id, the recipe it was made against and
-  the recipe it proposes) and the daemon refuses an approval whose pin is not the proposal on file (`stale_proposal`, nothing
-  changed), so what is approved is exactly what was drawn. A proposal made against an older recipe offers Decline only; one
+  proposal's **pin** (a SHA-256 the daemon serves beside it, over the sign-in's id, account, place and method, the proposal's id, the
+  recipe it was made against and the recipe it proposes) and the daemon refuses an approval whose pin is not the proposal on file
+  as the sign-in stands in the very snapshot the approval is applied to (`stale_proposal`, nothing changed), so what is approved is exactly
+  what was drawn, at the place it named: moving the sign-in to another place or method after the proposal was drawn refuses the old pin.
+  The proposal remembers the board its ask landed on (a sub-ferret's lands on its lead's), and settling it closes that ask alone.
+  If the daemon cannot mask the texts it serves none: the form says it cannot show the change and offers no Approve. A proposal made against an older recipe offers Decline only; one
   already answered or pushed out says so. The owner approves or declines there, in Settings › Accounts › the account › the place › Recipe, or with
   `fy account site recipe approve|decline <sign-in> <proposal>` (these two send no pin), through the owner-only
   `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the

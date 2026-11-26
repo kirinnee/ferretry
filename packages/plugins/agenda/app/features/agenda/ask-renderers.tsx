@@ -7,7 +7,8 @@
  * them. A notice's cards are drawn by {@link AgendaCardsHost}, its Start and Close through a host's board.
  *
  * - `ask:sign-in-approval` is Accounts': the value names the ref's kind (`two-factor-seed`, `phone-approval`,
- *   `task-plan`, `copy-plan`, `rule-suggestion`) with the ask's words, the shape Accounts' renderer reads.
+ *   `task-plan`, `copy-plan`, `rule-suggestion`), or is the ref the daemon's
+ *   Asks port kept on the item (`askRef`: a `recipe-proposal`) with the ask's words, the shape Accounts' renderer reads.
  * - `ask:input` is the owner of input requests (Vault contributes it): where Vault is not installed, an input card shows
  *   its words and the answer row only.
  *
@@ -24,6 +25,9 @@ import { AgendaCardsHost } from './agenda-cards-host.tsx';
 
 /** Accounts' renderer for the asks its sign-ins, plans and phone approvals raise. */
 const SIGN_IN_APPROVAL_RENDERER = 'ask:sign-in-approval';
+/** The obligation prefix of an ask Accounts raised: `ask:sign-in-approval:<entry>`. */
+const SIGN_IN_APPROVAL_OBLIGATION = 'ask:sign-in-approval:';
+
 /** The input-request owner's renderer for a value typed into a prompt. */
 export const INPUT_RENDERER = 'ask:input';
 
@@ -92,6 +96,9 @@ export const askRendererFor = (
       slot: 'plan',
       value: onScreen(item, { kind: 'two-factor-seed', stage: item.twoFactorSeed.stage }, from),
     };
+  // An ask Accounts raised through Asks: the daemon's own ref (a recipe proposal, a plan...) is the ref its card is drawn from.
+  if (item.askRef !== undefined && item.sourceRef?.startsWith(SIGN_IN_APPROVAL_OBLIGATION) === true)
+    return { key: SIGN_IN_APPROVAL_RENDERER, slot: 'plan', value: onScreen(item, item.askRef, from) };
   if (item.kind === 'input') {
     const request = inputRequestOf(item);
     return {

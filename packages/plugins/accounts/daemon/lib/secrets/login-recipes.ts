@@ -32,11 +32,20 @@ interface RecipeAccounts {
     proposal: LoginRecipeProposal,
   ): Promise<{ readonly applied: boolean; readonly dropped: readonly LoginRecipeProposal[] }>;
   /** Remembers the ask a proposal was raised on, so settling it closes that ask. */
-  proposalCardSignIn(id: SignInId, proposalId: string, agendaItemId: string): Promise<void>;
+  proposalCardSignIn(
+    id: SignInId,
+    proposalId: string,
+    ask: { readonly ferret: string; readonly id: string },
+  ): Promise<void>;
+  /**
+   * Answers one proposal. `guard` runs on the SAME snapshot the answer is applied to, once the proposal is found and before
+   * anything changes: a throw leaves the sign-in as it was.
+   */
   decideSignIn(
     id: SignInId,
     proposalId: string,
     decision: 'approve' | 'decline',
+    guard?: (signIn: SignInSummary, proposal: LoginRecipeProposal) => void,
   ): Promise<{ readonly signIn: SignInSummary; readonly proposal: LoginRecipeProposal }>;
 }
 
@@ -74,8 +83,9 @@ export interface RecipeAgendaPort {
       readonly context: string;
       readonly howToResolve: string;
     },
-  ): Promise<{ ok: true; id: string } | { ok: false; message: string }>;
-  close(sessionId: string, id: string, note: string): Promise<void>;
+  ): Promise<{ ok: true; id: string; ferret: string } | { ok: false; message: string }>;
+  /** Closes the ask `id` on the board `ferret`, the one it landed on (which may not be the proposer's). */
+  close(ferret: string, id: string, note: string): Promise<void>;
 }
 
 export interface LoginRecipePorts {
@@ -93,14 +103,6 @@ export interface LoginRecipePorts {
   readonly newId?: () => string;
 }
 
-/** What carries a recipe a route serves: a saved login, or a sign-in. */
-interface RecipeBearing {
-  readonly recipe?: string | undefined;
-  readonly recipeBy?: 'ferret' | undefined;
-  readonly recipeVersion?: number | undefined;
-  readonly proposals?: readonly LoginRecipeProposal[] | undefined;
-}
-
 export class RecipeValueError extends Error {
   constructor(message: string) {
     super(message);
@@ -110,12 +112,37 @@ export class RecipeValueError extends Error {
 
 const STALE_PIN = 'this is not the proposal you were shown; reload it and read it again before approving';
 
-/** A proposal's pin: a SHA-256 over what an approval would write, so approving one means approving exactly that text. */
-function proposalPin(signIn: SignInId, proposal: LoginRecipeProposal): string {
+/** JSON with every object's keys in order, so one value always spells the same. */
+const stable = (value: unknown): string =>
+  JSON.stringify(value, (_key, each: unknown) =>
+    typeof each === 'object' && each !== null && !Array.isArray(each)
+      ? Object.fromEntries(Object.entries(each).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : each,
+  );
+
+/**
+ * A proposal's pin: a SHA-256 over what an approval would write AND where it would write it (the sign-in's account, place
+ * and method), so approving one means approving exactly that text at exactly the place the card named. Retargeting the
+ * sign-in after the card was drawn changes the pin.
+ */
+function proposalPin(signIn: SignInSummary, proposal: LoginRecipeProposal): string {
   return createHash('sha256')
-    .update(JSON.stringify([signIn, proposal.id, proposal.base ?? null, proposal.recipe]))
+    .update(
+      stable([
+        signIn.id,
+        signIn.account,
+        signIn.place,
+        signIn.method,
+        proposal.id,
+        proposal.base ?? null,
+        proposal.recipe,
+      ]),
+    )
     .digest('hex');
 }
+
+/** What the owner is told when the redactor cannot mask a proposal: the card says it cannot show it, and offers no Approve. */
+const UNSHOWN = 'The change could not be shown here; see it in Settings.';
 
 const HOLDS_VALUE = 'a recipe never holds a value, and this one contains a saved or secret value; take it out';
 
@@ -177,7 +204,7 @@ export class LoginRecipeService {
       howToResolve: `Approve or decline it in Settings › Accounts, on the account's ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account site recipe approve ${signIn.id} ${proposal.id}\`.`,
     });
     if (!card.ok) return { ...answer, state: 'pending' };
-    await this.ports.accounts.proposalCardSignIn(signIn.id, proposal.id, card.id).catch(() => undefined);
+    await this.ports.accounts.proposalCardSignIn(signIn.id, proposal.id, card).catch(() => undefined);
     return { ...answer, state: 'pending', agendaItemId: card.id };
   }
 
@@ -188,11 +215,11 @@ export class LoginRecipeService {
   async scrubbedAccounts(listing: AccountListing): Promise<AccountListing> {
     return {
       accounts: listing.accounts,
-      signIns: await Promise.all(listing.signIns.map(async signIn => await this.scrubbedEntry(signIn.id, signIn))),
+      signIns: await Promise.all(listing.signIns.map(async signIn => await this.scrubbedEntry(signIn))),
     };
   }
 
-  private async scrubbedEntry<T extends RecipeBearing>(signIn: SignInId, entry: T): Promise<T> {
+  private async scrubbedEntry<T extends SignInSummary>(entry: T): Promise<T> {
     if (entry.recipe === undefined && entry.proposals === undefined) return entry;
     const { recipe: _recipe, recipeBy: _by, recipeVersion: _version, proposals: _proposals, ...bare } = entry;
     try {
@@ -205,7 +232,7 @@ export class LoginRecipeService {
               entry.proposals.map(async proposal => ({
                 ...proposal,
                 // The pin is of the text ON FILE; the text served beside it is that text masked.
-                pin: proposalPin(signIn, proposal),
+                pin: proposalPin(entry, proposal),
                 recipe: await redact(proposal.recipe),
                 why: await redact(proposal.why),
                 ...(proposal.base === undefined ? {} : { base: await redact(proposal.base) }),
@@ -219,13 +246,22 @@ export class LoginRecipeService {
         ...(proposals === undefined ? {} : { proposals }),
       } as T;
     } catch {
-      return bare as T;
+      // Nothing can mask the texts, so none is served; a proposal still on file stays on file, with no pin and no text,
+      // which the card reads as "could not be shown" and never as "already answered".
+      const unshown = (entry.proposals ?? []).map(proposal => ({
+        id: proposal.id,
+        recipe: UNSHOWN,
+        why: UNSHOWN,
+        sessionId: proposal.sessionId,
+        proposedAt: proposal.proposedAt,
+      }));
+      return { ...bare, ...(unshown.length === 0 ? {} : { proposals: unshown }) } as T;
     }
   }
 
   /** A text as it may be shown, or a fixed sentence when nothing can mask it. */
   private async masked(text: string): Promise<string> {
-    return await this.ports.values.redact(text).catch(() => 'The change could not be shown here; see it in Settings.');
+    return await this.ports.values.redact(text).catch(() => UNSHOWN);
   }
 
   /**
@@ -243,20 +279,27 @@ export class LoginRecipeService {
       const waiting = (await accounts.list()).signIns
         .find(each => each.id === id)
         ?.proposals?.find(proposal => proposal.id === proposalId);
-      if (waiting !== undefined) {
-        // What the owner approves is what they were shown: a pin they hold that the proposal on file no longer has is refused.
-        if (pin !== undefined && pin !== proposalPin(id, waiting)) throw this.ports.refuse('stale_proposal', STALE_PIN);
-        await this.assertNoValue(waiting.recipe);
-      }
+      if (waiting !== undefined) await this.assertNoValue(waiting.recipe);
     }
-    const { signIn, proposal } = await accounts.decideSignIn(id, proposalId, decision);
+    // What the owner approves is what they were shown, and where: the pin is checked against the sign-in and proposal as
+    // they stand in the very snapshot the answer is applied to, so no edit can slip in between the check and the write.
+    const guard =
+      decision === 'approve' && pin !== undefined
+        ? (signIn: SignInSummary, waiting: LoginRecipeProposal): void => {
+            if (pin !== proposalPin(signIn, waiting)) throw this.ports.refuse('stale_proposal', STALE_PIN);
+          }
+        : undefined;
+    const { signIn, proposal } = await accounts.decideSignIn(id, proposalId, decision, guard);
     await this.closeCard(proposal, decision === 'approve' ? 'Approved: the recipe was updated.' : 'Declined.');
-    return await this.scrubbedEntry(id, signIn);
+    return await this.scrubbedEntry(signIn);
   }
 
   private async closeCard(proposal: LoginRecipeProposal, note: string): Promise<void> {
     if (proposal.agendaItemId === undefined) return;
-    await this.ports.agenda.close(proposal.sessionId, proposal.agendaItemId, note).catch(() => undefined);
+    // The ask is numbered on the board it LANDED on, which for a sub-ferret's proposal is not the proposer's.
+    await this.ports.agenda
+      .close(proposal.agendaSession ?? proposal.sessionId, proposal.agendaItemId, note)
+      .catch(() => undefined);
   }
 
   private async record(

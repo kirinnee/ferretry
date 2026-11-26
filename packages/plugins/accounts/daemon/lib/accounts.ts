@@ -942,8 +942,12 @@ export class AccountDirectory {
   }
 
   /** Remembers the agenda card a proposal was raised on, so settling it closes that card. */
-  async proposalCardSignIn(id: SignInId, proposalId: string, agendaItemId: string): Promise<void> {
-    await this.transact(draft => cardOn(draft, id, proposalId, agendaItemId));
+  async proposalCardSignIn(
+    id: SignInId,
+    proposalId: string,
+    ask: { readonly ferret: string; readonly id: string },
+  ): Promise<void> {
+    await this.transact(draft => cardOn(draft, id, proposalId, ask));
   }
 
   /**
@@ -954,9 +958,15 @@ export class AccountDirectory {
     id: SignInId,
     proposalId: string,
     decision: 'approve' | 'decline',
+    guard?: (signIn: SignInSummary, proposal: LoginRecipeProposal) => void,
   ): Promise<{ readonly signIn: SignInSummary; readonly proposal: LoginRecipeProposal }> {
     return await this.transact(draft => {
-      const { proposal } = decideOn(draft, id, this.signInIn(draft, id), proposalId, decision);
+      const current = this.signInIn(draft, id);
+      const shown = signInSummary(id, current, draft.accounts, draft.signIns);
+      const waiting = shown.proposals?.find(each => each.id === proposalId);
+      // The caller's check sees this very draft: what it passes is what the write below applies.
+      if (waiting !== undefined) guard?.(shown, waiting);
+      const { proposal } = decideOn(draft, id, current, proposalId, decision);
       return { signIn: signInSummary(id, draft.signIns[id] as SignInRecord, draft.accounts, draft.signIns), proposal };
     });
   }
@@ -1245,11 +1255,16 @@ function proposeOn(
   return { applied: false, dropped };
 }
 
-function cardOn(draft: AccountDraft, id: SignInId, proposalId: string, agendaItemId: string): void {
+function cardOn(
+  draft: AccountDraft,
+  id: SignInId,
+  proposalId: string,
+  ask: { readonly ferret: string; readonly id: string },
+): void {
   const signIn = Object.hasOwn(draft.signIns, id) ? draft.signIns[id] : undefined;
   if (signIn?.proposals?.some(proposal => proposal.id === proposalId) !== true) return;
   const proposals = signIn.proposals.map(proposal =>
-    proposal.id === proposalId ? { ...proposal, agendaItemId } : proposal,
+    proposal.id === proposalId ? { ...proposal, agendaItemId: ask.id, agendaSession: ask.ferret } : proposal,
   );
   draft.signIns[id] = { ...signIn, proposals };
 }

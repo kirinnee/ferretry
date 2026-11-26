@@ -1,6 +1,7 @@
 /**
  * A FERRET'S RECIPE PROPOSAL ON ITS ASK CARD IS ROUND-SAFE IN EVERY STATE (G7, ledger A-31; docs/standards/theme). A real
- * browser draws the REAL card (`fixtures/recipe-proposal-scene.tsx`, fake accounts, no daemon) at a phone (390) and a desktop
+ * browser draws the REAL card (`fixtures/recipe-proposal-scene.tsx`) through the real agenda path, from an item and an account list a
+ * real accounts daemon made when a ferret proposed (no hand-written ref), at a phone (390) and a desktop
  * (1440), light and dark, in the default look (Studio) and in the two roundest looks (Gen Z, Neumorphism), and asserts the
  * geometric rule of `round-safe.ts`: no content leaves the inner rounded rectangle of the box it sits in.
  *
@@ -19,6 +20,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { describeRoundMisses, roundSafeMisses, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import type { AccountList } from '../../../contract/routes/index.ts';
+import { proposedWorld } from '../../support/daemon/proposed-world.ts';
 
 setDefaultTimeout(120_000);
 
@@ -31,6 +34,13 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 
 beforeAll(async () => {
   browser = await sharedChromium();
+  // The real daemon: a ferret proposes, and the item its ask became and the owner's account list are what the scene is shown.
+  const world = await proposedWorld();
+  const fixture = JSON.stringify({
+    item: world.item,
+    list: (await world.h.request('GET', '/v1/accounts')).json<AccountList>(),
+  });
+  await world.h.stop();
   directory = await mkdtemp(join(tmpdir(), 'ferretry-round-safe-recipe-'));
   const child = Bun.spawn(
     [process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/recipe-proposal-scene.tsx'],
@@ -49,10 +59,12 @@ beforeAll(async () => {
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: request =>
-      new URL(request.url).pathname === '/app.js'
-        ? new Response(js, { headers: { 'content-type': 'text/javascript' } })
-        : new Response(page, { headers: { 'content-type': 'text/html' } }),
+    fetch: request => {
+      const path = new URL(request.url).pathname;
+      if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
+      if (path === '/fixture.json') return new Response(fixture, { headers: { 'content-type': 'application/json' } });
+      return new Response(page, { headers: { 'content-type': 'text/html' } });
+    },
   });
   if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
 }, 180_000);

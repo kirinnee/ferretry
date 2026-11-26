@@ -59,12 +59,13 @@ function world(
         return { applied: options.applied === true, dropped: options.dropped ?? [] };
       },
       proposalCardSignIn: async (_id, _proposal, card) => {
-        calls.linked.push(card);
+        calls.linked.push(card.id);
         if (options.cardFails === true) throw new Error('the store is busy');
       },
-      decideSignIn: async (id, proposalId, decision) => {
+      decideSignIn: async (id, proposalId, decision, guard) => {
         const proposal = signIns.find(each => each.id === id)?.proposals?.find(each => each.id === proposalId);
         if (proposal === undefined) throw new Error('no such proposal');
+        guard?.(signIns.find(each => each.id === id) as SignInSummary, proposal);
         calls.closed.push(`decided ${decision}`);
         return { signIn: signIns.find(each => each.id === id) as SignInSummary, proposal };
       },
@@ -82,7 +83,9 @@ function world(
     agenda: {
       raise: async (_session, card) => {
         calls.cards.push(card);
-        return options.cardRefused === true ? { ok: false, message: 'Asks is paused' } : { ok: true, id: 'ask-1' };
+        return options.cardRefused === true
+          ? { ok: false, message: 'Asks is paused' }
+          : { ok: true, id: 'ask-1', ferret: 'F1' };
       },
       close: async (_session, id, note) => {
         calls.closed.push(`${id}: ${note}`);
@@ -337,7 +340,7 @@ describe('a ferret proposing steps', () => {
       agenda: {
         raise: async (_session, card) => {
           w.calls.cards.push(card);
-          return { ok: true, id: 'ask-1' };
+          return { ok: true, id: 'ask-1', ferret: 'F1' };
         },
         close: async () => undefined,
       },
@@ -386,7 +389,7 @@ describe('a listing as it may be served', () => {
     should(served.signIns[1]?.proposals?.[0]).not.have.property('base');
   });
 
-  it('should drop every recipe and proposal, failing closed, when the redactor cannot run', async () => {
+  it('should drop every recipe and every proposal text, failing closed, but keep each proposal on file unpinned so the card says it cannot show it', async () => {
     const w = world({ redactFails: true });
 
     const served = await w.service.scrubbedAccounts({
@@ -397,7 +400,11 @@ describe('a listing as it may be served', () => {
     const [one] = served.signIns;
     should(one).not.have.property('recipe');
     should(one).not.have.property('recipeVersion');
-    should(one).not.have.property('proposals');
+    // Not "already answered or replaced": the proposal is still waiting, only its words cannot be masked, so it has no pin to approve.
+    should(one?.proposals?.map(each => each.id)).eql(['rp_0000000000000001']);
+    should(one?.proposals?.[0]).not.have.property('pin');
+    should(one?.proposals?.[0]).not.have.property('base');
+    should(JSON.stringify(one?.proposals)).not.containEql('new steps');
     should(one?.id).equal(GITHUB_SIGN_IN);
   });
 });

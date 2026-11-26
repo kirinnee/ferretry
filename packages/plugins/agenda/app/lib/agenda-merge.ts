@@ -27,7 +27,8 @@ export const isPlainThread = (item: AgendaItem): boolean =>
   item.copyPlan === undefined &&
   item.signInRuleSuggestion === undefined &&
   item.twoFactorSeed === undefined &&
-  item.phoneApproval === undefined;
+  item.phoneApproval === undefined &&
+  item.askRef === undefined;
 
 /**
  * Whether "Merge with…" is offered on this item: the host can send it (the owner's own app, a board with this item

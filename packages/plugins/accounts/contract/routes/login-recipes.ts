@@ -246,6 +246,8 @@ export const LoginRecipeProposalSchema = z.strictObject({
   why: oneLine(LOGIN_PROPOSAL_WHY_MAX_LENGTH),
   sessionId: z.string().min(1).max(128),
   agendaItemId: z.string().min(1).max(32).optional(),
+  /** The board the proposal's ask landed on (`agendaItemId` is numbered there); absent: the proposer's own, `sessionId`. */
+  agendaSession: z.string().min(1).max(128).optional(),
   proposedAt: InstantSchema,
   /** Served only, never stored: what an approval names, so the owner approves exactly the text they were shown. */
   pin: RecipePinSchema.optional(),
