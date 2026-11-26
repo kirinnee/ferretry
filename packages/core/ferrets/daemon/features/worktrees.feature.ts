@@ -21,6 +21,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     ...(worktreeIo === undefined ? {} : { io: worktreeIo }),
     state: kernel.state,
     clock: kernel.clock,
+    stateHomeHolding: async folder => await kernel.paths.stateHomeHolding(folder),
     sessions: async () => {
       await ready();
       // A ferret standing in a folder, as today's session directory reported it: stopped ferrets are finished.

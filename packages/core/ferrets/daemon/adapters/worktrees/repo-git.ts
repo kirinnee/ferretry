@@ -4,7 +4,7 @@ import { parseWorktreeList } from '../../lib/worktrees/parser.ts';
 import type { GitRunner } from '../../lib/worktrees/ports.ts';
 import type { WorktreeListEntry } from '../../lib/worktrees/types.ts';
 import { decodeGitOutput, stripFinalLineFeed } from '../git/result.ts';
-import type { RepoDirectoryPin, RepoWorktreeAccess } from './repo-access.ts';
+import type { RepoCheckoutPin, RepoDirectoryPin, RepoWorktreeAccess } from './repo-access.ts';
 
 /** `git worktree list` is a few hundred bytes a row; this holds thousands before it would call the output truncated. */
 const LIST_OUTPUT_LIMIT = 8 * 1024 * 1024;
@@ -71,15 +71,22 @@ export class GitRepoWorktreeRows {
   }
 
   /** Every read uses the held checkout, after proving its metadata belongs to the held common directory. */
+  async holdCheckout(folder: string): Promise<RepoCheckoutPin> {
+    if (this.repository === undefined) throw notACommonDirectory();
+    return await this.access.checkout(folder, this.repository);
+  }
+
   async inCheckout<T>(
     folder: string,
     signal: AbortSignal | undefined,
     read: (runner: GitRunner) => Promise<T>,
+    removesCheckout = false,
+    held?: RepoCheckoutPin,
   ): Promise<T> {
     const repository = this.repository;
     if (repository === undefined) throw notACommonDirectory();
     signal?.throwIfAborted();
-    const checkout = await this.access.checkout(folder, repository);
+    const checkout = held ?? (await this.holdCheckout(folder));
     try {
       signal?.throwIfAborted();
       const result = await read({
@@ -94,17 +101,17 @@ export class GitRepoWorktreeRows {
             args: [`--git-dir=${checkout.gitDirectory}`, '--work-tree=.', ...invocation.args],
           });
           signal?.throwIfAborted();
-          await checkout.verify();
+          if (!removesCheckout) await checkout.verify();
           return result;
         },
       });
       // The inspection records Git failures as evidence. Identity failures must still escape that catch before a
       // successful inspection can authorize a managed label.
       signal?.throwIfAborted();
-      await checkout.verify();
+      if (!removesCheckout) await checkout.verify();
       return result;
     } finally {
-      await checkout.close();
+      if (held === undefined) await checkout.close();
     }
   }
 

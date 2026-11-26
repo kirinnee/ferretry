@@ -1,5 +1,7 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
+  type AdoptWorktreeRequest,
+  AdoptWorktreeRequestSchema,
   type CreatedWorktree,
   CreatedWorktreeSchema,
   type CreateWorktreeRequest,
@@ -32,6 +34,11 @@ export const WORKTREE_ROUTES = {
  */
 export class ClientWorktreeGateway implements IWorktreeGateway {
   constructor(private readonly client: PluginClient) {}
+
+  async adopt(request: AdoptWorktreeRequest): Promise<CreatedWorktree> {
+    const body = AdoptWorktreeRequestSchema.parse(request);
+    return CreatedWorktreeSchema.parse(await this.client.call('POST /v1/worktrees/adopt', { body }));
+  }
 
   async list(): Promise<WorktreeListResponse> {
     return WorktreeListResponseSchema.parse(await this.client.call(WORKTREE_ROUTES.list));

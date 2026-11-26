@@ -1069,6 +1069,22 @@
       "verb": "session unpin <session>"
     },
     {
+      "args": [
+        {
+          "help": "the existing linked worktree root",
+          "name": "path"
+        }
+      ],
+      "options": [
+        {
+          "flag": "--json",
+          "help": "print the protocol payload instead of the human rendering"
+        }
+      ],
+      "summary": "track an existing linked checkout in place so it can be safely removed later",
+      "verb": "worktree adopt <path>"
+    },
+    {
       "args": [],
       "options": [
         {
@@ -1922,6 +1938,24 @@
       "minimum": "operator",
       "noStore": true,
       "path": "/v1/archived-sessions"
+    },
+    {
+      "audit": {
+        "skip": "adopting files ownership in the worktree registry, as creating a checkout does"
+      },
+      "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "filesystem"
+      },
+      "guard": {
+        "none": "answers the adopted checkout and its removal verdict, no file contents"
+      },
+      "key": "POST /v1/worktrees/adopt",
+      "method": "POST",
+      "minimum": "operator",
+      "noStore": true,
+      "path": "/v1/worktrees/adopt"
     },
     {
       "audit": {

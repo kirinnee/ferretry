@@ -55,6 +55,28 @@ const safeEvidence = (overrides: Partial<WorktreeRemovalEvidence> = {}): Worktre
 });
 
 describe('worktree safety predicates', () => {
+  it('should permit only an adopted identity outside the managed root', () => {
+    const evidence = safeEvidence({ managedRoot: '/elsewhere', resolvedManagedRoot: '/elsewhere' });
+    should(assessWorktreeRemoval(evidence).removable).equal(false);
+    should(assessWorktreeRemoval({ ...evidence, origin: 'adopted' }).removable).equal(true);
+  });
+
+  it('should keep main-checkout, path, repository and marker refusals for adopted rows', () => {
+    const evidence = safeEvidence({ origin: 'adopted', managedRoot: '/elsewhere', resolvedManagedRoot: '/elsewhere' });
+    for (const changed of [
+      { ownershipMarkerMatches: false },
+      { resolvedPath: '/replacement' },
+      { checkout: { ...evidence.checkout!, kind: 'main_checkout' as const } },
+      { checkout: { ...evidence.checkout!, commonDir: '/foreign/.git' } },
+      { checkout: { ...evidence.checkout!, gitDir: '/foreign/metadata' } },
+    ])
+      should(assessWorktreeRemoval({ ...evidence, ...changed }).removable).equal(false);
+  });
+
+  it('should never let adopting bypass missing Git evidence', () => {
+    const decision = assessWorktreeRemoval(safeEvidence({ origin: 'adopted', checkout: undefined }));
+    should(decision.removable).equal(false);
+  });
   it.each([
     { parent: '/managed', child: '/managed', expected: true },
     { parent: '/managed', child: '/managed/repo/sub', expected: true },

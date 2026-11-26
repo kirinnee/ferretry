@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { ApiError, type ApiResponse } from '@ferretry/kernel/contract';
 import type {
+  AdoptWorktreeRequest,
   CreatedWorktree,
   CreateWorktreeRequest,
   ManagedWorktreeView,
@@ -11,6 +12,7 @@ import type {
   WorktreeRemovalRequest,
 } from '../../../../../contract/index.ts';
 import should from 'should';
+import actions from '../../../../../manifest/actions/90-worktrees.actions.ts';
 import {
   WORKTREE_ROUTE_KEYS,
   type WorktreeRouteKey,
@@ -48,6 +50,12 @@ const REMOVED: RemovedWorktree = {
 
 /** A subsystem that answers with fixtures and records what the routes asked of it. */
 class FakeWorktrees implements WorktreeSubsystem {
+  readonly adoptions: AdoptWorktreeRequest[] = [];
+  async adopt(request: AdoptWorktreeRequest): Promise<CreatedWorktree> {
+    this.adoptions.push(request);
+    if (this.failure) throw this.failure;
+    return { worktree: VIEW, cwd: PATH };
+  }
   readonly checks: { path: string; cwd?: string }[] = [];
   readonly removals: WorktreeRemovalRequest[] = [];
   readonly creations: CreateWorktreeRequest[] = [];
@@ -103,13 +111,42 @@ const thrownBy = async (work: Promise<unknown>): Promise<unknown> =>
   );
 
 describe('the managed-worktree mount', () => {
-  it('should key the five handlers exactly as the manifest declares them', () => {
+  it('should parse adoption through its strict path-only schema and preserve domain refusals', async () => {
+    const worktrees = new FakeWorktrees();
+    const response = await call(worktrees, 'POST /v1/worktrees/adopt', { body: { path: PATH } });
+    should(response.status).equal(200);
+    should(jsonOf(response)).match({ cwd: PATH, worktree: { path: PATH } });
+    should(worktrees.adoptions).eql([{ path: PATH }]);
+    const invalid = await refusalOf(
+      call(worktrees, 'POST /v1/worktrees/adopt', { body: { path: PATH, origin: 'adopted' } }),
+    );
+    should(invalid?.status).equal(400);
+    should(worktrees.adoptions).have.length(1);
+    const refused = await refusalOf(
+      call(new FakeWorktrees(new WorktreeError('unsafe_remove', 'foreign marker')), 'POST /v1/worktrees/adopt', {
+        body: { path: PATH },
+      }),
+    );
+    should(refused).match({ status: 409, code: 'unsafe_remove' });
+  });
+  it('should put adoption behind operator and filesystem.configure admission', () => {
+    const adoption = actions.routes?.find(route => route.path === '/v1/worktrees/adopt');
+    should(adoption).match({
+      method: 'POST',
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      capability: { capability: 'filesystem', axis: 'configure' },
+    });
+  });
+  it('should key the handlers exactly as the manifest declares them', () => {
     // Act
     const routes = worktreeRoutes(new FakeWorktrees());
 
     // Assert
     should(Object.keys(routes)).eql([...WORKTREE_ROUTE_KEYS]);
     should(Object.keys(routes)).eql([
+      'POST /v1/worktrees/adopt',
       'GET /v1/worktrees/removal',
       'GET /v1/worktrees/repo',
       'POST /v1/worktrees/remove',
@@ -352,6 +389,7 @@ describe('the managed-worktree mount', () => {
       checkRemoval: async () => DECISION,
       remove: async () => REMOVED,
       create: async () => ({ worktree: VIEW, cwd: PATH }),
+      adopt: async () => ({ worktree: VIEW, cwd: PATH }),
       listRepo: async () => ({ commonDirectory: '/r/.git', worktrees: [], total: 0, truncated: false }),
     };
 
