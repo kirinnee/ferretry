@@ -87,6 +87,13 @@ async function streamDaemon() {
       await accept?.();
       await settle();
     },
+    refuse: async (status: number, body: string) => {
+      await settle();
+      await deliver?.(
+        await (daemon as ScriptedDaemon).record({ t: 'stream-refused', protocol: SESSION_PROTOCOL_ID, status, body }),
+      );
+      await settle();
+    },
     close: async (code: number, reason: string) => {
       await deliver?.(
         await (daemon as ScriptedDaemon).record({ t: 'stream-close', protocol: SESSION_PROTOCOL_ID, code, reason }),
@@ -97,6 +104,32 @@ async function streamDaemon() {
 }
 
 describe('a stream socket over a sealed session', () => {
+  test('D-87 preserves a sealed refusal status and parsed body for the shell, without interpreting the sentence', async () => {
+    const daemon = await streamDaemon();
+    const transport = new SessionTransport({
+      crypto: relayCrypto,
+      daemonId: daemon.identity.daemonId,
+      device: device.claim,
+      dial: daemon.dial,
+    });
+    const closes: unknown[] = [];
+    transport.socket('/v1/browsers/stream', { onFrame: () => {}, onClose: (...args) => closes.push(args) });
+    await daemon.refuse(
+      403,
+      JSON.stringify({ code: 'grant_step_up_required', demand: { capability: 'browser', axis: 'use' } }),
+    );
+    expect(closes).toEqual([
+      [
+        'the daemon refused this stream: 403',
+        undefined,
+        {
+          status: 403,
+          body: { code: 'grant_step_up_required', demand: { capability: 'browser', axis: 'use' } },
+        },
+      ],
+    ]);
+    transport.close();
+  });
   test('it opens when the daemon accepts the stream, not when the carrier connects', async () => {
     const daemon = await streamDaemon();
     const transport = new SessionTransport({

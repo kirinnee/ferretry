@@ -35,6 +35,7 @@ import {
   remoteKeyInput,
   remoteKeyRelease,
   remotePointerButton,
+  streamWantsConfirmation,
 } from '../../lib/remote-browser.ts';
 
 export type { RemoteBrowserSocket, RemoteBrowserSocketFactory };
@@ -170,6 +171,10 @@ export function RemoteBrowserViewer({
   const [error, setError] = useState<string | null>(null);
   const [frameRevision, setFrameRevision] = useState(0);
   const [retry, setRetry] = useState(0);
+  const [confirmable, setConfirmable] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const confirmationRef = useRef(false);
+  const confirmNextRef = useRef(false);
   const previousUrlRef = useRef<string | null>(null);
   const previousTransportRef = useRef(0);
   const previousPageRef = useRef<string | undefined>(undefined);
@@ -225,6 +230,7 @@ export function RemoteBrowserViewer({
     setFrameRevision(0);
     setDisplayState('idle');
     setError(null);
+    setConfirmable(false);
   } else if (renderedPageId !== currentPageId) {
     // A status commit naming page B must never retain page A's already-painted
     // pixels. Doing this during render prevents that stale frame from reaching
@@ -416,7 +422,9 @@ export function RemoteBrowserViewer({
     // event can still arrive in between, and it must be judged against the live
     // scope rather than the one that attached the listener.
     const superseded = (): boolean => disposed || identityRef.current !== transportIdentity;
-    const socket = socketFactory(daemonRef.current, scopeRef.current);
+    const confirm = confirmNextRef.current;
+    confirmNextRef.current = false;
+    const socket = socketFactory(daemonRef.current, scopeRef.current, confirm ? { confirm: true } : undefined);
     socket.binaryType = 'arraybuffer';
     socketRef.current = socket;
     setDisplayState('connecting');
@@ -424,6 +432,9 @@ export function RemoteBrowserViewer({
 
     socket.addEventListener('open', () => {
       if (!superseded()) {
+        confirmationRef.current = false;
+        setConfirming(false);
+        setConfirmable(false);
         releasePressedKeys();
         setDisplayState('live');
         setError(null);
@@ -451,13 +462,23 @@ export function RemoteBrowserViewer({
     });
     socket.addEventListener('close', event => {
       if (superseded()) return;
+      confirmationRef.current = false;
+      setConfirming(false);
       setDisplayState('disconnected');
       if (event instanceof CloseEvent && event.code === 1000) return;
       // A refusal asking again cannot change: say so, and leave the retry to the person.
       if (event instanceof CloseEvent && event.code === 1008) {
-        setError(event.reason === '' ? 'The daemon refused the remote display.' : event.reason);
+        setConfirmable(streamWantsConfirmation(event.reason));
+        setError(
+          streamWantsConfirmation(event.reason)
+            ? 'Confirm it’s you to show the remote display.'
+            : event.reason === ''
+              ? 'The daemon refused the remote display.'
+              : event.reason,
+        );
         return;
       }
+      setConfirmable(false);
       setError('Remote display disconnected; reconnecting…');
       reconnectTimer = setTimeout(() => {
         if (!disposed) setRetry(value => value + 1);
@@ -745,9 +766,31 @@ export function RemoteBrowserViewer({
       {error && (
         <div className="fy-remote-browser-error" role="status">
           <span>{error}</span>
-          <button type="button" onClick={() => setRetry(value => value + 1)}>
+          <button
+            type="button"
+            disabled={confirming}
+            onClick={() => {
+              if (!confirmationRef.current) setRetry(value => value + 1);
+            }}
+          >
             Retry display
           </button>
+          {confirmable && (
+            <button
+              type="button"
+              data-remote-browser-confirm=""
+              disabled={confirming}
+              onClick={() => {
+                if (confirmationRef.current) return;
+                confirmationRef.current = true;
+                confirmNextRef.current = true;
+                setConfirming(true);
+                setRetry(value => value + 1);
+              }}
+            >
+              Confirm with passkey
+            </button>
+          )}
         </div>
       )}
     </section>

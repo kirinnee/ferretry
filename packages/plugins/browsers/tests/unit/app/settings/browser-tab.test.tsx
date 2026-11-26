@@ -87,6 +87,7 @@ const tab = async (script: Script = {}, place?: ViewPlace) => {
     if (route === GRANTS) return script.grants ?? OPEN;
     if (route === 'GET /v1/secrets') return { secrets: [] };
     if (route === 'POST /v1/secrets') return {};
+    if (route === 'DELETE /v1/secrets/:name') return {};
     if (route === PROXY_TEST) return script.test ?? new Error('no test scripted');
     return new Error(`no route ${route}`);
   });
@@ -302,6 +303,70 @@ describe('the Browser tab', () => {
     expect(sent.text).not.toContain(PASS);
     expect(view.container.innerHTML).not.toContain(USER);
     expect(view.container.innerHTML).not.toContain(PASS);
+    await view.unmount();
+  });
+
+  it('E-265 removes the credentials a failed Save and test just filed', async () => {
+    const USER = 'synthetic-proxy-user-0003';
+    const PASS = 'synthetic-proxy-pass-0004';
+    const { calls, view } = await tab({
+      test: { reachable: false, tested: 'unsaved', errorClass: 'auth', message: 'The proxy asked for a sign-in.' },
+    });
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'http://proxy.example.test:8080');
+    await typeInto(view.container.querySelector('[data-browser-proxy-credential-value="username"]'), USER);
+    await typeInto(view.container.querySelector('[data-browser-proxy-credential-value="password"]'), PASS);
+    await click(view.container.querySelector('[data-browser-proxy-save-panel] [data-change-submit]'), 'Save and test');
+    const removed = calls
+      .filter(call => call.route === 'DELETE /v1/secrets/:name')
+      .map(call => call.init?.params?.name);
+    expect(removed).toEqual(['PROXY_USER', 'PROXY_PASSWORD']);
+    expect(calls.some(call => call.route === CONFIG_PUT)).toBe(false);
+    await view.unmount();
+  });
+
+  it('E-265 removes the credentials a failed Test proxy just filed', async () => {
+    const { calls, view } = await tab({
+      test: { reachable: false, tested: 'unsaved', errorClass: 'auth', message: 'The proxy asked for a sign-in.' },
+    });
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'socks5://proxy.example.test:1080');
+    await typeInto(
+      view.container.querySelector('[data-browser-proxy-credential-value="username"]'),
+      'synthetic-proxy-user-0005',
+    );
+    await typeInto(
+      view.container.querySelector('[data-browser-proxy-credential-value="password"]'),
+      'synthetic-proxy-pass-0005',
+    );
+    await click(view.container.querySelector('[data-browser-proxy-test]'), 'Test proxy');
+    expect(calls.filter(call => call.route === 'POST /v1/secrets')).toHaveLength(2);
+    expect(
+      calls.filter(call => call.route === 'DELETE /v1/secrets/:name').map(call => call.init?.params?.name),
+    ).toEqual(['PROXY_USER', 'PROXY_PASSWORD']);
+    await view.unmount();
+  });
+
+  it('E-265 keeps the filed credentials when the test works', async () => {
+    const { calls, view } = await tab({
+      test: {
+        reachable: true,
+        tested: 'unsaved',
+        roundTripMs: 42,
+        egressIp: '203.0.113.7',
+        message: 'The proxy answered.',
+      },
+    });
+    await typeInto(view.container.querySelector('[data-browser-proxy-url]'), 'socks5://proxy.example.test:1080');
+    await typeInto(
+      view.container.querySelector('[data-browser-proxy-credential-value="username"]'),
+      'synthetic-proxy-user-0006',
+    );
+    await typeInto(
+      view.container.querySelector('[data-browser-proxy-credential-value="password"]'),
+      'synthetic-proxy-pass-0006',
+    );
+    await click(view.container.querySelector('[data-browser-proxy-test]'), 'Test proxy');
+    expect(calls.filter(call => call.route === 'POST /v1/secrets')).toHaveLength(2);
+    expect(calls.some(call => call.route === 'DELETE /v1/secrets/:name')).toBe(false);
     await view.unmount();
   });
 

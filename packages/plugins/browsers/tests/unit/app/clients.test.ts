@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { listSecretNames, putSecret, reasonOf } from '../../../app/lib/clients.ts';
+import { listSecretNames, putSecret, reasonOf, removeSecret } from '../../../app/lib/clients.ts';
 import { recordingClient } from '../../support/app/client.ts';
 
 describe('the secrets the Browser tab asks the daemon about', () => {
@@ -25,6 +25,14 @@ describe('the secrets the Browser tab asks the daemon about', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.route).toBe('POST /v1/secrets');
     expect(calls[0]?.init?.body).toEqual({ name: 'github', value: 's3cret' });
+  });
+
+  it('E-265 takes a secret back with a delete of its name', async () => {
+    const { client, calls } = recordingClient(() => ({}));
+    await removeSecret(client, 'PROXY_USER');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.route).toBe('DELETE /v1/secrets/:name');
+    expect(calls[0]?.init?.params).toEqual({ name: 'PROXY_USER' });
   });
 
   it('turns a refusal into its sentence, or a stand-in when it said nothing', () => {

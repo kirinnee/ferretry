@@ -103,6 +103,7 @@ describe('the daemon’s belief in the totals', () => {
     overflow: false,
     frames: ['https://app.example.test'],
     taintSeq: 0,
+    linked: false,
     watchedSince: 1,
     totals: { links: { 'https://app.example.test': 2 }, lost: 0 },
   };
