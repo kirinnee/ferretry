@@ -48,6 +48,25 @@ export async function decideResume(
   const model = keeps?.recorded?.model;
   const first = await decide({ ...base, fast, ...(model === undefined ? {} : { model }) });
   if (first.allow) return { decision: first, fast };
-  if (first.code !== 'unservable_model') return { decision: first, fast: undefined };
+  if (first.code !== 'unservable_model' && first.code !== 'fast_unverified')
+    return { decision: first, fast: undefined };
   return { decision: await decide(base), fast: undefined };
+}
+
+/**
+ * A START's answer from `start.decide`, with one downgrade: a taker that cannot VERIFY fast mode for the model
+ * (`fast_unverified`) does not fail the start. It is asked again without fast, the request loses its `fast` option, and the
+ * taker's sentence comes back as `notice` for the start's answer to show. Any other refusal, and a start that did not ask
+ * for fast, is exactly the taker's answer.
+ */
+export async function decideStart<R extends { readonly options?: { readonly fast?: boolean } }>(
+  decide: (input: StartDecideInput) => Promise<HookDecision>,
+  input: StartDecideInput,
+  request: R,
+): Promise<{ readonly decision: HookDecision; readonly request: R; readonly notice?: string }> {
+  const first = await decide(input);
+  if (first.allow || first.code !== 'fast_unverified') return { decision: first, request };
+  const { fast: _dropped, ...rest } = input;
+  const { fast: _fast, ...options } = request.options ?? {};
+  return { decision: await decide(rest), request: { ...request, options }, notice: first.reason };
 }

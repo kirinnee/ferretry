@@ -6,7 +6,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { openHarness } from './harness-facade.ts';
-import { type DecidedFast, decideResume, launchFastOf, launchOptions } from './launch-options.ts';
+import { type DecidedFast, decideResume, decideStart, launchFastOf, launchOptions } from './launch-options.ts';
 import type { FerretsCore } from './core.ts';
 import { compactAt, setCompactAt } from './compact-at.ts';
 import { agentControl, effectiveLimits, revokeToken, turnUsage } from './insights.ts';
@@ -601,7 +601,10 @@ const failed = (code: StartFailure['code'], reason: string): Result<never, Start
  */
 const refusedBy = (decision: { readonly reason: string; readonly code?: string }): Result<never, StartFailure> => {
   const code = StartRefusalCodeSchema.safeParse(decision.code);
-  return failed(code.success ? code.data : 'refused', decision.reason);
+  return failed(
+    code.success ? (code.data === 'fast_unverified' ? 'unservable_model' : code.data) : 'refused',
+    decision.reason,
+  );
 };
 
 /** Every code unit is ASCII, so no Unicode normalization form can make two spellings name one folder. */
@@ -788,6 +791,8 @@ export class FerretsService implements FerretsApi {
    * NOT `serial`: a start, stop or resume holds that queue for as long as it runs and some of them write details.
    */
   private readonly detailsQueue = new KeyedSerialExecutor();
+  /** Why a start went on without a fast mode it asked for (`decideStart`), by ferret; read once by the start answer. */
+  private readonly startNotices = new Map<FerretId, string>();
   /**
    * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
    * object (R501: the fleet read reuses its body while nothing moved). Held weakly by the input summary.
@@ -1006,6 +1011,13 @@ export class FerretsService implements FerretsApi {
     }
   }
 
+  /** The sentence for a start that went on without the fast mode it asked for, once; nothing for any other start. */
+  takeStartNotice(id: FerretId): string | undefined {
+    const notice = this.startNotices.get(id);
+    this.startNotices.delete(id);
+    return notice;
+  }
+
   /** A system callsign (`learning-000001`) for a helper the daemon starts itself, issued by the bound issuer. */
   async systemCallsign(prefix: SystemCallsignPrefix): Promise<string> {
     await this.ports.ready?.();
@@ -1172,26 +1184,33 @@ export class FerretsService implements FerretsApi {
     // ONE RULE: a ferret with a parent is never a lead (v4 derived the role from the parent alone). A start that POSTs
     // `role: lead` beside a parent is recorded as a helper, so lead-only instruction sections never reach a sub-ferret.
     const role = request.parent !== undefined ? 'helper' : (request.role ?? 'lead');
-    const decision = await this.ports.decide({
-      ferret: id,
-      name,
-      role,
-      ...(request.parent === undefined ? {} : { parent: request.parent }),
-      ...(request.pack === undefined ? {} : { pack: request.pack }),
-      harness: harnessKey,
-      ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
-      ...(login === undefined ? {} : { login }),
-      folder: folder.value,
-      ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
-      by: request.by,
-      ...(request.options?.model === undefined ? {} : { model: request.options.model }),
-      ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
-      // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
-      ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
-      ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
-    });
+    const decided = await decideStart(
+      this.ports.decide.bind(this.ports),
+      {
+        ferret: id,
+        name,
+        role,
+        ...(request.parent === undefined ? {} : { parent: request.parent }),
+        ...(request.pack === undefined ? {} : { pack: request.pack }),
+        harness: harnessKey,
+        ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
+        ...(login === undefined ? {} : { login }),
+        folder: folder.value,
+        ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
+        by: request.by,
+        ...(request.options?.model === undefined ? {} : { model: request.options.model }),
+        ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
+        // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
+        ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
+        ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
+      },
+      request,
+    );
+    const { decision } = decided;
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
     if (!decision.allow) return refusedBy(decision);
+    request = decided.request;
+    if (decided.notice !== undefined) this.startNotices.set(id, decided.notice);
     // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
     const staged = await this.stageConversation(harnessKey, request.harnessConversation, request.by);
     if (!staged.ok) return staged;

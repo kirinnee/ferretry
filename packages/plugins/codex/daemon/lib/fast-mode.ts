@@ -22,6 +22,16 @@ import type { FastModeFacts } from './runtime-switch.ts';
 /** The code Ferrets maps to `409 unservable_model` (its closed list; typed against it). */
 const UNSERVABLE_MODEL: StartRefusalCode = 'unservable_model';
 
+/** The code for fast mode Codex's catalog cannot confirm for the model: the start goes on without fast (not refused) and says why. */
+const FAST_UNVERIFIED: StartRefusalCode = 'fast_unverified';
+
+/** What the owner reads at the start when fast mode was asked for and could not be confirmed. */
+const startedWithoutFast = (why: string): HookDecision => ({
+  allow: false,
+  reason: `Started without Fast: ${why}`,
+  code: FAST_UNVERIFIED,
+});
+
 /** What a session's records say about its model and fast mode (the fields the planner reads, nothing else). */
 export interface FastView {
   /** What the harness last reported running. */
@@ -111,7 +121,7 @@ export const CATALOG_LOADING = "Codex's model list is still loading; try again i
 export const FAST_NOT_CONFIRMED = (label: string, retryInMs = 0): string => {
   const minutes = Math.ceil(retryInMs / 60_000);
   const when = minutes > 0 ? `the next read is in about ${minutes} min` : 'it is read again on the next fast start';
-  return `Fast mode for ${label} is not confirmed yet (Codex's model list could not be read; ${when}); try again then, or start without fast mode`;
+  return `Fast mode for ${label} is not confirmed yet (Codex's model list could not be read; ${when})`;
 };
 
 /** What a fast start is told when it names no model and the held list has no default to judge it on. */
@@ -152,16 +162,16 @@ export function openaiFallbackChoices(view: {
 }
 
 /**
- * The `start.decide` answer for a start that asks for fast mode: refuse it, with the code Ferrets maps to `409
- * unservable_model`, when the live Codex catalog says the model has none — or when there is no catalog to ask yet.
- * Only this harness's own starts, and only when fast was asked (a start that did not ask is never held up by it).
+ * The `start.decide` answer for a start that asks for fast mode. A model the live Codex catalog says has NO fast mode is refused, with
+ * the code Ferrets maps to `409 unservable_model`. Fast mode that cannot be VERIFIED (no catalog held yet, no Codex binary,
+ * a model the list does not carry or says nothing about) does not fail the start: the answer carries `fast_unverified` and
+ * Ferrets starts the ferret without fast and shows the sentence (`Started without Fast: ...`). Fast is never passed unverified.
+ * Only this harness's own starts, and only when fast was asked.
  *
  * The model is the one the start NAMED, else the catalog's own default. `held` is the catalog already in hand (a start
  * decides in the kernel's default 200 ms and never waits for a read). `undefined` means none is held: the first boot
- * ever, or no read has ever worked. Fast is never allowed unverified, so that REFUSES at once with {@link CATALOG_LOADING} (or {@link CODEX_NOT_FOUND}
- * when the last read found no Codex binary — the same closed code, still fail closed)
- * (britnee, #35). Today a cold read waited, and a failed one allowed (rebuild-ref `bin/fyd.ts:2692`, `.catch(() => [])`);
- * both are tightened on purpose. A catalog that is held but does not list the model, or lists it without fast-tier evidence, refuses too.
+ * ever, or no read has ever worked. With none held, the start goes on without fast, saying {@link CATALOG_LOADING} (or {@link CODEX_NOT_FOUND}
+ * when the last read found no Codex binary). A catalog that is held but does not list the model, or lists it without fast-tier evidence, does the same.
  * `known` is the `openai` catalog's models ({@link openaiFallbackChoices}): they state no service tier, so they never allow
  * a start, but a refusal for a model they list says so ({@link FAST_NOT_CONFIRMED}) instead of "still loading".
  */
@@ -175,21 +185,21 @@ export function fastStartDecision(
   if (input.harness !== 'codex' || input.fast !== true) return ALLOW;
   const choices = held();
   if (choices === undefined) {
-    if (binaryMissing()) return { allow: false, reason: CODEX_NOT_FOUND, code: UNSERVABLE_MODEL };
+    if (binaryMissing()) return startedWithoutFast(CODEX_NOT_FOUND);
     const listed = known();
     const model = input.model ?? listed?.find(choice => choice.isDefault === true)?.value;
     const entry =
       model === undefined
         ? undefined
         : catalogChoice({ harness: 'codex', source: 'codex-app-server', choices: listed ?? [] }, model);
-    return {
-      allow: false,
-      reason: entry === undefined ? CATALOG_LOADING : FAST_NOT_CONFIRMED(entry.label, retryInMs()),
-      code: UNSERVABLE_MODEL,
-    };
+    return startedWithoutFast(entry === undefined ? CATALOG_LOADING : FAST_NOT_CONFIRMED(entry.label, retryInMs()));
   }
   const model = input.model ?? choices.find(choice => choice.isDefault === true)?.value;
-  if (model === undefined) return { allow: false, reason: NO_MODEL_FOR_FAST, code: UNSERVABLE_MODEL };
+  if (model === undefined) return startedWithoutFast(NO_MODEL_FOR_FAST);
   const refusal = fastStartRefusal(model, choices);
-  return refusal === undefined ? ALLOW : { allow: false, reason: refusal, code: UNSERVABLE_MODEL };
+  if (refusal === undefined) return ALLOW;
+  // A model the list says has NO fast mode is a definite no (refused); one it cannot confirm goes on without fast.
+  return catalogChoice({ harness: 'codex', source: 'codex-app-server', choices }, model)?.fast === false
+    ? { allow: false, reason: refusal, code: UNSERVABLE_MODEL }
+    : startedWithoutFast(refusal);
 }

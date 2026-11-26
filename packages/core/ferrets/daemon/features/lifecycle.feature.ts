@@ -105,7 +105,8 @@ function register(f: FerretsContext): FeatureContribution | undefined {
           );
           if (!started.ok) return startFailure(started.error);
           startedFerret = started.value;
-          return jsonResponse({ id: started.value }, 201);
+          const notice = service.takeStartNotice(started.value);
+          return jsonResponse({ id: started.value, ...(notice === undefined ? {} : { notice }) }, 201);
         };
         // A start is IDEMPOTENT on its request id (today's retry contract): the same id and body answer the ferret it
         // already started; the same id with another body is a conflict, never a second ferret.
