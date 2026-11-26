@@ -65,7 +65,7 @@ export interface PathsPort {
    * and gh/git in fixed Homebrew/Linuxbrew bin/Cellar locations or the Nix store. Other user installs, worktrees,
    * downloads and temporary folders are refused; package-prefix symlinks into those locations are refused too.
    * Requires permissions.which. verify() rechecks the full identity, including nanosecond timestamps, before use.
-   * The returned trusted stat command lets a shell shim recheck dev/inode/size/mtime/ctime immediately before exec.
+   * The returned runtime command lets a shell shim recheck the same nanosecond identity immediately before exec.
    */
   bindProgram(absolutePath: string): Promise<BoundProgram | undefined>;
   /**

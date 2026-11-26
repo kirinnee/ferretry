@@ -3,7 +3,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { ghLocator } from '../../daemon/lib/gh-locator.ts';
 import { testClient } from './run-folder.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 
 const HOME = '/h/.fy';
@@ -36,6 +36,40 @@ function locator(
 const inHome = (path: string) => (path === HOME || path.startsWith(`${HOME}/`) ? HOME : undefined);
 
 describe('which gh runs with a token', () => {
+  test('S3: an arbitrary Nix-store client on daemon PATH is refused', async () => {
+    const { run, asked } = locator('/nix/store/agent-selected/bin', ['/nix/store/agent-selected/bin']);
+    await expect(run()).rejects.toThrow('not in a trusted installation');
+    expect(asked[0]?.directories).not.toContain('/nix/store/agent-selected/bin');
+  });
+
+  test('S3: only fixed Nix profile roots may select store clients', async () => {
+    for (const directory of [
+      '/home/synthetic/.nix-profile/bin',
+      `/etc/profiles/per-user/${userInfo().username}/bin`,
+      '/run/current-system/sw/bin',
+      '/nix/var/nix/profiles/default/bin',
+    ]) {
+      const run = ghLocator({
+        home: () => '/home/synthetic',
+        daemonPath: () => '/nix/store/agent-selected/bin',
+        which: async (name, options) => (options.directories.includes(directory) ? `${directory}/${name}` : undefined),
+        stateHomeHolding: async () => undefined,
+        bindProgram: async named => testClient(`/nix/store/fixed-profile/bin/${named.split('/').at(-1)}`),
+      });
+      expect((await run()).program).toBe('/nix/store/fixed-profile/bin/gh');
+    }
+  });
+  test('S3: a Nix profile must resolve into the Nix store', async () => {
+    const run = ghLocator({
+      home: () => '/home/synthetic',
+      daemonPath: () => '/usr/bin',
+      which: async name => `/home/synthetic/.nix-profile/bin/${name}`,
+      stateHomeHolding: async () => undefined,
+      bindProgram: async () => testClient('/usr/bin/gh'),
+    });
+    await expect(run()).rejects.toThrow('not in a trusted installation');
+  });
+
   test('R2 portability: fixed package-prefix order ignores a planted earlier PATH client', async () => {
     const asked: string[][] = [];
     const bound: string[] = [];
@@ -59,7 +93,7 @@ describe('which gh runs with a token', () => {
     expect(bound).toEqual(['/opt/homebrew/bin/gh', '/opt/homebrew/bin/git']);
     expect(asked[0]).not.toContain('/tmp/planted');
   });
-  test('R2: gh can start identity-bound git when both live only in separate Nix-store-like directories', async () => {
+  test('R2: gh can start identity-bound git when fixed profiles resolve to separate Nix-store directories', async () => {
     const home = mkdtempSync(join(tmpdir(), 'g21-nix-'));
     try {
       const ghBin = join(home, 'nix/store/gh/bin');
@@ -77,11 +111,12 @@ describe('which gh runs with a token', () => {
       const launch = await ghLocator({
         home: () => '/home/synthetic',
         daemonPath: () => '/pane-untrusted:/nix/store/synthetic-gh/bin:/nix/store/synthetic-git/bin',
-        which: async name => (name === 'gh' ? namedGh : namedGit),
+        which: async name => `/home/synthetic/.nix-profile/bin/${name}`,
         stateHomeHolding: async () => undefined,
         bindProgram: async program => {
           bound.push(program);
-          return { ...testClient(program === namedGh ? gh : git), program };
+          const isGh = program.endsWith('/gh');
+          return { ...testClient(isGh ? gh : git), program: isGh ? namedGh : namedGit };
         },
       })();
       // Map the synthetic kernel's canonical store names onto this test's temporary filesystem.
@@ -93,7 +128,7 @@ describe('which gh runs with a token', () => {
       expect(new TextDecoder().decode(result.stdout)).toBe('synthetic-git\n');
       expect(launch.program).toBe(namedGh);
       expect(launch.path).toBe('/nix/store/synthetic-git/bin:/nix/store/synthetic-gh/bin:/usr/bin:/bin');
-      expect(bound).toEqual([namedGh, namedGit]);
+      expect(bound).toEqual(['/home/synthetic/.nix-profile/bin/gh', '/home/synthetic/.nix-profile/bin/git']);
       expect(await launch.verify()).toBe(true);
       writeFileSync(git, '#!/bin/sh\nexit 99\n', { mode: 0o755 });
       expect(await launch.verify()).toBe(false);

@@ -23,7 +23,7 @@ import { GhRunner } from './features/gh-run/gh-runner.ts';
 import { ghLocator } from './lib/gh-locator.ts';
 import { programLocator } from './lib/program-locator.ts';
 import { ghShimLaunchParts } from './features/gh-shim/parts.ts';
-import { type GhShimFolders, installGhShim } from './features/gh-shim/shim.ts';
+import { closeGhConfig, type GhShimFolders, installGhShim } from './features/gh-shim/shim.ts';
 import { ghRunRoutes } from './features/gh-run/routes.ts';
 import { sshKeyRoutes } from './features/ssh-keys/routes.ts';
 import { SshKeyService } from './features/ssh-keys/service.ts';
@@ -203,10 +203,14 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
             },
             {
               id: 'git-accounts-gh',
-              item: ghShimLaunchParts(shimFolders, async folder => {
-                const linked = accountForFolder(folder, (await projects.current()?.list()) ?? [], () => true);
-                return linked !== undefined;
-              }),
+              item: ghShimLaunchParts(
+                shimFolders,
+                async folder => {
+                  const linked = accountForFolder(folder, (await projects.current()?.list()) ?? [], () => true);
+                  return linked !== undefined;
+                },
+                () => closeGhConfig(shimFolder),
+              ),
             },
           ],
         },

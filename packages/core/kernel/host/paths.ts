@@ -66,22 +66,42 @@ export async function bindProgram(
   };
   try {
     const bound = await trusted(path, true);
-    const stat = await trusted('/usr/bin/stat');
-    if (bound === undefined || stat === undefined) return undefined;
+    if (bound === undefined) return undefined;
     const file = { ...bound.file };
     const expected = [
       file.device,
       file.inode,
       file.size,
-      file.mtimeNs / 1_000_000_000n,
-      file.ctimeNs / 1_000_000_000n,
+      file.mtimeNs,
+      file.ctimeNs,
       file.owner,
-      (file.mode & 0o7777).toString(8),
+      file.mode & 0o7777,
     ].join(':');
-    const args = process.platform === 'darwin' ? ['-Lf', '%d:%i:%z:%m:%c:%u:%Lp'] : ['-Lc', '%d:%i:%s:%Y:%Z:%u:%a'];
+    // The daemon verifies in-process below. A shell shim must also look immediately before exec, even after launch.
+    // Use this running runtime (BUN_BE_BUN also works for compiled fyd), never a stat/bun selected from pane PATH.
+    const runtime = await fs.realpath(process.execPath);
+    const inspect = `import { lstatSync } from 'node:fs';
+const s = lstatSync(process.argv[1], { bigint: true });
+if (!s.isFile()) process.exit(1);
+process.stdout.write([s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs, s.uid, s.mode & 4095n].join(':'));`;
     return {
       program: bound.real,
-      check: { argv: [stat.real, ...args, bound.real], expected },
+      check: {
+        argv: [
+          '/bin/sh',
+          '-c',
+          'BUN_OPTIONS= NODE_OPTIONS= BUN_BE_BUN=1 exec "$@"',
+          '--',
+          runtime,
+          '--config=/dev/null',
+          '--no-env-file',
+          '--cwd=/',
+          '--eval',
+          inspect,
+          bound.real,
+        ],
+        expected,
+      },
       verify: async () => {
         try {
           const current = await trusted(bound.real, true);

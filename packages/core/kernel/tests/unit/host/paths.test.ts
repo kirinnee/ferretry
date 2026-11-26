@@ -54,14 +54,14 @@ describe('bindProgram installed-client trust', () => {
     return { fs, files, writable };
   }
 
-  test('pins the canonical installed client and a trusted absolute identity verifier without executing either', async () => {
+  test('pins the canonical installed client and a runtime identity verifier without executing either', async () => {
     const { fs } = installed();
     expect(await bindProgram(fs, '/alias/fy')).toMatchObject({
       program: '/installed/fy',
-      check: { expected: '1:3:17:1:2:0:755' },
+      check: { expected: '1:3:17:1000000000:2000000000:0:493' },
     });
     const bound = await bindProgram(fs, '/alias/fy');
-    expect(bound?.check.argv[0]).toBe('/usr/bin/stat');
+    expect(bound?.check.argv).toContain(process.execPath);
     expect(bound?.check.argv.at(-1)).toBe('/installed/fy');
   });
 
@@ -76,11 +76,20 @@ describe('bindProgram installed-client trust', () => {
   });
 
   test('refuses a writable client or any writable ancestor, including an ACL write grant', async () => {
-    for (const path of ['/installed/fy', '/installed', '/usr/bin/stat', '/usr/bin', '/']) {
+    for (const path of ['/installed/fy', '/installed', '/']) {
       const { fs, writable } = installed();
       writable.add(path);
       expect(await bindProgram(fs, '/installed/fy')).toBeUndefined();
     }
+  });
+
+  test('S2: NixOS binds and verifies without /usr/bin/stat or any external stat executable', async () => {
+    const { fs, files } = installed();
+    files.delete('/usr/bin/stat');
+    const bound = await bindProgram(fs, '/installed/fy');
+    expect(bound?.program).toBe('/installed/fy');
+    expect(await bound?.verify()).toBe(true);
+    expect(bound?.check.argv.join(' ')).not.toContain('/usr/bin/stat');
   });
 
   test('refuses a same-user readonly file (its owner can chmod it) and a group writable ancestor', async () => {

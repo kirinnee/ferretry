@@ -4,6 +4,7 @@
  */
 import { ApiError, isPackageProgramPath, PACKAGE_PROGRAM_PREFIXES, type PathsPort } from '@ferretry/kernel/contract';
 import { dirname } from 'node:path';
+import { userInfo } from 'node:os';
 import { GIT_ACCOUNT_CODES } from '../../contract/index.ts';
 import type { ProgramLocatorPorts, TrustedLaunch } from './program-locator.ts';
 
@@ -15,19 +16,14 @@ export type GhLaunch = TrustedLaunch & { verify(): Promise<boolean> };
 export function ghLocator(ports: GhLocatorPorts): () => Promise<GhLaunch> {
   const locate = async (name: 'gh' | 'git') => {
     try {
-      // Fixed prefix order. Only canonical store bins from PATH are eligible, sorted independently of PATH order.
-      const storeBins = [
-        ...new Set((ports.daemonPath() ?? '').split(':').filter(dir => /^\/nix\/store\/[^/]+\/bin$/u.test(dir))),
-      ].sort();
-      const directories = [
-        ...PACKAGE_PROGRAM_PREFIXES.map(prefix => `${prefix}/bin`),
+      // Fixed package/profile roots only. PATH must never select the set of trusted Nix-store packages.
+      const profiles = [
         `${ports.home()}/.nix-profile/bin`,
+        `/etc/profiles/per-user/${userInfo().username}/bin`,
         '/nix/var/nix/profiles/default/bin',
         '/run/current-system/sw/bin',
-        ...storeBins.slice(0, 54),
-        '/usr/bin',
-        '/bin',
       ];
+      const directories = [...PACKAGE_PROGRAM_PREFIXES.map(prefix => `${prefix}/bin`), ...profiles, '/usr/bin', '/bin'];
       const found = await ports.which(name, { directories });
       if (found === undefined)
         throw new ApiError(
@@ -44,6 +40,7 @@ export function ghLocator(ports: GhLocatorPorts): () => Promise<GhLaunch> {
       const pinned = directories.includes(dirname(found)) ? await ports.bindProgram(found) : undefined;
       if (
         pinned === undefined ||
+        (profiles.includes(dirname(found)) && !pinned.program.startsWith('/nix/store/')) ||
         (!isPackageProgramPath(pinned.program) && !['/usr/bin', '/bin'].includes(dirname(pinned.program))) ||
         (await ports.stateHomeHolding(pinned.program)) !== undefined
       )

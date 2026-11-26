@@ -2388,8 +2388,10 @@ whose remote changed since reads the old one until Projects rescans.
 
 ## The `gh` on every ferret's `PATH` (B10: `git-accounts`)
 
-B9 is the daemon half of Ferretry's `gh`; B10 is what makes a ferret reach it. **Every** ferret is started (in a linked
-project or not, so the host's `gh` is ignored everywhere) with:
+B9 is the daemon half of Ferretry's `gh`; B10 is what makes a ferret reach it. **Every** ferret gets an empty managed
+`GH_CONFIG_DIR`, linked project or not, so the host's GitHub sign-in is ignored everywhere. When shim repair fails,
+unlinked panes still receive that closed config; linked launches refuse. If the closed config cannot be prepared,
+the launch refuses too. A successful repair supplies:
 
 - **A shim first on its `PATH`.** `<state>/git-accounts/agent-homes/gh/shims/gh` (`0755`, in the plugin's own private
   folder; repaired at every daemon boot and before each ferret launch) executes the canonical installed client,
@@ -2411,7 +2413,10 @@ project or not, so the host's `gh` is ignored everywhere) with:
 - **It fails closed for linked projects.** Discovery or repair failure refuses a linked pane launch with **GitHub client unavailable**. This
   also covers an old shim already on the inherited PATH. An unlinked project launches normally without adding a shim.
   Each invocation checks the canonical client's device,
-  inode, size, modification time, change time, owner and mode using an absolute, trusted system `stat` before exec;
+  inode, size, nanosecond modification/change times, owner and mode using the daemon's own Bun runtime and no-follow
+  `fs.lstatSync` before exec; no external `stat` executable is required, including on NixOS. The daemon's checks use
+  its in-process filesystem adapter. The shell shim must recheck after launch on every invocation, so it invokes that
+  same absolute runtime with `BUN_BE_BUN=1` (also for compiled `fyd`), independent of the pane's PATH;
   a mismatch, a missing client or a symlink replacement refuses with the same sentence and executes no client.
   The shim and config have separate exact managed directory scopes. Publication cannot follow a link into a sibling;
   **Known gap — cleanup races:** config cleanup validates a directory, lists it, and removes its entries with separate
@@ -2443,7 +2448,7 @@ after the first `--` is passed byte for byte. It waits for the daemon's own budg
 
 **Which `gh` gets a token.** The daemon never starts `gh` by bare name. Both `gh` and `git` are selected in fixed order:
 `/opt/homebrew/bin`, `/usr/local/bin`, `/home/linuxbrew/.linuxbrew/bin`, the owner's `~/.nix-profile/bin`,
-`/nix/var/nix/profiles/default/bin`, `/run/current-system/sw/bin`, sorted canonical Nix-store bin directories, then
+`/etc/profiles/per-user/<OS username>/bin`, `/nix/var/nix/profiles/default/bin`, `/run/current-system/sw/bin`, then
 `/usr/bin` and `/bin`. Arbitrary pane/daemon PATH entries do not enter that list. Canonical Homebrew/Linuxbrew targets
 must stay in the fixed prefix's bin or the matching gh/git Cellar package; Nix profile links must resolve into the store.
 Those package-manager installs may be user-owned. System installs otherwise require a root-owned, non-writable chain.
@@ -2480,7 +2485,8 @@ the pane. It prints the variable's NAME and never a value.
   exceptions may be user-writable: same-user edits before binding are trusted at those explicit install locations,
   and a same-user process can race the pre-exec check. These exceptions are identity-bound, not a filesystem sandbox.
   A privileged installer can still change a system client in that interval.
-  System `stat` timestamps are second-resolution in this fingerprint. Same-user filesystem writes are not a sandbox.
+  The shim's runtime is the daemon's own executable; a user-writable daemon install shares the same-user install trust
+  described above. Same-user filesystem writes are not a sandbox.
 - **GAP: the harness's own shell tool.** Whether Claude Code's and Codex's shell tools keep the shim first after they
   read the person's shell rc is **not measured here** (it needs a real signed-in harness; a test daemon refuses to start
   one). `fy gh-doctor` is the pane-side check, and the first real-machine check is owner step 5/6.

@@ -12,11 +12,12 @@ export const GH_INSTRUCTION =
  * The part for one launch. NEVER a token: the pane gets a folder on `PATH`, an empty `GH_CONFIG_DIR`, and a sentence.
  * `GH_TOKEN`, `GITHUB_TOKEN` and `GH_ENTERPRISE_TOKEN` are not named here, and the launch refuses them if they ever were.
  * `folders` answers `undefined` when repair or trusted client discovery fails. A linked launch is then refused:
- * a previously published shim can already be on its inherited PATH. Unlinked launches continue without adding a shim.
+ * a previously published shim can already be on its inherited PATH. Unlinked launches still get a closed config.
  */
 export function ghShimLaunchParts(
   folders: () => Promise<GhShimFolders | undefined>,
   needsGithub: (folder: string) => Promise<boolean>,
+  closeConfig: () => Promise<string>,
 ): LaunchPartSource {
   return {
     required: true,
@@ -25,7 +26,7 @@ export function ghShimLaunchParts(
       // An older shim may already be in the inherited PATH. Closed config alone cannot disable it.
       if (ready === undefined) {
         if (await needsGithub(spec.folder)) throw new LaunchRefusal('GitHub client unavailable');
-        return [];
+        return [{ kind: 'pane-env', plugin: PLUGIN, env: { GH_CONFIG_DIR: await closeConfig() } }];
       }
       return [
         { kind: 'pane-env', plugin: PLUGIN, env: { GH_CONFIG_DIR: ready.paneConfig }, pathPrepend: [ready.shims] },

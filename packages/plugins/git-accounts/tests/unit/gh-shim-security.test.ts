@@ -113,9 +113,37 @@ test('MUST 3: failed discovery with an old shim on the inherited PATH refuses th
   expect(existsSync(marker)).toBe(false);
 });
 
-test('R1: an unlinked project launches without a shim when client discovery fails', async () => {
+test('S1: an unlinked project keeps a closed GH_CONFIG_DIR when client discovery fails', async () => {
   const run = await source([], tmpRunFolder(), false);
-  expect(await run.parts()).toEqual([]);
+  expect(await run.parts()).toEqual([
+    { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: `${run.folder.path}/pane-gh-config` } },
+  ]);
+  expect(readdirSync(join(run.folder.path, 'pane-gh-config'))).toEqual([]);
+  expect(statSync(join(run.folder.path, 'pane-gh-config')).mode & 0o777).toBe(0o500);
+});
+
+test('S1: failed shim publication still empties and closes the unlinked pane config', async () => {
+  const folder = tmpRunFolder();
+  await folder.emptyDirectory('pane-gh-config', 0o700);
+  writeFileSync(join(folder.path, 'pane-gh-config/hosts.yml'), 'synthetic-stale-sign-in');
+  folder.publish = async () => {
+    throw new Error('synthetic publication failure');
+  };
+  const run = await source(['/synthetic-installed/fy'], folder, false, async path => testClient(path));
+  expect(await run.parts()).toEqual([
+    { kind: 'pane-env', plugin: 'git-accounts', env: { GH_CONFIG_DIR: `${folder.path}/pane-gh-config` } },
+  ]);
+  expect(readdirSync(join(folder.path, 'pane-gh-config'))).toEqual([]);
+  expect(statSync(join(folder.path, 'pane-gh-config')).mode & 0o777).toBe(0o500);
+});
+
+test('S1: an unlinked launch refuses when the closed config itself cannot be prepared', async () => {
+  const folder = tmpRunFolder();
+  folder.emptyDirectory = async () => {
+    throw new Error('synthetic config failure');
+  };
+  const run = await source([], folder, false);
+  await expect(run.parts()).rejects.toThrow('synthetic config failure');
 });
 
 test('R1: a linked pane uses the user-owned ~/.local/bin client beside its running daemon', async () => {
@@ -139,16 +167,37 @@ test('R1: a linked pane uses the user-owned ~/.local/bin client beside its runni
   });
   expect(result.exitCode).toBe(0);
   expect(new TextDecoder().decode(result.stdout)).toBe('gh\n--\npr\nlist\n');
+  // The verifier runs inside the pane. Its Bun runtime must ignore project/home preload configuration and options.
+  const marker = join(home, 'preload-executed');
+  const preload = join(home, 'preload.js');
+  writeFileSync(preload, `await Bun.write(${JSON.stringify(marker)}, 'must not execute'); process.exit(99);`);
+  for (const name of ['bunfig.toml', '.bunfig.toml'])
+    writeFileSync(join(home, name), `preload = [${JSON.stringify(preload)}]\n`);
+  const configured = Bun.spawnSync([join(run.folder.path, 'shims/gh'), 'pr', 'list'], {
+    cwd: home,
+    env: { HOME: home, PATH: '/absent', BUN_OPTIONS: `--preload=${preload}`, NODE_OPTIONS: `--require=${preload}` },
+  });
+  expect(configured.exitCode).toBe(0);
+  expect(existsSync(marker)).toBe(false);
 });
 
-test('MUST 1: a replacement after preflight never executes with the pane credential environment', () => {
+test('MUST 1: a replacement after preflight never executes with the pane credential environment', async () => {
   const bin = scratch();
   const client = join(bin, 'fy');
   const marker = join(bin, 'executed');
   writeFileSync(client, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  const binding = testClient(client);
+  const binding = await bindProgram(
+    nodeFs(() => crypto.randomUUID()),
+    client,
+    {
+      executable: client,
+      client: 'fy',
+      daemon: 'fyd',
+    },
+  );
+  expect(binding).toBeDefined();
   const shim = join(bin, 'gh');
-  writeFileSync(shim, shimScript(binding), { mode: 0o755 });
+  writeFileSync(shim, shimScript(binding!), { mode: 0o755 });
   const replacement = join(bin, 'replacement');
   writeFileSync(replacement, `#!/bin/sh\nprintf '%s' "$FY_SESSION_TOKEN" > '${marker}'\n`, { mode: 0o755 });
   renameSync(replacement, client);

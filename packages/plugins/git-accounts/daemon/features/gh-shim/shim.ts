@@ -9,6 +9,7 @@
  */
 import type { RunFolder } from '../ssh-keys/agents.ts';
 import type { BoundProgram } from '@ferretry/kernel/contract';
+import { LaunchRefusal } from '@ferretry/core-ferrets/contract';
 
 /** `<run folder>/shims`: put first on every pane's `PATH`. */
 const SHIM_FOLDER = 'shims';
@@ -41,6 +42,13 @@ export const ghShimFolders = (folder: RunFolder): GhShimFolders => ({
   shims: `${folder.path}/${SHIM_FOLDER}`,
   paneConfig: `${folder.path}/${PANE_CONFIG_FOLDER}`,
 });
+
+/** Every pane needs an empty config even when client discovery or shim publication fails. Fail closed if unavailable. */
+export async function closeGhConfig(folder: RunFolder): Promise<string> {
+  if (!(await folder.isPrivate())) throw new LaunchRefusal('GitHub config unavailable');
+  await folder.emptyDirectory(PANE_CONFIG_FOLDER, PANE_CONFIG_MODE);
+  return ghShimFolders(folder).paneConfig;
+}
 
 /**
  * Writes the shim (and the pane's empty config folder) and answers the folders; `undefined` when they cannot be made

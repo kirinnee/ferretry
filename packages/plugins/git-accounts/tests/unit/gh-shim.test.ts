@@ -121,6 +121,7 @@ describe('every ferret’s launch gets the shim, and never a token', () => {
     const parts = await ghShimLaunchParts(
       async () => folders,
       async () => true,
+      async () => folders.paneConfig,
     ).parts(spec);
     expect(parts).toEqual([
       {
@@ -137,6 +138,7 @@ describe('every ferret’s launch gets the shim, and never a token', () => {
     const parts = await ghShimLaunchParts(
       async () => folders,
       async () => true,
+      async () => folders.paneConfig,
     ).parts(spec);
     const env = parts.flatMap(part => (part.kind === 'pane-env' ? Object.keys(part.env) : []));
     expect(env).toEqual(['GH_CONFIG_DIR']);
@@ -150,6 +152,7 @@ describe('every ferret’s launch gets the shim, and never a token', () => {
       ghShimLaunchParts(
         async () => undefined,
         async () => true,
+        async () => folders.paneConfig,
       ).parts(spec),
     ).rejects.toThrow('GitHub client unavailable');
   });
