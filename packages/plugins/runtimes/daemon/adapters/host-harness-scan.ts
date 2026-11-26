@@ -69,6 +69,11 @@ const LINK_REFUSED = 'symbolic links are not readable setup paths';
 
 const DEFAULT_MAX_SKILL_FILES = 2_000;
 
+/** The largest skill file a scan or an import reads whole; a larger one is told apart by a marker and skipped by the import. */
+export const MAX_SKILL_FILE_BYTES = 256 * 1024;
+/** The most bytes one skill's digest reads in all; the files after it are hashed by name only. */
+export const MAX_SKILL_TOTAL_BYTES = 8 * 1024 * 1024;
+
 /** How many skill files are read at once while one skill is hashed (each read is a guarded kernel walk). */
 const DIGEST_READS_AT_ONCE = 16;
 
@@ -394,16 +399,20 @@ export class HostHarnessScanner {
     sorted: readonly { readonly path: string; readonly kind: HostEntry['kind'] }[],
   ): Promise<string> {
     const hasher = new Bun.CryptoHasher('sha256');
+    let read = 0;
     for (let start = 0; start < sorted.length; start += DIGEST_READS_AT_ONCE) {
       const batch = sorted.slice(start, start + DIGEST_READS_AT_ONCE);
       // Only what the listing called a plain file is looked at again and read: a link, a sign-in name or anything else is
-      // hashed as a link and never opened.
+      // hashed as a link and never opened. Past the total budget a file is hashed by name only, never read.
+      const budgeted = read < MAX_SKILL_TOTAL_BYTES;
       const contents = await Promise.all(
-        batch.map(async file => (file.kind === 'file' ? await this.#leafBytes(file.path) : undefined)),
+        batch.map(async file => (file.kind === 'file' ? await this.#leafBytes(file.path, budgeted) : undefined)),
       );
       batch.forEach(({ path }, index) => {
+        const bytes = contents[index];
+        read += bytes === undefined || typeof bytes === 'string' ? 0 : bytes.length;
         hasher.update(`${relative(root, path)}\0`);
-        hasher.update(contents[index] ?? 'link\0');
+        hasher.update(bytes ?? 'link\0');
         hasher.update('\0');
       });
     }
@@ -446,10 +455,16 @@ export class HostHarnessScanner {
     );
   }
 
-  /** A file's bytes, looked at by itself first: anything that is no longer a plain file (or is refused) is `undefined`. */
-  async #leafBytes(path: string): Promise<Uint8Array | undefined> {
+  /**
+   * A file's bytes, looked at by itself first: anything that is no longer a plain file (or is refused) is `undefined`.
+   * At most {@link MAX_SKILL_FILE_BYTES} + 1 bytes are read whatever the file has grown to; a longer file is hashed as the
+   * marker `large`, and a file past the total budget (`budgeted` false) as `unread`, so no read is unbounded.
+   */
+  async #leafBytes(path: string, budgeted: boolean): Promise<Uint8Array | string | undefined> {
     const info = await this.deps.files.lstat(path).catch(() => undefined);
     if (info?.kind !== 'file') return undefined;
-    return (await this.deps.files.readBytes(path)) ?? new Uint8Array();
+    if (!budgeted) return 'unread';
+    const bytes = (await this.deps.files.readBytes(path, MAX_SKILL_FILE_BYTES + 1)) ?? new Uint8Array();
+    return bytes.length > MAX_SKILL_FILE_BYTES ? 'large' : bytes;
   }
 }

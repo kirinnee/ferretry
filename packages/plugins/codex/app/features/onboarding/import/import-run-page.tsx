@@ -16,6 +16,7 @@ import { Button } from '@ferretry/app';
 import { ActionRow } from '@ferretry/app/ui';
 import {
   IMPORT_KINDS,
+  ImportPartialNote,
   ImportResultList,
   kindItemIds,
   RuntimeNameField,
@@ -57,7 +58,7 @@ function RunBody({
   readonly mode: ImportMode;
 }) {
   const scan = useRunScan(client, step);
-  const { changes, applied, apply } = useApplyImport(client);
+  const { changes, applied, apply, partial } = useApplyImport(client);
   const { model } = scan;
   const [name, setName] = useState<string | null>(null);
   const told = useRef<'none' | 'ready' | 'skipped'>('none');
@@ -156,6 +157,7 @@ function RunBody({
                 {changes.refusal}
               </StepLine>
             )}
+            {partial === null ? null : <ImportPartialNote partial={partial} />}
             {changes.busy ? <StepLine role="status">Importing…</StepLine> : null}
             {/* One way on here: the footer's Later (and Next) are the way to leave the import, so no second "skip" row. */}
             {nothingToImport ? null : (

@@ -958,6 +958,43 @@ describe('the setup.import executor', () => {
     should(configTextOf(applied[0]?.documents ?? [])).not.containEql('"agent"');
   });
 
+  it('should name every file an import left out, with its reason, in the preview and in the receipt', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.folders['/person/.claude/skills/review'] = {
+      files: [{ path: 'SKILL.md', content: '---\nname: review\n---\n' }],
+      skipped: [
+        { path: 'big.bin', reason: 'it is too large' },
+        { path: 'assets/more.md', reason: 'the folder is larger than an import takes' },
+      ],
+    };
+
+    // Act
+    const { description, summary } = await importOnce(service);
+
+    // Assert
+    const sentence =
+      'Not imported: skills/review/big.bin (it is too large), skills/review/assets/more.md (the folder is larger than an import takes).';
+    should(description).containEql(sentence);
+    should(summary).containEql(sentence);
+  });
+
+  it('should name at most twenty left-out files and count the rest', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.folders['/person/.claude/skills/review'] = {
+      files: [{ path: 'SKILL.md', content: '---\nname: review\n---\n' }],
+      skipped: Array.from({ length: 25 }, (_, index) => ({ path: `f${String(index)}.md`, reason: 'it is too large' })),
+    };
+
+    // Act
+    const { summary } = await importOnce(service);
+
+    // Assert
+    should(summary).containEql('skills/review/f19.md (it is too large), and 5 more.');
+    should(summary).not.containEql('f20.md');
+  });
+
   it('should write none of what the person skipped, and move no secret whose env was skipped', async () => {
     // Arrange
     const { service, applied, secrets } = world();

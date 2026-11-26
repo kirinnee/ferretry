@@ -11,7 +11,7 @@ import {
   mcpCheckBaseEnvironment,
 } from '../../../daemon/lib/inventory/check.ts';
 import { type McpInventoryRefusal, McpInventoryService } from '../../../daemon/lib/inventory/service.ts';
-import { documents, inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
+import { CLAUDE_HOME, documents, inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
 
 const TOKEN = 'project-access-token-value';
 const ACCESS_SECRET = 'MCP_DOCS_0123456789ABCDEF_ACCESS';
@@ -212,6 +212,33 @@ describe('McpCheckService', () => {
     should(JSON.stringify(probe.specs[0])).not.containEql('secret:');
   });
 
+  it('should not tell a stdio check that a stored secret is not presented, when the command is handed it', async () => {
+    // Arrange — the command's variable names a secret-bound launch variable, which fills no value but is sealed into the child.
+    const files = documents();
+    const home = files.get(`${CLAUDE_HOME}/.claude.json`) as { mcpServers: { scratch: object } };
+    home.mcpServers.scratch = { command: 'uvx', args: ['scratch'], env: { K: '${API_KEY}' } };
+    const inventory = new McpInventoryService(inventoryWorld(files).deps);
+    const service = new McpCheckService({
+      inventory,
+      probe: new FakeProbe(new McpProbeFailure('protocol', '')),
+      launchEnvironment: async () => ({ API_KEY: '${secret:WORK_KEY}' }),
+      opaqueVariables: async () => ['API_KEY'],
+      baseEnvironment: () => ({}),
+      sealEnvironment: async () => ({ ok: true, env: { names: [] } as never }),
+      credential: async () => undefined,
+      redactor: { redact: async text => text },
+      now: () => 0,
+    });
+
+    // Act
+    const result = await service.check(await idOf(inventory, 'scratch', 'user'), 's1');
+
+    // Assert
+    should(result.message).not.containEql('does not present');
+    should(result.message).containEql('only as its own environment');
+    should(result.message).containEql('API_KEY');
+  });
+
   it('should read a 401 as needing a sign-in', async () => {
     // Arrange
     const { inventory, service } = checker(new FakeProbe(new McpProbeFailure('unauthorized', 'It answered 401.')));
@@ -295,6 +322,19 @@ describe('McpCheckService', () => {
         url: 'https://mcp.linear.app/mcp',
         headers: { Authorization: 'Bearer codex-launch-token' },
       });
+    });
+
+    it('should mask a short bearer value a server reflects, whatever its length', async () => {
+      // Arrange — a fake 6-character token; the server's error repeats the whole header back.
+      const probe = new FakeProbe(new McpProbeFailure('protocol', 'Bad header "Authorization: Bearer tok123".'));
+      const { service, idOfLinear } = codexChecker(probe, { [BEARER_VARIABLE]: 'tok123' });
+
+      // Act
+      const result = await service.check(await idOfLinear(), 'c1');
+
+      // Assert
+      should(result.message).not.containEql('tok123');
+      should(result.message).containEql('[redacted]');
     });
 
     it('should name the variable it could not fill when the launch does not hold it', async () => {
@@ -454,6 +494,23 @@ describe('where a held sign-in is placed in the headers a project server declare
     // Assert — the other variable is the check's to fill and it is not set; it is not taken for the held token.
     should(result.message).containEql('Not set for this check: SOMETHING_ELSE.');
     should(w.probe.specs[0]).not.have.property('credential');
+  });
+
+  it('should mask a literal Authorization bearer, and a literal key header, that the server reflects', async () => {
+    // Arrange — fake literal values written in the file itself, so no launch variable supplies them.
+    const w = declared(
+      docs({ Authorization: 'Bearer lit-0123', 'X-Api-Key': 'key-77' }),
+      undefined,
+      new McpProbeFailure('protocol', 'Rejected Authorization: Bearer lit-0123 and X-Api-Key: key-77.'),
+    );
+
+    // Act
+    const result = await w.service.check(await w.idOfDocs('s1'), 's1');
+
+    // Assert
+    should(result.message).not.containEql('lit-0123');
+    should(result.message).not.containEql('key-77');
+    should(result.message).containEql('[redacted]');
   });
 
   it('should present the held token for a Codex bearer variable that is the held one', async () => {

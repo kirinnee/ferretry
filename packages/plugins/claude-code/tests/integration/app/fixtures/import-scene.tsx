@@ -2,7 +2,7 @@
  * The browser entry for the Claude IMPORT pages: the REAL pages over a fixed fake daemon and a fake host scan, inside a plain
  * stand-in for the step frame (the real frame is O4's). Nothing reads a network; every name is made up.
  *
- *   ?page=settings|model-set|instructions|skills|mcp|conversations|run|run-everything|run-lost|run-slow|run-locked   ?theme=<family>-<mode>
+ *   ?page=settings|model-set|instructions|skills|mcp|conversations|run|run-everything|run-lost|run-partial|run-slow|run-locked   ?theme=<family>-<mode>
  *   `run` is "Choose" mode with some items left out; `run-everything` is the everything mode's single page;
  *   `run-lost` is what a reload leaves (no memory of the choice); `run-slow` holds the first import's first POST
  *   (it never answers, and ignores the abort) until `window.__import.releaseFirst()`; `?hold=<ms>` holds the import's apply; `run-locked` refuses every POST
@@ -37,6 +37,7 @@ const TITLES: Record<string, string> = {
   run: 'Bring it over',
   'run-everything': 'Bring it over',
   'run-lost': 'Bring it over',
+  'run-partial': 'Bring it over',
   'run-slow': 'Bring it over',
   'run-locked': 'Bring it over',
 };
@@ -48,6 +49,16 @@ const applied = routes['POST /v1/runtimes/proposals/:proposalId/apply'];
 const table: Record<string, unknown> = {
   ...routes,
   'POST /v1/runtimes/proposals/:proposalId/apply': async () => {
+    // `run-partial`: the apply stopped part-way, so the page names what landed and what did not.
+    if (page === 'run-partial')
+      throw Object.assign(new Error('The disk is full, so part of this import was applied.'), {
+        status: 409,
+        code: 'fleet_change_failed',
+        body: {
+          landed: ['secret-store key EXAMPLE_API_KEY', 'login example-default'],
+          notLanded: ['the runtimes and fleet files', 'variables of login example-default'],
+        },
+      });
     await new Promise(resolve => setTimeout(resolve, hold));
     return applied;
   },
@@ -126,7 +137,7 @@ const CHOOSE: StepSegmentMemory = {
   'skip:skills': JSON.stringify(['claude-code:skill:release-notes']),
 };
 const segment: StepSegmentMemory =
-  page === 'run-everything' || page === 'run-slow' || page === 'run-locked'
+  page === 'run-everything' || page === 'run-slow' || page === 'run-locked' || page === 'run-partial'
     ? { importMode: 'everything' }
     : page === 'run-lost'
       ? {}

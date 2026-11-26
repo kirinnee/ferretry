@@ -278,6 +278,24 @@ describe('the import run', () => {
     expect(run.events).not.toContain('done');
   });
 
+  it('an import that stopped part-way lists what landed and what did not, beside the refusal', async () => {
+    const routes = importRoutes(scanOf());
+    routes['POST /v1/runtimes/proposals/:proposalId/apply'] = Object.assign(
+      new Error('the disk is full. Part of this change was applied.'),
+      {
+        status: 409,
+        code: 'fleet_change_failed',
+        body: { landed: ['login claude-default'], notLanded: ['voice.yaml'] },
+      },
+    );
+    const { view } = await open(ImportRunPage, { importMode: 'everything' }, routes);
+    await click(view, '[data-import-run]');
+    await settle();
+    const note = must(view.container.querySelector('[data-import-partial]'), 'the partial note');
+    expect(note.querySelector('[data-import-landed]')?.textContent).toContain('login claude-default');
+    expect(note.querySelector('[data-import-not-landed]')?.textContent).toContain('voice.yaml');
+  });
+
   it('after a failed import the press reads Try again, and it sends the import once more (C59 O5-10)', async () => {
     const routes = importRoutes(scanOf());
     const ok = routes['POST /v1/runtimes/proposals'];

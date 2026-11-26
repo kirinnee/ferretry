@@ -30,8 +30,8 @@ export interface HostEntry {
 export interface HostFiles {
   /** The UTF-8 text of the file, or `undefined` when nothing is at the path. */
   readText(path: string): Promise<string | undefined>;
-  /** The bytes of the file, or `undefined` when nothing is at the path. */
-  readBytes(path: string): Promise<Uint8Array | undefined>;
+  /** The bytes of the file, or `undefined` when nothing is at the path. With `limit`, at most that many bytes (a longer file is cut there). */
+  readBytes(path: string, limit?: number): Promise<Uint8Array | undefined>;
   /** The entry, following a link; `undefined` when nothing is at the path (or an ancestor is not a directory). */
   stat(path: string): Promise<HostEntry | undefined>;
   /** The entry itself, never followed; `undefined` when nothing is at the path. */
