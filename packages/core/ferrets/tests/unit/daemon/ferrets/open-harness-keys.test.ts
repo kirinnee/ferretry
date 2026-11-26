@@ -1,7 +1,8 @@
 import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
+import { withRuntimeModel } from '../../../../daemon/lib/ferrets/runtime-records.ts';
 import { ok } from '@ferretry/std';
-import type { RunnerHandle } from '../../../../contract/index.ts';
+import type { RunnerHandle, StartRequest } from '../../../../contract/index.ts';
 import {
   emptyChildEnvironment,
   FakeHarness,
@@ -139,4 +140,17 @@ describe('a harness the contract never named', () => {
     expect(f.runner.starts).toBe(0);
     expect(f.service.harnessFacts('gemini')).toBeUndefined();
   });
+});
+
+const request: StartRequest = { folder: '/work', by: 'owner' };
+
+test("a start records the runtime's selected model, unless there is none or the caller chose one", () => {
+  expect(withRuntimeModel(request, 'provider/model')).toEqual({ ...request, options: { model: 'provider/model' } });
+  expect(withRuntimeModel({ ...request, options: { effort: 'high' } } as StartRequest, 'provider/model')).toEqual({
+    ...request,
+    options: { effort: 'high', model: 'provider/model' },
+  });
+  expect(withRuntimeModel(request, undefined)).toBe(request);
+  const chosen = { ...request, options: { model: 'caller/model' } } as StartRequest;
+  expect(withRuntimeModel(chosen, 'provider/model')).toBe(chosen);
 });
