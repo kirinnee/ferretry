@@ -240,6 +240,7 @@ export function AddSkillsPage({
   };
 
   const install = async (sub: MemberSubscription, row: SkillRow): Promise<void> => {
+    if (plan.refused === true) return;
     setBusy(row.key);
     setFailure(null);
     before.current = await readInstalls();
@@ -258,7 +259,7 @@ export function AddSkillsPage({
     const fresh = before.current === null ? [] : newInstalls(before.current, after);
     before.current = null;
     if (fresh.length === 0) return;
-    setLanded(fresh.map(item => landedSentence(item, plan, scopes, place.harness)).join(' '));
+    setLanded(fresh.map(item => landedSentence(item, plan, scopes, plan.harness)).join(' '));
     // The ferret now sees more; the next install's sentence compares against that.
     setScopes(known => [
       ...new Set([...known, ...fresh.map(item => (item.target.scope === 'project' ? 'project' : 'user'))]),
@@ -414,6 +415,7 @@ export function AddSkillsPage({
                                     row={row}
                                     busy={busy === row.key}
                                     onInstall={() => void install(sub, row)}
+                                    refused={plan.refused === true}
                                   />
                                 </li>
                               ))}
@@ -536,10 +538,13 @@ function PublisherNote({
 function SkillRowView({
   row,
   busy,
+  refused,
   onInstall,
 }: {
   readonly row: SkillRow;
   readonly busy: boolean;
+  /** The ferret's harness is one a catalog cannot install into: no install is offered. */
+  readonly refused: boolean;
   readonly onInstall: () => void;
 }) {
   return (
@@ -559,7 +564,7 @@ function SkillRowView({
           type="button"
           size="sm"
           variant="primary"
-          disabled={busy}
+          disabled={busy || refused}
           onClick={onInstall}
           data-add-skills-install=""
         >

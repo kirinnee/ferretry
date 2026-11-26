@@ -11,6 +11,7 @@
  * Core contracts are imported directly: Vault's secret names and Gate's passkey assertion.
  */
 import { z } from 'zod';
+import { InstallHarnessSchema } from './install-harness.ts';
 
 // ─── common (today's `common.ts`) ─────────────────────────────────────────────────────────────────────────────────
 
@@ -221,7 +222,7 @@ export const PublishedCarriersSchema = z.array(PublishedCarrierSchema).max(MAX_P
 export type PublishedCarriers = z.infer<typeof PublishedCarriersSchema>;
 // ─── harness names (Ferrets; today's `session-base.ts`) ───────────────────────────────────────────────────────────
 
-export const HarnessSchema = z.enum(['claude', 'codex']);
+export const HarnessSchema = InstallHarnessSchema;
 
 // ─── the raw-key rule both ends run (MCP; today's `session-mcp.ts`) ───────────────────────────────────────────────
 

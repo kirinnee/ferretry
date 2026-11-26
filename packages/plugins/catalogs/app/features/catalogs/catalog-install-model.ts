@@ -12,6 +12,10 @@ import {
   type CatalogInstallPreviewRequest,
   type CatalogInstallRequest,
   type CatalogSecretBindings,
+  type InstallHarness,
+  installHarnessFacts,
+  installHarnessOfKey,
+  installHarnesses,
   readSharedCatalogFile,
   SHARED_CATALOG_FILE_MAX_BYTES,
   type SharedCatalogFile,
@@ -134,18 +138,38 @@ export function fileSummary(opened: OpenedCatalogFile): string {
 
 export interface TargetOptions {
   readonly projects: readonly { readonly root: string; readonly label: string }[];
-  readonly runtimes: readonly { readonly runtime: string; readonly profiles: readonly string[] }[];
+  /** Each runtime with the profiles it launches with, and the harness PLUGIN KEY it runs when the machine said (`claude-code`). */
+  readonly runtimes: readonly {
+    readonly runtime: string;
+    readonly profiles: readonly string[];
+    readonly harness?: string;
+  }[];
+}
+
+/**
+ * The agents a project install can be for: the harnesses the machine's runtimes run (by exact plugin key, in the table's
+ * order), plus `keep` (the one already chosen). A machine that cannot say what is installed (none read, or a runtime that
+ * did not say) offers every harness rather than none; one that read its runtimes offers only what they run, which is none
+ * when none runs a harness Catalogs can install into.
+ */
+export function harnessChoices(
+  runtimes: readonly { readonly harness?: string }[],
+  keep?: InstallHarness,
+): readonly InstallHarness[] {
+  if (runtimes.length === 0 || runtimes.some(runtime => runtime.harness === undefined)) return installHarnesses();
+  const running = new Set(runtimes.flatMap(runtime => installHarnessOfKey(runtime.harness ?? '') ?? []));
+  return installHarnesses().filter(word => running.has(word) || word === keep);
 }
 
 export type TargetPick =
-  | { readonly scope: 'project'; readonly projectRoot: string; readonly harness: 'claude' | 'codex' }
+  | { readonly scope: 'project'; readonly projectRoot: string; readonly harness: InstallHarness }
   | { readonly scope: 'runtime'; readonly runtime: string; readonly profile: string };
 
 /** What the person has chosen so far. Every field may still be missing. */
 export interface TargetDraft {
   readonly scope?: 'project' | 'runtime';
   readonly projectRoot?: string;
-  readonly harness?: 'claude' | 'codex';
+  readonly harness?: InstallHarness;
   readonly runtime?: string;
   readonly profile?: string;
 }
@@ -353,7 +377,7 @@ const flatPath = (path: string): string =>
 export function installIsAt(install: CatalogInstall, location: SkillLocation): boolean {
   const { target } = install;
   if (target.scope === 'runtime') return location.scope === 'ferretry' && location.runtimes.includes(target.runtime);
-  const folder = target.harness === 'claude' ? '.claude' : '.agents';
+  const folder = installHarnessFacts(target.harness).projectFolder;
   return (
     location.scope === 'project' &&
     flatPath(location.path) === flatPath(`${target.projectRoot}/${folder}/skills/${install.provenance.name}/SKILL.md`)

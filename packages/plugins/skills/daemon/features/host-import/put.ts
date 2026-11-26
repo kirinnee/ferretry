@@ -26,8 +26,13 @@
  *
  * Nothing here holds a value: a skill is text, and a refusal names a skill, a path and a rule, never a file's content.
  */
-import type { KnownHarnessKey } from '@ferretry/core-ferrets/contract';
-import type { ComponentPutFile, ComponentPutOptions, ComponentPutResult } from '@ferretry/plugin-runtimes/contract';
+import {
+  type ComponentPutFile,
+  type ComponentPutOptions,
+  type ComponentPutResult,
+  harnessWords,
+} from '@ferretry/plugin-runtimes/contract';
+import { isSkillsHarnessKey, type SkillsHarnessKey, skillsHarnessKeys } from '../../../contract/index.ts';
 import { ITEM_NAME_PATTERN } from '@ferretry/std';
 import {
   type InstalledSkillFile,
@@ -45,11 +50,8 @@ export const MAX_DOCUMENT_BYTES = 64 * 1024;
 const MAX_NAME_LENGTH = 64;
 
 /** Runtimes' word for a harness, and the harness key itself, to the key a skills item carries. */
-const HARNESS_KEY_OF: Readonly<Record<string, KnownHarnessKey | undefined>> = Object.assign(Object.create(null), {
-  claude: 'claude-code',
-  'claude-code': 'claude-code',
-  codex: 'codex',
-});
+const harnessKeyOf = (word: string): SkillsHarnessKey | undefined =>
+  isSkillsHarnessKey(word) ? word : skillsHarnessKeys().find(key => harnessWords(key)?.catalogHalf === word);
 
 /** One file of an imported skill, as Runtimes hands it over: `<skill>/<path inside the skill>` and its text. */
 export type ImportedSkillFile = ComponentPutFile;
@@ -159,7 +161,7 @@ export function skillsImportPut(
     const harness = (document as { readonly harness?: unknown }).harness;
     let text = documentText;
     if (harness !== undefined) {
-      const key = typeof harness === 'string' ? HARNESS_KEY_OF[harness] : undefined;
+      const key = typeof harness === 'string' ? harnessKeyOf(harness) : undefined;
       if (key === undefined) return refuse('the skills selection names a harness Ferretry does not know');
       text = `${JSON.stringify({ ...(document as object), harness: key }, null, 2)}\n`;
     }

@@ -208,6 +208,9 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
   private tidy(state: ConnectorState): ConnectorState {
     const now = this.now();
     const grants = state.grants
+      // An approval that never finished (its process died between the write and the audit) holds no credential and
+      // is dropped by whatever writes next.
+      .filter(grant => !grant.pending)
       .filter(grant => !grant.revokedAt || Date.parse(grant.revokedAt) + REVOKED_RETENTION_MS > now)
       .map(grant => {
         const usedRefresh = grant.usedRefresh.filter(used => used.expiresAt > now);
@@ -469,7 +472,10 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
     }, 'owner');
   }
   grants(): Promise<readonly ConnectorGrantView[]> {
-    return this.ports.memory.run(async () => (await this.ports.store.load()).grants.map(grantView), 'owner');
+    return this.ports.memory.run(
+      async () => (await this.ports.store.load()).grants.filter(g => !g.pending).map(grantView),
+      'owner',
+    );
   }
   private findRequest(id: string) {
     const match = id.toUpperCase().replaceAll('-', '');
@@ -503,22 +509,48 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
         refresh: [],
         usedRefresh: [],
       };
-      await this.persist({ ...state, grants: [...state.grants, grant] });
-      // The write was an await too. If the request vanished or lost its trust inside it, the approval is void: the
-      // grant just written is taken back out, nothing is republished and no approval is audited.
-      if (this.ports.memory.pending.get(key) !== request || !this.trusted(request)) {
-        await this.persist(state);
+      // Three steps, each safe to die in. (1) A PENDING record is written: it is never connected, so a crash here
+      // leaves nothing a person or a credential can use. (2) Trust is judged once more, synchronously, and only a
+      // sign-in that is still the same live, trusted one goes on; the approval is audited next. (3) The record is
+      // flipped to approved, so no grant is ever connected without its approval already audited. The queue
+      // serialises every owner act; trust itself is read live, so step 2's synchronous check is the one instant
+      // the approval is judged against it.
+      try {
+        await this.ports.store.save({ ...state, grants: [...state.grants, { ...grant, pending: true }] });
+      } catch (error) {
+        await this.dropPending(state);
+        throw error;
+      }
+      if (this.ports.memory.pending.get(key) !== request || !this.approvable(request)) {
+        await this.dropPending(state);
         return { ok: false, code: 'expired', message: 'This sign-in expired.' };
       }
-      this.ports.memory.pending.set(key, { ...request, decision: 'approved', grantId: grant.id });
       await this.audit({
         kind: 'connector.grant.approved',
         grantId: grant.id,
         clientName: grant.clientName,
         actor: approvedBy,
       });
+      try {
+        await this.persist({ ...state, grants: [...state.grants, grant] });
+      } catch (error) {
+        await this.dropPending(state);
+        throw error;
+      }
+      this.ports.memory.pending.set(key, { ...request, decision: 'approved', grantId: grant.id });
       return { ok: true, value: grantView(grant) };
     }, 'owner');
+  }
+  /**
+   * Takes an unfinished approval back out. If even that cannot be written the record stays on disk as pending, which
+   * is inert (never connected, never indexed, no credential) and is dropped by the next write that succeeds.
+   */
+  private async dropPending(before: ConnectorState): Promise<void> {
+    try {
+      await this.ports.store.save(before);
+    } catch {
+      /* Inert as it stands. */
+    }
   }
   deny(id: string, deniedBy: string): Promise<ConnectorActResult<ConnectorPendingView>> {
     return this.ports.memory.run(async () => {
@@ -707,6 +739,7 @@ export class ConnectorAuthority implements ConnectorOwnerActs, ConnectorAccessVe
       if (
         !grant ||
         grant.revokedAt ||
+        grant.pending ||
         !this.trusted(code) ||
         code.expiresAt <= this.now() ||
         issuing.challenge === undefined ||

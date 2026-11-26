@@ -1,6 +1,8 @@
 import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import { resolve } from 'node:path';
 import {
+  installHarnesses,
+  isInstallHarness,
   readSharedCatalogFile,
   SHARED_CATALOG_FILE_MAX_BYTES,
   type CatalogInstallPreview,
@@ -150,11 +152,15 @@ export class CatalogInstallController {
     const runtime = options.runtime !== undefined;
     if (project === runtime)
       throw new Stop(
-        'Name where it goes: either --project <root> --harness claude|codex, or --runtime <name> --profile <name>.',
+        `Name where it goes: either --project <root> --harness ${installHarnesses().join('|')}, or --runtime <name> --profile <name>.`,
       );
     if (project) {
-      if (options.harness !== 'claude' && options.harness !== 'codex')
-        throw new Stop('A project install needs --harness claude or --harness codex.');
+      if (options.harness === undefined || !isInstallHarness(options.harness))
+        throw new Stop(
+          `A project install needs ${installHarnesses()
+            .map(word => `--harness ${word}`)
+            .join(' or ')}.`,
+        );
       return { scope: 'project', projectRoot: resolve(this.deps.cwd, options.project ?? ''), harness: options.harness };
     }
     if (options.profile === undefined) throw new Stop('A runtime install needs --profile <name>.');

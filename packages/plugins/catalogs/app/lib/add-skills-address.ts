@@ -5,8 +5,9 @@
  */
 
 import { FerretSkillsInventorySchema, type SkillsAddSlotProps } from '@ferretry/plugin-skills/contract';
+import { installHarnessOfKey } from '../../contract/wire/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import type { SessionPlace } from '../features/add-skills/add-skills-model.ts';
+import { type SessionPlace, UNKNOWN_HARNESS } from '../features/add-skills/add-skills-model.ts';
 
 export interface AddSkillsPlace extends SessionPlace {
   /** Where the skills the ferret sees come from. */
@@ -20,13 +21,24 @@ export function placeQuery(props: SkillsAddSlotProps): string {
   return `?${query.toString()}`;
 }
 
-/** The place a query names; the slot's `claude-code` is the `claude` an install target names, and anything else reads as it. */
+/**
+ * The harness an address names: the slot's harness key (`claude-code`) is the word an install target names (`claude`). None named
+ * is no harness (the page picks the only one the machine runs, or asks); a key Catalogs has no layout for is `unknown`, which
+ * is refused, never read as Claude.
+ */
+function harnessOf(key: string | null): Pick<SessionPlace, 'harness' | 'unsupportedKey'> {
+  if (key === null || key === '') return { harness: undefined };
+  const harness = installHarnessOfKey(key);
+  return harness === undefined ? { harness: UNKNOWN_HARNESS, unsupportedKey: key } : { harness };
+}
+
+/** The place a query names. */
 export function readPlace(search: string): AddSkillsPlace {
   const query = new URLSearchParams(search);
   const folder = query.get('folder');
   return {
     cwd: folder === null || folder === '' ? undefined : folder,
-    harness: query.get('harness') === 'codex' ? 'codex' : 'claude',
+    ...harnessOf(query.get('harness')),
     runtime: query.get('runtime') ?? undefined,
     scopes: (query.get('scopes') ?? '').split(',').filter(scope => scope !== ''),
   };
@@ -36,7 +48,7 @@ const FERRET_INVENTORY_ROUTE = 'GET /v1/ferrets/:ferretId/skills/inventory' as c
 
 /**
  * The query for a ferret whose place nobody handed over (the Actions menu knows the ferret, not where it works): Skills'
- * own read of what that ferret sees. A daemon that will not say leaves the page to its defaults (no folder, `claude`).
+ * own read of what that ferret sees. A daemon that will not say leaves the page to its defaults (no folder, no harness).
  */
 export async function placeQueryOfFerret(client: Pick<PluginClient, 'call'>, ferret: string): Promise<string> {
   try {

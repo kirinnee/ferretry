@@ -228,7 +228,9 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
         mode,
       );
       try {
-        const { size } = await handle.stat();
+        const { size, mode: found } = await handle.stat();
+        // A file somebody loosened by hand is tightened back to what this log asks for (bits only ever removed).
+        if ((found & 0o777 & ~mode) !== 0) await handle.chmod(found & mode & 0o777);
         let prefix = '';
         if (size > 0) {
           const last = new Uint8Array(1);

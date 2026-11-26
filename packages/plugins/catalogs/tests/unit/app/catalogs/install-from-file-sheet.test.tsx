@@ -826,3 +826,33 @@ describe('B16 the runtime and profile an item installs into are the target machi
     await view.unmount();
   });
 });
+
+describe('the agents a project install offers', () => {
+  const agents = async (runtimes: readonly { runtime: string; profiles: string[]; harness?: string }[]) => {
+    const { view } = await open({}, { runtimes });
+    await giveText(fileText);
+    await pickItem(SKILL_ID);
+    await choose('[data-catalog-scope]', 'A project');
+    const labels = await labelsAt('[data-catalog-harness]');
+    await view.unmount();
+    return labels;
+  };
+
+  it('should offer only the harness a Claude-only machine runs', async () => {
+    expect(await agents([{ runtime: 'box', profiles: ['default'], harness: 'claude-code' }])).toEqual([
+      CHOOSE_PLACEHOLDER,
+      'Claude',
+    ]);
+  });
+
+  it('should offer both when the machine runs both, and both when it could not say', async () => {
+    const both = [CHOOSE_PLACEHOLDER, 'Claude', 'Codex'];
+    expect(
+      await agents([
+        { runtime: 'a', profiles: ['default'], harness: 'claude-code' },
+        { runtime: 'b', profiles: ['default'], harness: 'codex' },
+      ]),
+    ).toEqual(both);
+    expect(await agents([])).toEqual(both);
+  });
+});
