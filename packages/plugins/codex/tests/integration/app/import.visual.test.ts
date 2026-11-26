@@ -39,6 +39,7 @@ const PAGES = [
   'run-done',
   'run-everything',
   'run-unreviewed',
+  'run-partial',
 ] as const;
 
 let browser: Browser;
@@ -106,6 +107,12 @@ const open = async (context: BrowserContext, page: string, mode: 'light' | 'dark
     await tab.waitForSelector('[data-import-run]');
     await tab.locator('[data-import-run]').click();
     await tab.waitForSelector('[data-import-done]');
+  }
+  // The partial shot is the run page after an import that stopped part-way.
+  if (page === 'run-partial') {
+    await tab.waitForSelector('[data-import-run]');
+    await tab.locator('[data-import-run]').click();
+    await tab.waitForSelector('[data-import-partial]');
   }
   // Let the card animation and the scan read finish: a shot shows the last frame.
   await tab.waitForTimeout(800);
@@ -307,4 +314,36 @@ describe('an unticked import row keeps its words and its panel (C59 O8 item 5)',
           }
           await context.close();
         }, 60_000);
+});
+
+/** The phone and the 1440 desktop the owner's shot rule names (this file's own desktop is 1280). */
+const SHOT_VIEWPORTS = [
+  VIEWPORTS[0],
+  { name: 'desktop-1440', width: 1_440, height: 900, phone: false } as unknown as (typeof VIEWPORTS)[number],
+];
+
+describe('the part-way import note at the highest rounding (Neumorphism)', () => {
+  for (const viewport of SHOT_VIEWPORTS)
+    for (const mode of ['light', 'dark'] as const)
+      it(`run-partial: the lists stay inside the note and the screen at ${viewport.name}, ${mode}`, async () => {
+        const context = await newContext(viewport, mode);
+        const tab = await open(context, 'run-partial', mode);
+        await tab.evaluate(() => document.documentElement.setAttribute('data-style', 'neumorphism'));
+        await tab.waitForTimeout(300);
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+        const note = (await tab.locator('[data-import-partial]').boundingBox()) as { x: number; width: number };
+        for (const item of await tab.locator('[data-import-partial] li').all()) {
+          const box = (await item.boundingBox()) as { x: number; width: number };
+          expect(box.x).toBeGreaterThanOrEqual(note.x);
+          expect(box.x + box.width).toBeLessThanOrEqual(note.x + note.width);
+        }
+        expect(await tab.locator('[data-import-landed] li').count()).toBeGreaterThan(0);
+        expect(await tab.locator('[data-import-not-landed] li').count()).toBeGreaterThan(0);
+        if (shotsDir !== '')
+          await tab.screenshot({
+            fullPage: true,
+            path: join(shotsDir, `run-partial-neumorphism-${viewport.name}-${mode}.png`),
+          });
+        await context.close();
+      }, 60_000);
 });

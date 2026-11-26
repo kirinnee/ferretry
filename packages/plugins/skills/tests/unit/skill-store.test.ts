@@ -286,6 +286,17 @@ describe('a look at an installed folder is bounded', () => {
     expect(found.filter(entry => entry.kind === 'file')).toHaveLength(1000);
   });
 
+  test('walk counts plain folders it visits, so a skill of thousands of empty folders is bounded too', async () => {
+    const f = await fixture();
+    await mkdir(join(f.installed, 'wide'), { recursive: true });
+    await Promise.all(
+      Array.from({ length: 1001 }, (_, index) =>
+        mkdir(join(f.installed, 'wide', `d${String(index).padStart(4, '0')}`)),
+      ),
+    );
+    expect(await f.store.walk('wide')).toEqual([{ path: '(more entries than a skill holds)', kind: 'directory' }]);
+  });
+
   test('walk of a name that is no folder name finds nothing', async () => {
     const f = await fixture();
     expect(await f.store.walk('../x')).toEqual([]);

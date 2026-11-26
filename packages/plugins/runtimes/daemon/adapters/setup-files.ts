@@ -13,13 +13,20 @@ import type {
   FolderReading,
   SetupCatalogDeps,
 } from '../lib/service/setup-service.ts';
-import { HostHarnessScanner } from './host-harness-scan.ts';
+import { HostHarnessScanner, MAX_SKILL_FILE_BYTES, MAX_SKILL_TOTAL_BYTES } from './host-harness-scan.ts';
 import type { AdapterHost, ConfigFileService, HostFiles } from './ports.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
-const MAX_FOLDER_FILE_BYTES = 256 * 1024;
+const MAX_FOLDER_FILE_BYTES = MAX_SKILL_FILE_BYTES;
+/** The most bytes one folder read takes in all (the per-file cap times the file cap is 125 MiB); the rest are skipped and named. */
+export const MAX_FOLDER_TOTAL_BYTES = MAX_SKILL_TOTAL_BYTES;
 /** The most files one folder read takes; the rest are skipped and named. */
 export const MAX_FOLDER_FILES = 500;
+
+/** The most names (files, folders, links) one folder read looks at; the walk stops there and the rest are named as skipped. */
+export const MAX_FOLDER_ENTRIES = 5_000;
+/** The deepest folder one folder read enters; a deeper one is skipped and named. */
+export const MAX_FOLDER_DEPTH = 12;
 
 /** Names a folder read never enters: version control and the harness's own bundled skills. */
 const SKIPPED_ENTRIES: ReadonlySet<string> = new Set(['.git', '.system', 'node_modules']);
@@ -36,16 +43,26 @@ export async function readTextFolder(
   const found: { path: string; content: string }[] = [];
   const skipped: { path: string; reason: string }[] = [];
   const decoder = new TextDecoder('utf-8', { fatal: true });
-  const walk = async (relative: string): Promise<void> => {
+  let total = 0;
+  let looked = 0;
+  const walk = async (relative: string, depth: number): Promise<void> => {
     const names = await files.list(join(root, relative));
     if (names === undefined) return;
     for (const name of names.toSorted()) {
       if (SKIPPED_ENTRIES.has(name)) continue;
       const path = relative === '' ? name : `${relative}/${name}`;
+      if (looked >= MAX_FOLDER_ENTRIES) {
+        // One line for the walk's end, not one per name: the folder is wider or deeper than an import reads.
+        if (looked === MAX_FOLDER_ENTRIES) skipped.push({ path, reason: 'the folder has too many entries to read' });
+        looked += 1;
+        return;
+      }
+      looked += 1;
       const entry = await files.lstat(join(root, path));
       if (entry === undefined) continue;
       if (entry.kind === 'directory') {
-        await walk(path);
+        if (depth >= MAX_FOLDER_DEPTH) skipped.push({ path, reason: 'it is nested too deep' });
+        else await walk(path, depth + 1);
         continue;
       }
       if (entry.kind !== 'file') {
@@ -60,16 +77,31 @@ export async function readTextFolder(
         skipped.push({ path, reason: 'it is too large' });
         continue;
       }
+      if (total + entry.size > MAX_FOLDER_TOTAL_BYTES) {
+        skipped.push({ path, reason: 'the folder is larger than an import takes' });
+        continue;
+      }
       try {
-        const bytes = await files.readBytes(join(root, path));
+        // The size the listing gave is only a first look: a file can grow after it, so the read itself is bounded, one byte
+        // past the cap, and what is charged is what was read.
+        const bytes = await files.readBytes(join(root, path), MAX_FOLDER_FILE_BYTES + 1);
         if (bytes === undefined) continue;
+        if (bytes.length > MAX_FOLDER_FILE_BYTES) {
+          skipped.push({ path, reason: 'it is too large' });
+          continue;
+        }
+        if (total + bytes.length > MAX_FOLDER_TOTAL_BYTES) {
+          skipped.push({ path, reason: 'the folder is larger than an import takes' });
+          continue;
+        }
+        total += bytes.length;
         found.push({ path, content: decoder.decode(bytes) });
       } catch {
         skipped.push({ path, reason: 'it is not text' });
       }
     }
   };
-  await walk('');
+  await walk('', 0);
   return { files: found, skipped };
 }
 
