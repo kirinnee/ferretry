@@ -49,7 +49,7 @@ import { budgetNoticeText } from './lib/budget/notice.ts';
 import { serialExecutor, type TurnUsageSource } from './lib/ports.ts';
 import { PerformanceProfiler } from './lib/performance/profiler.ts';
 import { PerformanceRecorder } from './lib/performance/recorder.ts';
-import { feedLoopToProbe } from './lib/performance/loop-feed.ts';
+import { feedLoopToProbe, feedWorkToProbe } from './lib/performance/loop-feed.ts';
 import { IDLE_DAEMON_BUDGETS } from './lib/performance/budgets.ts';
 import {
   CredentialUsageSource,
@@ -354,6 +354,8 @@ export default implementDaemon(manifest, {
     // The kernel's own quarter-second tick, heard for as long as the daemon runs: a window opened by a profile finds the lag
     // and stalls of exactly the seconds it spans, and with none open the observer returns at once.
     kernel.lifecycle.onStop(feedLoopToProbe(kernel.loop, recorder));
+    // The routes served, programs run and host file calls the kernel sees, by name and duration only.
+    kernel.lifecycle.onStop(feedWorkToProbe(kernel.loop, recorder));
     // "Hot functions": the runtime's own stack sampler, started by the first profile and drained for as long as the daemon runs.
     const stackSampling = new ProfileStackSampling({
       start: async () => await JscStackSampler.start(),
@@ -383,7 +385,7 @@ export default implementDaemon(manifest, {
             : { sessions: all.length, running: all.filter(ferret => ferret.state !== 'stopped').length };
         },
         limitations: () => [
-          'The kernel does not yet hand Usage the routes, child processes or file operations it sees, so this report holds the event-loop lag and stalls, the process counters and the sampled work only.',
+          'File operations are the host filesystem seam’s calls by method, with no path; calls made through a held directory are not counted.',
           ...(platform() === 'linux'
             ? []
             : ['System-call counts and children’s CPU are read from /proc and exist on Linux only.']),

@@ -139,6 +139,7 @@ import {
   LOOP_INTERVAL_MS,
   type LoopWatchdogPort,
 } from './loop-health.ts';
+import { tapFs, tapSpawn, WorkFeed } from './work-feed.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
 import { hostProgramLines } from './doctor-programs.ts';
@@ -501,7 +502,14 @@ async function bootLocked(
   lease: HomeLockLease,
   own: (release: () => void | Promise<void>) => void,
 ): Promise<BootOutcome> {
-  const { adapters, home } = options;
+  const { home } = options;
+  // What the kernel sees (routes, children, host file calls) reaches whoever listens, by name and duration only.
+  const work = new WorkFeed();
+  const adapters = {
+    ...options.adapters,
+    fs: tapFs(options.adapters.fs, work),
+    spawn: tapSpawn(options.adapters.spawn, work),
+  };
   const log = scopedLog(adapters.logSink, 'kernel');
   const clock = adapters.clock;
 
@@ -1073,6 +1081,7 @@ async function bootLocked(
       loop: {
         blockedMs: () => (adapters.loopHealth === undefined ? 0 : loop.blockedMs()),
         observe: observer => (adapters.loopHealth === undefined ? (): void => {} : loop.observe(observer)),
+        observeWork: observer => work.observe(observer),
       },
       // `send` goes through this plugin's OWN guarded fetch, to the exact hosts its manifest names (`./secrets.ts`).
       secrets: ownSecretsPort(
@@ -1487,6 +1496,7 @@ async function bootLocked(
     outputGuard: () => bound.outputGuard,
     version: options.version,
     build: bootBuild(options.version, options.build),
+    work,
     refused: (note: RefusalNote) => {
       const line = describeRefusal(note);
       refusalLog.warn(line.message, line.fields);

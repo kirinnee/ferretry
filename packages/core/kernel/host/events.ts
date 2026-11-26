@@ -65,7 +65,13 @@ export class EventBus {
           .then(() => {
             if (this.subscribers.get(event.name)?.includes(subscriber)) return subscriber.fn(value);
           })
-          .catch(() => this.log.warn('a subscriber failed', { event: event.name, plugin: subscriber.plugin }));
+          .catch((cause: unknown) =>
+            this.log.warn('a subscriber failed', {
+              event: event.name,
+              plugin: subscriber.plugin,
+              reason: reasonOf(cause),
+            }),
+          );
       }
     });
   }
@@ -80,4 +86,14 @@ export class EventBus {
       },
     };
   }
+}
+
+/**
+ * Why a subscriber failed, for the log: the error's kind and its short `code` (`TypeError`, `Error ECONNRESET`). Never its
+ * message or stack, which can carry a URL, a path or a value the plugin held.
+ */
+function reasonOf(cause: unknown): string {
+  if (!(cause instanceof Error)) return 'a non-error value was thrown';
+  const code = (cause as { code?: unknown }).code;
+  return typeof code === 'string' && /^[A-Z0-9_]{1,40}$/u.test(code) ? `${cause.name} ${code}` : cause.name;
 }

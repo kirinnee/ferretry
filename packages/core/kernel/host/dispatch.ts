@@ -40,6 +40,7 @@ import {
 import type { RefusalNote } from './refusal-log.ts';
 import { orderRoutesBySpecificity, Router } from './router.ts';
 import { PublicRouter } from './public-router.ts';
+import { timedRoute, type WorkFeed } from './work-feed.ts';
 
 /** How one plugin is serving right now. Read on every call, so a failure or damage after mount is honoured. */
 export type Serving =
@@ -89,6 +90,8 @@ export interface DispatchBindings {
    * the log nothing either). The host turns it into one `error` line; a throw here never changes the answer.
    */
   readonly failed?: (note: FailureNote) => void;
+  /** Hears each served route, by template, with its wall time ({@link WorkFeed}); absent: nothing is measured. */
+  readonly work?: WorkFeed;
 }
 
 /**
@@ -316,6 +319,16 @@ export class Dispatcher {
   }
 
   async dispatch(
+    incoming: ApiRequest,
+    delegation?: { readonly allowed: ReadonlySet<string>; readonly refused: (key: string) => void },
+  ): Promise<ApiResponse> {
+    const { work } = this.bindings;
+    return work === undefined
+      ? await this.serve(incoming, delegation)
+      : await timedRoute(work, incoming, request => this.serve(request, delegation));
+  }
+
+  private async serve(
     incoming: ApiRequest,
     delegation?: { readonly allowed: ReadonlySet<string>; readonly refused: (key: string) => void },
   ): Promise<ApiResponse> {

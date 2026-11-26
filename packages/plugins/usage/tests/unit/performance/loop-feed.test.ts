@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { feedLoopToProbe, STALL_RECORDED_MS } from '../../../daemon/lib/performance/loop-feed.ts';
+import type { WorkObserver } from '@ferretry/kernel/contract';
+import {
+  feedLoopToProbe,
+  feedWorkToProbe,
+  STALL_RECORDED_MS,
+  UNNAMED_PATH,
+} from '../../../daemon/lib/performance/loop-feed.ts';
 import { PerformanceRecorder } from '../../../daemon/lib/performance/recorder.ts';
 
 type Observer = Parameters<Parameters<typeof feedLoopToProbe>[0]['observe']>[0];
@@ -71,5 +77,56 @@ describe('feedLoopToProbe', () => {
     subject.stop();
     // Assert
     should(subject.stopped()).equal(1);
+  });
+});
+
+describe('feedWorkToProbe', () => {
+  const work = () => {
+    let heard: WorkObserver | undefined;
+    let stopped = 0;
+    const recorder = new PerformanceRecorder();
+    const stop = feedWorkToProbe(
+      {
+        observeWork: observer => {
+          heard = observer;
+          return () => {
+            stopped += 1;
+          };
+        },
+      },
+      recorder,
+    );
+    return { recorder, stop, heard: () => heard as WorkObserver, stopped: () => stopped };
+  };
+
+  it('should fold routes, children and file calls into the window by name and duration only', () => {
+    // Arrange
+    const { recorder, heard } = work();
+    const window = recorder.open(0);
+    // Act
+    heard().route('GET /v1/ferrets/:ferretId', 12, 200, 340);
+    heard().route('GET /v1/ferrets/:ferretId', 8, 500, 10);
+    heard().childStarted('git');
+    heard().childExited('git', 30);
+    heard().file('readText', 2);
+    // Assert
+    const tables = window.tables(60_000);
+    should(tables.routes.map(r => [r.route, r.count, r.errors])).deepEqual([['GET /v1/ferrets/:ferretId', 2, 1]]);
+    should(tables.childProcesses.commands.map(c => [c.command, c.count, c.synchronous])).deepEqual([['git', 1, 0]]);
+    should(tables.fileOperations.top.map(f => [f.operation, f.path, f.count])).deepEqual([
+      ['readText', UNNAMED_PATH, 1],
+    ]);
+  });
+
+  it('should record nothing with no window open, and stop hearing when told', () => {
+    // Arrange
+    const { recorder, heard, stop, stopped } = work();
+    // Act
+    heard().route('GET /x', 1, 200, 1);
+    const window = recorder.open(0);
+    stop();
+    // Assert
+    should(window.tables(1_000).routes).deepEqual([]);
+    should(stopped()).equal(1);
   });
 });
