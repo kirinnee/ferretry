@@ -19,7 +19,7 @@ import {
 import { AGENDA_FILES, AGENDA_REPLY_RECHECK_MS, AGENDA_REPLY_SETTLE_MS } from '../../../daemon/lib/agenda/index.ts';
 import { agendaLedgerDocument, applyAgendaCommandToSession } from '../../../daemon/lib/agenda/state-machine.ts';
 import { agendaFilesAt } from '../../support/daemon/agenda-state.ts';
-import { asksHalf } from '../../support/daemon/asks-half.ts';
+import { asksHalf, EVERY_FERRET } from '../../support/daemon/asks-half.ts';
 
 const BOARD = 'POST /v1/ferrets/:ferretId/agenda';
 const REPLIES = 'POST /v1/ferrets/:ferretId/agenda/replies';
@@ -196,8 +196,8 @@ describe('the owner’s answer reaching a ferret through the conversation', () =
     });
   }
 
-  it('should close the answer quietly, never reopening it, when it is closed and the ferret can no longer receive replies', async () => {
-    // Arrange: the ferret's terminal is gone, so the send is refused outright
+  it('should hand a closing back to the owner, with the reason, when the send is refused and Ferrets says the ferret is live', async () => {
+    // Arrange: a refusal says nothing about why (a question the ferret will clear), so it is never read as "stopped"
     const { sent, delivery } = conversation({ send: new Error('terminal gone') });
     const half = await world(providers(delivery));
     const ref = await ferretAsk(half);
@@ -207,17 +207,42 @@ describe('the owner’s answer reaching a ferret through the conversation', () =
     await half.call(REPLIES, F1, {});
     await Bun.sleep(50);
     const board = (await half.call('GET /v1/ferrets/:ferretId/agenda', F1)).json<{
-      items: unknown[];
-      resolved: { id: string; response?: unknown }[];
-      delivery?: unknown;
+      items: { undelivered?: { reason: string } }[];
     }>();
 
-    // Assert: the owner's resolution stands, the undeliverable reply is dropped, nothing waits to be sent
+    // Assert
     expect(sent).toHaveLength(0);
-    expect(board.items).toEqual([]);
-    expect(board.resolved.map(each => each.id)).toEqual([ref.id]);
-    expect(board.delivery).toBeUndefined();
+    expect(board.items[0]?.undelivered?.reason).toBe('terminal gone');
   });
+
+  {
+    const name = 'stopped';
+    const ferrets = {
+      get: async () => ({ id: 'f1', mode: 'auto', updatedAt: '2026-11-06T09:00:00.000Z', live: false }),
+    };
+    it(`should close the owner's closing quietly, before any send, when Ferrets says the ferret is ${name}`, async () => {
+      // Arrange: a send that would fail (and, for a real stopped ferret, revive it)
+      const { sent, delivery } = conversation({ send: new Error('must not be sent') });
+      const half = await world({ ...providers(delivery), 'agenda.context:ferrets': { ...EVERY_FERRET, ...ferrets } });
+      const ref = await ferretAsk(half);
+      await close(half, ref.id);
+
+      // Act
+      await half.call(REPLIES, F1, {});
+      await Bun.sleep(50);
+      const board = (await half.call('GET /v1/ferrets/:ferretId/agenda', F1)).json<{
+        items: unknown[];
+        resolved: { id: string }[];
+        delivery?: unknown;
+      }>();
+
+      // Assert: the owner's resolution stands, nothing was sent, nothing reopens, nothing waits
+      expect(sent).toHaveLength(0);
+      expect(board.items).toEqual([]);
+      expect(board.resolved.map(each => each.id)).toEqual([ref.id]);
+      expect(board.delivery).toBeUndefined();
+    });
+  }
 
   it('should still hand the answer back to the owner, with the reason, when the transcript shows it failed', async () => {
     // Arrange: accepted by the send path, then proven not to have arrived

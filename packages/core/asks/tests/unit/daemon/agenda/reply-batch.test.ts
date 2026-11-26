@@ -499,6 +499,7 @@ function delivering() {
   const composer: { state: AgendaComposerState; throws: boolean } = { state: 'empty', throws: false };
   const receipts = new Map<string, AgendaReceipt>();
   const undelivered: Array<{ key: string; reason: string }> = [];
+  const lifecycle: { state: 'live' | 'stopped' | 'gone' | 'unknown' } = { state: 'live' };
   const batcher = new AgendaReplyBatcher(
     outboxes,
     sends,
@@ -508,6 +509,7 @@ function delivering() {
     { settleMs: AGENDA_REPLY_SETTLE_MS, capMs: AGENDA_REPLY_CAP_MS },
     { busy: async () => false },
     {
+      lifecycle: { state: async () => lifecycle.state },
       composer: {
         state: async () => {
           if (composer.throws) throw new Error('pane gone');
@@ -528,7 +530,7 @@ function delivering() {
     await batcher.flush(SESSION);
   };
   const lastSendId = (): string => sends.sent.at(-1)?.sendId ?? '';
-  return { outboxes, timers, sends, time, composer, receipts, undelivered, batcher, fire, lastSendId };
+  return { outboxes, timers, sends, time, composer, receipts, undelivered, lifecycle, batcher, fire, lastSendId };
 }
 
 describe('the agenda reply window', () => {
@@ -782,8 +784,8 @@ describe('the agenda reply batcher on receipt', () => {
     should(undelivered[0]?.reason).match(/never showed it arriving/);
   });
 
-  it('should drop a closing the send path refused outright, and hand back only what still waits on the ferret', async () => {
-    // Arrange: A1 is the owner closing an item, A2~1 an answer that left its item open waiting on the ferret
+  it('should hand a batch the send path refused outright straight back to the owner, closings included', async () => {
+    // Arrange: a refusal never says why (a question the ferret will clear), so it is never read as "closed for good"
     const { batcher, sends, outboxes, undelivered, fire } = delivering();
     sends.failure = new Error('the ferret was removed');
     await batcher.add(SESSION, 'A1', 'one');
@@ -793,9 +795,63 @@ describe('the agenda reply batcher on receipt', () => {
     await fire();
 
     // Assert
-    should(undelivered).deepEqual([{ key: 'A2~1', reason: 'the ferret was removed' }]);
+    should(undelivered).deepEqual([
+      { key: 'A1', reason: 'the ferret was removed' },
+      { key: 'A2~1', reason: 'the ferret was removed' },
+    ]);
     should(outboxes.files.get(SESSION)).containDeep({ pending: [], sending: [], delivered: [] });
   });
+
+  for (const lifecycle of ['stopped', 'gone'] as const) {
+    it(`should close the owner's closing quietly, before sending, for a ferret Ferrets says is ${lifecycle}`, async () => {
+      // Arrange: A1 closes an item; A2~1 still waits on the ferret and goes the normal way
+      const { batcher, sends, outboxes, undelivered, lifecycle: ferret, fire } = delivering();
+      ferret.state = lifecycle;
+      await batcher.add(SESSION, 'A1', 'one');
+      await batcher.add(SESSION, 'A2~1', 'two');
+
+      // Act
+      await fire();
+
+      // Assert: the closing is dropped unsent and untold; only the request is sent
+      should(undelivered).deepEqual([]);
+      should(sends.sent.map(each => each.message)).deepEqual(['two']);
+      should(outboxes.files.get(SESSION)?.pending).deepEqual([]);
+    });
+  }
+
+  it('should send nothing at all, and revive nothing, when only closings are held for a stopped ferret', async () => {
+    // Arrange
+    const { batcher, sends, undelivered, lifecycle, composer } = delivering();
+    lifecycle.state = 'stopped';
+    composer.state = 'unreadable';
+    await batcher.add(SESSION, 'A1', 'one');
+
+    // Act: even "Send now", whose composer read would otherwise hold the answer and give it back later
+    await batcher.sendNow(SESSION);
+    await settled();
+
+    // Assert
+    should(sends.sent).deepEqual([]);
+    should(undelivered).deepEqual([]);
+    should(await batcher.pending(SESSION)).be.undefined();
+  });
+
+  for (const lifecycle of ['live', 'unknown'] as const) {
+    it(`should hand a refused closing back to the owner when the lifecycle reads ${lifecycle}`, async () => {
+      // Arrange
+      const { batcher, sends, undelivered, lifecycle: ferret, fire } = delivering();
+      ferret.state = lifecycle;
+      sends.failure = new Error('the ferret is at a question');
+      await batcher.add(SESSION, 'A1', 'one');
+
+      // Act
+      await fire();
+
+      // Assert
+      should(undelivered).deepEqual([{ key: 'A1', reason: 'the ferret is at a question' }]);
+    });
+  }
 
   it('should look for the proof of an accepted batch after a restart, and re-send one never accepted', async () => {
     // Arrange — one batch accepted before the restart, one written down but never handed over.

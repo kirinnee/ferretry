@@ -7,6 +7,7 @@ import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '../..
 import { FakeVault } from '../../../../vault/contract/testing/index.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { daemonImplementations } from '../../../src/generated/plugins.ts';
+import { QUESTION_STATE } from '../../../../../plugins/conversation/contract/index.ts';
 import { testHost } from '../../../testing/index.ts';
 
 /**
@@ -256,5 +257,94 @@ describe('R-0334 V-0032: an owner’s answer reaches the ferret through the real
     await w.h.request('POST', `/v1/ferrets/${lead.id}/agenda/replies`, { body: {} });
     await w.h.settle();
     expect(typed()).toHaveLength(1);
+  });
+});
+
+describe('the owner closing an item whose ferret cannot take the closing message, through the real halves', () => {
+  const REPLIES_OF = (ferret: string) => `/v1/ferrets/${ferret}/agenda/replies`;
+  const QUESTION = JSON.stringify({
+    format: 1,
+    toolUseId: 'pane:0123456789abcdef',
+    text: 'Deploy?',
+    options: [{ label: 'Yes' }, { label: 'No' }],
+    multiple: false,
+    askedAt: '2026-11-07T08:59:00.000Z',
+    transcript: '/transcripts/a.jsonl',
+  });
+  type Board = {
+    items: { id: string; undelivered?: { reason: string } }[];
+    resolved: { id: string }[];
+    delivery?: unknown;
+  };
+  const boardOf = async (w: Awaited<ReturnType<typeof world>>, ferret: string) =>
+    (await w.h.request('GET', `/v1/ferrets/${ferret}/agenda`)).json<Board>();
+  /** A lead with one open ask, closed by the owner (done, as `fy tidy` does), and the owner's "send now". */
+  const closed = async (w: Awaited<ReturnType<typeof world>>) => {
+    const lead = await w.start({ folder: '/work/lead', prompt: 'Lead the work.' });
+    w.as(lead.id);
+    expect((await w.h.request('POST', `/v1/ferrets/${lead.id}/agenda`, { body: ASK })).status).toBe(200);
+    w.as('owner');
+    const done = await w.h.request('POST', `/v1/ferrets/${lead.id}/agenda`, {
+      body: { action: 'resolve', id: 'A1', note: 'tidied' },
+    });
+    expect(done.status).toBe(200);
+    return { lead, done };
+  };
+  const sendNow = async (w: Awaited<ReturnType<typeof world>>, ferret: string) => {
+    expect((await w.h.request('POST', REPLIES_OF(ferret), { body: {} })).status).toBe(200);
+    for (let look = 0; look < 20; look += 1) {
+      await w.h.settle();
+      await Bun.sleep(20);
+    }
+  };
+  const resumes = (w: Awaited<ReturnType<typeof world>>) => {
+    const seen: string[] = [];
+    const resume = w.runner.resume.bind(w.runner);
+    w.runner.resume = async spec => {
+      seen.push('resume');
+      return await resume(spec);
+    };
+    return seen;
+  };
+
+  test('a ferret sitting at a structured question refuses the closing: it is handed back to the owner, not lost', async () => {
+    const w = await open();
+    const { lead } = await closed(w);
+    w.h.state('conversation').plant(QUESTION_STATE, QUESTION, lead.id as never);
+
+    await sendNow(w, lead.id);
+
+    const board = await boardOf(w, lead.id);
+    expect(board.items.map(item => item.id)).toEqual(['A1']);
+    expect(board.items[0]?.undelivered?.reason).toBeDefined();
+    expect(w.runner.deliveries.filter(d => d.delivery.text.includes('[answer to'))).toHaveLength(0);
+  });
+
+  test('a stopped ferret is closed quietly: nothing is sent, it is not resumed, the item never reopens, and the tidy count holds', async () => {
+    const w = await open();
+    const { lead, done } = await closed(w);
+    expect((await w.h.request('POST', `/v1/ferrets/${lead.id}/stop`, { body: {} })).status).toBeLessThan(300);
+    await w.h.settle();
+    const resumed = resumes(w);
+
+    await sendNow(w, lead.id);
+
+    const board = await boardOf(w, lead.id);
+    expect(resumed).toEqual([]);
+    expect(w.runner.deliveries.filter(d => d.delivery.text.includes('[answer to'))).toHaveLength(0);
+    expect(board.items).toEqual([]);
+    expect(board.resolved.map(item => item.id)).toEqual(['A1']);
+    expect(board.delivery).toBeUndefined();
+    // The count `fy tidy` printed was true: the close it counted is still closed, with nothing queued behind it.
+    expect(done.status).toBe(200);
+  });
+
+  test('a ferret Ferrets still holds as live is sent to normally, and nothing is dropped', async () => {
+    const w = await open();
+    const { lead } = await closed(w);
+
+    await sendNow(w, lead.id);
+
+    expect(w.runner.deliveries.filter(d => d.delivery.text.includes('[answer to'))).toHaveLength(1);
   });
 });

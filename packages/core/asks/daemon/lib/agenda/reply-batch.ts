@@ -294,11 +294,21 @@ export interface AgendaReplyWindow {
   readonly receiptMs?: number;
 }
 
+/** What Ferrets' registry says of a ferret: `unknown` for anything it cannot say (Ferrets off, a failed read). */
+export type AgendaFerretLifecycle = 'live' | 'stopped' | 'gone' | 'unknown';
+
+/** Ferrets' typed lifecycle of a ferret, read before sending: the only evidence a closing is dropped on. */
+interface AgendaLifecycle {
+  state(sessionId: string): Promise<AgendaFerretLifecycle>;
+}
+
 /** How a batch reaches the ferret on proof: the composer it waits on, the receipts it reads, where failures go. */
 export interface AgendaDeliveryPorts {
   readonly composer: AgendaComposer;
   readonly receipts: AgendaReceipts;
   readonly undelivered: AgendaUndeliveredSink;
+  /** Absent reads as every ferret unknown: nothing is closed quietly. */
+  readonly lifecycle?: AgendaLifecycle;
 }
 
 /** The outbox's state for the owner's screen, and the owner skipping the wait. */
@@ -388,6 +398,7 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
 
   async sendNow(sessionId: string): Promise<void> {
     this.timers.cancel(sessionId);
+    await this.closeForStoppedFerret(sessionId);
     // "Send now" skips the wait, never the composer: a draft (or a screen that cannot be read) holds the answers,
     // still queued and in order, and the recheck delivers them once the composer is empty.
     const composer = await this.ports.composer.state(sessionId).catch(() => 'unreadable' as const);
@@ -405,6 +416,7 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
    * runs once the window closes (each key has one timer, so an answer that restarted the window replaced it).
    */
   async flush(sessionId: string): Promise<void> {
+    await this.closeForStoppedFerret(sessionId);
     const outbox = await this.outboxes.read(sessionId);
     if (outbox === null || outbox.pending.length === 0) return;
     const now = Date.parse(this.clock.now());
@@ -484,15 +496,10 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
         await this.locked(sessionId, async outbox => await this.outboxes.write(returnAgendaBatch(outbox, batch)));
         return this.recheck(sessionId);
       }
-      // Refused outright: the ferret cannot receive replies (its terminal is gone, it was stopped). An owner's closing
-      // of an item then stands (nothing to send, nobody to ask again), so only a rested or asked-about item, which is
-      // still open and waiting on that ferret, goes back to the owner.
-      return await this.fail(
-        sessionId,
-        batch,
-        error instanceof Error ? error.message : 'the send was refused',
-        isClosingKey,
-      );
+      // Any refusal hands every item back to the owner: a refusal says nothing about why (a question the ferret will
+      // clear, a launch still racing), so it is never read as "this ferret can never receive it". Only the Ferrets
+      // lifecycle, read BEFORE sending (`closeForStoppedFerret`), closes quietly.
+      return await this.fail(sessionId, batch, error instanceof Error ? error.message : 'the send was refused');
     }
     await this.locked(sessionId, async outbox => {
       await this.outboxes.write(sentAgendaBatch(outbox, batch.sendId, this.clock.now()));
@@ -500,22 +507,26 @@ export class AgendaReplyBatcher implements AgendaReplyQueue, AgendaRepliesSubsys
     this.watchLater(sessionId);
   }
 
-  /**
-   * Forgets a batch that did not arrive, then tells the board each of its items is the owner's again, but for the
-   * keys `quiet` names: those are dropped with it and nothing is told.
-   */
-  private async fail(
-    sessionId: string,
-    batch: SendingBatch,
-    reason: string,
-    quiet: (key: ReplyKey) => boolean = () => false,
-  ): Promise<void> {
+  /** Forgets a batch that did not arrive, then tells the board each of its items is the owner's again. */
+  private async fail(sessionId: string, batch: SendingBatch, reason: string): Promise<void> {
     await this.locked(sessionId, async outbox => await this.outboxes.write(dropAgendaBatch(outbox, batch)));
-    await this.report(
-      sessionId,
-      batch.ids.filter(key => !quiet(key)),
-      reason,
-    );
+    await this.report(sessionId, batch.ids, reason);
+  }
+
+  /**
+   * Decided BEFORE anything is sent, from Ferrets' typed lifecycle only: a ferret that is stopped or gone cannot be
+   * answered, and typing to it would revive it for a closing. The owner's closings held for it then stand: they are
+   * dropped from the outbox, nothing is sent, nothing is revived, and nothing reopens. What still waits on the ferret
+   * (a rested answer, a request, a tell) is kept and goes the normal way. A lifecycle that is unknown or cannot be
+   * read closes nothing.
+   */
+  private async closeForStoppedFerret(sessionId: string): Promise<void> {
+    const state = await this.ports.lifecycle?.state(sessionId).catch((): AgendaFerretLifecycle => 'unknown');
+    if (state !== 'stopped' && state !== 'gone') return;
+    await this.locked(sessionId, async outbox => {
+      const closings = outbox.pending.filter(each => isClosingKey(each.id)).map(each => each.id);
+      if (closings.length > 0) await this.outboxes.write(dropPendingReplies(outbox, closings));
+    });
   }
 
   /** The composer never emptied in time: every held answer goes back to the owner. */
