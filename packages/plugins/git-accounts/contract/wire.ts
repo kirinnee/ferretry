@@ -51,6 +51,10 @@ export const GitAccountKeySchema = z.strictObject({
   format: z.enum(['ssh', 'gpg']).optional(),
   /** A GPG key's fingerprint (`format: gpg`): what `user.signingkey` names. Public. */
   openpgpFingerprint: OpenpgpFingerprintSchema.optional(),
+  /** Durable removal intent: retries retain the remote id, but startup never reloads this signing key. */
+  revoking: z.literal(true).optional(),
+  /** An upload whose final account write failed; removal reconciles it by public fingerprint. */
+  registrationPending: z.literal(true).optional(),
   /**
    * `generated`: made here, private half sealed here. `imported`: the person handed Ferretry the private half (a GPG key),
    * sealed here. `own`: the person's own SSH key, used through the host's ssh-agent.
@@ -118,6 +122,8 @@ export const GitAccountRemovedSchema = z.strictObject({
   removed: z.literal(true),
   /** Registered keys that could not be taken off the account at GitHub (the person deletes them there). */
   keysLeftOnProvider: z.array(z.string().min(1).max(200)).max(8),
+  /** Upload outcomes without a confirmed provider id: check identity and ownership, never advise deletion by title. */
+  gpgUploadsToCheck: z.array(OpenpgpFingerprintSchema).max(8),
   /** Revoking an OAuth token needs the client secret, which Ferretry deliberately does not have. */
   revokeAt: z.url(),
 });
@@ -134,6 +140,7 @@ export const GIT_ACCOUNT_CODES = {
   keyRefused: 'key_refused',
   keyNotOnAccount: 'key_not_on_account',
   agentUnavailable: 'agent_unavailable',
+  keyCleanupManual: 'key_cleanup_manual',
   /** The daemon's scratch folder sits where `git` cannot be fenced into it (a `:` in its parent's path). */
   scratchUnusable: 'scratch_unusable',
 } as const;
@@ -152,9 +159,10 @@ export const GitKeyPurposeSchema = z.enum(GIT_KEY_PURPOSES);
 export type GitKeyPurpose = z.infer<typeof GitKeyPurposeSchema>;
 /** The two registrations a key can hold at GitHub; `both` is a request for the two. */
 export const GitKeyKindSchema = z.enum(['auth', 'signing']);
-/** `ssh`: an ed25519 key held by a per-account ssh-agent. `gpg`: an OpenPGP key in an isolated per-account GNUPGHOME. */
+/** `ssh`: an ed25519 key held by a per-account ssh-agent. `gpg`: an OpenPGP key held by an in-memory signer. */
 export const GitKeyFormatSchema = z.enum(['ssh', 'gpg']);
 export type GitKeyFormat = z.infer<typeof GitKeyFormatSchema>;
+export const GitConnectRequestSchema = z.strictObject({ signingFormat: GitKeyFormatSchema.default('ssh') });
 /** The most an armored secret key may be (a 4096-bit RSA key with a few subkeys is about 10 KiB). */
 export const GPG_KEY_BLOCK_MAX = 24 * 1024;
 export type GitKeyKind = z.infer<typeof GitKeyKindSchema>;

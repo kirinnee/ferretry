@@ -6,8 +6,9 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { type ChildProcess, spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { readKey, generateKey, armor, enums } from 'openpgp';
 import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import type { SealedDocumentDef, SealedDocumentHandle } from '@ferretry/core-vault/contract';
 import { FakeSealedDocuments } from '@ferretry/core-vault/contract/testing';
@@ -16,6 +17,7 @@ import { testHost } from '@ferretry/kernel/testing';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import {
   GIT_ACCOUNT_KEYS,
+  GIT_ACCOUNT_TOKENS,
   GitAccountsPort,
   GitGpgKeyResultSchema,
   GitKeyRemovedSchema,
@@ -25,7 +27,7 @@ import {
 } from '../../contract/index.ts';
 import { gitAccountsDaemon } from '../../daemon/index.ts';
 import { type AccountKit, gitEnvironment, noIdentityEnvironment } from '../../daemon/features/launch/environment.ts';
-import type { GpgKit } from '../../daemon/features/gpg-keys/gnupg.ts';
+import type { GpgKit } from '../../daemon/features/gpg-keys/signer.ts';
 import { FAKE_TOKEN, FakeGithub } from './fake-github.ts';
 import { ghHost } from './gh-host.ts';
 import { tmpRunFolder } from './run-folder.ts';
@@ -34,7 +36,7 @@ const ACCOUNT = 'gha_4242';
 const EMAIL = '4242+octo-fake@users.noreply.github.com';
 const CLIENT = 'Ov23FAKECLIENTID';
 const HAVE_SSH = ['ssh-agent', 'ssh-add'].every(tool => spawnSync('which', [tool], { stdio: 'ignore' }).status === 0);
-const HAVE_GPG = ['gpg', 'gpgconf', 'git'].every(tool => spawnSync('which', [tool], { stdio: 'ignore' }).status === 0);
+const HAVE_GPG = ['gpg', 'curl', 'git'].every(tool => spawnSync('which', [tool], { stdio: 'ignore' }).status === 0);
 
 const account = (extra: Partial<GitAccount> = {}): GitAccount => ({
   id: ACCOUNT as GitAccount['id'],
@@ -49,9 +51,9 @@ const account = (extra: Partial<GitAccount> = {}): GitAccount => ({
 });
 
 const GPG_KIT: GpgKit = {
-  home: '/run/fy/gha_4242.gnupg',
+  home: '/run/fy/gha_4242.gpg-public',
   fingerprint: 'A'.repeat(40),
-  program: '/usr/bin/gpg',
+  program: '/run/fy/gha_4242.gpg-sign',
 };
 const SSH_KIT: AccountKit = {
   socket: '/run/fy/gha_4242.sock',
@@ -71,12 +73,12 @@ function settingsOf(env: Readonly<Record<string, string>>): Array<[string, strin
 }
 
 describe('what git is told for a GPG key (the launch environment)', () => {
-  test('signs with the key by fingerprint through the real gpg, in the account’s own GNUPGHOME', () => {
+  test('signs through the memory signer shim, with a public-only GNUPGHOME', () => {
     const env = gitEnvironment(account(), undefined, GPG_KIT);
     const settings = new Map(settingsOf(env));
     expect(settings.get('gpg.format')).toBe('openpgp');
     expect(settings.get('user.signingkey')).toBe(GPG_KIT.fingerprint);
-    expect(settings.get('gpg.program')).toBe('/usr/bin/gpg');
+    expect(settings.get('gpg.program')).toBe(GPG_KIT.program);
     expect(settings.get('commit.gpgsign')).toBe('true');
     expect(settings.get('tag.gpgsign')).toBe('true');
     expect(settings.get('user.email')).toBe(EMAIL);
@@ -152,9 +154,14 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
 class SpySealed extends FakeSealedDocuments {
   keys: SealedDocumentHandle | undefined;
+  tokens: SealedDocumentHandle | undefined;
   override open(own: StatePort, document: SealedDocumentDef): SealedDocumentHandle {
+    // Like the real vault's disk document: a new daemon/StatePort opens the same stored values.
+    if (document === GIT_ACCOUNT_KEYS && this.keys !== undefined) return this.keys;
+    if (document === GIT_ACCOUNT_TOKENS && this.tokens !== undefined) return this.tokens;
     const opened = super.open(own, document);
     if (document === GIT_ACCOUNT_KEYS) this.keys = opened;
+    if (document === GIT_ACCOUNT_TOKENS) this.tokens = opened;
     return opened;
   }
 }
@@ -168,6 +175,12 @@ interface Registered {
 /** GitHub's `/user/gpg_keys`, over the scripted device-flow fake. */
 class GpgGithub extends FakeGithub {
   readonly registered: Registered[] = [];
+  scopes = ['read:user', 'user:email', 'admin:gpg_key', 'repo', 'read:org'];
+  registrationGate: Promise<void> | undefined;
+  onRegistration: (() => void) | undefined;
+  deletionGate: Promise<void> | undefined;
+  onDeletion: (() => void) | undefined;
+  lostUpload = false;
   /** A status to answer a registration with instead of 201. */
   refuse: number | undefined;
   /** The account already holds whatever key is posted: 422 on the POST, and the listing names it by its key id. */
@@ -186,7 +199,20 @@ class GpgGithub extends FakeGithub {
         body: String(init?.body ?? ''),
         authorization: new Headers(init?.headers).get('authorization') ?? '',
       });
-      if (method === 'GET') return Response.json(this.listed.map(key_id => ({ key_id })));
+      if (method === 'GET')
+        return Response.json([
+          ...this.listed.map(key_id => ({ key_id })),
+          ...(await Promise.all(
+            this.registered.map(async key => ({
+              id: key.id,
+              key_id: (await readKey({ armoredKey: key.armored_public_key })).getFingerprint().slice(-16).toUpperCase(),
+            })),
+          )),
+        ]);
+      this.onRegistration?.();
+      await this.registrationGate;
+      if (!this.scopes.some(scope => ['write:gpg_key', 'admin:gpg_key'].includes(scope)))
+        return new Response(null, { status: 403 });
       if (this.refuse !== undefined) return Response.json({ message: 'Validation Failed' }, { status: this.refuse });
       if (this.alreadyHolds) {
         mkdirSync(`${scratch}/show-only`, { recursive: true, mode: 0o700 });
@@ -206,6 +232,10 @@ class GpgGithub extends FakeGithub {
       const body = JSON.parse(String(init?.body)) as Omit<Registered, 'id'>;
       this.#next += 1;
       this.registered.push({ id: this.#next, ...body });
+      if (this.lostUpload) {
+        this.registered[this.registered.length - 1] = { id: this.#next, ...body, name: 'Another machine key' };
+        throw new Error('synthetic lost upload response');
+      }
       return Response.json({ id: this.#next, name: body.name }, { status: 201 });
     }
     if (url.host === 'api.github.com' && url.pathname === '/user/keys' && method === 'POST') {
@@ -218,6 +248,9 @@ class GpgGithub extends FakeGithub {
     }
     const gone = /^\/user\/gpg_keys\/([0-9]+)$/u.exec(url.pathname);
     if (url.host === 'api.github.com' && method === 'DELETE' && gone !== null) {
+      this.onDeletion?.();
+      await this.deletionGate;
+      if (!this.scopes.includes('admin:gpg_key')) return new Response(null, { status: 403 });
       this.deleted.push(url.pathname);
       const at = this.registered.findIndex(key => String(key.id) === gone[1]);
       if (at >= 0) this.registered.splice(at, 1);
@@ -281,11 +314,12 @@ async function boot(github: GpgGithub, projects: readonly object[]) {
   const gate = new FakeGate();
   const runFolder = tmpRunFolder();
   const home = mkdtempSync(`${scratch}/home-`);
-  const held: { source?: Source } = {};
+  const held: { source?: Source; state?: StatePort } = {};
   const impl = gitAccountsDaemon({ runFolder });
   const wrapped = {
     ...impl,
     build: (ctx: never) => {
+      held.state = (ctx as { kernel: { state: StatePort } }).kernel.state;
       const half = (impl.build as (ctx: never) => unknown)(ctx) as {
         hooks: { 'launch.parts': () => readonly { item: Source }[] };
       };
@@ -300,7 +334,7 @@ async function boot(github: GpgGithub, projects: readonly object[]) {
     fakes: { sealed, gate },
     uses: { projects: { list: async () => projects } },
     fetch: github.keyFetch,
-    ...ghHost('/usr/bin', ['/usr/bin/gpg', '/usr/bin/gpgconf', '/usr/bin/ssh-agent', '/usr/bin/ssh-add']),
+    ...ghHost('/usr/bin', ['/usr/bin/gpg', '/usr/bin/curl', '/usr/bin/ssh-agent', '/usr/bin/ssh-add']),
     spawn: real.spawn,
     start: real.start,
     config: { 'git-accounts.yaml': { github: { clientId: CLIENT } } },
@@ -311,7 +345,7 @@ async function boot(github: GpgGithub, projects: readonly object[]) {
     responses.push(response.body);
     return response;
   };
-  github.tokenAnswers = [{ access_token: FAKE_TOKEN, scope: 'read:user user:email write:gpg_key repo read:org' }];
+  github.tokenAnswers = [{ access_token: FAKE_TOKEN, scope: github.scopes.join(' ') }];
   const flow = (await request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
   await host.clock.advance(5000);
   await request('GET', `/v1/git-accounts/github/device/${flow.flowId}`);
@@ -346,7 +380,7 @@ function strangerHome(name: string): string {
   return dir;
 }
 
-describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skipped without them)', () => {
+describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, curl and git; skipped without them)', () => {
   const root = `${scratch}/projects`;
 
   async function setup(name: string) {
@@ -363,7 +397,18 @@ describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skip
     return { github, world, project };
   }
   const gitIn = (cwd: string, home: string, env: Record<string, string>) => (args: string[]) =>
-    spawnSync('git', args, { cwd, encoding: 'utf8', env: bareEnv(home, env) });
+    new Promise<{ status: number | null; stdout: string; stderr: string }>(resolve => {
+      const child = nodeSpawn('git', args, { cwd, env: bareEnv(home, env) });
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', bytes => {
+        stdout += String(bytes);
+      });
+      child.stderr?.on('data', bytes => {
+        stderr += String(bytes);
+      });
+      child.on('close', status => resolve({ status, stdout, stderr }));
+    });
 
   test('generate: a commit made with ONLY the launch environment is signed, git verify-commit accepts it, and a stranger’s keyring accepts it with GitHub’s copy of the key', async () => {
     const { github, world, project } = await setup('generate');
@@ -400,19 +445,30 @@ describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skip
       expect(settings.get('gpg.format')).toBe('openpgp');
       expect(settings.get('user.signingkey')).toBe(result.fingerprint);
       expect(settings.get('commit.gpgsign')).toBe('true');
-      expect(env['GNUPGHOME']).toBe(`${world.runFolder.path}/${ACCOUNT}.gnupg`);
+      expect(env['GNUPGHOME']).toBe(`${world.runFolder.path}/${ACCOUNT}.gpg-public`);
       expect(statSync(env['GNUPGHOME'] as string).mode & 0o777).toBe(0o700);
 
       const git = gitIn(project.path, world.home, env);
-      expect(git(['init', '-q', '-b', 'main']).status).toBe(0);
-      const committed = git(['commit', '--allow-empty', '-q', '-m', 'signed']);
+      expect((await git(['init', '-q', '-b', 'main'])).status).toBe(0);
+      const committed = await git(['commit', '-S', '--allow-empty', '-q', '-m', 'signed']);
       expect(committed.stderr).toBe('');
       expect(committed.status).toBe(0);
-      expect(git(['cat-file', 'commit', 'HEAD']).stdout).toContain('-----BEGIN PGP SIGNATURE-----');
-      expect(git(['log', '-1', '--format=%ae']).stdout.trim()).toBe(EMAIL);
-      const verified = git(['verify-commit', 'HEAD']);
+      expect((await git(['cat-file', 'commit', 'HEAD'])).stdout).toContain('-----BEGIN PGP SIGNATURE-----');
+      expect((await git(['log', '-1', '--format=%ae'])).stdout.trim()).toBe(EMAIL);
+      const verified = await git(['verify-commit', 'HEAD']);
       expect(verified.status).toBe(0);
       expect(verified.stderr).toContain('Good signature');
+      expect((await git(['tag', '-s', 'signed-tag', '-m', 'signed tag'])).status).toBe(0);
+      expect((await git(['verify-tag', 'signed-tag'])).status).toBe(0);
+      const secrets = spawnSync(
+        'gpg',
+        ['--no-options', '--batch', '--no-autostart', '--list-secret-keys', '--with-colons'],
+        {
+          encoding: 'utf8',
+          env: bareEnv(world.home, { GNUPGHOME: env['GNUPGHOME'] ?? '' }),
+        },
+      );
+      expect(secrets.stdout).not.toMatch(/^sec:/mu);
 
       // What GitHub does: only the registered public key, in a keyring of its own, and the committer address is the key's.
       const stranger = strangerHome('generate-stranger');
@@ -507,17 +563,17 @@ describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skip
 
       const env = await paneEnvFor(world, project.path);
       const git = gitIn(project.path, world.home, env);
-      git(['init', '-q', '-b', 'main']);
-      expect(git(['commit', '--allow-empty', '-q', '-m', 'imported']).status).toBe(0);
-      expect(git(['verify-commit', 'HEAD']).status).toBe(0);
+      await git(['init', '-q', '-b', 'main']);
+      expect((await git(['commit', '--allow-empty', '-q', '-m', 'imported'])).status).toBe(0);
+      expect((await git(['verify-commit', 'HEAD'])).status).toBe(0);
 
       // Removing it deletes it at GitHub (it was registered by us), forgets the sealed key and the home.
       const removed = await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}/keys/signing`);
       expect(GitKeyRemovedSchema.parse(removed.json())).toMatchObject({ purpose: 'signing', removed: true });
       expect(github.deleted).toEqual([`/user/gpg_keys/${String(701)}`]);
       expect(github.registered).toHaveLength(0);
-      expect(await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)).toBeUndefined();
-      expect(existsSync(`${world.runFolder.path}/${ACCOUNT}.gnupg`)).toBe(false);
+      expect((await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)) === undefined).toBe(true);
+      expect(existsSync(`${world.runFolder.path}/${ACCOUNT}.gpg-public`)).toBe(false);
       const after = (await world.request('GET', '/v1/git-accounts')).json<GitAccount[]>();
       expect(after[0]?.keys.signing).toBeUndefined();
     } finally {
@@ -559,7 +615,7 @@ describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skip
       expect(answer.body).not.toContain('PRIVATE KEY');
       expect(github.registered).toHaveLength(0);
       expect(await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)).toBeUndefined();
-      expect(readdirSync(world.runFolder.path).filter(name => name.endsWith('.gnupg'))).toEqual([]);
+      expect(readdirSync(world.runFolder.path).filter(name => name.endsWith('.gpg-public'))).toEqual([]);
     } finally {
       await world.host.stop();
     }
@@ -597,6 +653,304 @@ describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skip
     }
   }, 90_000);
 
+  test('security 1: generation and launch leave no private key material on disk, including after daemon stop', async () => {
+    const { world, project } = await setup('disk-scan');
+    const scan = (path: string): void => {
+      for (const name of readdirSync(path)) {
+        const at = `${path}/${name}`;
+        const stat = statSync(at);
+        if (stat.isDirectory()) {
+          expect(name).not.toBe('private-keys-v1.d');
+          scan(at);
+        } else if (stat.isFile())
+          expect(readFileSync(at, 'utf8')).not.toMatch(/PRIVATE KEY BLOCK|\(private-key|\(protected-private-key/u);
+      }
+    };
+    try {
+      expect(
+        (await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'signing', format: 'gpg' })).status,
+      ).toBe(200);
+      await paneEnvFor(world, project.path);
+      scan(world.runFolder.path);
+      scan(world.home);
+    } finally {
+      await world.host.stop();
+    }
+    scan(world.runFolder.path);
+    scan(world.home);
+  }, 90_000);
+
+  test('security 2: GPG scopes require an explicit connect choice; SSH consent has no GPG scope', async () => {
+    const { world, github } = await setup('scopes');
+    try {
+      const first = github.calls('github.com', '/login/device/code')[0];
+      expect(new URLSearchParams(first?.body).get('scope')).not.toMatch(/gpg_key/u);
+      expect((await world.request('POST', '/v1/git-accounts/github/device', { signingFormat: 'gpg' })).status).toBe(
+        200,
+      );
+      const gpg = github.calls('github.com', '/login/device/code').at(-1);
+      expect(new URLSearchParams(gpg?.body).get('scope')?.split(' ')).toContain('admin:gpg_key');
+    } finally {
+      await world.host.stop();
+    }
+  }, 90_000);
+
+  test('security 3: a write-only token cannot revoke remotely; local signing is dropped before the provider refusal and retry succeeds', async () => {
+    const { world, github, project } = await setup('write-only');
+    try {
+      expect(
+        (await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'signing', format: 'gpg' })).status,
+      ).toBe(200);
+      github.scopes = ['write:gpg_key'];
+      const answer = await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}/keys/signing`);
+      expect(answer.status).toBe(502);
+      expect(github.registered).toHaveLength(1);
+      expect(await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)).toBeUndefined();
+      const env = await paneEnvFor(world, project.path);
+      expect(new Map(settingsOf(env)).get('commit.gpgsign')).toBe('false');
+      github.scopes = ['admin:gpg_key'];
+      expect((await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}/keys/signing`)).status).toBe(200);
+      expect(github.registered).toHaveLength(0);
+    } finally {
+      await world.host.stop();
+    }
+  }, 90_000);
+
+  test('security review: narrowed gh cannot delete an unrelated owner GPG key with the account admin scope', async () => {
+    const { world, github } = await setup('unrelated-key');
+    try {
+      const unrelated = await generateKey({ userIDs: [{ name: 'Owner', email: 'owner@example.test' }] });
+      github.registered.push({ id: 999, name: 'owner key', armored_public_key: unrelated.publicKey });
+      const port = world.host.provided(GitAccountsPort);
+      for (const args of [
+        ['api', '-X', 'DELETE', '/user/gpg_keys/999'],
+        ['api', '/user/gpg_keys/999', '--method=DELETE'],
+        ['api', '-X', 'DELETE', 'https://api.github.com/user/gpg_keys/999'],
+        ['api', '-X', 'DELETE', '/%75ser/gpg_keys/999'],
+        ['api', 'graphql', '-f', 'query=mutation { deleteGpgKey(input:{id:"999"}){clientMutationId} }'],
+      ])
+        await expect(port.run(ACCOUNT, { program: 'gh', args })).rejects.toMatchObject({ status: 403 });
+      expect(github.registered.map(key => key.id)).toEqual([999]);
+      expect(github.deleted).toEqual([]);
+    } finally {
+      await world.host.stop();
+    }
+  }, 90_000);
+
+  test('security review: disconnect distinguishes uncertain uploads by fingerprint and never asks to delete an unconfirmed title', async () => {
+    const { world, github } = await setup('uncertain-disconnect');
+    try {
+      github.lostUpload = true;
+      expect(
+        (await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'signing', format: 'gpg' })).status,
+      ).not.toBe(200);
+      const key = (await world.host.provided(GitAccountsPort).list())[0]?.keys.signing;
+      expect(key?.registrationPending).toBe(true);
+      const removed = await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}`);
+      expect(removed.status).toBe(200);
+      expect(removed.json()).toMatchObject({ keysLeftOnProvider: [], gpgUploadsToCheck: [key?.openpgpFingerprint] });
+      expect(github.deleted).toEqual([]);
+      expect(github.registered).toHaveLength(1);
+    } finally {
+      await world.host.stop();
+    }
+  }, 90_000);
+
+  test('security review: import rejects trailing armor blocks, trailing text, and mixed public/private packets', async () => {
+    const { world, github } = await setup('bundled-import');
+    try {
+      const one = await generateKey({ userIDs: [{ name: 'One', email: 'one@example.test' }], format: 'object' });
+      const two = await generateKey({ userIDs: [{ name: 'Two', email: 'two@example.test' }], format: 'object' });
+      const binary = new Uint8Array([...one.privateKey.write(), ...two.publicKey.write()]);
+      for (const keyBlock of [
+        one.privateKey.armor() + two.privateKey.armor(),
+        one.privateKey.armor() + 'ignored',
+        armor(enums.armor.privateKey, binary),
+      ]) {
+        expect(
+          (
+            await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, {
+              purpose: 'signing',
+              format: 'gpg',
+              keyBlock,
+            })
+          ).status,
+        ).toBe(400);
+      }
+      expect(github.registered).toHaveLength(0);
+      expect((await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)) === undefined).toBe(true);
+    } finally {
+      await world.host.stop();
+    }
+  }, 90_000);
+
+  test('security review: a reconnect queued during disconnect retains its new token and a consistent account', async () => {
+    const { world, github } = await setup('reconnect-race');
+    let resume = () => {};
+    let entered = () => {};
+    const started = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    github.deletionGate = new Promise<void>(resolve => {
+      resume = resolve;
+    });
+    github.onDeletion = entered;
+    try {
+      expect(
+        (await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'signing', format: 'gpg' })).status,
+      ).toBe(200);
+      const flow = (await world.request('POST', '/v1/git-accounts/github/device', { signingFormat: 'gpg' })).json<{
+        flowId: string;
+      }>();
+      await world.host.clock.advance(5000);
+      const disconnect = world.request('DELETE', `/v1/git-accounts/${ACCOUNT}`);
+      await started;
+      const reconnect = world.request('GET', `/v1/git-accounts/github/device/${flow.flowId}`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      resume();
+      expect((await disconnect).status).toBe(200);
+      expect((await reconnect).json()).toMatchObject({ status: 'done' });
+      const port = world.host.provided(GitAccountsPort);
+      expect(await port.list()).toHaveLength(1);
+      expect((await port.api(ACCOUNT, { method: 'GET', path: '/user' })).status).toBe(200);
+      expect((await port.list())[0]?.keys.signing).toBeUndefined();
+      expect(github.registered).toHaveLength(0);
+    } finally {
+      resume();
+      await world.host.stop();
+    }
+  }, 90_000);
+
+  test('security review: SSH-only reconnect cannot discard the scope needed to revoke a held GPG key', async () => {
+    const { world, github, project } = await setup('reconnect-scopes');
+    try {
+      expect(
+        (await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'signing', format: 'gpg' })).status,
+      ).toBe(200);
+      github.tokenAnswers = [{ access_token: FAKE_TOKEN, scope: 'read:user repo' }];
+      const flow = (await world.request('POST', '/v1/git-accounts/github/device')).json<{ flowId: string }>();
+      await world.host.clock.advance(5000);
+      expect((await world.request('GET', `/v1/git-accounts/github/device/${flow.flowId}`)).status).toBe(409);
+      expect((await world.host.provided(GitAccountsPort).list())[0]?.scopes).toContain('admin:gpg_key');
+      expect(new Map(settingsOf(await paneEnvFor(world, project.path))).get('commit.gpgsign')).toBe('true');
+      expect((await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}/keys/signing`)).status).toBe(200);
+    } finally {
+      await world.host.stop();
+    }
+  }, 90_000);
+
+  for (const disconnect of [false, true])
+    test(`security 4: ${disconnect ? 'disconnect' : 'revoke'} queued behind GPG creation snapshots format under the same account lock`, async () => {
+      const { world, github } = await setup(`race-${disconnect}`);
+      let release = () => {};
+      let entered = () => {};
+      const started = new Promise<void>(resolve => {
+        entered = resolve;
+      });
+      github.registrationGate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      github.onRegistration = entered;
+      try {
+        const create = world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'signing', format: 'gpg' });
+        await started;
+        const remove = world.request('DELETE', `/v1/git-accounts/${ACCOUNT}${disconnect ? '' : '/keys/signing'}`);
+        await new Promise(resolve => setTimeout(resolve, 10));
+        release();
+        expect((await create).status).toBe(200);
+        expect((await remove).status).toBe(200);
+        expect(github.deleted).toEqual(['/user/gpg_keys/701']);
+        expect(github.registered).toHaveLength(0);
+        expect(await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)).toBeUndefined();
+      } finally {
+        release();
+        await world.host.stop();
+      }
+    }, 90_000);
+
+  test('security 4: failed public-file cleanup leaves removal retryable with no live or sealed signing capability', async () => {
+    const { world, github, project } = await setup('cleanup-retry');
+    const remove = world.runFolder.remove;
+    try {
+      expect(
+        (await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'signing', format: 'gpg' })).status,
+      ).toBe(200);
+      const env = await paneEnvFor(world, project.path);
+      const socket = `${world.runFolder.path}/${ACCOUNT}.gpg.sock`;
+      const before = await fetch('http://localhost/export', { unix: socket });
+      expect(before.status).toBe(404);
+      world.runFolder.remove = async name => {
+        if (name.endsWith('.gpg-public')) throw new Error('synthetic cleanup failure');
+        await remove(name);
+      };
+      expect((await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}/keys/signing`)).status).toBe(500);
+      expect((await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)) === undefined).toBe(true);
+      expect(existsSync(socket)).toBe(false);
+      expect(github.registered).toHaveLength(1);
+      expect(new Map(settingsOf(await paneEnvFor(world, project.path))).get('commit.gpgsign')).toBe('false');
+      const git = gitIn(project.path, world.home, env);
+      await git(['init', '-q', '-b', 'main']);
+      expect((await git(['commit', '-S', '--allow-empty', '-q', '-m', 'revoked'])).status).not.toBe(0);
+      world.runFolder.remove = remove;
+      expect((await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}/keys/signing`)).status).toBe(200);
+      expect(github.registered).toHaveLength(0);
+    } finally {
+      world.runFolder.remove = remove;
+      await world.host.stop();
+    }
+  }, 90_000);
+
+  for (const fault of ['marker-write', 'token-read'] as const)
+    test(`security review: ${fault} failure cannot leave a running GPG signer usable`, async () => {
+      const { world, github, project } = await setup(fault);
+      let restarted: typeof world.host | undefined;
+      let restore = () => {};
+      try {
+        expect(
+          (await world.request('POST', `/v1/git-accounts/${ACCOUNT}/keys`, { purpose: 'signing', format: 'gpg' }))
+            .status,
+        ).toBe(200);
+        const env = await paneEnvFor(world, project.path);
+        const socket = `${world.runFolder.path}/${ACCOUNT}.gpg.sock`;
+        expect(existsSync(socket)).toBe(true);
+        if (fault === 'marker-write') {
+          const state = world.held.state as StatePort;
+          const original = state.update;
+          state.update = async () => {
+            throw new Error('synthetic metadata failure');
+          };
+          restore = () => {
+            state.update = original;
+          };
+        } else {
+          const token = world.sealed.tokens as SealedDocumentHandle;
+          const original = token.get;
+          token.get = async () => {
+            throw new Error('synthetic token read failure');
+          };
+          restore = () => {
+            token.get = original;
+          };
+        }
+        expect((await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}`)).status).toBe(500);
+        expect(existsSync(socket)).toBe(false);
+        expect((await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)) === undefined).toBe(true);
+        const git = gitIn(project.path, world.home, env);
+        await git(['init', '-q', '-b', 'main']);
+        expect((await git(['commit', '-S', '--allow-empty', '-q', '-m', 'revoked'])).status).not.toBe(0);
+        restore();
+        restarted = await world.host.restart();
+        await restarted.settle();
+        expect(new Map(settingsOf(await paneEnvFor(world, project.path))).get('commit.gpgsign')).toBe('false');
+        expect(existsSync(socket)).toBe(false);
+        expect((await restarted.request('DELETE', `/v1/git-accounts/${ACCOUNT}`)).status).toBe(200);
+        expect(github.registered).toHaveLength(0);
+      } finally {
+        restore();
+        await (restarted ?? world.host).stop();
+      }
+    }, 90_000);
+
   test('a second request while a signing key exists is refused; the same request again answers what is there', async () => {
     const { github, world } = await setup('twice');
     try {
@@ -624,7 +978,7 @@ describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skip
       await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}`);
       expect(github.deleted).toEqual(['/user/gpg_keys/701']);
       expect(await world.sealed.keys?.get(`${ACCOUNT}:gpg` as never)).toBeUndefined();
-      expect(existsSync(`${world.runFolder.path}/${ACCOUNT}.gnupg`)).toBe(false);
+      expect(existsSync(`${world.runFolder.path}/${ACCOUNT}.gpg-public`)).toBe(false);
     } finally {
       await world.host.stop();
     }
@@ -649,9 +1003,9 @@ describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skip
         expect(env['SSH_AUTH_SOCK']).toBeDefined();
         expect(env['GNUPGHOME']).toBeDefined();
         const git = gitIn(project.path, world.home, env);
-        git(['init', '-q', '-b', 'main']);
-        expect(git(['commit', '--allow-empty', '-q', '-m', 'both']).status).toBe(0);
-        expect(git(['verify-commit', 'HEAD']).status).toBe(0);
+        await git(['init', '-q', '-b', 'main']);
+        expect((await git(['commit', '--allow-empty', '-q', '-m', 'both'])).status).toBe(0);
+        expect((await git(['verify-commit', 'HEAD'])).status).toBe(0);
 
         // The push key goes; its sealed private half goes with it, and the GPG key is untouched.
         expect((await world.request('DELETE', `/v1/git-accounts/${ACCOUNT}/keys/auth`)).status).toBe(200);
@@ -663,7 +1017,9 @@ describe.skipIf(!HAVE_GPG)('a real gpg and git (needs gpg, gpgconf and git; skip
         expect(github.registered).toHaveLength(1);
         const after = await paneEnvFor(world, project.path);
         expect(after['SSH_AUTH_SOCK']).toBeUndefined();
-        expect(gitIn(project.path, world.home, after)(['commit', '--allow-empty', '-q', '-m', 'after']).status).toBe(0);
+        expect(
+          (await gitIn(project.path, world.home, after)(['commit', '--allow-empty', '-q', '-m', 'after'])).status,
+        ).toBe(0);
       } finally {
         await world.host.stop();
         for (const child of world.real.children) child.kill('SIGKILL');

@@ -22,8 +22,8 @@ export const CONSENT_ITEMS: readonly ConsentItem[] = [
     text: 'to sign your commits as you.',
   },
   {
-    title: 'Add SSH and GPG keys',
-    scopes: ['write:public_key', 'write:ssh_signing_key', 'write:gpg_key'],
+    title: 'Add SSH keys',
+    scopes: ['write:public_key', 'write:ssh_signing_key'],
     text: 'so ferrets can push and sign as you without a password.',
   },
   {
@@ -37,6 +37,12 @@ export const CONSENT_ITEMS: readonly ConsentItem[] = [
     text: 'to list your organisations’ repositories and teams.',
   },
 ];
+
+export const GPG_CONSENT_ITEM: ConsentItem = {
+  title: 'Manage GPG keys',
+  scopes: ['admin:gpg_key'],
+  text: 'add the signing key and remove it when you disconnect. GitHub gives this permission over **all** GPG keys on the account; Ferretry only removes keys it registered.',
+};
 
 export const CONSENT_MEANING_HEADING = 'What this means:';
 

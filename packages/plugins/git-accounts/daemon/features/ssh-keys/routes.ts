@@ -65,10 +65,7 @@ export function sshKeyRoutes(keys: SshKeyService, gpg: GpgKeyService) {
       const kind = GitKeyKindSchema.safeParse(decodeParameter(call.params.get('purpose') ?? ''));
       if (!kind.success) throw new ApiError(404, 'a key purpose is auth or signing', GIT_ACCOUNT_CODES.invalidRequest);
       const id = accountOf(call);
-      const removed =
-        kind.data === 'signing' && (await gpg.holdsSigning(id))
-          ? await gpg.remove(id)
-          : await keys.remove(id, kind.data);
+      const removed = await keys.remove(id, kind.data, gpg);
       return jsonResponse(GitKeyRemovedSchema.parse(removed));
     },
   } satisfies Record<string, RouteHandler>;

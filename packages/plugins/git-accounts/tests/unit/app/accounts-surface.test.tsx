@@ -31,10 +31,39 @@ async function open(options: ScriptOptions = {}) {
   return { ...script, root: mounted.container };
 }
 
-const posted = (calls: readonly { route: string }[]) =>
-  calls.filter(c => c.route === 'POST /v1/git-accounts/github/device');
+const posted = (calls: readonly Call[]) => calls.filter(c => c.route === 'POST /v1/git-accounts/github/device');
 
 describe('the accounts list', () => {
+  for (const format of ['ssh', 'gpg'] as const)
+    it(`security 2: creates a ${format} signing key and removes it through the account routes`, async () => {
+      const { root, calls } = await open({ accounts: [{ ...hubot, scopes: ['admin:gpg_key'] }] });
+      await click(q(root, `input[value="${format}"]`));
+      await click(buttonNamed(root, `Create ${format.toUpperCase()} signing key`));
+      await settle();
+      expect(calls.find(call => call.route === 'POST /v1/git-accounts/:id/keys')?.init).toEqual({
+        params: { id: hubot.id },
+        body: { purpose: 'signing', format },
+      });
+      expect(root.textContent).toContain(`Signing with ${format.toUpperCase()}`);
+      await click(buttonNamed(root, 'Change signing key'));
+      expect(calls.some(call => call.route === 'DELETE /v1/git-accounts/:id/keys/:purpose')).toBe(false);
+      await click(buttonNamed(root, 'Remove signing key'));
+      await settle();
+      expect(calls.find(call => call.route === 'DELETE /v1/git-accounts/:id/keys/:purpose')?.init?.params).toEqual({
+        id: hubot.id,
+        purpose: 'signing',
+      });
+      expect(root.textContent).toContain(`Create ${format.toUpperCase()} signing key`);
+    });
+
+  it('requires a new GPG consent before allowing an SSH-only account to create a GPG key', async () => {
+    const { root, calls } = await open({ accounts: [hubot] });
+    await click(q(root, 'input[value="gpg"]'));
+    expect(buttonNamed(root, 'Create GPG signing key').disabled).toBe(true);
+    expect(root.textContent).toContain('Connect @hubot-fake again below and choose GPG');
+    expect(calls.some(call => call.route === 'POST /v1/git-accounts/:id/keys')).toBe(false);
+  });
+
   it('says there are none, with a Connect button', async () => {
     const { root } = await open();
     expect(q(root, '[data-testid="git-accounts-empty"]').textContent).toContain('No GitHub account');
@@ -78,20 +107,25 @@ describe('the accounts list', () => {
 });
 
 describe('connecting an account', () => {
+  for (const format of ['ssh', 'gpg'] as const)
+    it(`security 2: ${format} consent sends only the chosen signing format`, async () => {
+      const { root, calls } = await open();
+      await click(buttonNamed(root, 'Connect a GitHub account'));
+      await click(q(root, `input[value="${format}"]`));
+      const consent = q(root, '[data-testid="git-consent"]');
+      if (format === 'gpg') expect(consent.textContent).toContain('admin:gpg_key');
+      else expect(consent.textContent).not.toMatch(/(?:admin|write):gpg_key/u);
+      expect(posted(calls)).toHaveLength(0);
+      await click(buttonNamed(root, 'Continue to GitHub'));
+      expect(posted(calls)[0]?.init?.body).toEqual({ signingFormat: format });
+    });
+
   it('shows the consent words first and asks GitHub for nothing until Continue', async () => {
     const { root, calls } = await open();
     await click(buttonNamed(root, 'Connect a GitHub account'));
     const consent = q(root, '[data-testid="git-consent"]');
     expect(consent.textContent).toContain('What Ferretry asks GitHub for');
-    for (const scope of [
-      'read:user',
-      'user:email',
-      'write:public_key',
-      'write:ssh_signing_key',
-      'write:gpg_key',
-      'repo',
-      'read:org',
-    ])
+    for (const scope of ['read:user', 'user:email', 'write:public_key', 'write:ssh_signing_key', 'repo', 'read:org'])
       expect(consent.textContent, scope).toContain(scope);
     expect(consent.textContent).toContain('every repository you can reach');
     expect(posted(calls)).toHaveLength(0);
@@ -391,6 +425,18 @@ describe('a code that expires between two polls', () => {
 });
 
 describe('removing an account', () => {
+  it('shows an uncertain upload fingerprint for ownership checks without deletion instructions', async () => {
+    const fingerprint = 'A'.repeat(40);
+    const { root } = await open({ accounts: [octo], gpgUploadsToCheck: [fingerprint] });
+    await click(buttonNamed(root, 'Remove @octo-fake'));
+    await click(buttonNamed(root, 'Remove @octo-fake'));
+    await settle();
+    const answer = q(root, '[data-testid="git-removed"]').textContent ?? '';
+    expect(answer).toContain(fingerprint);
+    expect(answer).toContain('confirm who registered each key before taking any action');
+    expect(answer).not.toContain('delete them there');
+  });
+
   it('asks twice, says what it deletes, then removes it and says how to revoke the app', async () => {
     const { root, calls, accounts } = await open({ accounts: [octo, hubot], keysLeftOnProvider: ['Ferretry laptop'] });
     await click(buttonNamed(root, 'Remove @octo-fake'));

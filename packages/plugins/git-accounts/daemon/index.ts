@@ -15,7 +15,7 @@ import { gitAccountRoutes } from './routes.ts';
 import { psAgentProcesses } from './adapters/agent-processes.ts';
 import { rootRunFolder } from './adapters/run-folder.ts';
 import { accountLaunchParts } from './features/launch/parts.ts';
-import { GnupgHomes } from './features/gpg-keys/gnupg.ts';
+import { GpgSigners } from './features/gpg-keys/signer.ts';
 import { GpgKeyService } from './features/gpg-keys/service.ts';
 import { AgentSupervisor, type RunFolder } from './features/ssh-keys/agents.ts';
 import type { AgentProcessTable } from './features/ssh-keys/sweep.ts';
@@ -28,6 +28,7 @@ import { ghRunRoutes } from './features/gh-run/routes.ts';
 import { sshKeyRoutes } from './features/ssh-keys/routes.ts';
 import { SshKeyService } from './features/ssh-keys/service.ts';
 import { AccountBook } from './lib/accounts.ts';
+import { AccountLocks } from './lib/account-locks.ts';
 import { GithubDeviceFlows } from './lib/device-flow.ts';
 import { GitAccountsService } from './lib/service.ts';
 
@@ -47,8 +48,12 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
   return implementDaemon(manifest, {
     build: ({ needs, uses, kernel }) => {
       const { projects, ferrets } = uses;
-      const book = new AccountBook(kernel.state, needs.sealed.open(kernel.state, GIT_ACCOUNT_TOKENS), () =>
-        kernel.clock.now(),
+      const locks = new AccountLocks();
+      const book = new AccountBook(
+        kernel.state,
+        needs.sealed.open(kernel.state, GIT_ACCOUNT_TOKENS),
+        () => kernel.clock.now(),
+        locks,
       );
       const http = new FetchGithubHttp(kernel.fetch);
       const settings = () => kernel.config.file(GitAccountsConfigFile) ?? GitAccountsConfigSchema.parse({});
@@ -72,10 +77,10 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         'ssh-agent': programLocator({ name: 'ssh-agent', trustedWith: 'an account key' }, locatorPorts),
         'ssh-add': programLocator({ name: 'ssh-add', trustedWith: 'an account key' }, locatorPorts),
       };
-      // `gpg` gets the account's SECRET KEY on its stdin: the real program only, never a file in the state home.
-      const gnupg = new GnupgHomes(kernel.spawn, runFolder, kernel.log, {
+      // GnuPG receives public packets only. Private packets stay in the daemon's memory signer.
+      const gnupg = new GpgSigners(kernel.spawn, runFolder, kernel.log, kernel.clock, {
         gpg: programLocator({ name: 'gpg', trustedWith: 'an account key' }, locatorPorts),
-        gpgconf: programLocator({ name: 'gpgconf', trustedWith: 'an account key' }, locatorPorts),
+        curl: programLocator({ name: 'curl', trustedWith: 'a signing payload' }, locatorPorts),
       });
       // A daemon that died uncleanly left its agents running: the first start (and the warm below) ends this daemon's own.
       const agents = new AgentSupervisor(
@@ -119,15 +124,17 @@ export function gitAccountsDaemon(overrides: GitAccountsOverrides = {}) {
         kernel.scratch,
         id => kernel.events.publish(GitAccountDisconnected, { id }),
         async id => {
-          await keys.service?.forget(id);
-          await keys.gpg?.forget(id);
+          const results = await Promise.allSettled([keys.service?.forgetLocked(id), keys.gpg?.forgetLocked(id)]);
+          const failure = results.find(result => result.status === 'rejected');
+          if (failure?.status === 'rejected') throw failure.reason;
         },
         // The `gh` that gets a token is the real one: never a file in the state home, even if the daemon's own PATH names the shim folder.
         ghLocator(locatorPorts),
+        (id, work) => locks.run(id, work),
       );
       // One sealed document and one handle for both kinds of key: two handles over one file would race each other's writes.
       const sealedKeys = needs.sealed.open(kernel.state, GIT_ACCOUNT_KEYS);
-      const keyService = new SshKeyService(service, sealedKeys, agents, () => kernel.identity.daemonName);
+      const keyService = new SshKeyService(service, sealedKeys, agents, () => kernel.identity.daemonName, locks);
       keys.service = keyService;
       const gpgService = new GpgKeyService(
         service,

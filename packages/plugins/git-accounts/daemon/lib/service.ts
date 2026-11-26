@@ -37,6 +37,7 @@ export class GitAccountsService {
     private readonly beforeForget: (id: GitAccountId) => Promise<void>,
     /** The `gh` to run with a token and the `PATH` it runs with: an absolute path and folders outside the state home (`gh-locator.ts`), or a refusal. */
     private readonly ghProgram: () => Promise<GhLaunch>,
+    private readonly exclusive: <T>(id: GitAccountId, work: () => Promise<T>) => Promise<T>,
   ) {}
 
   list(): Promise<readonly GitAccount[]> {
@@ -163,26 +164,38 @@ export class GitAccountsService {
    * then the record. A key GitHub will not delete is named in the answer for the person to remove there; it does not
    * keep the account connected. Revoking the app's grant needs the client secret we deliberately do not have.
    */
-  async remove(id: GitAccountId): Promise<GitAccountRemoved> {
+  remove(id: GitAccountId): Promise<GitAccountRemoved> {
+    return this.exclusive(id, () => this.#removeLocked(id));
+  }
+
+  async #removeLocked(id: GitAccountId): Promise<GitAccountRemoved> {
+    // Storage reads can fail too: first close every local capability, independently of metadata/token availability.
+    await this.beforeForget(id);
     const account = await this.book.find(id);
     if (account === undefined) {
       // A token with no record (a connect whose record never landed) must still be removable, or it is stranded.
       if ((await this.book.token(id)) === undefined)
         throw new ApiError(404, 'no such Git account', GIT_ACCOUNT_CODES.unknownAccount);
-      await this.beforeForget(id);
       await this.book.forget(id);
       await this.removed(id);
-      return { id, removed: true, keysLeftOnProvider: [], revokeAt: GITHUB_REVOKE_URL };
+      return { id, removed: true, keysLeftOnProvider: [], gpgUploadsToCheck: [], revokeAt: GITHUB_REVOKE_URL };
     }
     const left: string[] = [];
-    const token = await this.book.token(id);
+    const gpgUploadsToCheck: string[] = [];
     const registered = [
       { key: account.keys.ssh, base: '/user/keys' },
       { key: account.keys.signing, base: isGpgKey(account.keys.signing) ? '/user/gpg_keys' : '/user/ssh_signing_keys' },
     ];
+    // Stop local signing before remote I/O. The lock keeps the snapshot and the capability consistent with creates.
+    const token = await this.book.token(id);
     for (const { key, base } of registered) {
       // A key the person already had (`source: own`) was never ours to delete.
-      if (key === undefined || key.source === 'own' || key.githubKeyId === undefined) continue;
+      if (key === undefined || key.source === 'own') continue;
+      if (key.githubKeyId === undefined) {
+        if (key.registrationPending === true && key.openpgpFingerprint !== undefined)
+          gpgUploadsToCheck.push(key.openpgpFingerprint);
+        continue;
+      }
       if (token === undefined) {
         left.push(key.title);
         continue;
@@ -198,10 +211,9 @@ export class GitAccountsService {
         left.push(key.title);
       }
     }
-    await this.beforeForget(id);
     await this.book.forget(id);
     await this.removed(id);
-    return { id, removed: true, keysLeftOnProvider: left, revokeAt: GITHUB_REVOKE_URL };
+    return { id, removed: true, keysLeftOnProvider: left, gpgUploadsToCheck, revokeAt: GITHUB_REVOKE_URL };
   }
 
   async #tokenOf(id: GitAccountId): Promise<string> {

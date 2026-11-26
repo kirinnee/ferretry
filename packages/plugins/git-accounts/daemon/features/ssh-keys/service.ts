@@ -22,6 +22,8 @@ import {
 import type { AccountKit } from '../launch/environment.ts';
 import type { AgentSupervisor } from './agents.ts';
 import { generateEd25519, parsePublicKey } from './openssh.ts';
+import type { GpgKeyService } from '../gpg-keys/service.ts';
+import { AccountLocks } from '../../lib/account-locks.ts';
 
 /** What the key feature needs from the account service: nothing that returns a token. */
 export interface KeyAccounts {
@@ -55,13 +57,12 @@ const refused = (message: string, code: string = GIT_ACCOUNT_CODES.keyRefused, s
   new ApiError(status, message, code);
 
 export class SshKeyService {
-  readonly #queues = new Map<GitAccountId, Promise<unknown>>();
-
   constructor(
     private readonly accounts: KeyAccounts,
     private readonly sealed: SealedDocumentHandle,
     private readonly agents: AgentSupervisor,
     private readonly machineName: () => string,
+    private readonly locks = new AccountLocks(),
   ) {}
 
   /** Makes (or reuses) the account's key and registers it for `purpose`; or records a key the person already has. */
@@ -75,12 +76,17 @@ export class SshKeyService {
   }
 
   /** Takes one registration off the account at GitHub and out of the record; the key itself goes when none is left. */
-  remove(id: GitAccountId, kind: GitKeyKind): Promise<GitKeyRemoved> {
+  remove(id: GitAccountId, kind: GitKeyKind, gpg?: Pick<GpgKeyService, 'removeLocked'>): Promise<GitKeyRemoved> {
     return this.#serial(id, async () => {
       const account = await this.#account(id);
       const { slot, path } = KINDS[kind];
       const key = account.keys[slot];
       if (key === undefined) throw new ApiError(404, 'this account has no such key', GIT_ACCOUNT_CODES.unknownAccount);
+      // Select the format INSIDE the same lock as create, removal and disconnect.
+      if (isGpgKey(key)) {
+        if (gpg === undefined) throw refused('the GPG key remover is unavailable');
+        return await gpg.removeLocked(id);
+      }
       // A key the person already had is only forgotten here: it was never ours to delete at GitHub.
       if (key.source !== 'own' && key.githubKeyId !== undefined) {
         const answer = await this.accounts.api(id, { method: 'DELETE', path: `${path}/${key.githubKeyId}` });
@@ -157,6 +163,10 @@ export class SshKeyService {
   /** The account is going: stop its agent and forget the private key. */
   forget(id: GitAccountId): Promise<void> {
     return this.#serial(id, () => this.#dropOwnKey(id));
+  }
+
+  forgetLocked(id: GitAccountId): Promise<void> {
+    return this.#dropOwnKey(id);
   }
 
   async #createOwn(account: GitAccount, purpose: GitKeyRequest['purpose']): Promise<GitKeyResult> {
@@ -294,14 +304,7 @@ export class SshKeyService {
   }
 
   #serial<T>(id: GitAccountId, work: () => Promise<T>): Promise<T> {
-    const before = this.#queues.get(id) ?? Promise.resolve();
-    const run = before.then(work, work);
-    const tail = run.catch(() => undefined);
-    this.#queues.set(id, tail);
-    void tail.then(() => {
-      if (this.#queues.get(id) === tail) this.#queues.delete(id);
-    });
-    return run;
+    return this.locks.run(id, work);
   }
 }
 

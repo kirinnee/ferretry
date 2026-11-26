@@ -3,7 +3,7 @@ import type { LaunchPart, LaunchPartSource } from '@ferretry/core-ferrets/contra
 import type { ProjectInfo } from '@ferretry/plugin-projects/contract';
 import type { GitAccount, GitAccountId } from '../../../contract/index.ts';
 import { accountForFolder } from '../../lib/account-for-folder.ts';
-import type { GpgKit } from '../gpg-keys/gnupg.ts';
+import type { GpgKit } from '../gpg-keys/signer.ts';
 import { type AccountKit, gitEnvironment, noIdentityEnvironment } from './environment.ts';
 
 const GIT_ACCOUNTS_PLUGIN = 'git-accounts';
@@ -14,7 +14,7 @@ export interface AccountLaunchDeps {
   accounts(): Promise<readonly GitAccount[]>;
   /** The account's agent and files, started on first ask; `undefined` when it has no key Ferretry made. */
   kit(account: GitAccountId): Promise<AccountKit | undefined>;
-  /** The account's GPG signing key in its isolated home, started on first ask; `undefined` when it signs another way. */
+  /** The account's memory signer and public-only keyring, started on first ask; `undefined` when it signs another way. */
   gpg?(account: GitAccountId): Promise<GpgKit | undefined>;
 }
 

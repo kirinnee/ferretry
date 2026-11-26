@@ -96,7 +96,6 @@ describe('git-accounts contract', () => {
       'user:email',
       'write:public_key',
       'write:ssh_signing_key',
-      'write:gpg_key',
       'repo',
       'read:org',
     ]);

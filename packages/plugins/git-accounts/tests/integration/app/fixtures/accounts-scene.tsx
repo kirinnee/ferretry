@@ -12,7 +12,27 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 
 const poll = params.get('poll') ?? 'pending';
 const script = scriptedGithub({
-  accounts: params.get('accounts') === 'two' ? [octo, hubot] : [],
+  accounts:
+    params.get('accounts') === 'two'
+      ? [octo, { ...hubot, scopes: ['admin:gpg_key'] }]
+      : params.get('accounts') === 'pending'
+        ? [
+            {
+              ...hubot,
+              keys: {
+                signing: {
+                  title: 'Ferretry test',
+                  format: 'gpg',
+                  source: 'generated',
+                  revoking: true,
+                  registrationPending: true,
+                  openpgpFingerprint: 'A'.repeat(40),
+                },
+              },
+            },
+          ]
+        : [],
+  gpgUploadsToCheck: params.get('uploads') === 'uncertain' ? ['A'.repeat(40)] : [],
   pollNeedsPress: poll === 'stepup',
   polls: [poll === 'expired' ? { status: 'expired' } : { status: 'pending', interval: 1 }],
 });

@@ -5,7 +5,7 @@
  * can be asked to sign and to authenticate, never to hand the key over.
  */
 import { type GitAccount, keptHere } from '../../../contract/index.ts';
-import type { GpgKit } from '../gpg-keys/gnupg.ts';
+import type { GpgKit } from '../gpg-keys/signer.ts';
 
 /** What an account's agent and files are called, from the key service. Paths only. */
 export interface AccountKit {
@@ -94,8 +94,8 @@ export function noIdentityEnvironment(account: GitAccount): Readonly<Record<stri
 
 /**
  * What git is told for the account. `kit` is the SSH side (an agent, for pushing or for SSH signing); `gpg` is the
- * OpenPGP signing key in its isolated `GNUPGHOME`. An account signs with one of them: a GPG kit means `gpg.format`
- * `openpgp`, the real `gpg` named by absolute path, and the key by fingerprint. Paths and a fingerprint only.
+ * OpenPGP signer with its public-only `GNUPGHOME`. An account signs with one of them: a GPG kit means `gpg.format`
+ * `openpgp`, the signing shim named by absolute path, and the key by fingerprint. Paths and a fingerprint only.
  */
 export function gitEnvironment(
   account: GitAccount,
