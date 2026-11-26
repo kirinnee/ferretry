@@ -82,7 +82,9 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
       ...(resolved.derived === true ? { derived: true as const } : {}),
     };
   };
-  const defaultRuntime = async (): Promise<string | undefined> => await deps.default?.().catch(() => undefined);
+  // A failed lookup REJECTS: Ferrets turns that into its plain refusal. Answering `undefined` here would read as "the
+  // machine has no default" and start the ferret on a fallback harness, which is exactly what a default forbids.
+  const defaultRuntime = async (): Promise<string | undefined> => await deps.default?.();
   const catalogDep = deps.catalog;
   if (catalogDep === undefined) return { login, resolve, defaultRuntime };
   // What the runtime NAMED serves, by name or by id, from the one published view; `undefined` when it is not published or

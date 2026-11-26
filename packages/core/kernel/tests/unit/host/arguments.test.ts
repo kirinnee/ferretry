@@ -40,6 +40,11 @@ describe('daemon command line', () => {
     should(text).match(/FY_HOME/u);
     should(text).match(/--print-config/u);
     should(text).match(/--check/u);
+    // C-47: the port has THREE spellings and the help names them: the flag wins over FY_PORT, which wins over the
+    // `direct.port` key of connections.yaml (the file the daemon actually reads; there is no daemon.json here).
+    should(text).match(/FY_PORT/u);
+    should(text).match(/direct\.port/u);
+    should(text).not.match(/daemon\.json/u);
     // The exit codes are the daemon's contract with whatever supervises it, and there was previously
     // nowhere at all to read them.
     should(text).match(/^ {2}69 {2,}/mu);

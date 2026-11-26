@@ -5,6 +5,8 @@ import { z } from 'zod';
  * daemon on listen, read by `fy`; both use {@link recordedBindAddress}, so they cannot disagree (P89).
  */
 export const DAEMON_RUN_FILE = 'run/daemon.json';
+/** A state home as the daemon spells it: `FY_HOME` with trailing slashes dropped. The daemon and `fy` both use this, so they name one directory. */
+export const withoutTrailingSlashes = (home: string): string => home.replace(/\/+$/, '');
 /** The owner-only Unix socket of the local listener. */
 export const DAEMON_SOCKET_FILE = 'run/fyd.sock';
 export const DAEMON_RUN_FORMAT = 1 as const;

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { implementCli } from '@ferretry/kernel/manifest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -61,6 +61,20 @@ const daemon = () =>
         ? Response.json(PLUGINS)
         : Response.json({ error: 'no' }, { status: 404 }),
   );
+
+describe('reading a regular file', () => {
+  it('C-100: answers a regular file’s text, and nothing for a link, a missing path or a folder', async () => {
+    await withHome(async home => {
+      const read = worldFor(home, {}).readRegularText;
+      await writeFile(join(home, 'real.json'), '{"a":1}');
+      await symlink(join(home, 'real.json'), join(home, 'link.json'));
+      should(await read?.(join(home, 'real.json'))).equal('{"a":1}');
+      should(await read?.(join(home, 'link.json'))).be.undefined();
+      should(await read?.(join(home, 'gone.json'))).be.undefined();
+      should(await read?.(home)).be.undefined();
+    });
+  });
+});
 
 describe('connecting to the daemon', () => {
   it('P90 FY_URL wins outright and FY_TOKEN is the credential, with no token file read', async () => {

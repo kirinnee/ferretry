@@ -12,6 +12,10 @@ describe('resolveHome', () => {
     should(resolveHome('/home/a', ' /srv/fy ', 'ferretry')).equal('/srv/fy');
   });
 
+  it('C-100: should spell FY_HOME as the daemon does, trailing slashes dropped, so both name one directory', () => {
+    should(resolveHome('/home/a', '/srv/fy//', 'ferretry')).equal('/srv/fy');
+  });
+
   it('should refuse a relative FY_HOME and a relative user home', () => {
     should(() => resolveHome('/home/a', 'relative/fy', 'ferretry')).throw('FY_HOME must be an absolute path');
     should(() => resolveHome('home/a', undefined, 'ferretry')).throw('the user home directory is not an absolute path');
