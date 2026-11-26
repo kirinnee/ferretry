@@ -66,6 +66,7 @@ import {
   SecretStoreError,
   type SecretVaultDocument,
 } from './seal.ts';
+import type { RecipeAsk, RecipeGuard } from './secrets/login-recipes.ts';
 import { totpCode } from './totp.ts';
 
 /** What a directory reads the time from: an instant, as text. */
@@ -942,11 +943,7 @@ export class AccountDirectory {
   }
 
   /** Remembers the agenda card a proposal was raised on, so settling it closes that card. */
-  async proposalCardSignIn(
-    id: SignInId,
-    proposalId: string,
-    ask: { readonly ferret: string; readonly id: string },
-  ): Promise<void> {
+  async proposalCardSignIn(id: SignInId, proposalId: string, ask: RecipeAsk): Promise<void> {
     await this.transact(draft => cardOn(draft, id, proposalId, ask));
   }
 
@@ -958,7 +955,7 @@ export class AccountDirectory {
     id: SignInId,
     proposalId: string,
     decision: 'approve' | 'decline',
-    guard?: (signIn: SignInSummary, proposal: LoginRecipeProposal) => void,
+    guard?: RecipeGuard,
   ): Promise<{ readonly signIn: SignInSummary; readonly proposal: LoginRecipeProposal }> {
     return await this.transact(draft => {
       const current = this.signInIn(draft, id);
@@ -1255,12 +1252,7 @@ function proposeOn(
   return { applied: false, dropped };
 }
 
-function cardOn(
-  draft: AccountDraft,
-  id: SignInId,
-  proposalId: string,
-  ask: { readonly ferret: string; readonly id: string },
-): void {
+function cardOn(draft: AccountDraft, id: SignInId, proposalId: string, ask: RecipeAsk): void {
   const signIn = Object.hasOwn(draft.signIns, id) ? draft.signIns[id] : undefined;
   if (signIn?.proposals?.some(proposal => proposal.id === proposalId) !== true) return;
   const proposals = signIn.proposals.map(proposal =>

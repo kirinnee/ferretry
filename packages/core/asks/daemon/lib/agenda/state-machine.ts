@@ -205,8 +205,7 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaTaskFields {
   readonly taskPlan?: AgendaTaskPlanRef;
   /** The ferret's standing-rule suggestion a card presents (`AgendaSignInRuleSuggestionRef`); only the daemon raises one. */
   readonly signInRuleSuggestion?: AgendaSignInRuleSuggestionRef;
-  /** The ref the Asks port validated for the ask's source (`AgendaItem.askRef`); only the daemon raises one. */
-  readonly askRef?: AgendaItem['askRef'];
+  readonly askRef?: AgendaItem['askRef']; // the ref the Asks port validated for the ask's source; only the daemon raises one
   /** The staged 2FA seed a card asks the owner to save with a passkey (`AgendaTwoFactorSeedRef`); only the daemon raises one. */
   readonly twoFactorSeed?: AgendaTwoFactorSeedRef;
   /** The approve-on-phone card an `info` item presents (`AgendaPhoneApprovalRef`); only the daemon raises one. */
@@ -2386,8 +2385,7 @@ function plainThread(item: AgendaItem): boolean {
     item.copyPlan === undefined &&
     item.signInRuleSuggestion === undefined &&
     item.twoFactorSeed === undefined &&
-    item.phoneApproval === undefined &&
-    item.askRef === undefined
+    item.phoneApproval === undefined
   );
 }
 

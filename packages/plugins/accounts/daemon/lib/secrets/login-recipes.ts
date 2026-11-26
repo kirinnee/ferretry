@@ -21,6 +21,15 @@ export interface AccountListing {
   readonly signIns: readonly SignInSummary[];
 }
 
+/** The ask a proposal was raised on: the board it LANDED on (a sub-ferret's lands on its lead's) and its id there. */
+export interface RecipeAsk {
+  readonly ferret: string;
+  readonly id: string;
+}
+
+/** Judges an approval on the very snapshot it is applied to: a throw leaves the sign-in as it was. */
+export type RecipeGuard = (signIn: SignInSummary, proposal: LoginRecipeProposal) => void;
+
 /**
  * THE ACCOUNT STORE, as the recipe policy needs it: where a proposal is filed (on one sign-in) and where the owner
  * answers one. accounts-a's `AccountDirectory` (today's `lib/secrets/accounts.ts`) is this, method for method.
@@ -32,20 +41,13 @@ interface RecipeAccounts {
     proposal: LoginRecipeProposal,
   ): Promise<{ readonly applied: boolean; readonly dropped: readonly LoginRecipeProposal[] }>;
   /** Remembers the ask a proposal was raised on, so settling it closes that ask. */
-  proposalCardSignIn(
-    id: SignInId,
-    proposalId: string,
-    ask: { readonly ferret: string; readonly id: string },
-  ): Promise<void>;
-  /**
-   * Answers one proposal. `guard` runs on the SAME snapshot the answer is applied to, once the proposal is found and before
-   * anything changes: a throw leaves the sign-in as it was.
-   */
+  proposalCardSignIn(id: SignInId, proposalId: string, ask: RecipeAsk): Promise<void>;
+  /** Answers one proposal; `guard` runs on the SAME snapshot the answer is applied to, before anything changes. */
   decideSignIn(
     id: SignInId,
     proposalId: string,
     decision: 'approve' | 'decline',
-    guard?: (signIn: SignInSummary, proposal: LoginRecipeProposal) => void,
+    guard?: RecipeGuard,
   ): Promise<{ readonly signIn: SignInSummary; readonly proposal: LoginRecipeProposal }>;
 }
 

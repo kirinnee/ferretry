@@ -1068,7 +1068,7 @@ export type AgendaConfirms = z.infer<typeof AgendaConfirmsSchema>;
 const AgendaInputRefSchema = z.strictObject({ requestId: z.string().regex(/^[0-9a-f]{32}$/u) });
 export type AgendaInputRef = z.infer<typeof AgendaInputRefSchema>;
 
-/** The ref an ask source registered (`AgendaItem.askRef`): its kind, and whatever else its own schema reads. */
+/** The ref an ask source registered (`AgendaItem.askRef`): its kind and whatever its own schema reads. */
 export const AgendaAskRefSchema = z.looseObject({ kind: z.string() });
 
 /**
@@ -1376,11 +1376,7 @@ const AgendaItemBaseShape = {
   twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
   /** A ferret's suggested standing rule: its card opens the create sheet with nothing ticked, never the generic answer. */
   signInRuleSuggestion: AgendaSignInRuleSuggestionRefSchema.optional(),
-  /**
-   * The ref an ask SOURCE registered a schema for (`ask.sources`), set by the daemon's Asks port when it raised the ask: the
-   * owner of that source (named by `sourceRef`) draws the ask's own card from it. A source's ref names ids only: agenda text is
-   * every ferret's to read. No add or answer carries one.
-   */
+  /** The ref the Asks port kept for the ask's source (ids only: agenda text is every ferret's to read); the daemon alone sets it. */
   askRef: AgendaAskRefSchema.optional(),
   /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
