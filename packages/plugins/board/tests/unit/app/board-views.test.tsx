@@ -60,7 +60,10 @@ describe('S-0124 KanbanView', () => {
       'Unplaced',
     ]);
     expect(root.querySelectorAll('.fy-board-lane__empty').length).toBe(6);
-    expect(root.querySelector('.fy-board-project__head')).toBeNull();
+    // W-89: the project is named even when it is the only one, with how many tasks it holds.
+    expect(root.querySelector('.fy-board-project__name')?.textContent).toBe('ferretry');
+    expect(root.querySelector('.fy-board-project__count')?.textContent).toBe('4 tasks');
+    expect(root.querySelector('[data-project-focus]')).toBeNull();
     expect(ids(root)).toEqual(['F1', 'F2', 'F3', 'F9']);
   });
 
@@ -83,8 +86,8 @@ describe('S-0124 KanbanView', () => {
       />,
     );
     expect([...view.container.querySelectorAll('.fy-board-project__head')].map(node => node.textContent)).toEqual([
-      'ferretrylaptop',
-      'otherlaptop',
+      'ferretry1 tasklaptop',
+      'other1 tasklaptop',
     ]);
   });
 
@@ -98,6 +101,48 @@ describe('S-0124 KanbanView', () => {
     const over = new Event('dragover', { bubbles: true, cancelable: true });
     await interact(() => must(root.querySelector('.fy-board-lane'), 'a lane').dispatchEvent(over));
     expect(over.defaultPrevented).toBe(false);
+  });
+
+  it('W-89: "Only this project" narrows the board to a project and "All projects" widens it back', async () => {
+    const model = await boardModelOf([boardTask('F1'), boardTask('F2', { projectId: OTHER_PROJECT })]);
+    const picked: (string | null)[] = [];
+    view = await mount(
+      <KanbanView
+        env={envOf(model)}
+        focus={{ projectId: null, onFocus: id => picked.push(id) }}
+        hideClosed
+        model={model}
+        projectName={group => (group.projectId === OTHER_PROJECT ? 'other' : 'ferretry')}
+      />,
+    );
+    const only = [...view.container.querySelectorAll<HTMLElement>('[data-project-focus="only"]')];
+    expect(only.map(node => node.textContent)).toEqual(['Only this project', 'Only this project']);
+    await interact(() => only[1]?.click());
+    expect(picked).toEqual([OTHER_PROJECT]);
+    await view.unmount();
+    view = await mount(
+      <KanbanView
+        env={envOf(model)}
+        focus={{ projectId: OTHER_PROJECT, onFocus: id => picked.push(id) }}
+        hideClosed
+        model={model}
+        projectName={() => 'other'}
+      />,
+    );
+    await interact(() =>
+      must(view?.container.querySelector<HTMLElement>('[data-project-focus="all"]'), 'All projects').click(),
+    );
+    expect(picked).toEqual([OTHER_PROJECT, null]);
+  });
+
+  it('W-89: a project\x27s lanes fold away under its heading', async () => {
+    const model = await boardModelOf([boardTask('F1')]);
+    view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'ferretry'} />);
+    const root = view.container;
+    expect(root.querySelectorAll('.fy-board-lane').length).toBeGreaterThan(0);
+    await interact(() => must(root.querySelector<HTMLElement>('.fy-board-project__toggle'), 'toggle').click());
+    expect(root.querySelectorAll('.fy-board-lane')).toHaveLength(0);
+    expect(root.querySelector('.fy-board-project__toggle')?.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('draws no Lanes editor link beside a project heading when several are on the board', async () => {

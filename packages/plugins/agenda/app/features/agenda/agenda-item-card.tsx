@@ -31,6 +31,7 @@ import {
   AGENDA_SHAPE_LEADS,
   type AgendaTaskAnswer,
   type AgendaItem,
+  awaitsOwnAnswer,
   plainLabel,
   singleAgendaQuestion,
 } from '@ferretry/core-asks/contract';
@@ -43,7 +44,7 @@ import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { readTab, writeTab } from '../../lib/agenda-fold.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
-import type { HistoryEvent } from '../../lib/agenda-history.ts';
+import { answeredAsks, type HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import {
   type ItemTaskAsk,
@@ -533,7 +534,15 @@ export function AgendaItemCard({
   // With task asks the item's own row is not docked: it sits inline under its ask, labelled, so two button sets never
   // share the foot of the view and the task ask's buttons are never covered. An item answered in words (a reply, its
   // questions) has no row to label: it gets no "Your answer for this item" heading over nothing (&B156).
-  const ownRow = model.notice || model.answers.length > 0 || requestChanges !== undefined;
+  // The item's own question, once the owner answered it, is History's: with a task ask still open its row is not
+  // drawn again, so the only buttons left on the item are the ones that still wait for an answer (A-29).
+  const ownAnswered =
+    taskAsks.length > 0 &&
+    !awaitsOwnAnswer(
+      item,
+      taskAsks.map(ask => ({ gate: ask.gate, howToTest: ask.howToTest })),
+    );
+  const ownRow = !ownAnswered && (model.notice || model.answers.length > 0 || requestChanges !== undefined);
   const rowInline = taskAsks.length > 0 && !isInput && planForm === undefined && ownRow;
   const docked =
     answerDock != null &&
@@ -543,6 +552,17 @@ export function AgendaItemCard({
     planForm === undefined &&
     taskAsks.length === 0 &&
     (model.notice || model.answers.length > 0 || requestChanges !== undefined);
+  // A machine's input form and a plan's form are asks too: they come with the other open asks, never after the details.
+  const askForm =
+    !latest || settled !== undefined ? null : isInput ? (
+      <div className="fy-card__input" data-agenda-input-form="">
+        {inputForm}
+      </div>
+    ) : planForm !== undefined ? (
+      <div className="fy-card__input" data-agenda-plan-form="">
+        {planForm}
+      </div>
+    ) : null;
   const state = stateChip(current, ferret, now);
   const stage = itemStage(current);
 
@@ -729,6 +749,21 @@ export function AgendaItemCard({
               {replies}
             </div>
           ) : null}
+          {askForm}
+          {taskAsks.length === 0 ? null : (
+            <div className="fy-card__card-asks" data-agenda-card-asks={taskAsks.length}>
+              {taskAsks.map(ask => (
+                <TaskAskBlock
+                  ask={ask}
+                  busy={busy}
+                  key={ask.key}
+                  offer={replyOffer?.ask === ask.key ? replyOffer : null}
+                  onAct={onAct}
+                  renderProse={renderProse}
+                />
+              ))}
+            </div>
+          )}
           {recommendation === undefined || recommendation.why === undefined ? null : (
             <Section
               name="recommendation"
@@ -765,20 +800,6 @@ export function AgendaItemCard({
               )}
             </Section>
           )}
-          {taskAsks.length === 0 ? null : (
-            <div className="fy-card__card-asks" data-agenda-card-asks={taskAsks.length}>
-              {taskAsks.map(ask => (
-                <TaskAskBlock
-                  ask={ask}
-                  busy={busy}
-                  key={ask.key}
-                  offer={replyOffer?.ask === ask.key ? replyOffer : null}
-                  onAct={onAct}
-                  renderProse={renderProse}
-                />
-              ))}
-            </div>
-          )}
           {!latest ? (
             <p className="fy-card__old" data-agenda-old-version="">
               <span>Showing v{shown}.</span>
@@ -794,18 +815,10 @@ export function AgendaItemCard({
             </p>
           ) : settled !== undefined ? (
             settled
-          ) : isInput ? (
-            <div className="fy-card__input" data-agenda-input-form="">
-              {inputForm}
-            </div>
-          ) : planForm !== undefined ? (
-            <div className="fy-card__input" data-agenda-plan-form="">
-              {planForm}
-            </div>
-          ) : (
+          ) : askForm !== null ? null : (
             <>
               {rowInline ? null : parkedNote}
-              {rowInline ? null : docked ? createPortal(replies, answerDock) : replies}
+              {rowInline || ownAnswered ? null : docked ? createPortal(replies, answerDock) : replies}
             </>
           )}
         </div>
@@ -821,7 +834,13 @@ export function AgendaItemCard({
         />
       </TermLayer>
       {/* 7. CONVERSATION, oldest first: the log, at the bottom, folded. */}
-      <AgendaItemHistory events={history} ferret={ferret} itemKey={foldKey} renderProse={renderProse} />
+      <AgendaItemHistory
+        answered={answeredAsks(current)}
+        events={history}
+        ferret={ferret}
+        itemKey={foldKey}
+        renderProse={renderProse}
+      />
       {/* 8. ACTIVITY LOG: folded. */}
       <AgendaActivityLog ferret={ferret} item={current} itemKey={foldKey} now={now} />
     </article>

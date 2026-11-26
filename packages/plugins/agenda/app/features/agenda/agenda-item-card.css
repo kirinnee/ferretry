@@ -1019,6 +1019,26 @@
   margin-right: 4px;
   vertical-align: -2px;
 }
+/* The asks the owner answered: one line each, the tick beside its words. */
+.fy-hist__answered {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.fy-hist__answered > li {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.fy-hist__answered .fy-hist__check {
+  flex: none;
+  margin: 2px 0 0;
+}
 .fy-message .fy-hist__note {
   margin-top: 2px;
   color: var(--muted);

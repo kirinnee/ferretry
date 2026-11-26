@@ -325,6 +325,14 @@ describe('the board page and its views', () => {
     expect(root.querySelectorAll('[data-view-tab]').length).toBeGreaterThan(0);
   });
 
+  it('W-89 BoardPage: the one project is named with its count, and a line says what the view is', async () => {
+    const root = await drawBoard();
+    expect(root.querySelector('.fy-board-project__name')).not.toBeNull();
+    expect(root.querySelector('.fy-board-project__count')?.textContent).toMatch(/^\d+ tasks?$/);
+    expect(root.querySelector('[data-board-hint="kanban"]')?.textContent).toContain('Each project is a row');
+    expect(root.querySelector('[data-view-tab="list"]')?.getAttribute('title')).toBe('Every task in one table');
+  });
+
   it('S-0124 KanbanView: the default view is lanes of cards', async () => {
     const root = await drawBoard();
     expect(root.querySelector('.fy-board-lane__name')?.textContent).toBe('Todo');
