@@ -392,7 +392,6 @@ runs:
       if: inputs.namespacelabs == 'true' && runner.os == 'Linux' && inputs.warm-bootstrap == 'true'
       env:
         NIX_CONF: ${{ steps.nixconf.outputs.config }}
-        GITHUB_TOKEN_VALUE: ${{ github.token }}
         MAX_AGE_DAYS: ${{ inputs.warm-max-age-days }}
         FLAKEHUB_LOGIN: ${{ inputs.flakehub-login }}
       run: '"$GITHUB_ACTION_PATH/scripts/linux-warm-nix.sh" bootstrap'

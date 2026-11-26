@@ -45,6 +45,11 @@ env:
   # `build` projects the repository's configuration onto them and `deploy` re-checks the handed-over file against them
   # BEFORE any step that has the token. scripts/validate/release-guards.sh holds the exact list.
   HANDOFF_CONFIG_KEYS: '["$schema","compatibility_date","durable_objects","main","migrations","name","observability","services","vars","workers_dev"]'
+  # No external Worker bindings or migration transfers: only this store's reviewed classes.
+  HANDOFF_RESOURCES: >-
+    {"services":[],
+    "durable_objects":{"bindings":[{"name":"LINK_BUNDLE","class_name":"LinkBundleDurableObject"},{"name":"LINK_OWNER","class_name":"LinkOwnerDurableObject"},{"name":"LINK_STORE_CONTROL","class_name":"LinkStoreControlDurableObject"}]},
+    "migrations":[{"tag":"v1","new_sqlite_classes":["LinkBundleDurableObject","LinkOwnerDurableObject","LinkStoreControlDurableObject"]}]}
 
 # THE CLOUDFLARE TOKEN NEVER MEETS CHECKOUT CODE (the same rule as pwa-pages.yaml and relay-hosted.yaml, which holds the
 # full reasoning and the declared gap; scripts/validate/release-guards.sh holds it for every workflow that reads a
@@ -151,10 +156,11 @@ jobs:
             exit 1
           fi
           # shellcheck disable=SC2016 # jq variables, not shell expansions
-          if ! jq -e --argjson keys "$HANDOFF_CONFIG_KEYS" --arg name ferretry-hosted-link-store \
-            'type == "object" and ((keys - $keys) == []) and .main == "worker.js" and .name == $name' \
+          if ! jq -e --argjson keys "$HANDOFF_CONFIG_KEYS" --argjson resources "$HANDOFF_RESOURCES" --arg name ferretry-hosted-link-store \
+            'type == "object" and ((keys - $keys) == []) and .main == "worker.js" and .name == $name
+             and ({services: (.services // []), durable_objects: (.durable_objects // {}), migrations: (.migrations // [])} == $resources)' \
             wrangler.link-store.hosted.json >/dev/null 2>&1; then
-            echo "❌ wrangler.link-store.hosted.json must hold only allow-listed keys, main worker.js and the name ferretry-hosted-link-store" >&2
+            echo "❌ wrangler.link-store.hosted.json must hold only allow-listed keys, main worker.js, name ferretry-hosted-link-store and the exact reviewed resources" >&2
             exit 1
           fi
       # No token in this step: the install scripts of wrangler's dependencies are not run at all (`--ignore-scripts`),
