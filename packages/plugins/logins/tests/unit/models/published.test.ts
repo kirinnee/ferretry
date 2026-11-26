@@ -382,6 +382,14 @@ describe('PublishedModelCatalogService', () => {
       outcome: 'refused',
       reason: /changed while it was read/,
     });
+    const wrongDigest = {
+      ...app.served,
+      'catalog/version.json': encode(JSON.stringify({ version: 7, digest: 'A'.repeat(43) })),
+    };
+    should(await run(fetchOf(wrongDigest).port)).match({
+      outcome: 'refused',
+      reason: /digest changed while it was read/,
+    });
   });
 
   it('should refuse a signed catalog that is not a catalog document', async () => {
