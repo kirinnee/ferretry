@@ -54,6 +54,12 @@ export const QuestionSchema = z.strictObject({
    * the file only; the question route and port answer without it.
    */
   transcript: z.string().min(1).optional(),
+  /**
+   * The harness's own id of the conversation a transcript-projected question (Codex) was first seen in, kept in the file
+   * only. A ferret that later holds another conversation has left the question behind; a renamed file is the same one. A
+   * question stored without it is never retired by a conversation switch.
+   */
+  conversation: z.string().min(1).optional(),
 });
 export type Question = z.infer<typeof QuestionSchema>;
 

@@ -185,13 +185,13 @@ describe('the question watch: the hook’s file becomes question.json', () => {
     expect(w.state.question?.toolUseId).toBe(TOOL_USE_ID);
   });
 
-  it('a payload the writer cannot store whole clears the earlier question and publishes nothing', async () => {
+  it('a payload the writer cannot store whole clears the earlier question, retires its card and asks nothing new', async () => {
     const w = world();
     await w.watch.sweep();
     w.state.file = { payload: '{"not":"a hook payload"}', writtenAt: WRITTEN, transcript: TRANSCRIPT };
     await w.watch.sweep();
     expect(w.state.question).toBeUndefined();
-    expect(w.events).toEqual([`asked fern ${TOOL_USE_ID}`]);
+    expect(w.events).toEqual([`asked fern ${TOOL_USE_ID}`, `answered fern ${TOOL_USE_ID}`]);
   });
 
   it('looks only at a Claude Code ferret that is working or idle', async () => {
@@ -225,5 +225,28 @@ describe('the question watch: the hook’s file becomes question.json', () => {
     w.watch.forget('fern');
     await w.watch.sweep();
     expect(w.writes).toHaveLength(2);
+  });
+});
+
+describe('a question that replaces another retires the old one’s card (D-03)', () => {
+  const NEXT_ID = 'toolu_02NEXTreplacement';
+  const NEXT = PAYLOAD.replace(TOOL_USE_ID, NEXT_ID);
+  const NEXT_AT = '2026-10-30T04:40:00.000Z' as Instant;
+
+  it('closes the first question’s card when the hook stores a different question over it', async () => {
+    const w = world();
+    await w.watch.sweep();
+    expect(w.events).toEqual([`asked fern ${TOOL_USE_ID}`]);
+    w.state.file = { payload: NEXT, writtenAt: NEXT_AT, transcript: TRANSCRIPT };
+    await w.watch.sweep();
+    expect(w.state.question?.toolUseId).toBe(NEXT_ID);
+    expect(w.events).toEqual([`asked fern ${TOOL_USE_ID}`, `answered fern ${TOOL_USE_ID}`, `asked fern ${NEXT_ID}`]);
+  });
+
+  it('does not close a card that is still the stored question (the same payload is never stored twice)', async () => {
+    const w = world();
+    await w.watch.sweep();
+    await w.watch.sweep();
+    expect(w.events).toEqual([`asked fern ${TOOL_USE_ID}`]);
   });
 });

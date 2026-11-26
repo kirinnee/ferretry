@@ -1867,7 +1867,14 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
    items: the app's "Sending…"). It is **delivered only when the send ledger proves it** in the
    ferret's transcript (the send tracker’s `delivered` fate). The outbox then never queues
    those items again.
-5. **Undelivered.** A send refused outright, a fate of `timed_out`, `unaccounted`, `withdrawn` or
+5. **Undelivered.** The one exception is a ferret Ferrets says is **stopped or gone**, read before anything is
+   sent: the owner's done or dismiss of its item **stands**, nothing is sent (so nothing revives it) and nothing
+   reopens (an answer that rested the item, a request or a tell still goes the normal way). The same gate holds when
+   the daemon starts: a closing written down as sending but never accepted is not replayed to such a ferret. A
+   Restart writes an intermediate stopped record that is indistinguishable from a stop (a known gap, a millisecond
+   window: the closing is dropped, the task stays closed). A send that is refused
+   for any other reason is never read that way, because the ferret may be at a question it will clear: it is
+   undelivered like the rest. A refusal, a fate of `timed_out`, `unaccounted`, `withdrawn` or
    `cancelled`, no proof within the receipt wait (15 minutes), or a composer that never emptied: each
    item goes **back to the owner as an open item**. A done or dismiss reopens the closed item; an answer that
    rested a ferret's item brings it back from resting (each answer is its own delivery, keyed by the item's request

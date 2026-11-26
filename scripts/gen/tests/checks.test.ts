@@ -458,6 +458,33 @@ describe('context-imports', () => {
     expect(found).toContain('other/tests/witness.test.ts:1: ../../access/daemon/step-up-provider.ts');
   });
 
+  test("only Conversation's tests may reach the harness Asks mounts its real half with, and no other Asks file", async () => {
+    const f = ws([
+      {
+        id: 'conversation',
+        files: {
+          'tests/real.test.ts': `import '../../../core/asks/tests/support/daemon/asks-half.ts';\n`,
+          'tests/other.test.ts': `import '../../../core/asks/daemon/index.ts';\n`,
+          'daemon/host.ts': `import '../../../core/asks/tests/support/daemon/asks-half.ts';\n`,
+        },
+      },
+      {
+        id: 'asks',
+        core: true,
+        files: { 'tests/support/daemon/asks-half.ts': 'export {};\n', 'daemon/index.ts': 'export {};\n' },
+      },
+      {
+        id: 'other',
+        files: { 'tests/real.test.ts': `import '../../../core/asks/tests/support/daemon/asks-half.ts';\n` },
+      },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('conversation/tests/real.test.ts');
+    expect(found).toContain('conversation/tests/other.test.ts:1: ../../../core/asks/daemon/index.ts');
+    expect(found).toContain('conversation/daemon/host.ts:1: ../../../core/asks/tests/support/daemon/asks-half.ts');
+    expect(found).toContain('other/tests/real.test.ts:1: ../../../core/asks/tests/support/daemon/asks-half.ts');
+  });
+
   test("only Projects' tests may reach Ferrets' New ferret page and client type, and no other Ferrets app file", async () => {
     const f = ws([
       {

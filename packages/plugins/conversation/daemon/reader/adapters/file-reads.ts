@@ -17,7 +17,7 @@ import { searchTranscriptRecords } from '../lib/session/log-search.ts';
 import { tailTranscriptEvents } from '../lib/session/reader.ts';
 import { TranscriptTailCache } from '../lib/session/tail-cache.ts';
 import { ClaudeTranscriptParser } from '../lib/transcript/claude.ts';
-import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
+import { CODEX_HEADER_BYTES, CodexTranscriptParser, codexConversationId } from '../lib/transcript/codex.ts';
 import type { TranscriptParser } from '../lib/transcript/types.ts';
 import { PacedTranscriptParser, type TranscriptParsePacing } from '../lib/transcript/sliced.ts';
 import { BytesTranscriptSource, type TranscriptClock } from './file-source.ts';
@@ -98,6 +98,8 @@ export class FileTranscriptReads
   readonly #tails: TranscriptTailCache;
   /** Per ferret, the token its held handle was proved under, when, and in which generation (see {@link HELD_PROOF_MS}). */
   readonly #proved = new Map<string, { readonly token: string; readonly at: number; readonly generation: number }>();
+  /** Per ferret, the conversation id read from the head of the transcript held under a token (a held file's head does not change). */
+  readonly #conversations = new Map<string, { readonly token: string; readonly id: string }>();
 
   /**
    * `extraParsers`: asked once, on the first read, for the parsers other harnesses declare (a harness's `HarnessFacts.transcriptFormat` names one by its
@@ -247,7 +249,26 @@ export class FileTranscriptReads
       return stat === undefined ? undefined : { file: where.token, size: stat.size, mtimeMs: stat.mtimeMs };
     };
     const events = await this.#tails.tail(ferret, where.token, limit, fingerprint, async () => await read());
-    return events === undefined ? { kind: 'unreadable' } : { kind: 'read', events };
+    if (events === undefined) return { kind: 'unreadable' };
+    const conversation = await this.#conversation(ferret, where);
+    return conversation === undefined ? { kind: 'read', events } : { kind: 'read', events, conversation };
+  }
+
+  /**
+   * The harness's own id of the conversation the held file holds (see {@link codexConversationId}). It is read from the
+   * file's head, never from its name: a renamed file is the same conversation under a new token. Only Codex's format
+   * names one; a head that cannot be read says nothing.
+   */
+  async #conversation(ferret: string, where: Extract<Located, { kind: 'found' }>): Promise<string | undefined> {
+    if (where.format !== 'codex') return undefined;
+    const known = this.#conversations.get(ferret);
+    if (known?.token === where.token) return known.id;
+    const head = await where.handle.read(0, CODEX_HEADER_BYTES).catch(() => undefined);
+    if (head === undefined) return undefined;
+    const id = codexConversationId(new TextDecoder().decode(head));
+    // A header not yet whole is asked again next time; a whole one is remembered under the file's token.
+    if (id !== undefined) this.#conversations.set(ferret, { token: where.token, id });
+    return id;
   }
 
   async page(
@@ -327,6 +348,7 @@ export class FileTranscriptReads
 
   /** Closes the transcript handle held for one ferret (it stopped or was removed); a later read opens a fresh one. */
   release(ferret: string): void {
+    this.#conversations.delete(ferret);
     this.runtime.releaseOwner(ferret);
   }
 

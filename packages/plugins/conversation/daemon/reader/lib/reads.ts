@@ -131,8 +131,12 @@ export type TranscriptTailResult =
   | { readonly kind: 'unresolved' }
   /** The exact file was proved, but it disappeared or could not be parsed when it was read. */
   | { readonly kind: 'unreadable' }
-  /** A file was resolved and read. `events` may legitimately be empty — the agent has not spoken yet. */
-  | { readonly kind: 'read'; readonly events: readonly TranscriptEvent[] };
+  /**
+   * A file was resolved and read. `events` may legitimately be empty — the agent has not spoken yet. `conversation` is the
+   * harness's own id of the conversation the file holds (a Codex rollout's session id, from its header record), which a
+   * renamed file keeps and another conversation does not; absent where the format names none or the header was unreadable.
+   */
+  | { readonly kind: 'read'; readonly events: readonly TranscriptEvent[]; readonly conversation?: string };
 
 export interface SessionTranscriptTail {
   tail(sessionId: string, limit: number): Promise<TranscriptTailResult>;
