@@ -109,6 +109,9 @@ export class GithubClient {
       // A validator is only ever sent with a cached entry, so a 304 with none is a provider that answered wrongly.
       if (cached === undefined)
         return err({ code: PULLS_CODES.github, status: 304, message: 'GitHub answered with an error' });
+      // A purge that landed while the call was out removed what that validator was for: the entry read before it is not an answer.
+      if (stamp !== this.cache.stamp(reading.project, reading.account))
+        return err({ code: PULLS_CODES.github, status: 304, message: 'what was kept for this read was removed' });
       return ok({
         body: cached.body,
         fromCache: true,

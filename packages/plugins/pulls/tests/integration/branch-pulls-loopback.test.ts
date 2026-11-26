@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { StandInAdmission, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import { testHost } from '@ferretry/kernel/testing';
+import { ProjectRemoved } from '@ferretry/plugin-projects/contract';
 import type { GitAccountId, GitApiAnswer, GitApiCall } from '@ferretry/plugin-git-accounts/contract';
 import { BranchPullsAnswerSchema, PULLS_CODES, PullsPort } from '../../contract/index.ts';
 import { repoSegment } from '../../contract/repo-segment.ts';
@@ -30,12 +31,15 @@ const project = (over: Record<string, unknown> = {}) => ({
 class Loopback {
   readonly requests: { path: string; ifNoneMatch: string | null }[] = [];
   readonly github = new FakeGithub();
+  /** Runs before GitHub answers a request, so a test can act while that call is in flight. */
+  before: ((path: string) => Promise<void>) | undefined;
   readonly #server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: async request => {
       const url = new URL(request.url);
       this.requests.push({ path: `${url.pathname}${url.search}`, ifNoneMatch: request.headers.get('if-none-match') });
+      await this.before?.(`${url.pathname}${url.search}`);
       return await this.github.fetch(url, { method: request.method, headers: request.headers });
     },
   });
@@ -227,5 +231,89 @@ describe('the `pulls` port', () => {
       { branch: 'y', outcome: 'unknown', code: PULLS_CODES.notFound },
     ]);
     expect(loopback.requests).toHaveLength(asked);
+  });
+});
+
+describe('branchPulls never certifies a wrong `none` or a wrong latest (U6 deletes on this answer)', () => {
+  const rawPull = (number: number, over: Record<string, unknown> = {}) => ({
+    number,
+    state: 'open',
+    html_url: `https://github.com/octo/widgets/pull/${number}`,
+    created_at: `2026-11-0${number}T00:00:00Z`,
+    merged_at: null,
+    head: { sha: SHA + String(number), ref: 'feat/x' },
+    ...over,
+  });
+  const NEXT = `<https://api.github.com/repos/octo/widgets/pulls?state=all&head=octo:feat%2Fx&sort=created&direction=desc&per_page=30&page=2>; rel="next"`;
+  const answered = async (host: Awaited<ReturnType<typeof boot>>['host'], branch = 'feat/x') =>
+    BranchPullsAnswerSchema.parse((await ask(host, [branch])).json()).branches[0];
+
+  test('an empty page that links a next page is not `none`: the next page is read', async () => {
+    const { host, loopback } = await boot();
+    loopback.github.on('GET', '/repos/octo/widgets/pulls', ({ query }) =>
+      query.get('page') === '2'
+        ? { status: 200, body: [rawPull(2)] }
+        : { status: 200, body: [], headers: { link: NEXT } },
+    );
+    loopback.github.set(`/repos/octo/widgets/commits/${SHA}2/check-runs?per_page=100`, { check_runs: [] });
+    loopback.github.set(`/repos/octo/widgets/actions/runs?head_sha=${SHA}2&per_page=50`, { workflow_runs: [] });
+    expect(await answered(host)).toMatchObject({ outcome: 'pull', pull: { number: 2 } });
+  });
+
+  test('pages that never finish are `unknown`, not `none`', async () => {
+    const { host, loopback } = await boot();
+    loopback.github.on('GET', '/repos/octo/widgets/pulls', () => ({ status: 200, body: [], headers: { link: NEXT } }));
+    expect(await answered(host)).toEqual({ branch: 'feat/x', outcome: 'unknown', code: PULLS_CODES.github });
+  });
+
+  test('an empty answer cached before a purge is not served as `none` when GitHub then says 304', async () => {
+    const { host, loopback } = await boot();
+    loopback.github.set(list('feat/x'), []);
+    expect(await answered(host)).toEqual({ branch: 'feat/x', outcome: 'none' });
+    // The project is removed while the conditional read is out; GitHub then answers 304 for the stale validator.
+    loopback.before = async requested => {
+      if (requested !== list('feat/x')) return;
+      host.emit(ProjectRemoved, { id: P1 as never });
+      await host.settle();
+    };
+    expect(await answered(host)).toEqual({ branch: 'feat/x', outcome: 'unknown', code: PULLS_CODES.github });
+  });
+
+  test('a newer PR missing a field the answer does not use still wins over an older merged one', async () => {
+    const { host, loopback } = await boot();
+    // No `title`, `user`, `updated_at` or `base`: none of them is read for this answer.
+    loopback.github.set(list('feat/x'), [
+      rawPull(4),
+      // The older merged PR is complete in every field, the newer open one is not: only the older one parses under today's rules.
+      rawPull(3, {
+        state: 'closed',
+        merged_at: '2026-11-03T12:00:00Z',
+        title: 'Old',
+        user: { login: 'octo-fake' },
+        updated_at: '2026-11-03T13:00:00Z',
+        base: { ref: 'main' },
+      }),
+    ]);
+    for (const n of [3, 4]) {
+      loopback.github.set(`/repos/octo/widgets/commits/${SHA}${n}/check-runs?per_page=100`, { check_runs: [] });
+      loopback.github.set(`/repos/octo/widgets/actions/runs?head_sha=${SHA}${n}&per_page=50`, { workflow_runs: [] });
+    }
+    expect(await answered(host)).toMatchObject({ outcome: 'pull', pull: { number: 4, state: 'open' } });
+  });
+
+  test('an entry whose head cannot be read makes the branch `unknown`, never the older merged PR', async () => {
+    const { host, loopback } = await boot();
+    loopback.github.set(list('feat/x'), [
+      rawPull(4, { head: { sha: SHA + '4' } }),
+      rawPull(3, {
+        state: 'closed',
+        merged_at: '2026-11-03T12:00:00Z',
+        title: 'Old',
+        user: { login: 'octo-fake' },
+        updated_at: '2026-11-03T13:00:00Z',
+        base: { ref: 'main' },
+      }),
+    ]);
+    expect(await answered(host)).toEqual({ branch: 'feat/x', outcome: 'unknown', code: PULLS_CODES.github });
   });
 });
