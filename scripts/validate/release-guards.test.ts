@@ -1230,7 +1230,7 @@ describe('the Cloudflare token never meets checkout code (the hosted relay and l
         writeFileSync(p(file), mutate(readFileSync(p(file), 'utf8')));
       }),
     );
-    expect(result.status).toBe(1);
+    expect(result.status, result.err).toBe(1);
     expect(result.err).toContain(expected);
   };
   const addStep = (job: string, step: string) => (text: string) => {
@@ -1626,7 +1626,7 @@ describe('the Cloudflare token never meets checkout code (the hosted relay and l
       mkdirSync(join(workspace, h.source, '..'), { recursive: true });
       mkdirSync(directory, { recursive: true });
       writeFileSync(join(workspace, h.source), JSON.stringify(repositoryConfig));
-      const env = { RUNNER_TEMP: runner, HANDOFF_CONFIG_KEYS: workflowJson(h.file).env.HANDOFF_CONFIG_KEYS ?? '' };
+      const env = { RUNNER_TEMP: runner, HANDOFF_CONFIG_KEYS: '', ...workflowJson(h.file).env };
       const projected = bash(stepRun(h.file, 'build', 'Hand over the hosted configuration'), workspace, env);
       for (const name of h.files)
         writeFileSync(join(directory, name), name === 'fingerprint' ? 'bundle-0123456789abcdef\n' : '// worker\n');

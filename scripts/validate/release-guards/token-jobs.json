@@ -1,0 +1,20 @@
+{
+  ".github/workflows/pwa-pages.yaml": {
+    "sign": "a2565435cf48df6518b1bbad652241bd824d8f04f41b34e1c891d3913db44307",
+    "deploy": "bbe3973e2377b067b1c4833b3ba6d1bf8229ca112ab57a889004684cb8206d08"
+  },
+  ".github/workflows/pwa-pages-v5.yaml": {
+    "sign": "e1788e3fd272869fa29c8822765e0c47f5fae59ad0ca32a52c62672165ee486e",
+    "project": "386c1eacff4724e2fea0ceb49225720df4b3812cc84e8f9e6ea786cb52eb5d3c",
+    "deploy": "2c869400ee6a02c06e96ee639f5de9f922f22017bca00fc7117976c1754f06ec"
+  },
+  ".github/workflows/relay-hosted.yaml": {
+    "deploy": "cce954cae9a3ba4e8a86e9f4d07305db89ba99387e3ebe645d852b4bd1c00ed7",
+    "control": "c2187ba8e5db91f37f72d8a7a2737cbcf494523ed2049260a8cc4e6f74439d73",
+    "tunnel-accounts": "df01d04d1067781ce35cbe77c392f645969d12c254b106d60cc55bcbe07ae6f7"
+  },
+  ".github/workflows/link-store-hosted.yaml": {
+    "deploy": "f59b48e82726ed48475a1c6a61b55895ddeccdf2eab337f14212fbf0428cf6f5",
+    "control": "0b01d92edadbbcb6cc868d644dc298e37652585efd1bd139d3c854d6e608bfe7"
+  }
+}
