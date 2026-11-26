@@ -35,7 +35,11 @@ describe('pickReply: last message of the turn', () => {
       row('t1', 'tool', 'ran grep', 3),
       row('a2', 'assistant', 'Fixed. All tests pass.', 9),
     ];
-    expect(pickReply(rows, T0 + 1000)).toEqual({ key: 'a2', markdown: 'Fixed. All tests pass.', reason: 'reply' });
+    expect(pickReply(rows, T0 + 1000)).toMatchObject({
+      key: 'a2',
+      markdown: 'Fixed. All tests pass.',
+      reason: 'reply',
+    });
   });
 
   test('a turn that wrote no text says "Done. No message." and never falls back to the previous turn', () => {
@@ -116,7 +120,14 @@ describe('pickReply: every message', () => {
       row('t1', 'tool', 'grep', 3),
       row('a2', 'assistant', 'Found it.\n', 4),
     ];
-    expect(pickReply(rows, T0, 'every')).toEqual({ key: 'a2', markdown: 'Let me look.\n\nFound it.', reason: 'reply' });
+    expect(pickReply(rows, T0, 'every')).toMatchObject({
+      key: 'a2',
+      markdown: 'Let me look.\n\nFound it.',
+      reason: 'reply',
+    });
+    // The rows the words came from, so what was said live can be followed line by line.
+    expect(pickReply(rows, T0, 'every').rows?.map(each => each.id)).toEqual(['a1', 'a2']);
+    expect(pickReply(rows, T0).rows?.map(each => each.id)).toEqual(['a2']);
   });
 
   test('a silent turn is still "Done. No message."', () => {
@@ -174,7 +185,7 @@ describe('pickReply: the turn boundary is the initiating record', () => {
       row('a1', 'assistant', 'The fix is in.', 2),
       row('u2', 'user', 'thanks, one more thing', 3),
     ];
-    expect(pickReply(rows, T0)).toEqual({ key: 'a1', markdown: 'The fix is in.', reason: 'reply' });
+    expect(pickReply(rows, T0)).toMatchObject({ key: 'a1', markdown: 'The fix is in.', reason: 'reply' });
   });
 
   test('the harness clock a little ahead: the row that began the turn, dated just after it, still begins it', () => {
@@ -212,7 +223,7 @@ describe('pickReply: a send names its own boundary', () => {
       row('u2', 'user', 'follow-up', -898),
     ];
     const pick = pickReply(rows, { startedAt: T0 + 99_000, knownIds: ['u0', 'a0'] });
-    expect(pick).toEqual({ key: 'a1', markdown: 'Reply to it.', reason: 'reply' });
+    expect(pick).toMatchObject({ key: 'a1', markdown: 'Reply to it.', reason: 'reply' });
   });
 
   test("before the person's own row shows, the turn begins after everything already held", () => {
@@ -288,7 +299,7 @@ describe('pickLatestReply: the last assistant text after the last row of the per
   ];
 
   test('reads the last text after the last user row', () => {
-    expect(pickLatestReply(held)).toEqual({ key: 'a2', markdown: 'second thought', reason: 'reply' });
+    expect(pickLatestReply(held)).toMatchObject({ key: 'a2', markdown: 'second thought', reason: 'reply' });
   });
 
   test('R4 #1: a silent turn says "Done. No message." however many older rows were hydrated before it', () => {
@@ -308,7 +319,7 @@ describe('pickLatestReply: the last assistant text after the last row of the per
       row('a3', 'assistant', ' one ', 6),
       row('a4', 'assistant', 'two', 7),
     ];
-    expect(pickLatestReply(rows, 'every')).toEqual({ key: 'a4', markdown: 'one\n\ntwo', reason: 'reply' });
+    expect(pickLatestReply(rows, 'every')).toMatchObject({ key: 'a4', markdown: 'one\n\ntwo', reason: 'reply' });
   });
 
   test('a ferret’s message (peer) is not the person’s row, and not read; no user row at all means the whole conversation', () => {
@@ -339,7 +350,7 @@ describe('pickReplyToSend: the reply to ONE send, with evidence the send’s own
       row('u2', 'user', 'and this', 31, { send: { sendId: 's2' } }),
       row('a2', 'assistant', 'New answer.', 40),
     ];
-    expect(pickReplyToSend(rows, send)).toEqual({ key: 'a2', markdown: 'New answer.', reason: 'reply' });
+    expect(pickReplyToSend(rows, send)).toMatchObject({ key: 'a2', markdown: 'New answer.', reason: 'reply' });
     const other = [row('u2', 'user', 'and this', 31, { send: { sendId: 's1' } }), row('a2', 'assistant', 'Old.', 40)];
     expect(pickReplyToSend(other, send)).toBeNull();
     // Identity needs neither the words nor a date.
@@ -385,10 +396,10 @@ describe('pickReplyToSend: the reply to ONE send, with evidence the send’s own
       row('u3', 'user', 'and more', 41),
       row('a4', 'assistant', 'Reply to the next one.', 50),
     ];
-    expect(pickReplyToSend(rows, send)).toEqual({ key: 'a3', markdown: 'The answer.', reason: 'reply' });
+    expect(pickReplyToSend(rows, send)).toMatchObject({ key: 'a3', markdown: 'The answer.', reason: 'reply' });
     expect(pickReplyToSend(rows, send, 'every')?.markdown).toBe('First thought.\n\nThe answer.');
     // A silent turn says so: its own row is there, nothing follows.
-    expect(pickReplyToSend([row('u2', 'user', 'and this', 31), row('t', 'tool', 'ran', 32)], send)).toEqual({
+    expect(pickReplyToSend([row('u2', 'user', 'and this', 31), row('t', 'tool', 'ran', 32)], send)).toMatchObject({
       key: SILENT_TURN_KEY,
       markdown: NO_MESSAGE_WORDS,
       reason: 'no-message',

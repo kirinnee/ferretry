@@ -7,6 +7,7 @@ import {
   type StreamSnapshot,
   decodeLineFrame,
   decodeSpeakFrame,
+  encodeDropFrame,
   encodeReplyDownlinkUnit,
   encodeDownlinkUnit,
 } from '../../../contract/index.ts';
@@ -135,6 +136,40 @@ describe('the browser end of the reply voice', () => {
     r.listeners().onOpen?.();
     expect(r.sent).toHaveLength(1);
     expect(JSON.parse(r.sent[0] as string)).toMatchObject({ t: 'start' });
+  });
+
+  test('V4: drop sends one fixed-size frame per line nobody has heard, and the sound of a dropped line is not played', () => {
+    const r = rig();
+    r.listeners().onOpen?.();
+    r.handle.speak('First.');
+    r.handle.speak('Step one.');
+    r.handle.drop([1]);
+    const frames = r.sent.filter(
+      (frame): frame is string => typeof frame === 'string' && frame.length === SPEAK_FRAME_BYTES,
+    );
+    expect(frames.map(frame => decodeLineFrame(frame)).at(-1)).toEqual({ t: 'drop', id: 1 });
+    expect(frames.at(-1)).toBe(encodeDropFrame(1));
+    // The machine may have made it already: its sound is ignored, and no event says it was heard.
+    r.listeners().onFrame?.(
+      unit({ reply: 'ready', audio: { id: 1, samples: 10, last: true } }, new Int16Array(10).fill(1)),
+    );
+    expect(r.played).toHaveLength(0);
+    expect(r.events.lines).toEqual([]);
+  });
+
+  test('V4: a line already heard from is not dropped, and a held line that is dropped is never sent', () => {
+    const r = rig();
+    r.handle.speak('Held, then dropped.');
+    r.handle.drop([0]);
+    r.listeners().onOpen?.();
+    expect(r.sent).toHaveLength(1); // only the start record
+    r.handle.speak('Heard.');
+    r.listeners().onFrame?.(
+      unit({ reply: 'ready', audio: { id: 1, samples: 10, last: false } }, new Int16Array(10).fill(1)),
+    );
+    const before = r.sent.length;
+    r.handle.drop([1]);
+    expect(r.sent).toHaveLength(before);
   });
 
   test('a stream that did not ask sends nothing for speak', () => {
@@ -269,7 +304,7 @@ describe('what barge-in hears of the microphone', () => {
     };
     const handle = openVoiceStream(
       client,
-      { t: 'start', v: 1, purpose: 'chat', ferretId: 'f' },
+      { t: 'start', v: 1, purpose: 'chat', ferretId: 'f', session: 'vm-test-session' },
       mic,
       {
         onSnapshot: () => undefined,

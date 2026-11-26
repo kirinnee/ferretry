@@ -159,7 +159,7 @@ describe('voice chat needs fleet.use as well as voice.use (review 2481, blocking
     await stream.open();
     return { stream, frames, closes };
   };
-  const chat = JSON.stringify({ t: 'start', v: 1, purpose: 'chat', ferretId: 'fer-1' });
+  const chat = JSON.stringify({ t: 'start', v: 1, purpose: 'chat', ferretId: 'fer-1', session: 'vm-test-session' });
   const test_ = JSON.stringify({ t: 'start', v: 1, purpose: 'test' });
   const error = (frames: Uint8Array[]) => frames.map(decodeDownlinkUnit).find(snapshot => snapshot.error)?.error;
 
