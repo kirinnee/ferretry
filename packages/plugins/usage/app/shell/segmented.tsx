@@ -49,8 +49,9 @@ export function Segmented<T extends string>({
           onClick={() => onChoose(option.id)}
           className={cn(
             'h-control-sm min-w-0 whitespace-nowrap rounded-control text-ui font-medium transition-colors',
-            // A segment that keeps its words sits at the end of a curved control, so its inline padding is the shared floor.
-            fit ? 'px-control-x' : 'px-2',
+            // A segment that keeps its words sits at the end of a curved control, so its inline padding is never less than half the
+            // corner radius (the theme's round-safe floor), and otherwise stays the tight 8px every segment had, so the row stays one row.
+            fit ? 'px-[max(0.5rem,calc(var(--radius-control-max)*0.5))]' : 'px-2',
             fit ? 'flex-auto' : 'flex-1',
             option.id === value ? 'bg-surface text-fg shadow-control' : 'text-muted hover:text-fg',
             option.disabled === true && 'cursor-not-allowed opacity-60 hover:text-muted',

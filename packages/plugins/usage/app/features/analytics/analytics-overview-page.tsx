@@ -207,8 +207,9 @@ export function AnalyticsOverviewPage({ machines, requestAnalytics, now, timeZon
           {pending > 0 && reads.length > 0 ? ` · waiting for ${plural(pending, 'machine')}` : ''}
         </p>
         <div className="flex flex-wrap items-center gap-sm">
-          <div className="w-44">
+          <div className="w-fit max-w-full">
             <Segmented<`${AnalyticsRange}`>
+              fit
               label="Period"
               name="analytics-range"
               options={ANALYTICS_RANGES.map(option => ({ id: `${option}`, label: `${option}d` }))}

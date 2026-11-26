@@ -160,6 +160,27 @@ for (const look of LOOKS) {
                 });
               }
             });
+          // `overflow` clips a box's CONTENTS, never the box's own edge: the same move on a button that clips its own children is
+          // the same painted protrusion, and must stay red.
+          if (state.name.endsWith('refused') && look.style === 'genz' && scheme === 'light')
+            it(`${state.name}: the gate stays RED when the moved "Pair again" also has overflow:hidden`, async () => {
+              const tab = tabs.get(state.name) as Page;
+              await tab.evaluate(() => {
+                const button = document.querySelector('[data-device-refused-pair]') as HTMLElement;
+                button.style.overflow = 'hidden';
+                button.style.transform = 'translate(-18px, 8px)';
+              });
+              try {
+                const misses = await roundSafeMisses(tab);
+                expect(misses.some(m => m.leaf.includes('Pair again'))).toBe(true);
+              } finally {
+                await tab.evaluate(() => {
+                  const button = document.querySelector('[data-device-refused-pair]') as HTMLElement;
+                  button.style.overflow = '';
+                  button.style.transform = '';
+                });
+              }
+            });
           it(`${state.name}: the ferret is centred over the column, within 2 px`, async () => {
             const { ferret, column } = await centres(tabs.get(state.name) as Page);
             expect(Math.abs(ferret - column), `ferret ${ferret}, column ${column}`).toBeLessThanOrEqual(2);

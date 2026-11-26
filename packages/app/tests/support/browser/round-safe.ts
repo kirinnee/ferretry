@@ -308,11 +308,15 @@ const collectRoundBoxes = (): RawBox[] => {
     // In-flow content that nothing clips must stay inside the box: a part of it past an edge is a PROTRUSION, judged, not skipped
     // (a button poking 4px out of a banner's corner is the owner's bug). Out-of-flow pieces (absolute, fixed, a popover) and
     // content a clipping or scrolling box cuts are judged only where they sit inside the box.
-    const inFlowOf = (start: Element | null): boolean => {
+    // `overflow` clips an element's CONTENTS, never its own box: when `start` is the painted child itself (`own`), its own overflow
+    // exempts nothing (its border box is still checked against the rounded ancestor); only the ancestors it sits in can clip it.
+    const inFlowOf = (start: Element | null, own = false): boolean => {
       for (let at = start; at !== null; at = at.parentElement) {
         const s = getComputedStyle(at);
         if (at !== element && (s.position === 'absolute' || s.position === 'fixed')) return false;
-        if (s.overflowX !== 'visible' || s.overflowY !== 'visible' || s.textOverflow === 'ellipsis') return false;
+        const clipsItself = own && at === start;
+        if (!clipsItself && (s.overflowX !== 'visible' || s.overflowY !== 'visible' || s.textOverflow === 'ellipsis'))
+          return false;
         if (at === element) return true;
       }
       return false;
@@ -369,7 +373,7 @@ const collectRoundBoxes = (): RawBox[] => {
         if (!clips && visible(child) && paint(child, childStyle) === 'all') {
           const cr = child.getBoundingClientRect();
           const rect = { left: cr.left, top: cr.top, right: cr.right, bottom: cr.bottom };
-          const flows = inFlowOf(child);
+          const flows = inFlowOf(child, true);
           if (judged(rect, flows)) {
             // A child that fills its parent's whole box is the same box, not content: skip a twin of the parent.
             const twin =
