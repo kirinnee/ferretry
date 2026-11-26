@@ -43,6 +43,8 @@ const fake = {
   lines: [] as string[],
   hushes: 0,
   sent: [] as string[],
+  /** The asks to the machine to tell the ferret (`POST /v1/voice/entry`), kept apart from what the person said. */
+  entries: [] as { ferretId: string; session: string }[],
 };
 (window as unknown as { __fake: typeof fake }).__fake = fake;
 const flags = window as unknown as { __loud?: boolean; __read?: () => void; __reading?: () => string };
@@ -112,7 +114,11 @@ setInterval(() => {
 }, 50);
 
 const client = {
-  call: async (route: string, init?: { body?: { message?: string } }) => {
+  call: async (route: string, init?: { body?: { message?: string; ferretId?: string; session?: string } }) => {
+    if (route === 'POST /v1/voice/entry') {
+      fake.entries.push({ ferretId: init?.body?.ferretId ?? '', session: init?.body?.session ?? '' });
+      return { sent: true };
+    }
     if (route === 'POST /v1/ferrets/:ferretId/send') {
       fake.sent.push(init?.body?.message ?? '');
       return { ferret: 'ferret-1', disposition: 'delivered' };

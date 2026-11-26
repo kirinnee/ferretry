@@ -409,7 +409,7 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
 
 - **Open.** Before the protocol switches the machine answers with a status: `409 voice_not_ready` (speech not installed),
   `429 voice_busy` (one stream per device, two per machine). The first record is a text frame
-  `{t:'start', v:1, purpose:'test'|'chat', ferretId?, session?, style?, reply?:'machine'}` (`session` is required for `chat`); anything else first is a protocol error
+  `{t:'start', v:1, purpose:'test'|'chat', ferretId?, session?, style?, reply?:'machine'}` (`session` is optional, and only a `chat` may carry it); anything else first is a protocol error
   (4400), and the machine **sends nothing until it has the start record** (what it asks for decides the size of every unit
   after it). A frame after the start is a `speak` line (below), and only on a stream that asked for `reply: 'machine'`. `test` shows live words and sends nothing. `chat` sends each finished turn to `ferretId` (an id or a
   callsign, resolved as a typed send resolves it), and a second stream for the same ferret, however it is named, is refused
@@ -436,13 +436,20 @@ closes an open stream at once** (4401). `contract/stream.ts` is the wire; `daemo
   `engine_behind`: an interim decode over 2 s counted as unseen audio); last word → sent was about 3.3 s there. A longer turn is decoded at the pause as before. The message is sent **as soon as it is ready**, as the person's own
   message through Conversation's send, prefixed `(voice) `, with the stable id `<streamId>:<turn>`. A turn is handed over
   once; a refused or failed send is reported, never repeated by the stream.
-- **Entering voice mode tells the ferret, once.** A `chat` start carries `session`, a name the page mints when voice mode is
-  turned on and keeps across reconnects (8–64 URL-safe characters). As soon as the ferret is claimed the machine sends one
-  message as the owner, `(voice mode on) Speak first, narrate as you work, speak the result.`, with the stable id
-  `voice-on:<session>`: a stream that drops and reopens inside the same voice mode sends the same id, so the ferret reads it
-  once, and turning voice mode off and on is a new session. A refused entry does not end the stream, and it is not audited
-  (a fixed sentence with none of the person's words). The phone engine sends the same message under the same id. The static
-  instruction (`instructions/voice.md`) teaches the grammar on every turn; this message switches it on for the conversation.
+- **Entering voice mode tells the ferret, once per chat.** A `chat` start MAY carry `session`, a name the page mints when voice
+  mode is turned on and keeps across reconnects (8–64 URL-safe characters); **without it the stream is exactly what it was** (no
+  entry message), so a client that predates the field still streams. The ferret is told by **one message per chat, whoever is in
+  voice mode there**: the machine holds a **claim per chat** (in memory, in the stream registry) that a stream and a phone's own
+  engine both enter. The one that finds no live claim sends the message as the owner, `(voice mode on) Speak first, narrate as
+you work, speak the result.`, with the stable id `voice-on:<session>`; every other tab, device or engine that enters while
+  the claim is live (a second tab whose stream got `voice_busy` and fell back to the phone, a phone started while another
+  device is on the machine) sends nothing. The claim is renewed by anyone still in voice mode (the stream every
+  `ENTRY_RENEW_MS`, 60 s; a phone on its own speech by asking again) and lapses `ENTRY_LEASE_MS` (3 min) after the last
+  renewal, so a stream that drops and reopens inside it is not a repeat, and a later voice mode tells the ferret afresh. A refused
+  entry gives the claim up (the next to enter sends it), does not end the stream, and is not audited (a fixed sentence with none
+  of the person's words). A phone on its own speech has no stream, so it asks the machine: `POST /v1/voice/entry`
+  `{ferretId, session}` → `{sent}` (`fleet.use`; `sent` is false when the claim was already live). The static instruction
+  (`instructions/voice.md`) teaches the grammar on every turn; this message switches it on for the conversation.
 - **A dead phone never sends.** The send waits for an echo of a nonce the machine issued **after** it heard the pause. A
   device that died, lost its network or entered a tunnel cannot echo it; the turn is cancelled
   (`phone_silent`) and nothing is sent. Units that arrive for a moment after a phone dies carry the OLD nonce, which proves
@@ -602,11 +609,16 @@ machine hears the same speech and sends it after the pause as usual, so the pers
   browser ignores sound of a dropped line that still arrives.
 - **Speaking while the ferret works (V4).** A `<voice>` line the ferret finishes mid-turn is handed to the machine's voice at
   once, behind the piece that is playing, and never waits for the turn to end (`useLiveVoiceLines` reads the closed lines of
-  the rows; `createLiveLines` is the machine voice). Progress lines can arrive faster than they are spoken: when a newer line
-  arrives, the lines still waiting that are only **progress** are dropped. **Never dropped:** the first line of the turn, the
-  result (the newest line, so nothing outdates it) and a line already being heard. History, a cached copy of the rows and a hidden
-  tab are never said. The reading at the end of the turn skips a reply whose spoken lines were all said live. A machine without
-  its reply voice takes no live line, so that reading says the reply on the device's voice as before.
+  the rows; `createLiveLines` is the machine voice). Progress lines can arrive faster than they are spoken, so a waiting line is dropped only when it is **known to be progress**: the ferret used a
+  tool after it (a turn's result is never followed by one; the turn's state is no evidence, because the last line of a result is
+  read before the turn says it ended), nobody has heard any of it, and a newer line is waiting behind it. **When unsure, a line is
+  kept**: the first line of the turn, any line the ferret has not worked past (so every part of a result, even a result of several
+  lines, and a result that finishes just before the next turn begins) and a line already being heard are never dropped. History, a
+  cached copy of the rows and a hidden tab are never said. **The reading at the end of the turn says exactly what was not played**:
+  each line is followed through playback (its sound has finished AND the player has none left), a line that failed to be made,
+  that the person talked over or whose stream went away is read, a line dropped on purpose is never read, and a line still being
+  said is not said twice. A machine without its reply voice takes no live line, so that reading says the reply on the device's voice
+  as before. Declared gap: a line that fails to play only AFTER the reading of the turn's end was decided is not read.
 - **Measured here (2026-11-24).** On the recorded clip (`clip-5s.wav`) over a faint room hiss, the detector fires at the
   ninth unit, **360 ms into the clip** (its first words are at the third unit: about 300 ms of speech). In the panel harness
   (real panel, stream client, speaker, controller and detector; fake machine, microphone and sound) seven loud units change

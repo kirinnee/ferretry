@@ -10,7 +10,7 @@ import { bunWorkers } from '../../../../core/kernel/host/adapters/process.ts';
 import type { SocketDownstream } from '@ferretry/kernel/contract';
 import { startSpeechThread } from '../../daemon/adapters/worker-speech-thread.ts';
 import { SpeechEngine } from '../../daemon/lib/engine/engine.ts';
-import { decodeDownlinkUnit } from '../../contract/index.ts';
+import { DOWNLINK_UNIT_BYTES, decodeDownlinkUnit, decodeReplyDownlinkUnit } from '../../contract/index.ts';
 import { VoiceStream } from '../../daemon/lib/stream/session.ts';
 import { DiskFiles, nativeFor, nativeHost } from './disk-files.ts';
 
@@ -60,6 +60,10 @@ function wavOf(clip: Int16Array, lead: number, tail: number): Uint8Array {
     view.setInt16(44 + (16_000 * lead + index) * 2, clip[index] ?? 0, true);
   return out;
 }
+
+/** The browser asks for the machine's reply voice, so its units are the larger kind; read each by its size. */
+const snapshotOf = (frame: Uint8Array) =>
+  frame.byteLength === DOWNLINK_UNIT_BYTES ? decodeDownlinkUnit(frame) : decodeReplyDownlinkUnit(frame).snapshot;
 
 const realClock = {
   nowMs: () => performance.now(),
@@ -119,6 +123,7 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
       const started: unknown[] = [];
       let firstAudioAt = 0;
       const outcomes: string[] = [];
+      const claimed = new Set<string>();
       const page = `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body><div id="root"></div><script>window.__bridge=location.origin</script><script type="module" src="/app.js"></script></body></html>`;
       const streams = new Map<unknown, VoiceStream>();
       server = Bun.serve({
@@ -136,7 +141,7 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
           open: async ws => {
             const downstream: SocketDownstream = {
               send: frame => {
-                const seen = decodeDownlinkUnit(frame as Uint8Array);
+                const seen = snapshotOf(frame as Uint8Array);
                 if (seen.last !== undefined || seen.error !== undefined || seen.words?.final === true)
                   outcomes.push(
                     JSON.stringify({
@@ -171,6 +176,10 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
               resolveFerret: async reference => reference,
               recordSent: () => undefined,
               claimFerret: () => () => undefined,
+              entry: {
+                enter: ferret => !claimed.has(ferret) && !!claimed.add(ferret),
+                leave: ferret => void claimed.delete(ferret),
+              },
               onEnd: () => undefined,
               log: { info: () => undefined },
             });
@@ -256,17 +265,29 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
         console.log('start records', JSON.stringify(started));
         // The fake microphone starts with the stream: 1 s of silence, then the clip. Speech ended that long after the first unit.
         const speechEndedAt = firstAudioAt + 1_000 + (clip.length / 16_000) * 1_000;
-        console.log('speech ended → sent (ms)', Math.round((sent[0]?.at ?? 0) - speechEndedAt));
+        // The entry message and the utterance are two different sends: each is asserted on its own, and the utterance is timed by its id.
+        const entry = sent.filter(item => item.message.startsWith('(voice mode on)'));
+        const utterance = sent.filter(item => item.sendId === 'real:1');
+        console.log('speech ended → utterance sent (ms)', Math.round((utterance[0]?.at ?? 0) - speechEndedAt));
         expect(started).toEqual([
-          { t: 'start', v: 1, purpose: 'chat', ferretId: 'real-ferret', session: expect.stringMatching(/^vm-/u) },
+          {
+            t: 'start',
+            v: 1,
+            purpose: 'chat',
+            ferretId: 'real-ferret',
+            session: expect.stringMatching(/^vm-/u),
+            reply: 'machine',
+          },
         ]);
         expect(interim.length).toBeGreaterThan(0);
         console.log('outcomes', JSON.stringify([...new Set(outcomes)]));
         // The machine's final words are firm in the panel (the greyed interim style is gone).
         expect(await tab.locator('[data-voice-mode-words]').getAttribute('data-final')).toBe('true');
-        expect(sent).toHaveLength(1);
-        expect(sent[0]?.sendId).toBe('real:1');
-        expect((sent[0]?.message ?? '').toLowerCase().replace(/[^a-z ]/gu, '')).toBe(
+        expect(entry).toHaveLength(1);
+        expect(entry[0]?.sendId).toMatch(/^voice-on:vm-/u);
+        expect(utterance).toHaveLength(1);
+        expect(sent).toHaveLength(2);
+        expect((utterance[0]?.message ?? '').toLowerCase().replace(/[^a-z ]/gu, '')).toBe(
           'voice please fix the login redirect and run the tests again',
         );
 
@@ -274,7 +295,7 @@ describe.skipIf(!ASKED)('voice mode in a real browser with the real speech engin
         await tab.locator('[data-fake-composer]').waitFor({ state: 'visible' });
         expect(await tab.getByLabel('Message').inputValue()).toBe('half a thought');
         await tab.waitForTimeout(500);
-        expect(sent).toHaveLength(1);
+        expect(sent).toHaveLength(2);
       } finally {
         await browser.close();
       }

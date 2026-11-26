@@ -108,7 +108,7 @@ export interface AutoReadInput {
    * True for a reply whose spoken lines were already said while the ferret worked (voice mode's live lines): the reading at
    * the end of the turn then leaves it alone instead of saying it twice. A question is never covered.
    */
-  readonly covers?: (markdown: string) => boolean;
+  readonly unsaid?: (markdown: string) => string;
   /** The clock, for tests. */
   readonly now?: () => number;
 }
@@ -248,11 +248,14 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
           step.fire.outcome === 'needs-input'
             ? pickQuestion(current.question)
             : pickReply(current.entries, step.fire.startedAt, current.settings.whatToRead);
-        if (step.fire.outcome !== 'needs-input' && current.covers?.(pick.markdown) === true) return;
+        // Voice mode said some of these lines live: only the ones not played are read.
+        const words =
+          step.fire.outcome === 'needs-input' ? pick.markdown : (current.unsaid?.(pick.markdown) ?? pick.markdown);
+        if (words === '') return;
         mine.current = pick.key;
         if (step.fire.outcome === 'needs-input')
           asked.current = { turnAt: parseInstant(current.turnStateAt), words: pick.markdown };
-        controller.read(pick.key, pick.markdown, readOptionsOf(current.settings));
+        controller.read(pick.key, words, readOptionsOf(current.settings));
         return;
       }
     }
@@ -273,9 +276,10 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
           timer.current = setTimeout(evaluate, Math.max(1, Math.ceil(TEXT_SETTLED_MS - Math.max(0, quiet))));
         } else {
           pending.current = null;
-          if (current.covers?.(pick.markdown) === true) return;
+          const words = current.unsaid?.(pick.markdown) ?? pick.markdown;
+          if (words === '') return;
           mine.current = pick.key;
-          controller.read(pick.key, pick.markdown, readOptionsOf(current.settings));
+          controller.read(pick.key, words, readOptionsOf(current.settings));
         }
       }
       return;

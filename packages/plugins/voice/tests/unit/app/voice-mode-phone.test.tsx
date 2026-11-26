@@ -128,13 +128,18 @@ const phone = () => {
   const meter: MicMeter = { monitor, release: () => undefined };
   const port: MicMeterPort = { open: async () => meter };
   const calls: SentCall[] = [];
-  /** The entry messages ("(voice mode on) …"): kept apart from the utterances the person spoke. */
-  const entries: SentCall[] = [];
+  /** The asks to the machine to tell the ferret (`POST /v1/voice/entry`): kept apart from the utterances the person spoke. */
+  const entries: { route: string; ferretId: string; session: string }[] = [];
   const refusals: { count: number; message: string } = { count: 0, message: 'The machine is not answering.' };
   const client = {
     call: async (route: string, init?: { params?: Record<string, string>; body?: unknown; headers?: unknown }) => {
+      if (route === 'POST /v1/voice/entry') {
+        const ask = init?.body as { ferretId: string; session: string };
+        entries.push({ route, ferretId: ask.ferretId, session: ask.session });
+        return { sent: true } as never;
+      }
       const body = init?.body as { message: string; sendId: string };
-      (body.message.startsWith('(voice mode on)') ? entries : calls).push({
+      calls.push({
         route,
         ferretId: init?.params?.['ferretId'],
         message: body.message,
@@ -231,19 +236,17 @@ const say = async (p: ReturnType<typeof phone>, words: string): Promise<void> =>
 };
 
 describe('V1: the phone engine tells the ferret too', () => {
-  test('voice mode entered on the phone sends the entry message once, under the id of the voice-mode session', async () => {
+  test('voice mode entered on the phone asks the MACHINE to tell the ferret, once, under the voice-mode session; the phone sends no entry itself', async () => {
     const p = phone();
     const store = createVoiceModeStore();
     store.start('ferret-1', 'desk', keptOnPhoneBanner);
     mounted = await mount(phoneTree(p, store));
-    await until(() => p.entries.length === 1, 'the entry message');
-    expect(p.entries[0]).toMatchObject({
-      route: 'POST /v1/ferrets/:ferretId/send',
+    await until(() => p.entries.length === 1, 'the ask');
+    expect(p.entries[0]).toEqual({
+      route: 'POST /v1/voice/entry',
       ferretId: 'ferret-1',
-      message: '(voice mode on) Speak first, narrate as you work, speak the result.',
-      sendId: `voice-on:${store.get('ferret-1').session}`,
+      session: store.get('ferret-1').session,
     });
-    expect(p.entries[0]?.header).toBe(p.entries[0]?.sendId);
     // A re-render is not an entry.
     await mounted.render(phoneTree(p, store));
     await wait(100);
@@ -251,7 +254,7 @@ describe('V1: the phone engine tells the ferret too', () => {
     expect(p.calls).toEqual([]);
   });
 
-  test('a machine lost mid-chat hands over inside the same session: the phone sends the entry under the id the machine used', async () => {
+  test('a machine lost mid-chat hands over inside the same session: the phone asks under the session the machine used', async () => {
     const r = machineRig();
     mounted = await mount(r.tree());
     await interact(() => r.store.start('ferret-1', 'desk'));
@@ -260,7 +263,7 @@ describe('V1: the phone engine tells the ferret too', () => {
     await interact(() => r.listeners().onFrame(unit()));
     await interact(() => r.listeners().onClose('lost', 1006));
     await until(() => r.p.entries.length === 1, 'the phone to say it');
-    expect(r.p.entries[0]?.sendId).toBe(`voice-on:${session}`);
+    expect(r.p.entries[0]?.session).toBe(session);
   }, 20_000);
 });
 

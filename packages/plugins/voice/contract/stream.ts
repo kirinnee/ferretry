@@ -77,8 +77,27 @@ export const VoiceSessionSchema = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/u);
  */
 export const VOICE_ENTRY_MESSAGE = '(voice mode on) Speak first, narrate as you work, speak the result.';
 
+/**
+ * How long a chat's entry claim (the machine's) stands without being renewed, and how often a holder renews it: a tab or phone
+ * that is still in voice mode renews well inside the lease, one that is gone lapses, and the next voice mode tells the ferret afresh.
+ */
+export const ENTRY_LEASE_MS = 180_000;
+export const ENTRY_RENEW_MS = 60_000;
+
 /** The send id of a session's entry message: stable for the session, so a reconnect sends it again as the same message. */
 export const entrySendId = (session: string): string => `voice-on:${session}`;
+
+/** What a phone's own voice mode asks of the machine (`POST /v1/voice/entry`): tell this ferret once, under this session. */
+export const VoiceEntryRequestSchema = z.strictObject({
+  ferretId: z.string().min(1).max(128),
+  session: VoiceSessionSchema,
+});
+export type VoiceEntryRequest = z.infer<typeof VoiceEntryRequestSchema>;
+
+/** `sent`: this call told the ferret. False when another tab, device or engine already holds the chat's claim, or the send was refused. */
+export interface VoiceEntryResult {
+  readonly sent: boolean;
+}
 
 /** The first record of a stream, as one text frame. Anything else first is a protocol error. */
 export const StreamStartSchema = z.discriminatedUnion('purpose', [
@@ -97,11 +116,11 @@ export const StreamStartSchema = z.discriminatedUnion('purpose', [
     purpose: z.literal('chat'),
     ferretId: z.string().min(1).max(128),
     /**
-     * Names this voice-mode session, minted once when the person turns voice mode on and kept across reconnects (a stream
-     * that drops and reopens is the same session). The machine's one entry message is sent under an id made from it, so a
-     * reconnect is not a repeat.
+     * Names this voice-mode session, minted once when the person turns voice mode on and kept across reconnects. OPTIONAL
+     * (additive): a client that does not send it gets the stream it always had, with no entry message. With it, the machine
+     * sends the one entry message under an id made from it, unless another tab or device already holds this chat's claim.
      */
-    session: VoiceSessionSchema,
+    session: VoiceSessionSchema.optional(),
     style: PauseStyleSchema.optional(),
     reply: ReplyRequestSchema.optional(),
   }),

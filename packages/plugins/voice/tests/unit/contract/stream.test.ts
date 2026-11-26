@@ -130,7 +130,8 @@ describe('the voice stream units', () => {
         style: 'quick',
       }).success,
     ).toBe(true);
-    expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'chat', ferretId: 'f1' }).success).toBe(false); // no session
+    // A v1 record from a client that knows no session still streams (additive: such a stream gets no entry message).
+    expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'chat', ferretId: 'f1' }).success).toBe(true);
     expect(StreamStartSchema.safeParse({ t: 'start', v: 1, purpose: 'chat', session: 'vm-test-session' }).success).toBe(
       false,
     );

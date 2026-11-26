@@ -230,7 +230,6 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       active: voiceModeOn,
       rows,
       live: turn.live,
-      working: turn.state === 'working',
       visible: useDocumentVisible(),
       sink: () => voiceMode.live(subject),
     });
@@ -240,7 +239,7 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       authoritative: turn.live,
       // Voice mode reads the replies aloud whatever the device's Auto-read switch says: hands-free has no other way to hear them.
       forced: voiceModeOn,
-      covers: lines.covers,
+      unsaid: lines.unsaid,
       turn: turn.state,
       turnStateAt: turn.at,
       question: needsInputOf(needsInput),

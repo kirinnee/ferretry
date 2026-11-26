@@ -13,6 +13,7 @@ import {
 } from '../../../contract/index.ts';
 import { VoiceEngineError } from '../../../contract/index.ts';
 import { spansFromProbabilities, VAD_CHUNK } from '../../../daemon/lib/engine/spans.ts';
+import { ENTRY_LEASE_MS } from '../../../contract/index.ts';
 import { StreamRegistry } from '../../../daemon/lib/stream/registry.ts';
 import { SampleBuffer } from '../../../daemon/lib/stream/samples.ts';
 import { VoiceStream, type StreamParts } from '../../../daemon/lib/stream/session.ts';
@@ -116,6 +117,10 @@ async function rig(
     resolveFerret: overrides.resolveFerret ?? (async reference => reference),
     recordSent: ferretId => void audited.push(ferretId),
     claimFerret: overrides.claimFerret ?? (ferret => registry.claimFerret(ferret)),
+    entry: {
+      enter: ferret => registry.enterVoice(ferret, clock.nowMs()),
+      leave: ferret => registry.leaveVoice(ferret),
+    },
     onEnd: () => {
       ended += 1;
     },
@@ -175,24 +180,74 @@ describe('V1: entering voice mode', () => {
     expect(r.closes).toEqual([]);
   });
 
-  test('a reconnect is not a repeat: the same session sends under the same id, a new session under a new one', async () => {
+  test('a reconnect inside the chat’s claim is not a repeat: the ferret already has the message', async () => {
     const registry = new StreamRegistry();
     const first = await rig({ registry });
     first.start(chat);
     await first.talk(400);
+    expect(first.entered.map(each => each.sendId)).toEqual(['voice-on:vm-test-session']);
     first.stream.close();
-    // The same voice-mode session reopens its stream (a dropped carrier): the id is the one the ferret already has.
+    // The same voice-mode session reopens its stream (a dropped carrier): the claim is still live, so nothing is sent.
     const again = await rig({ registry });
     again.start(chat);
     await again.talk(400);
-    expect(again.entered.map(each => each.sendId)).toEqual(first.entered.map(each => each.sendId));
-    expect(again.entered[0]?.sendId).toBe('voice-on:vm-test-session');
-    again.stream.close();
-    // Turning voice mode off and on again is a new session, so the ferret is told again.
-    const later = await rig({ registry });
-    later.start({ ...chat, session: 'vm-another-session' });
-    await later.talk(400);
-    expect(later.entered[0]?.sendId).toBe('voice-on:vm-another-session');
+    expect(again.entered).toEqual([]);
+  });
+
+  test('ONE entry per chat however many tabs, devices and engines: whoever holds the claim first sends, the rest send nothing', async () => {
+    // A phone's own engine (or another tab's) claimed this chat first; the machine's stream finds the claim live.
+    const registry = new StreamRegistry();
+    const stream = await rig({ registry });
+    expect(registry.enterVoice('fer-1', stream.clock.nowMs())).toBe(true);
+    stream.start(chat);
+    await stream.talk(400);
+    expect(stream.entered).toEqual([]);
+    expect(stream.closes).toEqual([]);
+    // And the other way round: the stream claims it, so a phone asking afterwards is not the one to send.
+    const other = new StreamRegistry();
+    const streaming = await rig({ registry: other });
+    streaming.start(chat);
+    await streaming.talk(400);
+    expect(streaming.entered).toHaveLength(1);
+    expect(other.enterVoice('fer-1', streaming.clock.nowMs())).toBe(false);
+  });
+
+  test('the claim lapses once nobody renews it: a later voice mode tells the ferret afresh, and a holder renews it while it stays', async () => {
+    const registry = new StreamRegistry();
+    expect(registry.enterVoice('fer-1', 0)).toBe(true);
+    expect(registry.enterVoice('fer-1', ENTRY_LEASE_MS - 1)).toBe(false); // renews
+    expect(registry.enterVoice('fer-1', 2 * ENTRY_LEASE_MS - 2)).toBe(false); // still live: the last call renewed it
+    expect(registry.enterVoice('fer-1', 4 * ENTRY_LEASE_MS)).toBe(true); // nobody renewed it
+    // An open stream renews on its own: after longer than the lease, the claim is still live.
+    const held = new StreamRegistry();
+    const live = await rig({ registry: held });
+    live.start(chat);
+    await live.talk(400);
+    expect(live.entered).toHaveLength(1);
+    // A phone's unit every 4 s (silence of 5 s ends a stream), for four minutes: more than the lease.
+    for (let second = 0; second < 240; second += 4) {
+      await live.clock.advance(4_000);
+      await live.talk(40);
+    }
+    expect(live.closes).toEqual([]);
+    expect(held.enterVoice('fer-1', live.clock.nowMs())).toBe(false);
+  });
+
+  test('a client that names no session is one that predates the entry message: it streams as before and nothing is sent', async () => {
+    const r = await rig();
+    r.start({ t: 'start', v: 1, purpose: 'chat', ferretId: 'fer-1' });
+    await r.talk(1_000);
+    expect(r.entered).toEqual([]);
+    expect(r.closes).toEqual([]);
+    expect(r.snapshot().state).toBe('listening');
+  });
+
+  test('a refused entry gives the claim up, so the next to enter sends it', async () => {
+    const registry = new StreamRegistry();
+    const refused = await rig({ registry, send: async () => ({ ok: false, code: 'send_refused' }) });
+    refused.start(chat);
+    await refused.talk(400);
+    expect(registry.enterVoice('fer-1', refused.clock.nowMs())).toBe(true);
   });
 
   test('Talk to test, a refused grant and a missing Conversation send nothing, and a refused entry does not end the stream', async () => {

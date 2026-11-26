@@ -122,6 +122,10 @@ export function voiceStreamAccept(deps: VoiceStreamDeps): SocketAccept {
         resolveFerret: deps.resolveFerret,
         recordSent: sentRecorder(deps, auditActor, streamId),
         claimFerret: ferret => registry.claimFerret(ferret),
+        entry: {
+          enter: ferret => registry.enterVoice(ferret, deps.clock.nowMs()),
+          leave: ferret => registry.leaveVoice(ferret),
+        },
         onEnd: slot.release,
         log: deps.log,
       });

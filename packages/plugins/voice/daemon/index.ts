@@ -27,7 +27,9 @@ import { ElevenLabsReplyVoice } from './lib/reply/elevenlabs.ts';
 import { routeReplyVoice } from './lib/reply/router.ts';
 import { StateReplySpend } from './adapters/state-reply-spend.ts';
 import { SpeechEngine } from './lib/engine/engine.ts';
-import { voiceStreamAccept } from './lib/stream/accept.ts';
+import { type VoiceStreamDeps, voiceStreamAccept } from './lib/stream/accept.ts';
+import { enterVoiceChat } from './lib/stream/entry.ts';
+import { StreamRegistry } from './lib/stream/registry.ts';
 import { voiceRoutes } from './routes.ts';
 
 /**
@@ -149,33 +151,52 @@ export default implementDaemon(manifest, {
 
     // The voice stream: each finished turn is sent to the ferret through Conversation's send, as the person's own message.
     const streamLog = kernel.log.child('stream');
+    const registry = new StreamRegistry();
+    const send: VoiceStreamDeps['send'] = () => {
+      const conversation = ctx.uses.conversation.current();
+      if (conversation === undefined) return undefined;
+      return async (ferretId, message, sendId) => {
+        const sent = await conversation.send(
+          ferretId as Parameters<typeof conversation.send>[0],
+          { kind: 'owner' },
+          { message, sendId },
+        );
+        return sent.ok ? { ok: true } : { ok: false, code: 'send_refused' };
+      };
+    };
+    const resolveFerret: VoiceStreamDeps['resolveFerret'] = async reference => {
+      const address = await ferrets.resolve(reference);
+      return address.kind === 'ferret' ? address.id : undefined;
+    };
     const sockets = {
       'GET /v1/voice/stream': voiceStreamAccept({
         engine,
         reply: replyVoice,
         clock: kernel.clock,
-        send: () => {
-          const conversation = ctx.uses.conversation.current();
-          if (conversation === undefined) return undefined;
-          return async (ferretId, message, sendId) => {
-            const sent = await conversation.send(
-              ferretId as Parameters<typeof conversation.send>[0],
-              { kind: 'owner' },
-              { message, sendId },
-            );
-            return sent.ok ? { ok: true } : { ok: false, code: 'send_refused' };
-          };
-        },
-        resolveFerret: async reference => {
-          const address = await ferrets.resolve(reference);
-          return address.kind === 'ferret' ? address.id : undefined;
-        },
+        registry,
+        send,
+        resolveFerret,
         fleetUseGranted: () => gate.policy()?.grants.fleet.use === true,
         audit: async draft => await gate.audit(draft),
         log: { info: (message, fields) => streamLog.info(message, fields) },
       }),
     };
 
-    return { routes: voiceRoutes(enhancement, speedups, engine, reply, elevenlabs), sockets, provides: { voice } };
+    return {
+      routes: voiceRoutes(enhancement, speedups, engine, reply, elevenlabs, body =>
+        enterVoiceChat(
+          {
+            registry,
+            clock: kernel.clock,
+            send,
+            resolveFerret,
+            log: { info: (message, fields) => streamLog.info(message, fields) },
+          },
+          body,
+        ),
+      ),
+      sockets,
+      provides: { voice },
+    };
   },
 });

@@ -23,6 +23,7 @@ import {
   UNIT_MS,
   UPLINK_UNIT_BYTES,
   UnitAssembler,
+  ENTRY_RENEW_MS,
   VOICE_ENTRY_MESSAGE,
   WORDS_MAX_CHARS,
   type VoiceEngineApi,
@@ -95,6 +96,14 @@ export interface StreamParts {
   readonly recordSent: (ferretId: string) => void;
   /** Takes the one voice chat a ferret may have; `undefined` when another stream holds it. Returns the release. */
   readonly claimFerret: (ferretId: string) => (() => void) | undefined;
+  /**
+   * The chat's entry claim, shared by every stream and phone engine of this machine (the registry holds it). `enter` is true
+   * only for the call that finds no live claim: that one sends the entry message. Absent (a suite): every entry sends.
+   */
+  readonly entry?: {
+    readonly enter: (ferretId: string) => boolean;
+    readonly leave: (ferretId: string) => void;
+  };
   /**
    * The machine's reply voice. `undefined` only where there is none to ask (a suite): a stream that asks for it is then told
    * `absent`. A stream that does not ask for it never touches this.
@@ -280,7 +289,7 @@ export class VoiceStream implements SocketHandler {
   }
 
   /** A chat stream is for ONE ferret: its id (an id and its callsign are the same ferret) is the one claimed. */
-  private async beginChat(reference: string, session: string): Promise<void> {
+  private async beginChat(reference: string, session: string | undefined): Promise<void> {
     let id: string | undefined;
     try {
       id = await this.parts.resolveFerret(reference);
@@ -293,17 +302,25 @@ export class VoiceStream implements SocketHandler {
     if (this.releaseFerret === undefined) return this.refuse('voice_busy');
     this.ferretId = id;
     this.begin('chat');
-    void this.sendEntry(id, session);
+    // A client that named no session is one that predates the entry message: it gets the stream it always had.
+    if (session === undefined) return;
+    this.cancels.push(this.parts.clock.every(milliseconds(ENTRY_RENEW_MS), () => void this.parts.entry?.enter(id)));
+    if (this.parts.entry?.enter(id) !== false) void this.sendEntry(id, session);
   }
 
   /**
    * Voice mode was just entered: tell the ferret at once, in one message, so the grammar `instructions/voice.md` teaches is
-   * switched on for this conversation. The send id belongs to the voice-mode SESSION (the device keeps it across reconnects),
-   * so a stream that drops and reopens sends the very same message again and the ferret reads it once. A refusal is not
-   * fatal: the person can still talk, and the typed instruction is in the ferret's static layer either way.
+   * switched on for this conversation. The chat's claim (the registry's) decides WHO sends it, so a second tab or a phone
+   * engine on the same chat sends nothing; the send id belongs to the voice-mode SESSION (the device keeps it across
+   * reconnects), so a stream that drops and reopens inside the claim's lease is not a second message. A refusal is not
+   * fatal: the person can still talk, the typed instruction is in the ferret's static layer either way, and the claim is
+   * given up so the next to enter sends it.
    */
   private async sendEntry(ferretId: string, session: string): Promise<void> {
-    if (this.ended || this.parts.send === undefined || !this.parts.mayChat()) return;
+    if (this.ended || this.parts.send === undefined || !this.parts.mayChat()) {
+      this.parts.entry?.leave(ferretId);
+      return;
+    }
     let result: Awaited<ReturnType<NonNullable<StreamParts['send']>>>;
     try {
       result = await this.parts.send(ferretId, VOICE_ENTRY_MESSAGE, entrySendId(session));
@@ -311,6 +328,7 @@ export class VoiceStream implements SocketHandler {
       result = { ok: false, code: 'send_refused' };
     }
     if (!result.ok) {
+      this.parts.entry?.leave(ferretId);
       this.parts.log.info('voice.stream.entry_refused', { stream: this.parts.streamId, code: result.code });
       return;
     }

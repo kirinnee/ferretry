@@ -4,7 +4,8 @@ import { type AutoReadInput, useAutoRead } from '../../../app/hooks/use-auto-rea
 import { useLiveVoiceLines } from '../../../app/hooks/use-live-voice-lines.ts';
 import { LiveVoiceSettingsProvider } from '../../../app/hooks/use-live-voice-settings.ts';
 import { ReadAloudProvider } from '../../../app/hooks/use-read-aloud.ts';
-import type { LiveLine, LiveSink } from '../../../app/lib/voice-mode/live-lines.ts';
+import { createLiveLines, type LiveLine, type LiveSink } from '../../../app/lib/voice-mode/live-lines.ts';
+import type { SpeechLineEvent } from '../../../app/lib/stream/voice-stream.ts';
 import { LiveVoiceSettingsStore } from '../../../app/lib/voice-chat/live-settings.ts';
 import { createReadAloud, type ReadAloudController } from '../../../app/lib/voice-chat/read-aloud.ts';
 import type { PickerRow } from '../../../app/lib/voice-chat/reply-picker.ts';
@@ -27,7 +28,9 @@ afterEach(async () => {
 const AT = Date.UTC(2026, 10, 26, 3, 0, 0);
 const iso = (ms: number): string => new Date(AT + ms).toISOString();
 const person = (id: string): PickerRow => ({ id, kind: 'user', text: '(voice) check the build', at: AT });
-const ferret = (text: string): PickerRow => ({ id: 'a1', kind: 'assistant', text, at: AT + 5_000 });
+const ferret = (text: string, id = 'a1'): PickerRow => ({ id, kind: 'assistant', text, at: AT + 5_000 });
+/** The ferret used a tool: whatever it said before was narration, not the end of the turn. */
+const tool = (id = 't1'): PickerRow => ({ id, kind: 'tool', text: 'ran a command', at: AT + 6_000 });
 
 interface Page {
   readonly rows: readonly PickerRow[];
@@ -36,28 +39,61 @@ interface Page {
   readonly active?: boolean;
 }
 
-function rig(options: { sink?: 'takes' | 'refuses' | 'none' } = {}) {
+/** The machine voice, for real: the panel's own queue over a fake stream that records what it was asked to speak and to take back. */
+function realSink() {
+  const spoken: { id: number; text: string }[] = [];
+  const dropped: number[] = [];
+  let next = 0;
+  const live = createLiveLines({
+    stream: () => ({
+      speak: text => {
+        const id = next;
+        next += 1;
+        spoken.push({ id, text });
+        return [{ id, text }];
+      },
+      drop: ids => void dropped.push(...ids),
+      hush: () => undefined,
+    }),
+    replyState: () => 'ready',
+    player: { remainingMs: () => 0 },
+    every: () => () => undefined,
+  });
+  return {
+    sink: live as LiveSink,
+    spoken,
+    dropped,
+    /** A line's sound as the stream reports it. */
+    heard: (id: number, event: SpeechLineEvent['event'], code?: string) =>
+      live.onSpeech(code === undefined ? { id, event } : { id, event, code }),
+  };
+}
+
+function rig(options: { sink?: 'takes' | 'refuses' | 'none' | 'real' } = {}) {
   const synth = new FakeSynth([voice('Samantha', 'en-US', { isDefault: true })]);
   const speaker = createSpeechSynthesisSpeaker({ synth, createUtterance: text => new FakeUtterance(text) });
   const controller: ReadAloudController = createReadAloud({ speaker, language: () => 'en-US' });
   const settings = new LiveVoiceSettingsStore({ getItem: () => null, setItem: () => undefined });
   const said: LiveLine[] = [];
+  const machine = realSink();
   const sink: LiveSink | undefined =
     options.sink === 'none'
       ? undefined
-      : {
-          say: line => {
-            if (options.sink === 'refuses') return false;
-            said.push(line);
-            return true;
-          },
-        };
+      : options.sink === 'real'
+        ? machine.sink
+        : {
+            say: line => {
+              if (options.sink === 'refuses') return false;
+              said.push(line);
+              return true;
+            },
+            outdate: () => undefined,
+          };
   function Probe({ page }: { readonly page: Page }) {
     const lines = useLiveVoiceLines({
       active: page.active ?? true,
       rows: page.rows,
       live: true,
-      working: page.turn === 'working',
       visible: true,
       sink: () => sink,
     });
@@ -66,7 +102,7 @@ function rig(options: { sink?: 'takes' | 'refuses' | 'none' } = {}) {
       entries: page.rows,
       authoritative: true,
       forced: page.active ?? true,
-      covers: lines.covers,
+      unsaid: lines.unsaid,
       turn: page.turn,
       turnStateAt: iso(page.at),
       question: null,
@@ -81,7 +117,7 @@ function rig(options: { sink?: 'takes' | 'refuses' | 'none' } = {}) {
       </ReadAloudProvider>
     </LiveVoiceSettingsProvider>
   );
-  return { synth, said, tree, controller };
+  return { synth, said, tree, controller, machine };
 }
 
 const settle = async (ms = 600): Promise<void> => {
@@ -106,11 +142,11 @@ describe('live voice lines on the page', () => {
     );
     expect(r.said).toEqual([
       { text: 'On it.', kind: 'first' },
-      { text: 'Tests are running.', kind: 'progress' },
+      { text: 'Tests are running.', kind: 'line' },
     ]);
     const done = '<voice>On it.</voice>\n\n<voice>Tests are running.</voice>\n\n<voice>All green.</voice>';
     await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(done)], turn: 'your-turn', at: 10_000 }));
-    expect(r.said.at(-1)).toEqual({ text: 'All green.', kind: 'result' });
+    expect(r.said.at(-1)).toEqual({ text: 'All green.', kind: 'line' });
   });
 
   test('the reading at the end of the turn does not say what the machine voice already said', async () => {
@@ -126,6 +162,103 @@ describe('live voice lines on the page', () => {
     await settle();
     expect(r.said.map(line => line.text)).toEqual(['On it.', 'All green.']);
     expect(r.synth.spoken).toHaveLength(0);
+  });
+
+  // V4 never throws away the answer: only a line the ferret is KNOWN to have worked past is progress.
+  describe('the machine voice, with its real queue', () => {
+    const SPOKEN = (r: ReturnType<typeof rig>) => r.machine.spoken.map(line => line.text);
+
+    test('the two lines of a result that closed while the turn still said "working" are both said', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      await mounted.render(
+        r.tree({ rows: [person('u0'), ask, ferret('<voice>On it.</voice>')], turn: 'working', at: 1_000 }),
+      );
+      // The result: two lines in ONE message, read before the turn's state flips to your-turn.
+      const result = '<voice>On it.</voice>\n\n<voice>Tests passed.</voice>\n\n<voice>Nothing else to do.</voice>';
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(result)], turn: 'working', at: 1_000 }));
+      expect(SPOKEN(r)).toEqual(['On it.', 'Tests passed.', 'Nothing else to do.']);
+      expect(r.machine.dropped).toEqual([]);
+    });
+
+    test('a single tagged result is not dropped when the next turn begins before it plays', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      await mounted.render(
+        r.tree({ rows: [person('u0'), ask, ferret('<voice>On it.</voice>')], turn: 'working', at: 1_000 }),
+      );
+      const result = ferret('<voice>On it.</voice>\n\n<voice>All green.</voice>');
+      await mounted.render(r.tree({ rows: [person('u0'), ask, result], turn: 'working', at: 1_000 }));
+      // Nothing has played yet; the person asks the next thing and the ferret answers it at once.
+      const next = person('u2');
+      await mounted.render(
+        r.tree({
+          rows: [person('u0'), ask, result, next, ferret('<voice>Next one.</voice>', 'a2')],
+          turn: 'working',
+          at: 20_000,
+        }),
+      );
+      expect(SPOKEN(r)).toEqual(['On it.', 'All green.', 'Next one.']);
+      expect(r.machine.dropped).toEqual([]);
+    });
+
+    test('narration the ferret worked past IS dropped when a newer line arrives and nobody has heard it', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      const first = ferret('<voice>On it.</voice>');
+      await mounted.render(r.tree({ rows: [person('u0'), ask, first], turn: 'working', at: 1_000 }));
+      const stepA = ferret('<voice>Reading the logs.</voice>', 'a2');
+      await mounted.render(r.tree({ rows: [person('u0'), ask, first, stepA], turn: 'working', at: 1_000 }));
+      // Not known to be progress yet: the turn may end on it.
+      expect(r.machine.dropped).toEqual([]);
+      const rows = [person('u0'), ask, first, stepA, tool(), ferret('<voice>Found the cause.</voice>', 'a3')];
+      await mounted.render(r.tree({ rows, turn: 'working', at: 1_000 }));
+      expect(SPOKEN(r)).toEqual(['On it.', 'Reading the logs.', 'Found the cause.']);
+      expect(r.machine.dropped).toEqual([1]);
+    });
+
+    test('a line the machine failed to make is still read at the end of the turn', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      const text = '<voice>Build is green.</voice>';
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'working', at: 1_000 }));
+      r.machine.heard(0, 'failed', 'reply_voice_failed');
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'your-turn', at: 10_000 }));
+      await settle();
+      expect(r.synth.spoken.map(each => each.text).join(' ')).toContain('Build is green');
+    });
+
+    test('only the lines that did not play are read: the played one is not said twice', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      const text = '<voice>On it.</voice>\n\n<voice>Build is green.</voice>';
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'working', at: 1_000 }));
+      r.machine.heard(0, 'started');
+      r.machine.heard(0, 'finished');
+      r.machine.heard(1, 'failed', 'reply_voice_failed');
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'your-turn', at: 10_000 }));
+      await settle();
+      const heard = r.synth.spoken.map(each => each.text).join(' ');
+      expect(heard).toContain('Build is green');
+      expect(heard).not.toContain('On it');
+    });
+
+    test('a line still being said when the turn ends is not said again', async () => {
+      const r = rig({ sink: 'real' });
+      mounted = await mount(r.tree(START));
+      const ask = person('u1');
+      const text = '<voice>Build is green.</voice>';
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'working', at: 1_000 }));
+      r.machine.heard(0, 'started');
+      await mounted.render(r.tree({ rows: [person('u0'), ask, ferret(text)], turn: 'your-turn', at: 10_000 }));
+      await settle();
+      expect(r.synth.spoken).toHaveLength(0);
+    });
   });
 
   test('a voice that takes no line leaves the whole reply to the reading at the end, as before', async () => {

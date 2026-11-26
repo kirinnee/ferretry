@@ -104,7 +104,7 @@ describe('V1: a voice-mode session', () => {
 
   test('the panel offers its machine voice for live lines, per ferret, and takes it back', () => {
     const store = createVoiceModeStore();
-    const sink = { say: () => true };
+    const sink = { say: () => true, outdate: () => undefined };
     expect(store.live('f1')).toBeUndefined();
     store.attachLive('f1', sink);
     expect(store.live('f1')).toBe(sink);

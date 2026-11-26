@@ -152,6 +152,17 @@ export default definePlugin({
         audit: audit('secrets.used'),
         guard: { none: 'a code and one fixed sentence; never the provider body' },
       }),
+      // A phone's own voice mode asks the machine to tell the ferret once; the machine's stream does the same from its own side.
+      route('POST /v1/voice/entry', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'use'),
+        noStore: true,
+        audit: {
+          skip: "a fixed sentence of the machine's own, with none of the person's words; a stream sends it unrecorded as well",
+        },
+        guard: { none: 'a ferret name and a session name in; a boolean out; no pane, page or vault text' },
+      }),
     ],
     sockets: [
       // The voice stream (§14, unit 4): the microphone up, the words down, and the machine sends each finished turn to the

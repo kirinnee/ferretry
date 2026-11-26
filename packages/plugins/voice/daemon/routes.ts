@@ -11,6 +11,7 @@ import {
   type SpeedupsView,
   type SpeedupTestResult,
   type SttEnhancementResult,
+  type VoiceEntryResult,
   SttEnhancementError,
 } from '../contract/index.ts';
 import {
@@ -20,6 +21,7 @@ import {
   type VoiceEngineApi,
   VoiceEngineError,
 } from '../contract/index.ts';
+import { VoiceEntryRefused } from './lib/stream/entry.ts';
 import { enhancementErrorStatus, enhancementErrorView } from './lib/stt/enhancement.ts';
 
 /**
@@ -73,7 +75,9 @@ export function voiceRoutes(
   engine: Pick<VoiceEngineApi, 'view' | 'install' | 'remove'>,
   reply: Pick<ReplyVoiceApi, 'view' | 'install' | 'remove'>,
   elevenlabs: { status(): Promise<ElevenLabsStatus>; voices(): Promise<ElevenLabsVoices> },
+  entry: (body: unknown) => Promise<VoiceEntryResult>,
 ): {
+  readonly 'POST /v1/voice/entry': RouteHandler;
   readonly 'GET /v1/voice/engine': RouteHandler;
   readonly 'POST /v1/voice/engine/install': RouteHandler;
   readonly 'DELETE /v1/voice/engine': RouteHandler;
@@ -87,6 +91,15 @@ export function voiceRoutes(
   readonly 'POST /v1/speedups/:provider/test': RouteHandler;
 } {
   return {
+    // A phone's own voice mode asks the machine to tell the ferret once (the same claim the stream uses).
+    'POST /v1/voice/entry': async call => {
+      try {
+        return jsonResponse(await entry(await readJson(call).catch(() => undefined)));
+      } catch (error) {
+        if (error instanceof VoiceEntryRefused) throw new ApiError(error.status, error.message, error.code);
+        throw error;
+      }
+    },
     'GET /v1/voice/engine': async () => jsonResponse(await engine.view()),
     // Starts the download and answers at once (202): the screen polls the GET for progress.
     'POST /v1/voice/engine/install': async () => jsonResponse(await engine.install(), 202),

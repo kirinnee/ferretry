@@ -325,6 +325,8 @@ function VoiceModeSession({
       disposed = true;
       handle.current = null;
       store.attachLive(ferretId, null);
+      // The panel leaves with a line still waiting or playing: nothing is polled any more, and the reader is told it was not played.
+      lines?.dispose();
       voices.current = { reading: false, lines: false };
       if (speaker !== undefined) reader.attach(null);
       setMachineVoice(false);
