@@ -292,6 +292,19 @@ describe('forking a worktree', () => {
     should(out.text).containEql('start work in /managed/ferretry-new/packages/cli');
   });
 
+  it('should send the group the caller resolved, and none otherwise', async () => {
+    // Arrange
+    const { subject, gateway } = controller();
+
+    // Act
+    await subject.fork('feat/new', { group: 'alpha-1a2b3c4d' });
+
+    // Assert
+    should(gateway.creations).eql([
+      { sourcePath: CALLER_CWD, branch: 'feat/new', base: { kind: 'auto' }, group: 'alpha-1a2b3c4d' },
+    ]);
+  });
+
   it('should send each explicit base exactly as the caller named it', async () => {
     // Arrange
     const { subject, gateway } = controller();
