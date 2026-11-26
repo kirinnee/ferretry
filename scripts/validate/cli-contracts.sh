@@ -11,6 +11,7 @@ cli_contracts=(
   arch
   workspace-package-scopes
   name-single-source
+  repo-owner-single-source
   release-backup-order
   changelog-asset
   release-notes-render
@@ -142,11 +143,61 @@ name-single-source)
   rg -qF "project_name: ${product}" .goreleaser.yaml
   test -f "Casks/${product}.rb"
   rg -qF "module ${product}" go.mod
-  rg -qF "REPO=\"kirinnee/${product}\"" scripts/release/install.sh
   rg -qF "binary: ${name}" .goreleaser.yaml
   rg -qF "package_name: ${name}" .goreleaser.yaml
   rg -qF "binary \"${name}\"" "Casks/${product}.rb"
   rg -qF "BINARY=\"${name}\"" scripts/release/install.sh
+  ;;
+repo-owner-single-source)
+  # The repository's owner and slug have ONE home: the root package.json `repository` ("github:<owner>/<repo>"),
+  # the way the product name is the root `name`. Every static file that must spell it agrees with that field, and a
+  # foreign owner on this repository's own name is refused. `scripts/local/move-repo.sh` is how it moves.
+  slug="$(jq -r '.repository // empty' package.json | sed -n 's/^github://p')"
+  if ! [[ ${slug} =~ ^([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9][A-Za-z0-9._-]*)$ ]]; then
+    echo "❌ root package.json \`repository\` must be \"github:<owner>/<repo>\", got '${slug}'" >&2
+    exit 1
+  fi
+  owner="${BASH_REMATCH[1]}"
+  repo="${BASH_REMATCH[2]}"
+  repo_pattern="${repo//./\\.}"
+  repo_owner_fail() {
+    echo "❌ $1 (the repository is github:${slug}, from package.json; move it with scripts/local/move-repo.sh)" >&2
+    exit 1
+  }
+  rg -qF "REPO=\"${slug}\"" scripts/release/install.sh || repo_owner_fail "scripts/release/install.sh does not carry REPO=\"${slug}\""
+  rg -qF "https://github.com/${slug}/releases/download/" "Casks/${product}.rb" || repo_owner_fail "Casks/${product}.rb does not download from ${slug}"
+  rg -qF "homepage \"https://github.com/${slug}\"" "Casks/${product}.rb" || repo_owner_fail "Casks/${product}.rb homepage is not ${slug}"
+  yq -o=json '.' .goreleaser.yaml | jq -e --arg slug "${slug}" '
+    ([.release.github.owner + "/" + .release.github.name] + [.homebrew_casks[].repository | .owner + "/" + .name]
+      | unique) == [$slug]' >/dev/null || repo_owner_fail ".goreleaser.yaml release or tap repository is not ${slug}"
+  while IFS= read -r constant; do
+    [[ ${constant} == *"RELEASE_OWNER = '${owner}'"* ]] || repo_owner_fail "${constant%%:*}:  RELEASE_OWNER is not '${owner}'"
+  done < <(git grep -nIE "RELEASE_OWNER = '" -- '*.ts' ':!*.test.ts' ':!**/tests/**')
+  # The release REPOSITORY is the repository's name, not the product's: a repository moved to another name must not
+  # leave updates and downloads pointing at the old one. `RELEASE_REPO` carries it, and nothing builds the repository
+  # half of a release address from the product name after `RELEASE_OWNER`.
+  while IFS= read -r constant; do
+    [[ ${constant} == *"RELEASE_REPO = '${repo}'"* ]] || repo_owner_fail "${constant%%:*}:  RELEASE_REPO is not '${repo}'"
+  done < <(git grep -nIE "RELEASE_REPO = '" -- '*.ts' ':!*.test.ts' ':!**/tests/**')
+  # shellcheck disable=SC2016 # the \${RELEASE_REPO} text is a literal to exclude, not an expansion
+  product_as_repo="$(git grep -nIE 'RELEASE_OWNER[}]/[$][{]' -- '*.ts' ':!*.test.ts' ':!**/tests/**' | grep -vF '${RELEASE_REPO}' || true)"
+  if [ -n "${product_as_repo}" ]; then
+    printf '%s\n' "${product_as_repo}" >&2
+    repo_owner_fail "the lines above build a release address from the product name; use RELEASE_SLUG or RELEASE_REPO"
+  fi
+  # A hand-written owner beside this repository's name, in any file that is not a fixture or a changelog.
+  prefix='(github\.com[/:]|raw\.githubusercontent\.com/|github:|brew (un)?tap |--cask |--repo |repos/)'
+  # What may follow the name: a `.git` remote, a sentence-ending dot or any non-name character — never `<repo>.tools`, another repository.
+  suffix='(\.git)?([^A-Za-z0-9_.-]|\.([^A-Za-z0-9]|$)|$)'
+  foreign="$(
+    git grep -nIoE "${prefix}[A-Za-z0-9][A-Za-z0-9-]*/(${repo_pattern}|[$][{]product[}])${suffix}" -- . \
+      ':!Changelog*.md' ':!IncrementalChangelog.md' ':!bun.lock' ':!*.test.ts' ':!**/tests/**' |
+      grep -vE ":${prefix}${owner}/" || true
+  )"
+  if [ -n "${foreign}" ]; then
+    printf '%s\n' "${foreign}" >&2
+    repo_owner_fail "the lines above spell an owner other than '${owner}' on this repository's name"
+  fi
   ;;
 release-backup-order)
   yq -o=json '.' .releaserc.yaml | jq -e '
@@ -173,13 +224,15 @@ release-artifacts)
   ;;
 homebrew-cask)
   # The cask is named after the PRODUCT, installs every shipped executable, lives in THIS repo
-  # (owner repo == project) under Casks/, and strips the quarantine attribute post-install from
-  # every executable it installs (an unsigned helper left quarantined is refused by Gatekeeper).
+  # (the tap IS the release repository, whose name is the repository's, not the product's) under Casks/, and strips the
+  # quarantine attribute post-install from every executable it installs (an unsigned helper left quarantined is refused
+  # by Gatekeeper).
   yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" --argjson daemon "${daemon_bins}" --arg product "${product}" '
     (.homebrew_casks | length) > 0 and
     (.homebrew_casks[0].name == $product) and
     ((.homebrew_casks[0].binaries | sort) == ([$name] + $daemon | sort)) and
-    (.homebrew_casks[0].repository.name == .project_name) and
+    (.homebrew_casks[0].repository.name == .release.github.name) and
+    (.homebrew_casks[0].repository.owner == .release.github.owner) and
     (.homebrew_casks[0].directory == "Casks") and
     ((.homebrew_casks[0].dependencies // []) | any(.formula == "cloudflared")) and
     ([.homebrew_casks[].hooks.post.install] | join("\n") | contains("com.apple.quarantine")) and
