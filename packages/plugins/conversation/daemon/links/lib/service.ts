@@ -186,29 +186,34 @@ export class LinkService {
     selected?: ConversationSource,
   ): Promise<Result<StagedConversation, { code: 'not_found' | 'failed'; reason: string }>> {
     await this.needs.index.ready();
-    const owner = (await this.#kept()).get(`${harness}:${id}`);
-    if (owner !== undefined) return err({ code: 'failed', reason: `Ferret ${owner} already keeps it.` });
-    // Resolve after the last asynchronous ownership read, immediately before reserving and starting the copy.
-    const found = this.needs.index.get(harness, id, selected === undefined ? undefined : [selected.kind], selected);
-    if (found === undefined)
-      return err({ code: 'not_found', reason: `No ${harness} conversation ${id} is on this machine.` });
     const key = `${harness}:${id}`;
     if (this.#staging.has(key)) return err({ code: 'failed', reason: 'That conversation is already being continued.' });
     this.#staging.add(key);
-    const copied = await this.needs.copier
-      .copy({ harness, id, location: { kind: found.kind, label: found.label, path: found.path } })
-      .catch((error: unknown) =>
-        err({ reason: error instanceof Error && error.message !== '' ? error.message : 'It could not be copied.' }),
-      );
-    if (!copied.ok) {
-      this.#staging.delete(key);
-      return err({ code: 'failed', reason: copied.error.reason });
+    let handedToStart = false;
+    try {
+      // Reserve BEFORE the asynchronous snapshot: another start must not record its owner and release while we hold
+      // an older empty snapshot. Once reserved, read ownership afresh; a committed owner still refuses this start.
+      const owner = (await this.#kept()).get(key);
+      if (owner !== undefined) return err({ code: 'failed', reason: `Ferret ${owner} already keeps it.` });
+      // Resolve after the last asynchronous ownership read, immediately before starting the copy.
+      const found = this.needs.index.get(harness, id, selected === undefined ? undefined : [selected.kind], selected);
+      if (found === undefined)
+        return err({ code: 'not_found', reason: `No ${harness} conversation ${id} is on this machine.` });
+      const copied = await this.needs.copier
+        .copy({ harness, id, location: { kind: found.kind, label: found.label, path: found.path } })
+        .catch((error: unknown) =>
+          err({ reason: error instanceof Error && error.message !== '' ? error.message : 'It could not be copied.' }),
+        );
+      if (!copied.ok) return err({ code: 'failed', reason: copied.error.reason });
+      handedToStart = true;
+      return ok({
+        release: () => {
+          this.#staging.delete(key);
+        },
+      });
+    } finally {
+      if (!handedToStart) this.#staging.delete(key);
     }
-    return ok({
-      release: () => {
-        this.#staging.delete(key);
-      },
-    });
   }
 
   /** The read-only foreign history (the harness conversations that predate Ferretry): the same index, never resumable. */

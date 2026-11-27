@@ -22,6 +22,7 @@ const build = async (
     computer?: boolean;
     owned?: boolean;
     copyGate?: () => Promise<void>;
+    ownerSnapshot?: (owners: ReadonlyMap<string, FerretId>) => Promise<ReadonlyMap<string, FerretId>>;
   } = {},
 ) => {
   const computer = new MemoryHistory();
@@ -53,7 +54,7 @@ const build = async (
   const copies: Array<{ id: string; kind: string; label: string }> = [];
   const service = new LinkService({
     index,
-    owners: async () => owners,
+    owners: async () => (options.ownerSnapshot === undefined ? owners : await options.ownerSnapshot(owners)),
     previewer: { preview: async () => undefined },
     ledger: {
       read: async () => ({ format: 1 as const, links }),
@@ -141,6 +142,54 @@ describe('stage consults the keep ledger and the right source', () => {
     if (!first.ok) throw new Error('stage failed');
     first.value.release();
     expect((await service.stage('claude-code', ID)).ok).toBe(true);
+  });
+
+  test('R2-1 an active start cannot disappear while a competing stage holds a stale owner snapshot', async () => {
+    const snapshotTaken = Promise.withResolvers<void>();
+    const finishSnapshot = Promise.withResolvers<void>();
+    let reads = 0;
+    let pause = true;
+    const { service, copies, owners } = await build({
+      ownerSnapshot: async owners => {
+        const snapshot = new Map(owners);
+        if (++reads === 2 && pause) {
+          snapshotTaken.resolve();
+          await finishSnapshot.promise;
+        }
+        return snapshot;
+      },
+    });
+    const first = await service.stage('claude-code', ID);
+    if (!first.ok) throw new Error('first stage must succeed');
+    const second = service.stage('claude-code', ID);
+    // The old implementation takes an empty snapshot and suspends here. A safe implementation refuses before reading it.
+    await Promise.race([snapshotTaken.promise, second.then(() => undefined)]);
+    owners.set(`claude-code:${ID}`, 'recorded-scout' as FerretId);
+    first.value.release();
+    pause = false;
+    finishSnapshot.resolve();
+    expect((await second).ok).toBe(false);
+    expect(copies).toHaveLength(1);
+    expect(await service.stage('claude-code', ID)).toEqual(
+      err({ code: 'failed', reason: 'Ferret recorded-scout already keeps it.' }),
+    );
+  });
+
+  test('E-254 keeping cannot take a history reserved by a continuation; release permits a retry', async () => {
+    const { service, copies, links } = await build();
+    const staged = await service.stage('claude-code', ID);
+    if (!staged.ok) throw new Error('stage failed');
+    const request = { harness: 'claude-code', runtime: 'default', conversations: [{ id: ID, start: false }] };
+    expect(await service.keep(request)).toEqual({
+      kept: [],
+      refused: [{ id: ID, code: 'already_kept', reason: 'That conversation is already being continued.' }],
+    });
+    expect(copies).toHaveLength(1);
+    expect(links).toHaveLength(0);
+    staged.value.release();
+    expect((await service.keep(request)).kept).toHaveLength(1);
+    expect(copies).toHaveLength(2);
+    expect(links).toHaveLength(1);
   });
 
   test('E-256 a changed selected row is refused without falling back to another copy', async () => {
