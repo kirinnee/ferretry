@@ -8,12 +8,12 @@
  * it is (Ferrets never moves one), so the offer is the one existing in-place act and the list is read again after it.
  */
 import { Spinner } from '@ferretry/app/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { RepoWorktreeListResponse, RepoWorktreeRow } from '@ferretry/core-ferrets/contract';
 import type { ProjectInfo } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
 import { reasonOf } from '../../lib/client.ts';
-import { adoptWorktree, readRepoWorktrees, repoCommonDirectory } from './worktrees-api.ts';
+import { adoptWorktree, readRepoWorktrees, type WorktreeSource, worktreeSources } from './worktrees-api.ts';
 
 type Reading =
   | { readonly kind: 'unread' }
@@ -22,6 +22,18 @@ type Reading =
 
 /** A checkout Git lists that Ferretry holds no record of: the main checkout and a bare repository are never offered. */
 const isStray = (row: RepoWorktreeRow): boolean => row.tracked === 'none' && !row.main && !row.bare;
+
+/**
+ * Why a stray checkout cannot be adopted, when the daemon would refuse it: a detached HEAD has no branch to keep a record
+ * against, and a folder Git says is gone has nothing there to adopt. `undefined` is an offer the daemon will take.
+ */
+const cannotAdopt = (row: RepoWorktreeRow): string | undefined => {
+  if (row.live.prunable !== undefined)
+    return 'Its folder is missing on disk, so there is nothing to adopt. Run "git worktree prune" in the repository to forget it.';
+  if (row.live.detached)
+    return 'It is on a detached HEAD, which Ferretry cannot adopt. Check out a branch in it first, then adopt it.';
+  return undefined;
+};
 
 /** The words for what Git says about one checkout; an undetermined fact is not guessed. */
 const facts = (row: RepoWorktreeRow): readonly string[] => {
@@ -55,6 +67,7 @@ function Row({
   readonly onAdopt: (path: string) => void;
 }) {
   const stray = isStray(row);
+  const blocked = stray ? cannotAdopt(row) : undefined;
   return (
     <li
       className="grid min-w-0 gap-1 rounded-panel border border-border-strong bg-surface-2 px-panel py-2"
@@ -69,7 +82,12 @@ function Row({
       </span>
       <span className="mono break-all text-2xs text-muted">{row.path}</span>
       {!row.bare && <span className="text-meta text-muted">{facts(row).join(' · ')}</span>}
-      {stray && (
+      {blocked !== undefined && (
+        <span className="text-meta leading-base text-muted" data-project-worktree-no-adopt={row.path}>
+          {blocked}
+        </span>
+      )}
+      {stray && blocked === undefined && (
         <span className="grid justify-items-start gap-1" data-project-worktree-offer={row.path}>
           <span className="text-meta leading-base text-muted">
             Ferretry has no record of this old checkout. Adopting it keeps it exactly where it is, so Ferretry can list,
@@ -93,13 +111,17 @@ function Row({
 
 function RepoGroup({
   client,
-  commonDir,
-  name,
+  source,
+  listedElsewhere,
+  onListed,
 }: {
   readonly client: ProjectsClient;
-  readonly commonDir: string;
-  readonly name: string;
+  readonly source: WorktreeSource;
+  /** Every checkout another repository group of this project lists: a folder found here that one of them lists is theirs. */
+  readonly listedElsewhere: ReadonlySet<string>;
+  readonly onListed: (commonDir: string, paths: readonly string[]) => void;
 }) {
+  const { commonDir, name } = source;
   const [reading, setReading] = useState<Reading>({ kind: 'unread' });
   const [adopting, setAdopting] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
@@ -120,6 +142,13 @@ function RepoGroup({
     [client, commonDir],
   );
   useEffect(() => {
+    if (reading.kind === 'ready')
+      onListed(
+        commonDir,
+        reading.list.worktrees.map(row => row.path),
+      );
+  }, [reading, commonDir, onListed]);
+  useEffect(() => {
     let alive = true;
     void read(() => alive);
     return () => {
@@ -139,6 +168,9 @@ function RepoGroup({
     );
   };
 
+  // A repository found inside the folder that is itself a linked checkout of one listed above has no common directory of its own
+  // to ask about (Ferrets refuses its `.git` file): it is already shown there, so it is not a second, failed repository.
+  if (reading.kind === 'failed' && listedElsewhere.has(source.folder)) return null;
   return (
     <div className="grid gap-xs" data-project-worktree-repo={name} data-project-worktree-state={reading.kind}>
       <h3 className="m-0 mono break-all text-ui font-semibold text-fg">{name}</h3>
@@ -178,8 +210,17 @@ export function ProjectWorktrees({
   readonly client: ProjectsClient;
   readonly project: ProjectInfo;
 }) {
-  const repos = project.repos ?? [];
-  if (repos.length === 0)
+  const sources = useMemo(() => worktreeSources(project), [project]);
+  const [listed, setListed] = useState<Readonly<Record<string, readonly string[]>>>({});
+  const onListed = useCallback((commonDir: string, paths: readonly string[]) => {
+    setListed(previous => {
+      const before = previous[commonDir];
+      return before?.length === paths.length && before.every((path, at) => path === paths[at])
+        ? previous
+        : { ...previous, [commonDir]: paths };
+    });
+  }, []);
+  if (sources.length === 0)
     return (
       <p className="m-0 text-meta text-faint" data-project-worktrees="none">
         No repository has been found in this project’s folder yet, so there are no branches to list.
@@ -187,12 +228,19 @@ export function ProjectWorktrees({
     );
   return (
     <div className="grid gap-panel" data-project-worktrees="some">
-      {repos.map(repo => (
+      {sources.map(source => (
         <RepoGroup
-          key={repo.path}
+          key={source.commonDir}
           client={client}
-          commonDir={repoCommonDirectory(project.path, repo)}
-          name={repo.path}
+          source={source}
+          listedElsewhere={
+            new Set(
+              Object.entries(listed)
+                .filter(([commonDir]) => commonDir !== source.commonDir)
+                .flatMap(([, paths]) => paths),
+            )
+          }
+          onListed={onListed}
         />
       ))}
     </div>

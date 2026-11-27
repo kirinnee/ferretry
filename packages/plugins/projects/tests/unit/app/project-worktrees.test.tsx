@@ -171,6 +171,144 @@ describe('the project page: Branches & worktrees (F-120, F-121)', () => {
     await mounted.unmount();
   });
 
+  it('MUST 1: lists a project whose record has a common directory but no saved repositories (repos absent)', async () => {
+    const calls: Call[] = [];
+    const own = ProjectInfoSchema.parse({ ...PROJECT, git: { commonDirectory: '/work/ferretry/.git' } });
+    const mounted = await mount(
+      <RouterProvider>
+        <ProjectDetailPage
+          client={page(
+            {
+              [LIST]: (call: Call) =>
+                listAnswer(call.query?.commonDir ?? '', [
+                  row('/work/ferretry', 'main', { main: true, tracked: 'none' }),
+                  row('/work/trees/nav', 'feat/nav'),
+                ]),
+            },
+            calls,
+            own,
+          )}
+          daemon="workstation"
+          projectId={PROJECT.id}
+        />
+      </RouterProvider>,
+    );
+    await settleUntil(
+      () => mounted.container.querySelectorAll('[data-project-worktree]').length === 2,
+      'both worktrees listed',
+      interact,
+    );
+    expect(mounted.container.querySelector('[data-project-worktrees="none"]')).toBeNull();
+    expect(calls.filter(call => call.route === LIST).map(call => call.query)).toEqual([
+      { commonDir: '/work/ferretry/.git' },
+    ]);
+    await mounted.unmount();
+  });
+
+  it('MUST 2: a project that is itself a linked checkout asks its recorded common directory, never its own .git file', async () => {
+    const calls: Call[] = [];
+    const linked = ProjectInfoSchema.parse({
+      ...PROJECT,
+      git: { commonDirectory: '/work/main/.git' },
+      repos: [{ path: '.' }],
+    });
+    const mounted = await mount(
+      <RouterProvider>
+        <ProjectDetailPage
+          client={page(
+            {
+              [LIST]: (call: Call) =>
+                call.query?.commonDir === '/work/main/.git'
+                  ? listAnswer('/work/main/.git', [
+                      row('/work/main', 'main', { main: true, tracked: 'none' }),
+                      row('/work/ferretry', 'feat/this'),
+                    ])
+                  : refusal(422, 'not a git common directory.'),
+            },
+            calls,
+            linked,
+          )}
+          daemon="workstation"
+          projectId={PROJECT.id}
+        />
+      </RouterProvider>,
+    );
+    await settleUntil(
+      () => mounted.container.querySelectorAll('[data-project-worktree]').length === 2,
+      'main and linked branches listed',
+      interact,
+    );
+    expect(mounted.container.querySelector('[data-project-worktree-state="failed"]')).toBeNull();
+    expect(calls.filter(call => call.route === LIST).map(call => call.query)).toEqual([
+      { commonDir: '/work/main/.git' },
+    ]);
+    await mounted.unmount();
+  });
+
+  it('MUST 2: a repository found inside the folder that is a linked checkout of a listed one is folded into it, not drawn as failed', async () => {
+    const nested = ProjectInfoSchema.parse({ ...PROJECT, repos: [{ path: 'site' }, { path: 'site-wt' }] });
+    const mounted = await open(
+      page(
+        {
+          [LIST]: (call: Call) =>
+            call.query?.commonDir === '/work/ferretry/site/.git'
+              ? listAnswer('/work/ferretry/site/.git', [
+                  row('/work/ferretry/site', 'main', { main: true, tracked: 'none' }),
+                  row('/work/ferretry/site-wt', 'feat/wt'),
+                ])
+              : refusal(422, 'not a git common directory.'),
+        },
+        [],
+        nested,
+      ),
+    );
+    await settleUntil(
+      () => mounted.container.querySelectorAll('[data-project-worktree]').length === 2,
+      'the listed repository',
+      interact,
+    );
+    await settleUntil(
+      () => mounted.container.querySelectorAll('[data-project-worktree-repo]').length === 1,
+      'the folded repository gone',
+      interact,
+    );
+    expect(mounted.container.querySelector('[data-project-worktree-state="failed"]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('SHOULD 3: a detached or missing stray checkout gets the reason instead of an Adopt button the daemon would refuse', async () => {
+    const mounted = await open(
+      page(
+        {
+          [LIST]: (call: Call) =>
+            listAnswer(call.query?.commonDir ?? '', [
+              row('/work/a/main', 'main', { main: true, tracked: 'none' }),
+              row('/work/a/detached', '', { tracked: 'none', live: { branch: undefined, detached: true } }),
+              row('/work/a/gone', 'old', {
+                tracked: 'none',
+                live: { prunable: 'gitdir file points to non-existent location' },
+              }),
+              row('/work/a/fine', 'fine', { tracked: 'none' }),
+            ]),
+        },
+        [],
+      ),
+    );
+    await ready(mounted);
+    const offers = [...mounted.container.querySelectorAll('[data-project-worktree-adopt]')].map(node =>
+      node.getAttribute('data-project-worktree-adopt'),
+    );
+    expect(offers).toEqual(['/work/a/fine', '/work/a/fine']);
+    const reasons = [...mounted.container.querySelectorAll('[data-project-worktree-no-adopt]')].map(node => [
+      node.getAttribute('data-project-worktree-no-adopt'),
+      node.textContent,
+    ]);
+    expect(reasons).toHaveLength(4);
+    expect(String(reasons[0]?.[1])).toContain('detached HEAD');
+    expect(String(reasons[1]?.[1])).toContain('missing on disk');
+    await mounted.unmount();
+  });
+
   it('says so when the project holds no repository', async () => {
     const mounted = await open(page({}, [], PROJECT));
     expect(mounted.container.querySelector('[data-project-worktrees="none"]')).not.toBeNull();

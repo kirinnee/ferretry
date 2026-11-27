@@ -8,17 +8,48 @@ import {
   type RepoWorktreeListResponse,
   RepoWorktreeListResponseSchema,
 } from '@ferretry/core-ferrets/contract';
-import type { ProjectRepo } from '../../../contract/index.ts';
+import type { ProjectInfo } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
-import { normalizeProjectPath } from '../../lib/folders.ts';
+import { baseName, normalizeProjectPath } from '../../lib/folders.ts';
 
 const LIST_ROUTE = 'GET /v1/worktrees/repo';
 const ADOPT_ROUTE = 'POST /v1/worktrees/adopt';
 
-/** A repository's git common directory: its `.git` folder (a repository the scan found always has one at its top). */
-export const repoCommonDirectory = (projectPath: string, repo: Pick<ProjectRepo, 'path'>): string => {
-  const root = normalizeProjectPath(projectPath);
-  return `${repo.path === '.' ? root : `${root}/${repo.path}`}/.git`;
+/** One repository to ask about: what to call it, where its checkout stands and its git common directory. */
+export interface WorktreeSource {
+  readonly name: string;
+  readonly folder: string;
+  readonly commonDir: string;
+}
+
+/**
+ * Which repositories to ask Ferrets about, and for each its git COMMON directory (the one fact Ferrets' list is keyed by).
+ *
+ * The project's own repository comes from the common directory registration recorded (`git rev-parse
+ * --path-format=absolute --git-common-dir`), never from the optional saved `repos` list: a project folder that is a main
+ * checkout OR a linked one names the right directory either way, and one whose scan has not kept anything still has it.
+ * Repositories found INSIDE the folder (`repos`, never the folder itself) can only be asked about by their own `.git`
+ * folder; one that is a linked checkout (its marker is a file) is refused by Ferrets, and the page folds it into the
+ * repository that lists it (see `project-worktrees.tsx`). Two sources never share a common directory.
+ */
+export const worktreeSources = (project: ProjectInfo): readonly WorktreeSource[] => {
+  const root = normalizeProjectPath(project.path);
+  const sources: WorktreeSource[] = [];
+  const add = (source: WorktreeSource): void => {
+    if (!sources.some(known => known.commonDir === source.commonDir)) sources.push(source);
+  };
+  const repos = project.repos ?? [];
+  if (project.git !== undefined) add({ name: baseName(root), folder: root, commonDir: project.git.commonDirectory });
+  for (const repo of repos) {
+    if (repo.path === '.') {
+      // The folder itself: its recorded common directory already stands above; only a record that has none falls back.
+      if (project.git === undefined) add({ name: baseName(root), folder: root, commonDir: `${root}/.git` });
+      continue;
+    }
+    const folder = `${root}/${repo.path}`;
+    add({ name: repo.path, folder, commonDir: `${folder}/.git` });
+  }
+  return sources;
 };
 
 export const readRepoWorktrees = async (client: ProjectsClient, commonDir: string): Promise<RepoWorktreeListResponse> =>

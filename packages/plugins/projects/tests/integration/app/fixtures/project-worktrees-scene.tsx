@@ -1,7 +1,7 @@
 /**
  * Browser entry for F-120/F-121 (a project's branches and worktrees, and the offer to adopt a stray checkout): Projects' REAL
  * detail page over a scripted daemon. Fake names, no network. `?repos=<n>` repositories held (default 2);
- * `?worktrees=ok|failed|slow` is how the daemon answers the list; `?theme=<palette>-<mode>`.
+ * `?git=1` records the project's own common directory (and `repos=0` leaves the saved list absent); `?worktrees=ok|failed|slow|blocked` is how the daemon answers the list (`blocked` adds a detached and a missing stray checkout); `?theme=<palette>-<mode>`.
  */
 import { RouterProvider } from '@ferretry/app/testing/router';
 import { createRoot } from 'react-dom/client';
@@ -19,6 +19,7 @@ const NAMES = ['site', 'docs'];
 
 const held: ProjectInfo = ProjectInfoSchema.parse({
   ...PROJECT,
+  ...(params.get('git') === '1' ? { git: { commonDirectory: '/work/ferretry/site/.git' } } : {}),
   repos: NAMES.slice(0, count).map(path => ({
     path,
     remote: `https://github.com/fake-org/${path}`,
@@ -38,9 +39,19 @@ const client = scripted({
     if (mode === 'slow') return new Promise(() => undefined);
     if (mode === 'failed' && dir.endsWith('/docs/.git'))
       throw Object.assign(new Error('that folder is not a git common directory.'), { status: 422 });
+    const extra =
+      mode === 'blocked' && dir.endsWith('/docs/.git')
+        ? [
+            row('/home/fake/detached-checkout', '', { tracked: 'none', live: { branch: undefined, detached: true } }),
+            row('/home/fake/gone-checkout', 'docs/gone', {
+              tracked: 'none',
+              live: { prunable: 'gitdir file points to non-existent location' },
+            }),
+          ]
+        : [];
     return listAnswer(
       dir,
-      (ANSWERS[dir] ?? []).map(r =>
+      [...(ANSWERS[dir] ?? []), ...extra].map(r =>
         adopted.has(r.path) ? row(r.path, r.live.branch ?? '', { tracked: 'adopted' }) : r,
       ),
     );

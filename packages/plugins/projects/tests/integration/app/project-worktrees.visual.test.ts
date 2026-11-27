@@ -8,6 +8,8 @@
  *   adopted   the offer pressed: the checkout reads as adopted and the offer is gone
  *   failed    one repository could not be read: said beside its name, the other still listed
  *   none      no repository held: said, with nothing to list
+ *   own       no saved repositories but the project's recorded common directory: its worktrees listed (MUST 1)
+ *   blocked   a detached and a missing stray checkout: the reason, never an Adopt button the daemon would refuse (SHOULD 3)
  *
  * Set `FY_PROJECT_WORKTREES_SHOTS_DIR` to keep `<look>-<viewport>-<scheme>-<state>.png`.
  */
@@ -110,6 +112,24 @@ const STATES: readonly {
         'not a git common directory',
       );
       expect(await page.locator('[data-project-worktree="/work/trees/site-nav"]').count()).toBe(1);
+    },
+  },
+  {
+    name: 'own',
+    query: 'repos=0&git=1',
+    waitFor: '[data-project-worktree-state="ready"]',
+    check: async page => {
+      expect(await page.locator('[data-project-worktrees="none"]').count()).toBe(0);
+      expect(await page.locator('[data-project-worktree]').count(), 'the one repository' + "'s worktrees'").toBe(2);
+    },
+  },
+  {
+    name: 'blocked',
+    query: 'repos=2&worktrees=blocked',
+    waitFor: '[data-project-worktree-no-adopt]',
+    check: async page => {
+      expect(await page.locator('[data-project-worktree-no-adopt]').count(), 'a reason for each').toBe(2);
+      expect(await page.locator('[data-project-worktree-adopt]').count(), 'only the ordinary stray is offered').toBe(1);
     },
   },
   { name: 'none', query: 'repos=0', waitFor: '[data-project-worktrees="none"]', check: async () => undefined },
