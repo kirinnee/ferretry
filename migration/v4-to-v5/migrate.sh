@@ -951,7 +951,9 @@ verify)
   # that was BLOCKED (`session.restart_blocked`: its runtime cannot start, a login that needs sign-in) left the old v4
   # harness running untouched and is still queued: a REVIEW naming the login (from `fy ps`), never a FAIL, because v5 goes
   # on trying and restarts it once the owner signs that login in. The owner of a pane comes from the baseline's
-  # terminal-pane.json map; the history is read for event TYPES only.
+  # terminal-pane.json map; the history is read for event TYPES only (and, for an exit, its status).
+  # A restarted ferret whose agent then ended cleanly (exit status 0, or the done marker) has no pane because it is
+  # finished: a REVIEW, not a missing pane. A crash or a vanished pane after the restart stays a FAIL.
   if [ "$(note_get PANES)" = none ]; then
     row "panes" "SKIP" "no live ferret at baseline"
   else
@@ -980,7 +982,16 @@ verify)
       login_of() {
         jq -r --arg id "$1" 'first(.[]? | select(.id == $id) | .login // .runtime) // empty' "${work}/ps.json" 2>/dev/null || true
       }
-      kept=0 restarted=0 missing=0 blocked_n=0 gave_up="" blocked="" signins=""
+      # Whether the agent v5 restarted then ended cleanly, so its pane is gone because the work is done: the LAST event that
+      # says how the session stands is `session.completed` or a `session.exited` with status `stopped` (exit status 0; a
+      # crash, a signal or a vanished pane is `failed`), and nothing started or resumed it again after.
+      ended_clean() {
+        local file="${H}/state/ferrets/$1/history.jsonl"
+        [ -f "${file}" ] || return 1
+        jq -rs '[.[] | select(.type | IN("session.restarted", "session.resumed", "session.exited", "session.stopped", "session.completed", "session.failed"))]
+          | last | (.type == "session.completed" or (.type == "session.exited" and .data.status == "stopped"))' "${file}" 2>/dev/null | grep -qx true
+      }
+      kept=0 restarted=0 missing=0 blocked_n=0 exited_n=0 gave_up="" blocked="" exited="" signins=""
       while read -r session pane; do
         [ -n "${session}" ] || continue
         owner="$(awk -F'\t' -v p="${pane}" '$3 == p {print $1; exit}' "${base}/pane-owners.tsv")"
@@ -999,6 +1010,9 @@ verify)
           kept=$((kept + 1))
         elif [ "${how}" = restarted ] && awk -v s="${session}" '$1 == s {found = 1} END {exit !found}' "${work}/panes.now"; then
           restarted=$((restarted + 1))
+        elif [ "${how}" = restarted ] && ended_clean "${owner}"; then
+          exited_n=$((exited_n + 1))
+          exited="${exited}${exited:+, }${owner}"
         else
           missing=$((missing + 1))
         fi
@@ -1008,7 +1022,11 @@ verify)
       elif [ "${missing}" -gt 0 ]; then
         row "panes" FAIL "${missing} baseline panes missing (not restarted by v5 either)"
       elif [ -n "${blocked}" ]; then
-        row "panes" REVIEW "$((kept + blocked_n)) baseline panes still present (${blocked_n} not restarted yet: ${blocked}), ${restarted} restarted by v5 in a new pane. Sign each in (${signins}) and v5 restarts them by itself"
+        tail_note=""
+        [ -z "${exited}" ] || tail_note=". Already finished: ${exited} exited cleanly after v5 restarted it (${exited_n} ended, not lost)"
+        row "panes" REVIEW "$((kept + blocked_n)) baseline panes still present (${blocked_n} not restarted yet: ${blocked}), ${restarted} restarted by v5 in a new pane. Sign each in (${signins}) and v5 restarts them by itself${tail_note}"
+      elif [ -n "${exited}" ]; then
+        row "panes" REVIEW "${exited} exited cleanly after v5 restarted it (its history says session.exited with exit status 0, or session.completed): the work is done, not lost. ${kept} baseline panes still present, ${restarted} restarted by v5 in a new pane"
       else
         row "panes" OK "${kept} baseline panes still present, ${restarted} restarted by v5 in a new pane"
       fi

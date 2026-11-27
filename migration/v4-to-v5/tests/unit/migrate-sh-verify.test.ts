@@ -175,6 +175,18 @@ describe('verify: compares each field with its own v5 destination', () => {
         .join('\n') + '\n',
     );
   };
+  /** Like {@link history}, but each event carries its own data (an exit says how the agent ended). */
+  const historyWith = async (...events: { type: string; data?: Record<string, unknown> }[]) => {
+    await mkdir(join(sb.v4home, 'state', 'ferrets', 'f1'), { recursive: true });
+    await writeFile(
+      join(sb.v4home, 'state', 'ferrets', 'f1', 'history.jsonl'),
+      events
+        .map((event, index) =>
+          JSON.stringify({ format: 1, sequence: index + 1, sessionId: 'f1', type: event.type, data: event.data ?? {} }),
+        )
+        .join('\n') + '\n',
+    );
+  };
   const panesNow = async (line: string) =>
     await sb.fake('tmux', [
       { match: '*session_name*', out: line },
@@ -245,6 +257,66 @@ describe('verify: compares each field with its own v5 destination', () => {
     const gone = await sb.run('verify');
     expect(gone.code).toBe(1);
     expect(gone.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+  });
+
+  test('D-105: a ferret v5 restarted that then exited cleanly (status 0) is a REVIEW, not a missing pane', async () => {
+    // The restart worked and the agent finished by itself: its pane is gone because the work is done, not lost.
+    await panesNow('fy-other %9');
+    await historyWith(
+      { type: 'session.created' },
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'stopped', pane: 'dead', exitCode: 0, signal: null } },
+    );
+    const result = await sb.run('verify');
+    expect(result.code).toBe(0);
+    expect(result.out).toMatch(/panes +REVIEW +.*f1 exited cleanly after v5 restarted it .*the work is done/);
+    expect(result.out).not.toMatch(/panes +FAIL/);
+  });
+
+  test('D-105: a restarted ferret whose agent then crashed or was killed is still a FAIL', async () => {
+    await panesNow('fy-other %9');
+    await historyWith(
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'failed', pane: 'dead', exitCode: 1, signal: null } },
+    );
+    const crashed = await sb.run('verify');
+    expect(crashed.code).toBe(1);
+    expect(crashed.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+    await historyWith(
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'failed', pane: 'gone', exitCode: null, signal: null } },
+    );
+    const gone = await sb.run('verify');
+    expect(gone.code).toBe(1);
+    expect(gone.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+  });
+
+  test('D-105: the done marker after a restart is the same REVIEW; a resume after the clean exit that then crashed is a FAIL', async () => {
+    await panesNow('fy-other %9');
+    await historyWith({ type: 'session.restarted' }, { type: 'session.completed' });
+    const done = await sb.run('verify');
+    expect(done.code).toBe(0);
+    expect(done.out).toMatch(/panes +REVIEW +.*f1 exited cleanly after v5 restarted it/);
+    await historyWith(
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'stopped', pane: 'dead', exitCode: 0, signal: null } },
+      { type: 'session.resumed' },
+      { type: 'session.exited', data: { status: 'failed', pane: 'gone', exitCode: null, signal: null } },
+    );
+    const crashed = await sb.run('verify');
+    expect(crashed.code).toBe(1);
+    expect(crashed.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+  });
+
+  test('D-105: a clean exit from BEFORE the restart does not excuse a missing pane', async () => {
+    await panesNow('fy-other %9');
+    await historyWith(
+      { type: 'session.exited', data: { status: 'stopped', pane: 'dead', exitCode: 0, signal: null } },
+      { type: 'session.restarted' },
+    );
+    const result = await sb.run('verify');
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/panes +FAIL +1 baseline panes missing/);
   });
 
   test('run 7: a blocked restart that later went through is OK', async () => {
