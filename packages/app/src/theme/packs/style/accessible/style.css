@@ -92,6 +92,9 @@
   --glow-alpha: 0;
 
   /* 44px targets with room between them. */
+  /* The floor itself, not only the heights above it: the controls that read `--target-floor` directly (the Dialog's Close) are
+     otherwise 18px on a desktop, where no coarse pointer raises it. */
+  --target-floor: 44px;
   --control-h-desktop: 44px;
   --control-h-sm-desktop: 44px;
   --row-min-h-desktop: 48px;
@@ -205,6 +208,13 @@
 [data-swatch][data-style='accessible'] a:not([class]) {
   text-decoration: underline;
   text-underline-offset: 0.18em;
+}
+
+/* Two shared controls draw their own height and read no target token, so the promise is kept here, inside the pack: a settings
+   nav entry (a 6px pad round one line) and the terminal's Replay (a fixed 40px in the hypermedia theme). */
+:root[data-style='accessible'] .fy-settings-nav .fy-tab,
+:root[data-style='accessible'] .fy-hm .dh-doc .btn {
+  min-height: var(--target-floor);
 }
 
 /* One ring on every field, the same 4px line the buttons get. */
