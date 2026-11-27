@@ -35,6 +35,7 @@ export * from './codex-launch.ts';
 export * from './display-name.ts';
 export * from './component-source.ts';
 export * from './harness-fallback.ts';
+export * from './harness-kit.ts';
 export * from './harness-words.ts';
 export * from './homes.ts';
 export * from './layers.ts';
