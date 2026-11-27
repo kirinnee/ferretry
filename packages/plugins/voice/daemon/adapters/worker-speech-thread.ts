@@ -102,7 +102,9 @@ export const SPEECH_HOST_URL = new URL('../worker/speech-host.ts', import.meta.u
 /**
  * What to run for one native engine's host. From source the daemon's own runtime (`bun`) runs the module; compiled, the
  * executable is `fyd` itself and its `--plugin-child` mode runs the embedded program (`packages/core/kernel/host/plugin-child.ts`).
- * Either way the program is `process.execPath`, which the manifest's `$daemon` spawn permission allows and nothing else.
+ * Either way the program is `process.execPath`, which the manifest's `$daemon` spawn permission allows only as
+ * `--plugin-child <program>`: the compiled form below passes the host's spawn guard, and the source form (a `bun` run
+ * of the module by path) does not, so a daemon run from source is refused a native host.
  */
 export function nativeHostCommand(engine: 'speech' | 'reply'): HostCommand {
   return import.meta.url.endsWith('.ts')

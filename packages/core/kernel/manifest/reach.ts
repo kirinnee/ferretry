@@ -22,7 +22,8 @@ export function hostAllowed(host: string, declared: readonly string[]): boolean 
 /**
  * `'$daemon'` in `permissions.spawn`: the daemon's OWN executable (`process.execPath`, exactly), for a plugin that runs a
  * program of its own in a child process (Voice's native speech host: `fyd --plugin-child`). It is a name no program has, so it
- * cannot be matched by a basename, and it never allows a path other than the one this process was started from.
+ * cannot be matched by a basename, and it never allows a path other than the one this process was started from. The spawn
+ * guard (`spawnPermitted`) also admits it only with `--plugin-child` as the first argument, never with arguments of the plugin's own.
  */
 export const DAEMON_PROGRAM = '$daemon';
 

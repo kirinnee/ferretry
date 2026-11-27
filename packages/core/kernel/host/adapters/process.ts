@@ -14,12 +14,14 @@ import type {
   WorkersPort,
 } from '../../contract/ports.ts';
 import { detachedAsked, detachedHandle, plainEnvironment } from '../detached.ts';
+import { PLUGIN_CHILD_FLAG } from '../plugin-child.ts';
 import { embeddedWorkerUrl } from './embedded-worker.ts';
 import { ABANDONED, readCapped } from './process-capture.ts';
 
 /**
  * The unrestricted spawn adapter; the host wraps it per plugin (`restrictSpawn`). The child sees the base the host
- * names plus the caller's env. A Vault `ChildEnvironment` is opened HERE, at exec time, by the bound opener, so its
+ * names plus the caller's env, except `--plugin-child` launches of the daemon itself, whose environment is kernel-only.
+ * A Vault `ChildEnvironment` is opened HERE, at exec time, by the bound opener, so its
  * values go straight into the child and never back to the caller (lead decision 9). A handle with no opener bound, or
  * one the opener does not recognise, refuses the start: it is never passed through as if it were plain values.
  */
@@ -52,7 +54,7 @@ export function startDetached(
   program: string,
   args: readonly string[],
   options: SpawnOptions,
-  env: (program: string, options?: SpawnOptions) => Record<string, string>,
+  env: (program: string, options: SpawnOptions | undefined, args: readonly string[]) => Record<string, string>,
   call: DetachedSpawnCall = bunDetachedSpawn,
 ): ChildHandle {
   const cwd = options.cwd;
@@ -70,7 +72,7 @@ export function startDetached(
     );
   const child = call([program, ...args], {
     ...(cwd === undefined ? {} : { cwd }),
-    env: env(program, options),
+    env: env(program, options, args),
     stdin: 'ignore',
     stdout: 'ignore',
     stderr: 'ignore',
@@ -180,6 +182,9 @@ const TOOL_PROGRAMS: ReadonlySet<string> = new Set(['git', 'gh']);
  */
 const MANAGER_PROGRAMS: ReadonlySet<string> = new Set(['systemctl', 'systemd-run', 'tmux']);
 
+/** A daemon worker inherits only these names from the kernel's base, never caller values or tool overlays. */
+const DAEMON_CHILD_ENVIRONMENT_NAMES = ['PATH', 'HOME'] as const;
+
 /** The allow-listed names that are set in `source`: nothing else of it is copied. */
 export function toolEnvironment(source: Readonly<Record<string, string | undefined>>): Record<string, string> {
   const picked: Record<string, string> = {};
@@ -220,13 +225,22 @@ export function bunSpawn(
   /** What `systemctl` / `systemd-run` children inherit ({@link managerEnvironment}). */
   managers: Readonly<Record<string, string>> = {},
 ): SpawnPort {
-  const env = (program: string, options?: SpawnOptions): Record<string, string> =>
-    options?.inheritEnv === false
-      ? resolveEnv(options.env, opener())
-      : options?.sealed === true
-        ? // Never the tool overlay, whatever the program is called.
-          { ...sealedBase, ...resolveEnv(options.env, opener()) }
-        : childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()), managers);
+  // Fixed when the kernel builds the adapter. Loader/runtime options must not run code before --plugin-child dispatch.
+  const daemonEnv: Record<string, string> = {};
+  for (const name of DAEMON_CHILD_ENVIRONMENT_NAMES) {
+    const value = baseEnv[name];
+    if (value !== undefined) daemonEnv[name] = value;
+  }
+  Object.freeze(daemonEnv);
+  const env = (program: string, options: SpawnOptions | undefined, args: readonly string[]): Record<string, string> =>
+    program === process.execPath && args[0] === PLUGIN_CHILD_FLAG
+      ? { ...daemonEnv }
+      : options?.inheritEnv === false
+        ? resolveEnv(options.env, opener())
+        : options?.sealed === true
+          ? // Never the tool overlay, whatever the program is called.
+            { ...sealedBase, ...resolveEnv(options.env, opener()) }
+          : childEnvironment(program, baseEnv, tools, resolveEnv(options?.env, opener()), managers);
   /**
    * One piped child. `signalCode` is read from the Bun subprocess after `exited` settles: a killed child (Bun's
    * `timeout`, an abort `signal`, `kill`) resolves `exited` with `128 + n` while `signalCode` names the signal, and
@@ -248,7 +262,7 @@ export function bunSpawn(
     try {
       child = Bun.spawn([program, ...args], {
         ...(cwd === undefined ? {} : { cwd: typeof cwd === 'string' ? cwd : '.' }),
-        env: env(program, options),
+        env: env(program, options, args),
         ...(extra === 0
           ? { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }
           : { stdio: ['pipe', 'pipe', 'pipe', ...Array.from({ length: extra }, () => 'pipe' as const)] }),

@@ -2531,6 +2531,7 @@ async function start(world: World): Promise<TestHost> {
               itemsOf,
               program,
               resolversOf(manifest.id),
+              args,
             )
           )
             throw new Error(`${manifest.id}: spawn ${program} is not declared`);
@@ -2568,6 +2569,7 @@ async function start(world: World): Promise<TestHost> {
               itemsOf,
               program,
               resolversOf(manifest.id),
+              args,
             )
           )
             return options.start(program, args, spawnOptions);
