@@ -104,7 +104,7 @@ import { composeOwned, handOver, type OwnedComponents, recordText, withoutHanded
 import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
-import { parseSettings, type SettingsObject } from '../settings.ts';
+import { parseSettings, SETTINGS_FORMAT, type SettingsObject } from '../settings.ts';
 import { skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
@@ -141,7 +141,7 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   type FleetCatalogServiceDeps,
-  harnessCommandsOf,
+  harnessFactsOf,
 } from './catalog-service.ts';
 import { assertMayFileSecrets, reusableSecrets, secretSentences, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
@@ -238,6 +238,7 @@ export type SetupCatalogDeps = Pick<
   | 'loginStores'
   | 'loginChanges'
   | 'budgetHolds'
+  | 'kits'
 >;
 
 export interface FleetSetupServiceDeps {
@@ -324,7 +325,6 @@ const CLONE_BUNDLE_MAX_BYTES = 384 * 1024;
 
 const DOCUMENT_MODE = 0o600;
 const HARNESSES: readonly HarnessKind[] = supportedKinds();
-const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
 
 type SetupChange = Extract<AccountChange, { kind: 'setup.import' }>;
 type CloneChange = Extract<AccountChange, { kind: 'clone.import' }>;
@@ -1484,7 +1484,7 @@ export class FleetSetupService {
         bodies: await this.#bodies(model, documents),
         claudeStatusline: catalog.claudeStatusline,
         fyCommand: catalog.fyCommand,
-        harnessCommands: harnessCommandsOf(harness => catalog.locate(harness)),
+        ...harnessFactsOf(catalog),
         ...(catalog.hostCodexHome === undefined ? {} : { hostCodexHome: catalog.hostCodexHome }),
         acceptsAutoPermissionMode: catalog.acceptsAutoPermissionMode,
         // An import or a clone publishes the logins a budget holds unavailable too, like every other publish.

@@ -44,11 +44,12 @@ import {
   type FleetModelApplyPlan,
   type FleetProvisioner,
 } from '../provisioning.ts';
+import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
+import { type MaterialiseBodies, type MaterialiseInput, materialiseFleet } from '../account/materialise.ts';
 import { nextDisableExpiry } from '../account/disabled.ts';
 import type { BudgetHolds } from '../account/disabled-runtime.ts';
-import { parseSettings, type SettingsObject } from '../settings.ts';
+import { parseSettings, SETTINGS_FORMAT, type SettingsObject } from '../settings.ts';
 import {
   type AccountChange,
   type ApplyOutcome,
@@ -67,6 +68,7 @@ import {
   type ProfileDraftView,
   type RunningSession,
   type RuntimeCatalog,
+  type RuntimesHarnessKit,
 } from '../../../contract/index.ts';
 import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
 import { ApiError } from '@ferretry/kernel/contract';
@@ -269,6 +271,8 @@ export interface FleetCatalogServiceDeps {
   ids(): Promise<RuntimeIds | undefined>;
   /** The harness command this daemon's one rule resolves. Nothing is launched to find it. */
   locate(harness: HarnessKind): string | undefined;
+  /** What each harness's own plugin hands Runtimes, read live. Absent: no plugin gives any. */
+  kits?(): ReadonlyMap<HarnessKind, RuntimesHarnessKit>;
   /**
    * Whether every wrapper file this plan would write already holds exactly that content on disk. A
    * republish whose manifest is unchanged still has to rewrite a wrapper whose harness path moved, which
@@ -374,14 +378,22 @@ const countRunningSessions = (statuses: readonly SessionStatus[]): number => sta
  * aside. Anything else that differs — a model, a default, a catalog — is worth publishing again.
  */
 /** The absolute path each located harness resolved to, which a wrapper execs instead of a bare name. */
-export function harnessCommandsOf(
-  locate: (harness: HarnessKind) => string | undefined,
-): Partial<Record<HarnessKind, string>> {
-  const claude = locate('claude');
-  const codex = locate('codex');
+function harnessCommandsOf(locate: (harness: HarnessKind) => string | undefined): Partial<Record<HarnessKind, string>> {
+  return Object.fromEntries(
+    supportedKinds().flatMap(kind => {
+      const command = locate(kind);
+      return command === undefined ? [] : [[kind, command] as const];
+    }),
+  );
+}
+
+/** What the harnesses themselves give a materialisation: where each one lives, and what each one's plugin hands Runtimes. */
+export function harnessFactsOf(
+  deps: Pick<FleetCatalogServiceDeps, 'locate' | 'kits'>,
+): Pick<MaterialiseInput, 'harnessCommands' | 'kits'> {
   return {
-    ...(claude === undefined ? {} : { claude }),
-    ...(codex === undefined ? {} : { codex }),
+    harnessCommands: harnessCommandsOf(harness => deps.locate(harness)),
+    ...(deps.kits === undefined ? {} : { kits: deps.kits() }),
   };
 }
 
@@ -393,9 +405,6 @@ function sameManifest(planned: { readonly generatedAt: string }, published: unkn
 }
 
 // ── Component bodies ─────────────────────────────────────────────────────────────────────────────
-
-/** The document format each harness's settings file is in. */
-const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
 
 /** A document that parses, or nothing: an unreadable body is reported by the plan, not here. */
 function parsed(text: string | undefined, format: 'json' | 'toml'): SettingsObject | undefined {
@@ -637,7 +646,7 @@ export class FleetCatalogService {
         bodies: await this.#bodies(reading.model),
         claudeStatusline: this.deps.claudeStatusline,
         fyCommand: this.deps.fyCommand,
-        harnessCommands: harnessCommandsOf(this.deps.locate),
+        ...harnessFactsOf(this.deps),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
         ...this.#budgetHolds(),
@@ -1036,7 +1045,7 @@ export class FleetCatalogService {
         bodies,
         claudeStatusline: this.deps.claudeStatusline,
         fyCommand: this.deps.fyCommand,
-        harnessCommands: harnessCommandsOf(this.deps.locate),
+        ...harnessFactsOf(this.deps),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
         ...(await this.#loginStores()),

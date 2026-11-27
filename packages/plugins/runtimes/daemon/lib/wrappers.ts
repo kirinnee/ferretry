@@ -726,3 +726,11 @@ export function renderCommandScript(input: CommandRenderInput): string {
     '',
   ].join('\n');
 }
+
+/** What an auto launch of `harness` prepares before the harness starts: Claude re-asserts its first-run keys, Codex trusts the folder. */
+export function autonomousPreparation(harness: string): {
+  readonly seedFirstRun: boolean;
+  readonly trustLaunchFolder: boolean;
+} {
+  return { seedFirstRun: isKind(harness, 'claude'), trustLaunchFolder: isKind(harness, 'codex') };
+}

@@ -79,7 +79,7 @@ import {
   settingsKey,
 } from './layering.ts';
 import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
-import { UnsupportedHarnessError } from '../harness-kind.ts';
+import { byHarness, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { AgentPermissions } from './schema.ts';
 import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
@@ -904,4 +904,29 @@ function unquoted(value: string): string {
   } catch {
     return trimmed.slice(1, -1);
   }
+}
+
+/** What {@link fixedLayerOf} is asked for: the launch facts every harness's fixed layer is built from. */
+export interface FixedLayerRequest {
+  readonly agentPermissions: AgentPermissions;
+  readonly cwd: string;
+  readonly fyCommand: string;
+  /** Whether the installed Claude accepts `--permission-mode auto`; the one fact only Claude's layer reads. */
+  readonly acceptsAutoPermissionMode: boolean;
+}
+
+/** The fixed layer for the harness `harness` (a stored word or a plugin key), or the reason it cannot launch. */
+export function fixedLayerOf(harness: string, request: FixedLayerRequest): FixedLayerResult {
+  const { agentPermissions, cwd, fyCommand } = request;
+  return byHarness<FixedLayerResult>(harness, {
+    claude: () =>
+      fixedLayerFor({
+        harness: 'claude',
+        agentPermissions,
+        cwd,
+        acceptsAutoPermissionMode: request.acceptsAutoPermissionMode,
+        fyCommand,
+      }),
+    codex: () => fixedLayerFor({ harness: 'codex', agentPermissions, cwd, fyCommand }),
+  });
 }

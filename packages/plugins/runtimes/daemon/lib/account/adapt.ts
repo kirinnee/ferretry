@@ -799,3 +799,28 @@ export function componentPartialSupport(facts: PartialSupportFacts): readonly Pa
 /** A partial-support entry in the product's words (E22): "Partly supported on Codex: …". */
 export const describePartialSupport = (entry: PartialSupport): string =>
   `Partly supported on ${HARNESS_DISPLAY_NAMES[entry.harness]}: ${entry.reason}`;
+
+/** The plumbing facts the caller knows, as `harness` takes them. */
+export function plumbingOf(
+  harness: string,
+  facts: { readonly claudeStatusline: ClaudeStatuslineCommand; readonly codexSqliteHome: string },
+): AdaptPlumbing {
+  return byHarness<AdaptPlumbing>(harness, {
+    claude: () => ({ harness: 'claude', statusLine: facts.claudeStatusline }),
+    codex: () => ({ harness: 'codex', sqliteHome: facts.codexSqliteHome }),
+  });
+}
+
+/**
+ * The servers of the machine's own (those the profile in effect does not contribute) as the harness's document spells
+ * them: the ones an upgrade proves were Ferretry's. A harness whose document keeps none of them answers none.
+ */
+export function priorServersOf(
+  harness: string,
+  servers: Readonly<Record<string, McpComponent>>,
+): Readonly<Record<string, SettingsObject>> {
+  return byHarness<Readonly<Record<string, SettingsObject>>>(harness, {
+    claude: () => renderMcpComponents('claude', servers),
+    codex: () => ({}),
+  });
+}

@@ -12,7 +12,7 @@
  * `${secret:NAME}` references exactly as the import made them.
  */
 import type { HarnessKind } from '../manifest.ts';
-import { parseSettings } from '../settings.ts';
+import { parseSettings, SETTINGS_FORMAT } from '../settings.ts';
 import { foreignComponentRefs } from './runtimes-edits.ts';
 import type { AccountModel, LayerReferenceText } from './schema.ts';
 
@@ -68,7 +68,6 @@ function changedRefs(
   return changed;
 }
 
-const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
 const SETTINGS_DIRECTORY = { claude: 'claude-code', codex: 'codex' } as const satisfies Record<HarnessKind, string>;
 
 /** Whether any segment of a path starts with a dot: a hidden file or folder never crosses to an owner. */
