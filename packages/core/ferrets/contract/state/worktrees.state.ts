@@ -13,6 +13,10 @@ export const ManagedWorktreeRecordSchema = z.strictObject({
   version: z.literal(1),
   origin: z.enum(['managed', 'adopted']).optional(),
   adoptionIdentity: AdoptionIdentitySchema.optional(),
+  removalIdentity: AdoptionIdentitySchema.extend({
+    checkoutRemoved: z.literal(true).optional(),
+    metadataCleanupStarted: z.literal(true).optional(),
+  }).optional(),
   path: z.string().min(1),
   branch: z.string().min(1),
   repositoryRoot: z.string().min(1),

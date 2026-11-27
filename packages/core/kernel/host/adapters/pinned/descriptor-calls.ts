@@ -140,8 +140,7 @@ export const O_CLOEXEC = process.platform === 'darwin' ? 0x1000000 : 0o2000000;
  * atomically, when the target name is taken (`EEXIST`, the source left where it was). The history-pool move needs it:
  * a look for "nothing at the target" followed by `renameat(2)` replaces whatever a writer creates in between.
  *
- * Linux only (glibc 2.28+ exports it; the kernel has had it since 3.15). macOS spells it `renameatx_np(RENAME_EXCL)`,
- * which is not bound here: a macOS host has no no-replace move and the caller refuses `no_descriptor_reach`. A filesystem
+ * Linux (glibc 2.28+, kernel 3.15+) and macOS (`renameatx_np(RENAME_EXCL)`). A filesystem
  * that does not support the flag answers `EINVAL` per call; the caller refuses that the same way, never falling back to
  * a plain rename.
  *
@@ -152,23 +151,24 @@ export interface NoReplaceRename {
   renameNoReplace(fromFd: number, fromName: string, toFd: number, toName: string): void;
 }
 
-/** `RENAME_NOREPLACE` from `<linux/fs.h>`. */
-const RENAME_NOREPLACE = 1;
-
 /**
- * Loads `renameat2`, or throws one sentence (see {@link refusalSentence}). A platform other than Linux throws: nothing
- * there is bound. The caller self-tests what it loads ({@link selfTestNoReplaceRename}) before trusting it.
+ * Loads the platform's exclusive rename, or throws one sentence (see {@link refusalSentence}).
+ * The caller self-tests what it loads ({@link selfTestNoReplaceRename}) before trusting it.
  */
 export function loadNoReplaceRename(
   library: string = LIBC,
   errnoSymbol: string = ERRNO,
   platform: string = process.platform,
 ): NoReplaceRename {
-  if (platform !== 'linux') throw new Error(refusalSentence(`no renameat2 on ${platform}`));
+  if (platform !== 'linux' && platform !== 'darwin')
+    throw new Error(refusalSentence(`no exclusive rename on ${platform}`));
+  const symbol = platform === 'darwin' ? 'renameatx_np' : 'renameat2';
+  // <stdio.h> RENAME_EXCL on Darwin; <linux/fs.h> RENAME_NOREPLACE on Linux.
+  const exclusive = platform === 'darwin' ? 0x00000004 : 1;
   let symbols: Record<string, (...args: never[]) => unknown>;
   try {
     symbols = dlopen(library, {
-      renameat2: {
+      [symbol]: {
         args: [FFIType.i32, FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.u32],
         returns: FFIType.i32,
       },
@@ -178,18 +178,16 @@ export function loadNoReplaceRename(
     throw new Error(refusalSentence(error instanceof Error ? (error.message.split('\n')[0] ?? 'unknown') : 'unknown'));
   }
   const errnoOf = symbols[errnoSymbol] as unknown as () => Pointer | null;
-  const call = symbols as unknown as {
-    renameat2(from: number, fromName: Uint8Array, to: number, toName: Uint8Array, flags: number): number;
-  };
+  const call = symbols[symbol] as unknown as (
+    from: number,
+    fromName: Uint8Array,
+    to: number,
+    toName: Uint8Array,
+    flags: number,
+  ) => number;
   return {
     renameNoReplace: (fromFd, fromName, toFd, toName) => {
-      const status = call.renameat2(
-        fromFd,
-        cString(fromName, 'rename'),
-        toFd,
-        cString(toName, 'rename'),
-        RENAME_NOREPLACE,
-      );
+      const status = call(fromFd, cString(fromName, 'rename'), toFd, cString(toName, 'rename'), exclusive);
       if (status === 0) return;
       const at = errnoOf();
       const errno = at === null ? 0 : read.i32(at, 0);

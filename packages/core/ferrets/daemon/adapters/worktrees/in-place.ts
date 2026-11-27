@@ -16,6 +16,7 @@ import type {
 import { WorktreeError } from '../../lib/worktrees/errors.ts';
 import { GitRepoWorktreeRows } from './repo-git.ts';
 import type { RepoCheckoutPin, RepoWorktreeAccess } from './repo-access.ts';
+import { recoverQuarantine } from './quarantine.ts';
 import { GitWorktreeGateway } from './git-gateway.ts';
 import { ManagedWorktreeAdapter } from './service.ts';
 import { WorktreeOperationQueue } from './queue.ts';
@@ -108,7 +109,6 @@ export class InPlaceWorktrees {
             await this.files.writeText(markerOf(record), token, 0o600);
             return record;
           },
-          false,
           held,
         );
       } finally {
@@ -126,11 +126,20 @@ export class InPlaceWorktrees {
               unknownInspection(input.managed, error),
             )
           : await this.base.examine(input),
-      remove: async input =>
-        input.managed.origin === 'adopted' || input.expectedIdentity !== undefined
-          ? await this.#scoped(input.managed, async adapter => await adapter.remove(input), true)
-          : await this.base.remove(input),
-      presence: async entry => {
+      remove: async input => await this.#scoped(input.managed, async adapter => await adapter.remove(input), true),
+      presence: async (entry, recordRemovalIdentity) => {
+        if (entry.removalIdentity !== undefined) {
+          try {
+            const resumed = await this.#read(async reader => {
+              await reader.rows(entry.commonDir);
+              await reader.verifyRepository(entry.removalIdentity!.commonDirectory);
+              return await recoverQuarantine(this.files, entry, recordRemovalIdentity);
+            });
+            if (resumed !== undefined) return resumed;
+          } catch (error) {
+            return { kind: 'unverified', reason: reasonOf(error) };
+          }
+        }
         if (entry.origin !== 'adopted') return await this.base.presence(entry);
         try {
           if ((await this.files.type(entry.path)) === 'missing') return { kind: 'absent' };
@@ -167,7 +176,8 @@ export class InPlaceWorktrees {
     return await this.#read(async reader => {
       await reader.rows(record.commonDir);
       const recoveryIdentity = record.adoptionIdentity;
-      const recovery = recoveryIdentity === undefined ? undefined : await reader.holdCheckout(record.path);
+      const recovery =
+        recoveryIdentity === undefined && !removesCheckout ? undefined : await reader.holdCheckout(record.path);
       try {
         if (recovery !== undefined && recoveryIdentity !== undefined) {
           const current = identityOf(recovery);
@@ -205,7 +215,6 @@ export class InPlaceWorktrees {
               folder,
               invocation.signal,
               async scoped => await scoped.run(invocation),
-              invocation.args[0] === 'worktree' && invocation.args[1] === 'remove',
               held,
             );
           },
@@ -217,6 +226,7 @@ export class InPlaceWorktrees {
             this.clock,
             new WorktreeOperationQueue(),
             pinner,
+            recovery === undefined ? undefined : identityOf(recovery),
           ),
         );
         if (!removesCheckout) await recovery?.verify();

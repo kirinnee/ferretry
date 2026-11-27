@@ -2113,6 +2113,13 @@ async function start(world: World): Promise<TestHost> {
           remove: async (path, removeOptions) => {
             if (isReadOnlyRoot(name)) throw new RootError('read_only');
             const named = ownPath(path);
+            const expected = removeOptions?.expectedIdentity;
+            if (
+              expected !== undefined &&
+              (rootFolderExists(named) || rootFiles.has(named) || rootLinks.has(named)) &&
+              (!rootFolderExists(named) || expected.device !== 1n || expected.inode !== fileInode(named))
+            )
+              throw new RootError('changed');
             // The root itself (`resolve('.')`) is a folder like any other: `onlyIfEmpty` refuses it while anything is in
             // it, and without the option everything goes with it (the flat world has no base folder to be left missing).
             if (named === `${prefix}/.`) {

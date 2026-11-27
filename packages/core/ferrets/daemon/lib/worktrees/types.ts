@@ -74,6 +74,8 @@ export interface WorktreeListEntry {
 export interface ManagedWorktree {
   readonly origin?: 'managed' | 'adopted';
   readonly adoptionIdentity?: WorktreeAdoptionIdentity;
+  /** Written before quarantine; recovery can remove only this directory incarnation. */
+  readonly removalIdentity?: WorktreeRemovalIdentity;
   readonly version: 1;
   readonly path: string;
   readonly branch: string;
@@ -148,6 +150,13 @@ export interface WorktreeAdoptionIdentity {
   readonly gitDirectory: string;
   readonly commonDirectory: string;
 }
+
+/** Durable proofs of completed checkout deletion and entry into metadata cleanup. */
+export interface WorktreeRemovalIdentity extends WorktreeAdoptionIdentity {
+  readonly checkoutRemoved?: true;
+  readonly metadataCleanupStarted?: true;
+}
+export type RecordRemovalIdentity = (identity: WorktreeRemovalIdentity) => Promise<void>;
 
 /**
  * What currently occupies the path of a recorded checkout.
@@ -282,6 +291,7 @@ export interface ManagedWorktreeInspection {
 }
 
 export interface RemoveManagedWorktreeInput extends CheckManagedWorktreeRemovalInput {
+  readonly recordRemovalIdentity?: RecordRemovalIdentity;
   readonly expectedHead?: string;
   readonly expectedIdentity?: import('../../../contract/worktrees.ts').ReviewedWorktreeIdentity;
   readonly overrides: readonly WorktreeRemovalOverride[];
