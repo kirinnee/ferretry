@@ -139,3 +139,25 @@ _none_
 ### Whole files that are compatibility code (0); do not copy
 
 _none found by file name; still strip any `legacy`, `deprecated`, `compat`, `migrat*`, `retired` identifiers, old-format readers, one-shot boot passes and feature flags about an older peer (clean slate A452)_
+
+## Preview walkthrough: pair over SSM, no port forwarding
+
+Hand-written (owner: "dont use port forwarding"); `scripts/rebuild/ports.ts` does not own this section. One plain SSM shell on the box, one browser anywhere. **Nothing is forwarded**: no `ssh -L`, no SSM port-forwarding document, no `fy pair --open` (that one needs a browser on the box itself).
+
+Why it works without a tunnel: the daemon on the box dials the hosted relay on its own when no relay is configured, and `fy pair` then prints a link another device can redeem through that relay ([pairing.md](../../pairing.md), "Who may redeem"). The browser tries the box's `127.0.0.1` first, which is itself, fails at once, and falls back to the relay.
+
+1. **Open a shell on the box.** `aws ssm start-session --target <instance-id>`. A plain shell is all you need.
+2. **Check the preview daemon is up.** `fy5 daemon status` says `running`. If not, start it with the preview kit's `start` (`migration/v4-to-v5/preview/preview.sh`), not with a tunnel or a unit.
+3. **Check the relay is on.** The preview home's `logs/` has a line like `relay <url>: connected — the rendezvous accepted the claim`. No such line: stop here. Do not fall back to a tunnel; say the relay is not connected.
+4. **Mint the code on the box.** `fy5 pair` (not `fy5 setup`). Read the first line of the screen:
+   - "Scan this with your phone's camera" means the relay leg is available. Go on.
+   - "Open this link in a browser on THIS machine" means there is no relay. An SSM shell has no browser, so stop as in step 3.
+5. **Carry the link to your browser.** Copy the full link line from the SSM terminal into a private window on your own computer, or scan the QR with a phone (widen the terminal if it says the QR does not fit). Use a private window, or clear site data for the preview app and delete its old passkey, so an earlier pairing cannot confuse the walk.
+6. **Press Pair.** Home shows "This machine is locked… [Unlock]". Then Unlock, Add a passkey, Name this machine.
+7. **Prove it on the box.** `fy5 device ls` lists the new device.
+
+The code lives two minutes and works once. If it expires or the page says "Pairing failed", run `fy5 pair` again. Do not paste the code or the link anywhere but the browser.
+
+### What was walked
+
+2026-11-27, throwaway home, synthetic data, `fy daemon start` from this branch, no config: the boot log shows `dialling the relay` then `relay …: connected — the rendezvous accepted the claim 0.4s after dialling`. That is step 3's evidence that a bare daemon needs no tunnel. Steps 4 to 7 were **not** walked in the sandbox: `fy pair` refuses inside an agent's pane ("this is the owner's command"), and the browser steps need the hosted preview app. The first real run on the box is the check for those.

@@ -575,6 +575,13 @@ const FOLDERS: Readonly<Record<string, string>> = {
   hadi: '/work/docs',
   piper: '/work/ledger',
 };
+/** What each fixture ferret was started for (`fy new --purpose`); a row may override it with null (no purpose named). */
+const PURPOSES: Readonly<Record<string, string>> = {
+  zoe: 'implementation',
+  kai: 'review',
+  hadi: 'comms',
+  piper: 'planning',
+};
 const session = (
   daysAgo: number,
   hoursAgo: number,
@@ -600,6 +607,7 @@ const session = (
     cwd: FOLDERS[agent] ?? '/work/fixture',
     parent: null,
     tree: null,
+    purpose: PURPOSES[agent] ?? null,
     day,
     week: isoWeek(day),
     createdAt: new Date(REAL_NOW - daysAgo * 86_400_000 - hoursAgo * 3_600_000).toISOString(),
@@ -670,11 +678,17 @@ const INSIGHT_ROWS = [
     contextEndPercent: 88,
   }),
   session(7, 6, 'hadi', 'Docs sweep: rewrite the pairing guide', 12_000, 9_400, 4, 8, { model: 'claude-haiku-5-5' }),
-  session(8, 8, 'zoe', 'Draft the carrier choice question', null, 76_000, 8, 35, { costGap: 'unknown_pricing_model' }),
+  session(8, 8, 'zoe', 'Draft the carrier choice question', null, 76_000, 8, 35, {
+    costGap: 'unknown_pricing_model',
+    purpose: null,
+  }),
   session(8, 5, 'kai', 'Tag the 4.2.1 patch release', 189_000, 102_000, 10, 47),
   session(9, 7, 'hadi', 'Pairing guide: add the relay section', 51_000, 29_000, 11, 21, { model: 'claude-haiku-5-5' }),
   session(9, 4, 'zoe', 'Fix the login redirect loop', 298_000, 165_000, 15, 74),
-  session(10, 6, 'kai', 'Tidy the changelog drawer', 8_500, 6_900, 3, 6, { model: 'claude-haiku-5-5' }),
+  session(10, 6, 'kai', 'Tidy the changelog drawer', 8_500, 6_900, 3, 6, {
+    model: 'claude-haiku-5-5',
+    purpose: 'other',
+  }),
   session(11, 9, 'piper', 'Ledger rewrite', 1_270_000, 560_000, 29, 240, {
     model: 'claude-opus-5-5',
     mode: 'auto',

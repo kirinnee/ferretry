@@ -1,5 +1,10 @@
 import { isAbsolute, resolve } from 'node:path';
-import { FERRET_TASK_ID_PATTERN, type InitialAttachment, parseCompactAt } from '../../../contract/index.ts';
+import {
+  FERRET_PURPOSES,
+  FERRET_TASK_ID_PATTERN,
+  type InitialAttachment,
+  parseCompactAt,
+} from '../../../contract/index.ts';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment, StartBody } from './ports.ts';
 
@@ -42,6 +47,8 @@ export interface StartFlags extends StartNumericFlags {
   /** A task title (`--name <title>`), free-form, kept verbatim. */
   readonly title?: string;
   readonly label?: string;
+  /** What it is for (`--purpose`): one of the fixed list, refused by name here instead of as a schema issue. */
+  readonly purpose?: string;
   /** An existing task the new ferret takes over (`--task`): `&F21`, or `F21`. */
   readonly card?: string;
   readonly model?: string;
@@ -106,6 +113,15 @@ function taskId(value: string): string {
   return id;
 }
 
+/** A `--purpose` value from the fixed list, in any case; anything else is refused naming the list. */
+function purposeOf(value: string): (typeof FERRET_PURPOSES)[number] {
+  const typed = value.trim().toLowerCase();
+  const found = FERRET_PURPOSES.find(purpose => purpose === typed);
+  if (found === undefined)
+    throw new SessionCommandError(`--purpose must be one of ${FERRET_PURPOSES.join(', ')}, got "${value}"`);
+  return found;
+}
+
 /** Advisory notes for stderr — never a refusal, and never on stdout where `--json` would break. */
 export function startWarnings(flags: StartNumericFlags): readonly string[] {
   return flags.turnTimeout !== undefined && flags.turnTimeout < TURN_TIMEOUT_HINT_SECONDS
@@ -129,6 +145,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
   assertNumericFlags(flags);
   const compactAt = flags.compactAt === undefined ? undefined : parseCompactAt(flags.compactAt);
   if (compactAt?.ok === false) throw new SessionCommandError(`--compact-at: ${compactAt.reason}`);
+  const purpose = flags.purpose === undefined ? undefined : purposeOf(flags.purpose);
   const prompt = flags.prompt?.trim() ?? '';
   if (prompt === '' && flags.mode !== 'interactive')
     throw new SessionCommandError(
@@ -162,6 +179,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(flags.teammateFallback === true ? { teammateFallback: true } : {}),
     ...(flags.title === undefined ? {} : { title: flags.title }),
     ...(flags.label === undefined ? {} : { label: flags.label }),
+    ...(purpose === undefined ? {} : { purpose }),
     ...(flags.card === undefined ? {} : { task: taskId(flags.card) }),
     ...(flags.model === undefined ? {} : { model: flags.model }),
     ...(flags.effort === undefined ? {} : { effort: flags.effort }),

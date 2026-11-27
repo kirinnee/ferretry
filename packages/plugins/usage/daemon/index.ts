@@ -158,6 +158,7 @@ export default implementDaemon(manifest, {
       label: ferret.name,
       cwd: ferret.folder,
       parent: ferret.parent ?? null,
+      purpose: ferret.purpose ?? null,
       createdAt: ferret.createdAt,
       finishedAt: ferret.state === 'stopped' ? ferret.stateAt : null,
       status: ferret.state === 'stopped' ? endedStatus(ferret.cause, outcomes.get(ferret.id)) : 'running',

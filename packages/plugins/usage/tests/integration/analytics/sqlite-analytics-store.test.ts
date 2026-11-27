@@ -300,6 +300,27 @@ describe('the analytics store on disk', () => {
     should(second.store.rows()).deepEqual([syncedSession()]);
   });
 
+  it('W-09 should keep what a ferret was started for across a restart, and a ferret that named none as null', async () => {
+    // Arrange
+    const paths = await temporaryPaths();
+    const named = storedSession();
+    const rows = [
+      { ...named, raw: { ...named.raw, id: 'reviewer', purpose: 'review' } },
+      { ...named, raw: { ...named.raw, id: 'unnamed' } },
+    ];
+    const first = await open(paths);
+    first.store.upsert(rows);
+    await closeStore(first.store);
+
+    // Act — a SECOND open of the same file, as a restarted daemon would do.
+    const second = await open(paths);
+
+    // Assert
+    const read = new Map(second.store.rows().map(row => [row.raw.id, row.raw.purpose]));
+    should(read.get('reviewer')).equal('review');
+    should(read.get('unnamed')).equal(null);
+  });
+
   it('should keep a price that came from a model catalog with the catalog and address it was read from', async () => {
     // Arrange
     const paths = await temporaryPaths();
