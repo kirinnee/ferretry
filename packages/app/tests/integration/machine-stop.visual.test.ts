@@ -64,6 +64,7 @@ const VIEWPORTS = [
 
 const STATES = [
   { state: 'refused', headline: "This browser isn't connected to pebox any more", main: 'Pair again', other: true },
+  { state: 'replaced', headline: 'pebox was reinstalled or replaced', main: 'Pair again', other: false },
   { state: 'turned-away', headline: 'This browser was turned away by pebox', main: 'Pair again', other: false },
   { state: 'no-key', headline: "This browser can't reach pebox", main: 'Pair again', other: false },
   { state: 'unreadable', headline: "Can't read what pebox offers right now", main: 'Reload', other: false },

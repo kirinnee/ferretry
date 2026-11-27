@@ -1,4 +1,10 @@
-import { browserActivation, type ClientOrigin, DaemonClient, type ShellPluginClient } from '../client/daemon-client.ts';
+import {
+  browserActivation,
+  type ClientOrigin,
+  DaemonClient,
+  type RefusedWhy,
+  type ShellPluginClient,
+} from '../client/daemon-client.ts';
 import { type Standing, wholeDaemonWhy } from '../client/inventory.ts';
 import {
   blockedLine,
@@ -116,7 +122,7 @@ type Connection =
   | { readonly kind: 'connecting' }
   | { readonly kind: 'unreachable' }
   /** A session ended with `4403` here: not dialled again by this page; the pairing and its key are untouched (S12). */
-  | { readonly kind: 'refused' }
+  | { readonly kind: 'refused'; readonly replaced?: true }
   | { readonly kind: 'connected'; readonly client: DaemonClient; readonly transport: DaemonTransport };
 
 /** Every compiled package's standing on one daemon as one string: equal strings mean no half could now answer differently. */
@@ -675,9 +681,9 @@ export class ShellRuntime {
     // A session ended with `4403` (S12). That close is cleartext a relay can forge, so it is NOT an unpair: nothing is
     // removed, no key is deleted and no plugin forgets anything. This page just stops dialling the machine and says
     // so ("Pair again"); a reload asks the daemon again. Another machine is never touched.
-    client.onRefused(() => {
+    client.onRefused(why => {
       const held = this.#connections.get(paired.daemon);
-      if (held?.kind === 'connected' && held.client === client) this.#refuse(paired.daemon, held);
+      if (held?.kind === 'connected' && held.client === client) this.#refuse(paired.daemon, held, why);
     });
     // The feed coming back is a re-read trigger; every change of it re-renders the views' `online`.
     client.onFeedLive(live => {
@@ -703,10 +709,10 @@ export class ShellRuntime {
   }
 
   /** Stops dialling a machine this page was refused on (`4403`), keeping its pairing; see {@link DaemonClient.onRefused}. */
-  #refuse(daemon: string, held: Extract<Connection, { kind: 'connected' }>): void {
+  #refuse(daemon: string, held: Extract<Connection, { kind: 'connected' }>, why: RefusedWhy): void {
     held.client.stop();
     held.transport.close?.();
-    this.#connections.set(daemon, { kind: 'refused' });
+    this.#connections.set(daemon, why === 'replaced' ? { kind: 'refused', replaced: true } : { kind: 'refused' });
     this.#shape?.clear(daemon);
     this.#grants.drop(daemon);
     this.#places.delete(daemon);
@@ -718,6 +724,12 @@ export class ShellRuntime {
   /** Whether this page was refused on this machine (`4403`): the frame says so and offers to pair again. */
   isRefused(daemon: string): boolean {
     return this.#connections.get(daemon)?.kind === 'refused';
+  }
+
+  /** Whether this page was refused because the daemon at this address is not the one paired (the walk proved it): pair again. */
+  isReplaced(daemon: string): boolean {
+    const held = this.#connections.get(daemon);
+    return held?.kind === 'refused' && held.replaced === true;
   }
 
   #drop(daemon: string): void {
