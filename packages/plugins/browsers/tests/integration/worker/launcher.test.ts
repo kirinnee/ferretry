@@ -753,6 +753,10 @@ describe('NodeSessionBrowserLauncher', () => {
         {
           platform: 'linux',
           proxy: async () => proxy,
+          ports: async () => ({
+            kind: 'fixed',
+            ports: { cdp: await freeRangePort(), relay: await freeRangePort(), vnc: await freeRangePort() },
+          }),
           listenerProver: unprovenListenerProver(),
           cdpPort: freeRangePort,
         },

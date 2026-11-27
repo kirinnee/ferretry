@@ -12,6 +12,7 @@ export * as home from './home.ts';
 export * as identity from './identity.ts';
 export * as launchSettings from './launch-settings.ts';
 export * as lifecycle from './lifecycle.ts';
+export * as relocation from './relocation.ts';
 export * as runtimeSwitch from './runtime-switch.ts';
 export * as transcript from './transcript.ts';
 export * as usage from './usage.ts';

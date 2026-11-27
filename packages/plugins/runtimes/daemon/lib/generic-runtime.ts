@@ -37,7 +37,7 @@ import {
 } from '../../contract/index.ts';
 import type { RuntimesAssembly } from '../index.ts';
 import { supportedKindOfKey } from './harness-kind.ts';
-import { createRuntimesApi } from './service/runtimes-api.ts';
+import type { createRuntimesApi } from './service/runtimes-api.ts';
 import { FleetProposalStore, type FleetProposalRecord } from './service/proposals.ts';
 import { assertRequestLive } from './service/apply-bracket.ts';
 
@@ -369,8 +369,8 @@ export class GenericRuntimes {
   start(base: RuntimeStartSource): RuntimeStartSource {
     return {
       ...base,
-      resolve: async (name, harness) => {
-        const answer = await base.resolve(name, harness);
+      resolve: async (name, harness, mode) => {
+        const answer = await base.resolve(name, harness, mode);
         if (!answer.ok || !this.nativeFile(name)) return answer;
         try {
           const model = (await this.read(name)).models.default;

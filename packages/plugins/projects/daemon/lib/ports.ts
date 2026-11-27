@@ -20,6 +20,13 @@ export interface ProjectFolders {
   gitInit(path: string): Promise<void>;
   /** `git clone -- <url> <path>` with only the transports the address schema allows. */
   gitClone(url: string, path: string): Promise<void>;
+  /** Exclusively makes one destination and clones into its held descriptor, after judging both held folders. */
+  gitCloneInto(
+    url: string,
+    parent: string,
+    name: string,
+    verdict: (real: string) => Promise<'outside' | 'private' | undefined>,
+  ): Promise<void>;
   /** The repository's common directory for the work tree at `root`, or `undefined` when it is not one. */
   gitCommonDirectory(root: string): Promise<string | undefined>;
   /** The owner's home folder, resolved (no link on the way). */

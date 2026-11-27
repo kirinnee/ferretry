@@ -197,6 +197,10 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
         listenerProver: unprovenListenerProver(),
         mode: async () => mode,
         cdpPort: freeRangePort,
+        ports: async () => ({
+          kind: 'fixed',
+          ports: { cdp: await freeRangePort(), relay: await freeRangePort(), vnc: await freeRangePort() },
+        }),
         proxy: async identity => proxies.get(identity),
         // A window identity draws on an X server of its own, taken with it and closed with its Chrome.
         identityDisplay: identity => {

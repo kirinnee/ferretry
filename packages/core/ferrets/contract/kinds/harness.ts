@@ -245,6 +245,8 @@ export type TranscriptFormatId = string;
  * cannot drift from what the harness writes.
  */
 export interface HarnessFacts {
+  /** Ferrets derives this from `Harness.autoLaunchRefusal`; absent when the harness offers no Auto admission check. */
+  readonly checksAutoLaunch?: true;
   /** What a person reads: "Claude Code", "Codex". */
   readonly displayName: string;
   /** The instruction file the harness reads from its home (`CLAUDE.md`, `AGENTS.md`). */
@@ -334,6 +336,8 @@ export interface Harness {
   readonly runtime?: HarnessRuntimeDescriptor;
   /** Binary and version; never reads its sign-in files. */
   discover(): Promise<HarnessInstall | HarnessMissing>;
+  /** Why this host cannot honour an AUTO launch. Absent: no known refusal; rejection refuses AUTO only. */
+  autoLaunchRefusal?(): Promise<string | undefined>;
   update?(): Promise<UpdateResult>;
   /** Which login kinds it can spend. */
   readonly accepts: readonly LoginKindKey[];
@@ -403,6 +407,18 @@ export interface Harness {
    * harness cannot be moved to another machine.
    */
   packConversation?(ferret: FerretId): Promise<Result<PackedConversation, { readonly reason: string }>>;
+  /**
+   * Additive (C-45, the move to another machine, TARGET side): writes `packed` (what the source's `packConversation` gave)
+   * into THIS ferret's own home, in this harness's own format, and answers the conversation id the new ferret resumes
+   * (the packed one, unless this machine already holds a conversation of that id). The work folder and every self id the
+   * harness writes are moved to this ferret's; nothing of the source's is left in a field the harness reads. It proves
+   * `hasConversation` before it answers. Refuses with one plain sentence, NOTHING written, for a harness version it was
+   * not tested on or a conversation it cannot move. Absent: the harness cannot be moved to another machine.
+   */
+  unpackConversation?(
+    spec: LaunchSpec,
+    packed: PackedConversation,
+  ): Promise<Result<{ readonly conversation: string }, { readonly reason: string }>>;
   /**
    * Additive (c58-37, the cross-harness move, SOURCE side): this ferret's conversation in the harness-neutral form
    * ({@link PortableConversation}), at most `budgetTokens` of it (the oldest turns are left out and counted), or one
