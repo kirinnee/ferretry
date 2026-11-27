@@ -2,6 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { FerretRecordSchema } from '../../contract/ids.ts';
+import { RepoWorktreeListResponseSchema, MoveProjectWorktreeRequestSchema } from '../../contract/index.ts';
+import { generateKeyPairSync } from 'node:crypto';
+import { FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
+import { WebCryptoSessionCrypto, toBase64Url } from '@ferretry/kernel/session';
+import { deviceClient } from '../support/daemon/device-client.ts';
 import {
   cleanupTempDirectories,
   setupGit,
@@ -20,6 +25,10 @@ let target: string;
 let url: string;
 let admin: string;
 let environment: Record<string, string>;
+const projectId = '00000000-0000-4000-8000-000000000001';
+const deviceId = `fy_device_id_${'a'.repeat(22)}`;
+let daemonId: string;
+let deviceKey: CryptoKey;
 
 beforeAll(async () => {
   root = await tempDirectory('adopt-sit');
@@ -29,12 +38,60 @@ beforeAll(async () => {
   await setupGit(repository, 'worktree', 'add', '-b', 'adopt/sit', target);
   await mkdir(path.join(home, 'state/ferrets/F1'), { recursive: true });
   await mkdir(path.join(home, 'config'), { recursive: true });
+  for (const folder of ['state/kernel', 'state/access', 'state/projects'])
+    await mkdir(path.join(home, folder), { recursive: true });
+  const codec = new WebCryptoSessionCrypto();
+  const pem = generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  daemonId = (await codec.importDaemonIdentity(pem)).daemonId;
+  const device = await codec.generateDeviceKey();
+  deviceKey = device.privateKey;
+  await writeFile(
+    path.join(home, 'state/kernel/identity.json'),
+    JSON.stringify({ schemaVersion: 1, privateKeyPem: pem }),
+  );
+  await writeFile(
+    path.join(home, 'state/access/devices.json'),
+    JSON.stringify({
+      format: 1,
+      daemonId,
+      devices: [
+        {
+          id: deviceId,
+          daemonId,
+          name: 'Synthetic no-filesystem device',
+          platform: 'browser',
+          createdAt: STAMP,
+          lastSeenAt: new Date().toISOString(),
+          publicKey: toBase64Url(device.publicKeySpki),
+          grants: { ...FULL_DEVICE_GRANTS, filesystem: { use: false, configure: false } },
+        },
+      ],
+    }),
+  );
+  await writeFile(
+    path.join(home, 'state/projects/projects.json'),
+    JSON.stringify({
+      format: 1,
+      projects: [
+        {
+          id: projectId,
+          name: 'Synthetic',
+          path: repository,
+          source: 'existing-folder',
+          createdAt: STAMP,
+          git: { commonDirectory: path.join(repository, '.git') },
+          repos: [{ path: '.' }],
+        },
+      ],
+    }),
+  );
   await mkdir(path.join(root, 'user-home'), { recursive: true });
   await writeFile(
     path.join(home, 'home.json'),
     JSON.stringify({ format: 1, createdBy: 'adopt-sit', createdAt: STAMP }),
   );
   await writeFile(path.join(home, 'config/limits.yaml'), 'enabled: false\n');
+  await writeFile(path.join(home, 'config/plugins.yaml'), 'work: on\n');
   await writeFile(
     path.join(home, 'state/ferrets/F1/ferret.json'),
     JSON.stringify(
@@ -133,6 +190,56 @@ async function fy(args: readonly string[]) {
 }
 
 describe('adopt and remove over the real daemon (SIT)', () => {
+  it('the real Gate refuses a remote caller without filesystem.use before processing a move', async () => {
+    const security = await fetch(`${url}/v1/security`, {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${admin}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ unlockOnOpen: false }),
+    });
+    expect(security.status).toBe(200);
+    const device = await deviceClient(url, daemonId, deviceId, deviceKey);
+    try {
+      const answer = await device.request('POST', '/v1/worktrees/move', { path: '/not-even-valid-input' });
+      expect(answer.status, answer.body).toBe(403);
+      expect(JSON.parse(answer.body ?? '{}').code).toBe('grant_device_not_granted');
+    } finally {
+      device.close();
+    }
+    expect(await Bun.file(path.join(target, '.git')).exists()).toBe(true);
+  }, 20_000);
+
+  it('moves a reviewed adopted worktree through real HTTP and keeps its registry membership', async () => {
+    const linked = path.join(repository, 'to-move');
+    await setupGit(repository, 'worktree', 'add', '-b', 'move/sit', linked);
+    const call = async (method: string, route: string, body?: unknown) =>
+      await fetch(`${url}${route}`, {
+        method,
+        headers: { authorization: `Bearer ${admin}`, 'content-type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    expect((await call('POST', '/v1/worktrees/adopt', { path: linked })).status).toBe(200);
+    const listed = await call('GET', `/v1/worktrees/repo?project=${projectId}`);
+    expect(listed.status).toBe(200);
+    const offer = RepoWorktreeListResponseSchema.parse(await listed.json()).worktrees.find(
+      row => row.path === linked,
+    )?.move;
+    if (offer?.destination === undefined) throw new Error('no safe move was offered');
+    const request = MoveProjectWorktreeRequestSchema.parse({
+      project: projectId,
+      worktreeId: offer.worktreeId,
+      reviewedIdentity: offer.reviewedIdentity,
+    });
+    const moved = await call('POST', '/v1/worktrees/move', request);
+    expect(moved.status).toBe(200);
+    expect(await moved.json()).toEqual({ from: linked, to: offer.destination });
+    expect(await Bun.file(path.join(offer.destination!, 'README.md')).text()).toBe('# fixture\n');
+    const after = await call('GET', `/v1/worktrees/repo?project=${projectId}`);
+    expect(
+      RepoWorktreeListResponseSchema.parse(await after.json()).worktrees.find(row => row.path === offer.destination)
+        ?.tracked,
+    ).toBe('adopted');
+  }, 30_000);
+
   it('should reject unauthenticated adoption without creating a marker', async () => {
     const refused = await fetch(`${url}/v1/worktrees/adopt`, {
       method: 'POST',

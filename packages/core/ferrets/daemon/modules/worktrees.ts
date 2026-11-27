@@ -22,6 +22,7 @@ import type { ProjectRepository, RepoWorktreeListResponse } from '../../contract
 import path from 'node:path';
 import type { RepoWorktreeAccess } from '../adapters/worktrees/repo-access.ts';
 import { InPlaceWorktrees } from '../adapters/worktrees/in-place.ts';
+import { ProjectWorktreeMoves } from '../adapters/worktrees/project-move.ts';
 
 /**
  * Managed worktrees: the checkouts this daemon creates and removes (`/v1/worktrees`), and the evidence a removal is
@@ -35,7 +36,7 @@ import { InPlaceWorktrees } from '../adapters/worktrees/in-place.ts';
  * passes none, and this daemon hosts no managed checkouts — which every route then says plainly (`no_managed_root`),
  * exactly as today's daemon did without a managed root.
  */
-interface WorktreeHostIo {
+export interface WorktreeHostIo {
   readonly repoAccess: RepoWorktreeAccess;
   readonly git: GitByteSpawn;
   readonly fileSystem: WorktreeFileSystem;
@@ -60,7 +61,7 @@ export interface WorktreesNeeds {
    * The repository a REGISTERED project records, looked up by id in the daemon's own project registry (`undefined`: no such
    * project, or Projects is not running). A client names the project; it never names the directory.
    */
-  readonly projectRepository?: (project: string) => Promise<ProjectRepository | undefined>;
+  readonly projectRepository?: (project: string, commonDirectory?: string) => Promise<ProjectRepository | undefined>;
   /**
    * Which ferrets are standing in which folders (from Ferrets' registry). `undefined` when unreadable, which the
    * domain turns into an un-forceable refusal.
@@ -86,7 +87,7 @@ export interface BuiltWorktrees {
   /** Every worktree of the repository whose common directory this is (the repository listing). */
   readonly listRepo: (commonDirectory: string) => Promise<RepoWorktreeListResponse>;
   /** Every worktree of the repository a registered project records; an unknown project is refused. */
-  readonly listProjectRepo: (project: string) => Promise<RepoWorktreeListResponse>;
+  readonly listProjectRepo: (project: string, commonDirectory?: string) => Promise<RepoWorktreeListResponse>;
   readonly routes: { readonly [K in WorktreeRouteKey]: RouteHandler };
 }
 
@@ -188,15 +189,53 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
   };
   const listRepo = async (commonDirectory: string): Promise<RepoWorktreeListResponse> =>
     await listFrom(io, commonDirectory);
-  const listProjectRepo = async (project: string): Promise<RepoWorktreeListResponse> => {
-    const recorded = await needs.projectRepository?.(project);
-    if (recorded === undefined || needs.ioFor === undefined)
+  const projectHost = async (project: string, commonDirectory?: string) => {
+    const recorded = await needs.projectRepository?.(project, commonDirectory);
+    if (
+      recorded === undefined ||
+      needs.ioFor === undefined ||
+      (commonDirectory !== undefined && commonDirectory !== recorded.commonDirectory)
+    )
       throw new WorktreeError('invalid_common_directory', 'no registered project has that id');
     // What the registration recorded, nothing the caller sent: the project's folder, the common directory, and the main
     // checkout beside it (the directory above a `.git` folder).
     const folders = [recorded.folder, recorded.commonDirectory];
     if (path.basename(recorded.commonDirectory) === '.git') folders.push(path.dirname(recorded.commonDirectory));
-    return await listFrom(needs.ioFor(folders), recorded.commonDirectory);
+    const host = needs.ioFor(folders);
+    if (host === undefined) throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
+    // V-B3c: prove the registered folder itself, including a linked checkout whose common directory never moved.
+    const repository = await host.repoAccess.repository(recorded.commonDirectory);
+    try {
+      const checkout = await host.pinner.pin(recorded.folder);
+      try {
+        if (checkout.rootReal !== path.resolve(recorded.folder)) throw new Error('project folder was replaced');
+        const proof = await new KernelGitRunner(host.git).run({
+          cwd: checkout.policyCwd,
+          args: ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+        });
+        if (
+          proof.exitCode !== 0 ||
+          proof.stdoutTruncated ||
+          proof.timedOut ||
+          new TextDecoder().decode(proof.stdout).trim() !== recorded.commonDirectory
+        )
+          throw new Error('project repository changed');
+        await repository.verify();
+      } finally {
+        await checkout.close();
+      }
+    } catch {
+      throw new WorktreeError('invalid_common_directory', 'the registered project folder identity changed');
+    } finally {
+      await repository.close();
+    }
+    return { host, recorded };
+  };
+  const moves = new ProjectWorktreeMoves(needs, registry, projectHost);
+  const listProjectRepo = async (project: string, commonDirectory?: string): Promise<RepoWorktreeListResponse> => {
+    const { host, recorded } = await projectHost(project, commonDirectory);
+    await service.runExclusive(async () => await moves.reconcile(host, recorded.commonDirectory));
+    return await moves.offers(project, await listFrom(host, recorded.commonDirectory));
   };
   const subsystem: WorktreeSubsystem = {
     list: async () => await service.list(),
@@ -206,6 +245,7 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     adopt: async request => await service.adopt(request.path),
     listRepo,
     listProjectRepo,
+    moveProject: async request => await service.runExclusive(async () => await moves.move(request)),
   };
   return {
     service,

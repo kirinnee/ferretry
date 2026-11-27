@@ -50,6 +50,10 @@ const REMOVED: RemovedWorktree = {
 
 /** A subsystem that answers with fixtures and records what the routes asked of it. */
 class FakeWorktrees implements WorktreeSubsystem {
+  async moveProject(): Promise<{ from: string; to: string }> {
+    if (this.failure) throw this.failure;
+    return { from: PATH, to: '/managed/project/checkout' };
+  }
   readonly adoptions: AdoptWorktreeRequest[] = [];
   async adopt(request: AdoptWorktreeRequest): Promise<CreatedWorktree> {
     this.adoptions.push(request);
@@ -153,6 +157,7 @@ describe('the managed-worktree mount', () => {
     // Assert
     should(Object.keys(routes)).eql([...WORKTREE_ROUTE_KEYS]);
     should(Object.keys(routes)).eql([
+      'POST /v1/worktrees/move',
       'POST /v1/worktrees/adopt',
       'GET /v1/worktrees/removal',
       'GET /v1/worktrees/repo',
@@ -407,6 +412,7 @@ describe('the managed-worktree mount', () => {
   it('should let an error that is not this domain answer as the defect it is', async () => {
     // Arrange
     const worktrees: WorktreeSubsystem = {
+      moveProject: async () => ({ from: PATH, to: '/managed/project/checkout' }),
       list: async () => {
         throw new Error('the disk fell off');
       },
