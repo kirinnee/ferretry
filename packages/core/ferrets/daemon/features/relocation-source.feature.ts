@@ -43,7 +43,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     if (!fenced.ok) throw new Error(`${folder} cannot be confined to the session folder for a move`);
     let entries: readonly RootEntry[];
     try {
-      entries = await root.entries(fenced.value);
+      entries = await root.entries(fenced.value, { strict: true });
     } catch (error) {
       // Only an absent optional top-level folder is empty. A known folder disappearing, a failed probe or an IO/permission
       // error must refuse the whole move, otherwise a successful export could silently drop attachments.

@@ -406,8 +406,11 @@ export interface RootHandle {
    */
   checkPrivateChain(path: FencedPath): Promise<Result<void, DirectoryChainProblem>>;
   list(path: FencedPath): Promise<readonly string[]>;
-  /** The folder's names with each leaf's own kind, size, mode and hard-link count (a link is listed, never entered). */
-  entries(path: FencedPath): Promise<readonly RootEntry[]>;
+  /**
+   * The folder's names with each leaf's own kind, size, mode and hard-link count (a link is listed, never entered).
+   * `strict` propagates directory realpath errors instead of treating them as an empty listing.
+   */
+  entries(path: FencedPath, options?: { readonly strict?: boolean }): Promise<readonly RootEntry[]>;
   stat(path: FencedPath): Promise<RootStat | undefined>;
   /** The leaf's own kind (a link is `symlink`); its parents are resolved and fenced as for every call. */
   lstat(path: FencedPath): Promise<RootLstat | undefined>;
