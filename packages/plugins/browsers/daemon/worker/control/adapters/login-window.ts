@@ -13,6 +13,7 @@ import {
   type BrowserLoginWindow,
   type BrowserProfilePort,
 } from '../index.ts';
+import { DEFAULT_BROWSER_IDENTITY } from '../../../../contract/index.ts';
 
 export interface BrowserLoginChild {
   readonly pid: number;
@@ -160,8 +161,8 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
       const runtime = this.options.runtime;
       const chromeExecutable = runtime.chromeExecutable();
       const chromeVersion = await runtime.chromeVersion(chromeExecutable);
-      lease = await this.profile.acquire({ sessionId: 'human-login', chromeVersion });
-      await this.profile.assertChromeVersionCompatible(chromeVersion);
+      lease = await this.profile.acquire(DEFAULT_BROWSER_IDENTITY, { sessionId: 'human-login', chromeVersion });
+      await this.profile.assertChromeVersionCompatible(DEFAULT_BROWSER_IDENTITY, chromeVersion);
       await lease.cleanupStaleChromeLocks();
       const display = await runtime.display();
       const authority = runtime.authority();
@@ -242,7 +243,7 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
 
   private async profilePrimed(): Promise<boolean> {
     try {
-      return await this.profile.isPrimed();
+      return await this.profile.isPrimed(DEFAULT_BROWSER_IDENTITY);
     } catch {
       return false;
     }

@@ -43,7 +43,7 @@ export const BROWSER_MAX_PAGE_ID_LENGTH = 128;
 export const BrowserLifecycleSchema = z.enum(['stopped', 'starting', 'running', 'stopping', 'error']);
 export type BrowserLifecycle = z.infer<typeof BrowserLifecycleSchema>;
 export const BrowserActorKindSchema = z.enum(['agent', 'human']);
-export const BrowserProfileKindSchema = z.enum(['shared', 'session']);
+export const BrowserProfileKindSchema = z.enum(['shared']);
 export const BrowserPageStateSchema = z.enum(['loading', 'ready', 'error']);
 export const BrowserModeSchema = z.enum(['headless', 'window']);
 export type BrowserMode = z.infer<typeof BrowserModeSchema>;
@@ -231,6 +231,11 @@ export type StealthSwitch = z.infer<typeof StealthSwitchSchema>;
 
 /** The key a per-identity entry is written under: a short name, never an email address. */
 export const BROWSER_IDENTITY_KEY_PATTERN = /^[a-z][a-z0-9-]{0,31}$/u;
+/** An identity key as the folder name it becomes: no `/`, no `..`, no capitals, so a key can never leave `data/`. */
+export const BrowserIdentityKeySchema = z.string().regex(BROWSER_IDENTITY_KEY_PATTERN);
+export type BrowserIdentityKey = z.infer<typeof BrowserIdentityKeySchema>;
+/** The built-in identity. Its profile folder is the one the machine's single agent browser has always used. */
+export const DEFAULT_BROWSER_IDENTITY: BrowserIdentityKey = 'agent';
 
 /**
  * An identity's own stealth entry. The only thing it can say is `stealth: false`, the opt-out: turning stealth ON is the
@@ -277,7 +282,7 @@ export const BrowsersConfigSchema = z.strictObject({
   captcha: BrowserCaptchaSettingSchema.optional(),
   /** The ONE stealth switch: `on` opts in every identity on this machine (except one that opted out). Off → on is held for the owner. */
   stealth: StealthSwitchSchema.default('off'),
-  identities: z.record(z.string().regex(BROWSER_IDENTITY_KEY_PATTERN), BrowserIdentitySettingSchema).optional(),
+  identities: z.record(BrowserIdentityKeySchema, BrowserIdentitySettingSchema).optional(),
 });
 export type BrowsersConfig = z.infer<typeof BrowsersConfigSchema>;
 
