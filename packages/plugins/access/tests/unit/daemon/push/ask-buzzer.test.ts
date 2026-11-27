@@ -102,6 +102,54 @@ describe('AskBuzzer', () => {
     expect((ledger as MemoryLedger).records).toEqual([]);
   });
 
+  test('an ask that settles while its lookup is in flight sends no push and keeps no key (E-242)', async () => {
+    const records = new MemoryLedger();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const slow: AskBuzzLedger = {
+      has: async key => {
+        await gate;
+        return records.has(key);
+      },
+      append: record => records.append(record),
+      forget: key => records.forget(key),
+    };
+    const { made, sent } = buzzer({ ledger: slow });
+    const buzzing = made.buzz(card);
+    const settling = made.settle('f1', 'A3');
+    release();
+    expect(await buzzing).toBe(false);
+    await settling;
+    expect(sent).toEqual([]);
+    expect(records.records).toEqual([]);
+  });
+
+  test('an ask that settles while its push is going out keeps no key (E-242)', async () => {
+    const ledger = new MemoryLedger();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const { made } = buzzer({
+      ledger,
+      buzz: async () => {
+        await gate;
+        return 1;
+      },
+    });
+    const buzzing = made.buzz(card);
+    await Promise.resolve();
+    const settling = made.settle('f1', 'A3');
+    release();
+    await Promise.all([buzzing, settling]);
+    expect(ledger.records).toEqual([]);
+  });
+
+  test('a settle that arrives before any buzz does not block a later ask of the same key', async () => {
+    const { made, sent } = buzzer();
+    await made.settle('f1', 'A3');
+    expect(await made.buzz(card)).toBe(true);
+    expect(sent).toHaveLength(1);
+  });
+
   test('a ledger that cannot drop a key says so and does not throw', async () => {
     const { made, warned } = buzzer({
       ledger: {
