@@ -39,6 +39,8 @@ export default fragment({
       // current-ferret search, its Actions ▾ menu gets Interrupt and the stuck-message and Queue rows, and Agenda's ask page gets the ferret's conversation.
       panel(FILES_SEARCH_SLOT, { id: 'files-search', order: 10 }),
       panel(ACTIONS_ROW_SLOT, { id: 'interrupt-row', order: 10 }),
+      // Fork into a new ferret… (`app/slots/fork-row-panel.tsx`): Conversation owns the fork route, so the row is its.
+      panel(ACTIONS_ROW_SLOT, { id: 'fork-row', order: 15 }),
       // Clear stuck messages, Dismiss all cancelled and Queue… (`app/slots/stuck-messages-row-panel.tsx`).
       panel(ACTIONS_ROW_SLOT, { id: 'stuck-messages-row', order: 20 }),
       panel(AGENDA_CONVERSATION_SLOT, { id: 'agenda-conversation', order: 10 }),

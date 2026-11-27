@@ -124,6 +124,34 @@ HUMAN are not token checks a solver sells, and a picture puzzle is the agent's t
 - **Declared gaps.** A proxy with a `${secret:…}` login is not handed to the solver (the Vault gives Browsers no proxy
   credential to pass), so such a solve is proxyless; Turnstile is sold proxyless only.
 
+## Identities: one Chrome each
+
+An **identity** is a key under `identities:` in `config/browsers.yaml`, plus the built-in `agent`. Each identity is its own
+native Chromium: its own profile folder (`state/browsers/data/<key>`; `agent` is the folder the machine's single browser
+always used, so every existing sign-in stays), its own lease, DevTools port, worker process and, in a real window, its own Xvfb
+display and its own proxy (with its own sign-in relay when it has credentials). Identities run in parallel and share nothing:
+one stopping, crashing or going idle (15 minutes, per identity) closes only its own pages.
+
+```yaml
+engine: chromium # the engine every identity runs; chromium is the only value
+maxRunning: 4 # how many identities may run at once (1-16, default 4); one more is refused, naming the running ones
+identities:
+  work:
+    engine: chromium
+    proxy: { url: 'http://proxy.example:8080' } # this identity's own egress; the machine's proxy when absent
+```
+
+A page belongs to (identity, session): one ferret can hold pages in two identities, and two ferrets can drive two identities at
+the same time. The caps stay per session (20 pages) and per machine (60), counted across identities. A page name is unique
+within a session whichever identity holds it, and another identity's page ids carry its key (`work-pg-1`), so two Chromes never
+mint the same id. The two headful Chrome process trees measured about 0.6 GB of RAM in all by proportional share,
+and about 1.3 GB each counting shared pages in every process. These numbers exclude Xvfb and the workers; the full
+window session costs more, which is why `maxRunning` exists.
+
+- **GAP: nothing chooses an identity yet.** Every tool and the app still open pages in `agent`; the router accepts an
+  identity on `openPage` and on a start, and choosing one belongs to the next step (agent tools and the owner's login window).
+- **GAP: the sign-in window still closes every identity's browser first,** not only `agent`'s, until it works per identity.
+
 ## Stealth
 
 `config/browsers.yaml` has **one** stealth switch:
@@ -161,13 +189,11 @@ identities:
     the window is visible on the desktop. The stealth worker is about 13 MB larger (it carries `patchright-core` beside `playwright-core`).
   - **Turning it off does not touch a running browser.** `on` → `off` applies to the next launch: a stealth Chrome that is
     already running keeps running as it was until it closes or the machine's browser is restarted.
-  - **GAP: the per-identity opt-out has no target yet.** `identities.<key>.stealth: false` is read and held to its rules, but
-    the machine has ONE agent browser and it carries no identity key, so nothing asks the question per identity until
-    identities get a browser each (Group C of the browser rework).
+  - **The per-identity opt-out is asked per identity:** each identity's Chrome (below) launches with the answer for its own key.
   - **No patched engine.** One was measured (fingerprint-chromium 150, fetched by hash, three runs per layer, direct IP) and it did
     worse than the stock browser with this layer: 3 of 7 checks against 5 of 7 (it fails the user-agent test and Navia's Cloudflare
-    check never cleared), and it is an extra binary to download. So there is no engine switch.
-  - Still to come, each on its own: a stable fingerprint per identity, a proxy per identity.
+    check never cleared), and it is an extra binary to download. So `engine` has one value, `chromium`.
+  - Still to come, on its own: a stable fingerprint per identity.
 - **The audit log** ([audit.md](audit.md)) records metadata only: `browser.stealth.switched` (from, to) when the switch
   really changes — a held `on` leaves no record until it is confirmed — and, as the layers arrive,
   `browser.stealth.session`, `browser.captcha.solve` and `browser.captcha.cap-reached` (identity key, never an

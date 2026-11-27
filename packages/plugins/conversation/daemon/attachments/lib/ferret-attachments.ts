@@ -355,6 +355,32 @@ export class AttachmentStore {
     return this.view(stored, ferretId);
   }
 
+  /**
+   * Copies every attachment `from` durably holds into `to` (a fork's new ferret), and answers how many it copied.
+   *
+   * Each original is read back through {@link download}, so its bytes are proved against its manifest before they are
+   * written, and the manifest is published as it was stored: the id is the content address, so the copy is the same
+   * attachment. One `to` already holds is left as it is. An encrypted original is copied encrypted and stays locked:
+   * an unlock lives in memory for one ferret and is never carried. The source is only read.
+   */
+  async copyAll(from: string, to: string): Promise<number> {
+    assertFerretId(to);
+    let copied = 0;
+    for (const view of await this.list(from)) {
+      try {
+        await this.stored(to, view.id);
+        continue;
+      } catch (error) {
+        if (!(error instanceof AttachmentError) || error.failure !== 'not_found') throw error;
+      }
+      const stored = await this.stored(from, view.id);
+      const { bytes } = await this.download(from, view.id);
+      await this.options.originals.publish(to, view.id, bytes, `${JSON.stringify(stored)}\n`);
+      copied += 1;
+    }
+    return copied;
+  }
+
   /** Zeroes and forgets every plaintext this ferret holds — called when the ferret stops or is gone. */
   releaseFerret(ferretId: string): void {
     const prefix = `${ferretId}:`;
@@ -396,6 +422,12 @@ export function ferretScopedAttachments(store: AttachmentStore, exists: (ferretI
     lock: async (ferretId: string, attachmentId: string): Promise<AttachmentView> => {
       await require(ferretId);
       return await store.lock(ferretId, attachmentId);
+    },
+    /** A fork's attachments: both ferrets must exist; the number copied. */
+    copy: async (from: string, to: string): Promise<number> => {
+      await require(from);
+      await require(to);
+      return await store.copyAll(from, to);
     },
   };
 }

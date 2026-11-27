@@ -72,6 +72,7 @@ export default provideToShell(
           | 'turn'
           | 'files-search'
           | 'interrupt-row'
+          | 'fork-row'
           | 'stuck-messages-row'
           | 'agenda-conversation'
           | 'new-ferret-continue',
@@ -88,6 +89,7 @@ export default provideToShell(
           'message-marks': notDrawnPerDaemon,
           'files-search': panel('files-search'),
           'interrupt-row': panel('interrupt-row'),
+          'fork-row': panel('fork-row'),
           'stuck-messages-row': panel('stuck-messages-row'),
           'agenda-conversation': panel('agenda-conversation'),
           'new-ferret-continue': panel('new-ferret-continue'),
