@@ -22,6 +22,14 @@ export interface ProjectFolders {
   gitClone(url: string, path: string): Promise<void>;
   /** The repository's common directory for the work tree at `root`, or `undefined` when it is not one. */
   gitCommonDirectory(root: string): Promise<string | undefined>;
+  /** The owner's home folder, resolved (no link on the way). */
+  home(): Promise<string>;
+  /**
+   * Whether `root` is a real checkout of the repository whose common directory is `common`: git itself, asked at `root`,
+   * names `root` as the work tree's top, the same common directory, and not a bare repository. A folder that merely
+   * holds a bare repository named `.git` is not one.
+   */
+  isCheckout(root: string, common: string): Promise<boolean>;
 }
 
 /** The registry file, read and updated on one serialization chain. */
