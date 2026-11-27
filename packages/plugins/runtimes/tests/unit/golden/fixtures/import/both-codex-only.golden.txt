@@ -1,0 +1,398 @@
+"plan":
+  "components":
+    [
+      {
+        "kind": "instructions"
+        "name": "codex-instructions"
+        "value":
+          "harness": "codex"
+          "text":
+            <<<
+              # Golden Codex notes
+              Be brief.
+
+            >>>
+      }
+      {
+        "kind": "mcp"
+        "name": "files"
+        "value":
+          "args":
+            [
+              "server-files"
+            ]
+          "command": "npx"
+          "env": "FILES_TOKEN": "${secret:FILES_TOKEN}"
+          "harness": "codex"
+      }
+      {
+        "kind": "mcp"
+        "name": "docs"
+        "value":
+          "harness": "codex"
+          "url": "https://docs.example.test/mcp"
+      }
+      {
+        "kind": "skills"
+        "name": "codex-skills"
+        "value":
+          "harness": "codex"
+          "items":
+            [
+              "deploy"
+            ]
+      }
+      {
+        "kind": "settings"
+        "name": "codex-settings"
+        "value":
+          "file": "components/settings/codex-settings.toml"
+          "harness": "codex"
+      }
+      {
+        "kind": "modelSets"
+        "name": "codex-models"
+        "value":
+          "default": "gpt-6"
+          "models":
+            [
+              "gpt-6"
+              "gpt-6-mini"
+            ]
+      }
+    ]
+  "credentials":
+    "codex-you":
+      "harness": "codex"
+      "store": "host"
+  "duplicates": []
+  "files":
+    [
+      {
+        "from": "/host/home/.codex/skills/deploy"
+        "kind": "copy-directory"
+        "path": "skills/deploy"
+      }
+      {
+        "content":
+          <<<
+            model = "gpt-6"
+            approval_policy = "on-request"
+
+            [profiles.fast]
+            model = "gpt-6-mini"
+
+          >>>
+        "kind": "write"
+        "path": "components/settings/codex-settings.toml"
+      }
+    ]
+  "imported":
+    [
+      "codex"
+    ]
+  "loginEnvs": []
+  "notes":
+    [
+      {
+        "harness": "codex"
+        "text": "Login · codex@example.test · Refresh due. Ferretry renews it the first time you launch."
+      }
+      {
+        "harness": "codex"
+        "text": "1 secret value went to Ferretry's secret store and is never shown: mcp.files.env.FILES_TOKEN."
+      }
+    ]
+  "preview":
+    "harnesses":
+      [
+        {
+          "account":
+            "email": "claude@example.test"
+            "state": "signed-in"
+          "codexProfiles": []
+          "harness": "claude"
+          "installed": true
+          "mcpServers": []
+          "missingCommands":
+            [
+              "golden-not-installed"
+            ]
+          "problems": []
+          "projectInstructions":
+            [
+              {
+                "file": "CLAUDE.md"
+                "path": "/work/golden-project"
+                "verified": true
+              }
+            ]
+          "secretKeys": []
+          "skills": []
+        }
+        {
+          "account":
+            "email": "codex@example.test"
+            "state": "refresh-due"
+          "codexProfiles":
+            [
+              {
+                "model": "gpt-6-mini"
+                "name": "fast"
+              }
+            ]
+          "harness": "codex"
+          "installed": true
+          "instructions":
+            "bytes": 31
+            "name": "AGENTS.md"
+            "source": "/host/home/.codex/AGENTS.md"
+          "mcpServers":
+            [
+              "files"
+              "docs"
+            ]
+          "missingCommands": []
+          "problems": []
+          "projectInstructions": []
+          "secretKeys":
+            [
+              "mcp.files.env.FILES_TOKEN"
+            ]
+          "settings":
+            "count": 3
+            "hooks": 1
+            "source": "/host/home/.codex/config.toml"
+          "skills":
+            [
+              "deploy"
+            ]
+        }
+      ]
+  "profiles":
+    "codex-default":
+      "layers":
+        [
+          "profile/ferretry-codex"
+          "instructions/codex-instructions"
+          "mcp/files"
+          "mcp/docs"
+          "skills/codex-skills"
+          "settings/codex-settings"
+          "modelSets/codex-models"
+        ]
+  "record":
+    "components":
+      "instructions/codex-instructions":
+        "digest": "b1a72c642eec2b5d5ba5ca20f71b47d597164e6c61d9c5468fb249af1b30e10d"
+        "sources":
+          [
+            "/host/home/.codex/AGENTS.md"
+          ]
+      "mcp/docs":
+        "digest": "03c031c89df2605d0037fd4a9eb1092075446d5628064b9054cd0e454976bed2"
+        "sources":
+          [
+            "/host/home/.codex/config.toml"
+          ]
+      "mcp/files":
+        "digest": "c18340a27c1ef11985ee95643cb0085025ddf5969de718b126c3cae8e4a08c9a"
+        "sources":
+          [
+            "/host/home/.codex/config.toml"
+          ]
+      "modelSets/codex-models":
+        "digest": "b7fb53f421fd667770b882734fb8fc3f5c1878de96d0ddee51449c2be9458610"
+        "sources":
+          [
+            "/host/home/.codex/config.toml"
+          ]
+      "settings/codex-settings":
+        "digest": "7259ee0292de95e80823f79d1a421b6754666f03f1ed8d488fc3a8b9b6a5ade2"
+        "sources":
+          [
+            "/host/home/.codex/config.toml"
+          ]
+      "skills/codex-skills":
+        "digest": "a1de6f66f386e08a415bc452869d0828781a77536f1ecddc989b9e89e0a3adf2"
+        "sources":
+          [
+            "/host/home/.codex/skills/deploy"
+          ]
+    "profiles": "codex": "codex-default"
+    "version": 1
+  "runtimes":
+    "codex-default":
+      "credential": "codex-you"
+      "profile": "codex-default"
+  "secrets":
+    [
+      {
+        "from": "codex MCP server files · files.env.FILES_TOKEN"
+        "name": "FILES_TOKEN"
+        "value": "FAKE_FILES_TOKEN_VALUE"
+      }
+    ]
+  "starters": {}
+  "updates": []
+  "warnings": {}
+"scans":
+  [
+    {
+      "command": "/opt/harness/bin/claude"
+      "harness": "claude"
+      "instructions":
+        "bytes": 31
+        "kind": "text"
+        "source": "/host/home/.claude/CLAUDE.md"
+        "text":
+          <<<
+            # Golden Claude notes
+            Be kind.
+
+          >>>
+      "login":
+        "email": "claude@example.test"
+        "state": "signed-in"
+      "mcp":
+        "bytes": 439
+        "kind": "text"
+        "source": "/host/home/.claude.json"
+        "text":
+          <<<
+            {
+              "mcpServers": {
+                "files": {
+                  "type": "stdio",
+                  "command": "npx",
+                  "args": [
+                    "server-files"
+                  ],
+                  "env": {
+                    "FILES_TOKEN": "FAKE_FILES_TOKEN_VALUE"
+                  }
+                },
+                "docs": {
+                  "type": "http",
+                  "url": "https://docs.example.test/mcp"
+                },
+                "missing": {
+                  "type": "stdio",
+                  "command": "golden-not-installed"
+                }
+              },
+              "projects": {
+                "/work/golden-project": {}
+              }
+            }
+          >>>
+      "missingCommands":
+        [
+          "golden-not-installed"
+        ]
+      "problems": []
+      "projectInstructions":
+        [
+          {
+            "file": "CLAUDE.md"
+            "path": "/work/golden-project"
+            "verified": true
+          }
+        ]
+      "settings":
+        "bytes": 385
+        "kind": "text"
+        "source": "/host/home/.claude/settings.json"
+        "text":
+          <<<
+            {
+              "model": "claude-opus-5-5",
+              "env": {
+                "GH_TOKEN": "FAKE_GH_VALUE_NOT_A_TOKEN",
+                "EDITOR": "vim"
+              },
+              "permissions": {
+                "allow": [
+                  "Bash(ls:*)"
+                ]
+              },
+              "hooks": {
+                "PreToolUse": [
+                  {
+                    "matcher": "Bash",
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "echo golden"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          >>>
+      "skills":
+        [
+          {
+            "digest": "17b00456dbbec5673f5a13bb7e04a580ca61260cb115169dc1cd64d30b8ba08f"
+            "item": "review"
+            "source": "/host/home/.claude/skills/review"
+          }
+        ]
+    }
+    {
+      "command": "/opt/harness/bin/codex"
+      "harness": "codex"
+      "hooks":
+        "bytes": 73
+        "kind": "text"
+        "source": "/host/home/.codex/hooks.json"
+        "text": "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo done\"}]}]}}"
+      "instructions":
+        "bytes": 31
+        "kind": "text"
+        "source": "/host/home/.codex/AGENTS.md"
+        "text":
+          <<<
+            # Golden Codex notes
+            Be brief.
+
+          >>>
+      "login":
+        "email": "codex@example.test"
+        "state": "refresh-due"
+      "missingCommands": []
+      "problems": []
+      "settings":
+        "bytes": 268
+        "kind": "text"
+        "source": "/host/home/.codex/config.toml"
+        "text":
+          <<<
+            model = "gpt-6"
+            approval_policy = "on-request"
+
+            [mcp_servers.files]
+            command = "npx"
+            args = ["server-files"]
+
+            [mcp_servers.files.env]
+            FILES_TOKEN = "FAKE_FILES_TOKEN_VALUE"
+
+            [mcp_servers.docs]
+            url = "https://docs.example.test/mcp"
+
+            [profiles.fast]
+            model = "gpt-6-mini"
+
+          >>>
+      "skills":
+        [
+          {
+            "digest": "65c3da7c85e08e6cb57d9895a0d51bee36dbe83cc07f3259da63d327c585f412"
+            "item": "deploy"
+            "source": "/host/home/.codex/skills/deploy"
+          }
+        ]
+    }
+  ]

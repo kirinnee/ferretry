@@ -1,0 +1,56 @@
+"outcomes":
+  [
+    {
+      "cause": "needs-admin"
+      "harness": "claude"
+      "manualCommand": "sudo npm install -g @anthropic-ai/claude-code"
+      "outcome": "failed"
+      "output":
+        [
+          "npm ERR! code EACCES"
+          "npm ERR! permission denied"
+        ]
+      "reason": "npm needs admin rights and the account this daemon runs as isn't an admin, so nothing was installed. Ferretry never runs sudo; run the command yourself."
+    }
+    {
+      "cause": "needs-admin"
+      "harness": "codex"
+      "manualCommand": "sudo npm install -g @openai/codex"
+      "outcome": "failed"
+      "output":
+        [
+          "npm ERR! code EACCES"
+          "npm ERR! permission denied"
+        ]
+      "reason": "npm needs admin rights and the account this daemon runs as isn't an admin, so nothing was installed. Ferretry never runs sudo; run the command yourself."
+    }
+  ]
+"runs":
+  [
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@anthropic-ai/claude-code"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@openai/codex"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+  ]

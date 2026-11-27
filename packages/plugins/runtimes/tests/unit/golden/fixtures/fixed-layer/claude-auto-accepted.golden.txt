@@ -1,0 +1,178 @@
+"layer":
+  "agentPermissions": "auto"
+  "args":
+    [
+      "--permission-mode"
+      "auto"
+      "--disallowed-tools=AskUserQuestion"
+      "--mcp-config={\"mcpServers\":{\"ferretry\":{\"type\":\"stdio\",\"command\":\"/opt/ferretry/bin/fy\",\"args\":[\"mcp\",\"serve\"],\"env\":{\"FY_TOKEN\":\"\"}}}}"
+      <<<
+        --append-system-prompt=Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.
+
+        Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (`fy config path`). Before changing any, read `fy config guide` and follow it: never write a secret value into a file (the owner runs `fy secret set NAME`; then ${secret:NAME}), run `fy config check` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.
+      >>>
+    ]
+  "claudeJson":
+    "fullscreenUpsellSeenCount": 3
+    "hasCompletedOnboarding": true
+    "hasSeenAutoDefaultNudge": true
+    "hasSeenEffortMediumNudge": true
+    "hasSeenEffortMediumNudgeByModel":
+      "claude-fable-5-1": true
+      "claude-opus-5": true
+    "projects": "/golden/launch-folder": "hasTrustDialogAccepted": true
+  "claudeSettingsOverlay":
+    "permissions":
+      "defaultMode": "auto"
+      "deny":
+        [
+          "Bash(pkill:*)"
+          "Bash(killall:*)"
+        ]
+    "remoteControlAtStartup": false
+    "skipAutoPermissionPrompt": true
+  "entries":
+    [
+      {
+        "key": "permissions.defaultMode"
+        "path":
+          [
+            "permissions"
+            "defaultMode"
+          ]
+        "purpose": "permission-mode"
+        "target": "settings"
+        "value": "auto"
+      }
+      {
+        "key": "projects.\"/golden/launch-folder\".hasTrustDialogAccepted"
+        "path":
+          [
+            "projects"
+            "/golden/launch-folder"
+            "hasTrustDialogAccepted"
+          ]
+        "purpose": "trust"
+        "target": "claude-json"
+        "value": true
+      }
+      {
+        "key": "hasCompletedOnboarding"
+        "path":
+          [
+            "hasCompletedOnboarding"
+          ]
+        "purpose": "onboarding"
+        "target": "claude-json"
+        "value": true
+      }
+      {
+        "key": "remoteControlAtStartup"
+        "path":
+          [
+            "remoteControlAtStartup"
+          ]
+        "purpose": "remote-control"
+        "target": "settings"
+        "value": false
+      }
+      {
+        "key": "hasSeenAutoDefaultNudge"
+        "path":
+          [
+            "hasSeenAutoDefaultNudge"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "claude-json"
+        "value": true
+      }
+      {
+        "key": "hasSeenEffortMediumNudge"
+        "path":
+          [
+            "hasSeenEffortMediumNudge"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "claude-json"
+        "value": true
+      }
+      {
+        "key": "hasSeenEffortMediumNudgeByModel"
+        "path":
+          [
+            "hasSeenEffortMediumNudgeByModel"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "claude-json"
+        "value":
+          "claude-fable-5-1": true
+          "claude-opus-5": true
+      }
+      {
+        "key": "fullscreenUpsellSeenCount"
+        "path":
+          [
+            "fullscreenUpsellSeenCount"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "claude-json"
+        "value": 3
+      }
+      {
+        "key": "skipAutoPermissionPrompt"
+        "path":
+          [
+            "skipAutoPermissionPrompt"
+          ]
+        "purpose": "skip-prompt"
+        "target": "settings"
+        "value": true
+      }
+      {
+        "key": "--disallowed-tools=AskUserQuestion"
+        "path":
+          [
+            "--disallowed-tools=AskUserQuestion"
+          ]
+        "purpose": "no-questions"
+        "target": "launch"
+        "value": true
+      }
+      {
+        "key": "--mcp-config"
+        "path":
+          [
+            "--mcp-config"
+          ]
+        "purpose": "tools"
+        "target": "launch"
+        "value":
+          "mcpServers":
+            "ferretry":
+              "args":
+                [
+                  "mcp"
+                  "serve"
+                ]
+              "command": "/opt/ferretry/bin/fy"
+              "env": "FY_TOKEN": ""
+              "type": "stdio"
+      }
+      {
+        "key": "--append-system-prompt"
+        "path":
+          [
+            "--append-system-prompt"
+          ]
+        "purpose": "instructions"
+        "target": "launch"
+        "value":
+          <<<
+            Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.
+
+            Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (`fy config path`). Before changing any, read `fy config guide` and follow it: never write a secret value into a file (the owner runs `fy secret set NAME`; then ${secret:NAME}), run `fy config check` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.
+          >>>
+      }
+    ]
+  "harness": "claude"
+"ok": true
