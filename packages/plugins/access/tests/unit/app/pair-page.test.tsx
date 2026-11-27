@@ -475,6 +475,28 @@ describe('the /pair page', () => {
     expect(view.container.textContent).not.toContain('no longer accepts this browser');
   });
 
+  it('C-80b names the machine on the pair page after a long outage, claiming neither removal nor replacement', async () => {
+    const { Page } = setup(async () => {
+      throw new Error('not used');
+    }, [
+      {
+        daemon: DAEMON,
+        machine: 'workstation',
+        deviceId: DEVICE,
+        address: 'https://daemon.example.test',
+        carriers: [],
+        pairedAt: 1,
+        lastSelectedAt: 1,
+      } as PairedDaemon,
+    ]);
+    view = await mount(<Page {...props(`https://pwa.example.test/pair?unreachable=${DAEMON}`, [])} />);
+    expect(view.container.querySelector('[data-device-refused]')?.textContent).toContain('workstation');
+    expect(view.container.textContent).toContain('If Ferretry was reinstalled there, pair this browser with it again.');
+    expect(view.container.textContent).toContain('Pair again');
+    expect(view.container.textContent).not.toContain('no longer accepts this browser');
+    expect(view.container.textContent).not.toContain('was reinstalled or replaced');
+  });
+
   // G2: the page is drawn without the shell's chrome (manifest.test.ts), so it carries its own way back.
   describe('has its own way back, because it draws no sidebar or bars', () => {
     const back = (): HTMLElement | null => view?.container.querySelector<HTMLElement>('[data-pairing-close]') ?? null;
