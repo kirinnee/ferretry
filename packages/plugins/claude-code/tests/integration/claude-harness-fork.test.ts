@@ -2,23 +2,11 @@
  * Forking a Claude Code conversation (`Harness.fork`): the REAL kernel roots over a temp folder and SYNTHETIC transcripts
  * only (never a real `~/.claude`). What is proved: a cut at a turn holds exactly that turn and everything before it under a
  * fresh id; it lands in the pool under the spelling of the folder the new ferret will work in, where `hasConversation`
- * finds it; the source file is byte-, mtime- and inode-identical afterwards; every refusal writes nothing; and `discard`
- * removes only the file this fork made.
+ * finds it; the source file is byte-, mtime- and inode-identical afterwards; every refusal writes nothing; and a failed
+ * launch keeps the new file because no pathname-based cleanup is offered.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchSpec } from '@ferretry/core-ferrets/contract';
@@ -26,6 +14,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
 import { ensureInternalRootBases, rootsPortFor } from '../../../../core/kernel/host/roots.ts';
+import { FORK_INPUTS } from '../../contract/testing/fork-inputs.ts';
 import {
   CLAUDE_CODE_AGENT_HOMES,
   CLAUDE_CODE_HISTORY_ENTRIES,
@@ -255,26 +244,135 @@ describe('Claude Code fork', () => {
     );
   });
 
-  test('discard removes the new copy and only it; a file put at that name since is left, and the source is never touched', async () => {
+  test('MUST 4: no discard member; a launch failure keeps the copy and cannot remove a replacement', async () => {
     await seed(five());
     const harness = build();
     const target = pool(`projects/${spelled(FOLDER)}/${NEW_ID}.jsonl`);
     const before = await readFile(sourceFile());
     const plan = await harness.fork!('src' as FerretId, { turn: 3 }, { folder: FOLDER });
-    await plan.discard!();
-    expect(await lstat(target).catch(() => undefined)).toBeUndefined();
+    expect('discard' in plan).toBe(false);
+    // The optional cleanup a caller might try after a failed launch must leave this file for the owner.
+    await plan.discard?.();
+    expect((await lines(target)).map(r => r.uuid)).toEqual(['p1', 'a1', 'p2', 'a2', 'p3', 'a3']);
     expect(await readFile(sourceFile())).toEqual(before);
-    // A second discard has nothing to do.
-    await plan.discard!();
-
-    fresh = [NEW_ID];
-    const again = await harness.fork!('src' as FerretId, { turn: 3 }, { folder: FOLDER });
-    // Written beside and renamed over, so the old file still exists and no inode number is reused.
-    await writeFile(`${target}.new`, 'a different file at the same name\n');
-    await rename(`${target}.new`, target);
-    await again.discard!().catch(() => undefined);
+    await rm(target);
+    await writeFile(target, 'a different file at the same name\n');
+    await plan.discard?.();
     expect(await readFile(target, 'utf8')).toBe('a different file at the same name\n');
     expect(await readFile(sourceFile())).toEqual(before);
+  });
+
+  test('MUST 1: an unpooled transcript name that links to a file inside its own root is refused', async () => {
+    await seed(five());
+    await rm(join(homeOf('src'), 'projects'));
+    const folder = join(homeOf('src'), `projects/${spelled(FOLDER)}`);
+    await mkdir(folder, { recursive: true });
+    const real = join(folder, 'real.jsonl');
+    const bytes = `${five()
+      .map(r => JSON.stringify(r))
+      .join('\n')}\n`;
+    await writeFile(real, bytes);
+    await symlink('real.jsonl', join(folder, `${SOURCE}.jsonl`));
+    const before = await poolFiles();
+    await expect(build().fork!('src' as FerretId, { turn: 1 }, { folder: FOLDER })).rejects.toThrow();
+    expect(await poolFiles()).toEqual(before);
+    expect(await readFile(real, 'utf8')).toBe(bytes);
+    // A plain unpooled transcript still works: the refusal is about the link, not the home layout.
+    await rm(join(folder, `${SOURCE}.jsonl`));
+    await writeFile(join(folder, `${SOURCE}.jsonl`), bytes);
+    await build().fork!('src' as FerretId, { turn: 1 }, { folder: FOLDER });
+    expect((await lines(pool(`projects/${spelled(FOLDER)}/${NEW_ID}.jsonl`))).map(r => r.uuid)).toEqual(['p1', 'a1']);
+  });
+
+  test('MUST 2: the same fixture gives the reader and fork four inputs, including a queued prompt and a meta channel message', async () => {
+    const records = FORK_INPUTS.map(record => ({ ...record, sessionId: SOURCE }));
+    await seed(records);
+    const harness = build();
+    await expect(harness.fork!('src' as FerretId, { turn: 1, entry: 'p2' }, { folder: FOLDER })).rejects.toThrow(
+      'is in turn 2, not turn 1',
+    );
+    await harness.fork!('src' as FerretId, { turn: 2 }, { folder: FOLDER });
+    expect((await lines(pool(`projects/${spelled(FOLDER)}/${NEW_ID}.jsonl`))).map(r => r.uuid)).toEqual([
+      'p1',
+      'a1',
+      'p2',
+      'a2',
+    ]);
+    fresh = ['1c8f5d2b-2e3a-4d4c-8b9f-8a7e6d5c4b32'];
+    const channel = await harness.fork!('src' as FerretId, { turn: 4, entry: 'a4' }, { folder: FOLDER });
+    expect((await lines(pool(`projects/${spelled(FOLDER)}/${channel.harnessConversation}.jsonl`))).at(-2)?.uuid).toBe(
+      'p4',
+    );
+  });
+
+  test('MUST 2: a turn cut cannot split a tool pair across a queued prompt; the next turn keeps both', async () => {
+    await seed([
+      prompt(1),
+      answer(1, [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }]),
+      {
+        type: 'attachment',
+        uuid: 'p2',
+        sessionId: SOURCE,
+        attachment: {
+          type: 'queued_command',
+          commandMode: 'prompt',
+          origin: { kind: 'human' },
+          prompt: 'question 2',
+        },
+      },
+      {
+        type: 'user',
+        uuid: 'r1',
+        sessionId: SOURCE,
+        message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] },
+      },
+      answer(2),
+      prompt(3),
+      answer(3),
+    ]);
+    const harness = build();
+    const before = await poolFiles();
+    await expect(harness.fork!('src' as FerretId, { turn: 1 }, { folder: FOLDER })).rejects.toThrow(
+      'inside a tool call',
+    );
+    expect(await poolFiles()).toEqual(before);
+    await harness.fork!('src' as FerretId, { turn: 2 }, { folder: FOLDER });
+    expect((await lines(pool(`projects/${spelled(FOLDER)}/${NEW_ID}.jsonl`))).map(r => r.uuid)).toEqual([
+      'p1',
+      'a1',
+      'p2',
+      'r1',
+      'a2',
+    ]);
+  });
+
+  test('MUST 3: a pre-cut completed Agent is refused before writing, while a cut before it is safe', async () => {
+    await seed([
+      prompt(1),
+      answer(1),
+      prompt(2),
+      answer(2, [{ type: 'tool_use', id: 'agent-call', name: 'Agent', input: { prompt: 'synthetic work' } }]),
+      {
+        type: 'user',
+        uuid: 'agent-result',
+        sessionId: SOURCE,
+        toolUseResult: { agentId: 'agent-fixture' },
+        message: { content: [{ type: 'tool_result', tool_use_id: 'agent-call', content: 'agentId: agent-fixture' }] },
+      },
+      answer(3),
+    ]);
+    const harness = build();
+    const subagent = pool(`projects/${spelled(FOLDER)}/${SOURCE}/subagents/agent-agent-fixture.jsonl`);
+    await mkdir(join(subagent, '..'), { recursive: true });
+    await writeFile(subagent, `${JSON.stringify({ ...answer(1), agentId: 'agent-fixture', isSidechain: true })}\n`);
+    const original = { bytes: await readFile(subagent), stat: await stat(subagent) };
+    const before = await poolFiles();
+    await expect(harness.fork!('src' as FerretId, { turn: 2 }, { folder: FOLDER })).rejects.toThrow('subagent');
+    expect(await poolFiles()).toEqual(before);
+    expect(await readFile(subagent)).toEqual(original.bytes);
+    expect((await stat(subagent)).mtimeMs).toBe(original.stat.mtimeMs);
+    await harness.fork!('src' as FerretId, { turn: 1 }, { folder: FOLDER });
+    expect((await lines(pool(`projects/${spelled(FOLDER)}/${NEW_ID}.jsonl`))).map(r => r.uuid)).toEqual(['p1', 'a1']);
   });
 
   test('a source reached through a link in the pool is never followed out of it', async () => {

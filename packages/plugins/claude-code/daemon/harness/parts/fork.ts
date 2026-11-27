@@ -1,5 +1,5 @@
 import type { ForkPlan, ForkTarget, TurnRef } from '@ferretry/core-ferrets/contract';
-import type { FerretId } from '@ferretry/kernel/contract';
+import { MAX_ROOT_WINDOW_BYTES, type FencedPath, type FerretId, type RootHandle } from '@ferretry/kernel/contract';
 import { claudeTranscriptPath, isConversationId } from '../../lib/harness/claude-path.ts';
 import type { ClaudeCore, Serves } from './core.ts';
 import { resolveTranscriptFile } from './transcript.ts';
@@ -12,6 +12,28 @@ type Json = Record<string, unknown>;
 
 const asObject = (value: unknown): Json | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined;
+
+/** Hold one no-link descriptor, including on an unpooled home; a stat followed by readBytes would follow an in-root link. */
+async function sourceBytes(home: RootHandle, file: FencedPath): Promise<Uint8Array> {
+  const opened = await home.openBytes?.(file);
+  if (opened === undefined) throw new Error('the source conversation could not be opened without following a link');
+  try {
+    const { size } = await opened.stat();
+    if (size > MAX_FORK_BYTES) throw new Error('that conversation is too large to fork (over 256 MB)');
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size) {
+      const chunk = await opened.read(offset, Math.min(MAX_ROOT_WINDOW_BYTES, size - offset));
+      if (chunk.length === 0) break;
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    if (!(await opened.stillNames())) throw new Error('the source conversation changed while it was being read');
+    return bytes.subarray(0, offset);
+  } finally {
+    await opened.close();
+  }
+}
 
 /** One transcript line: its exact bytes (newline included) and what it parsed to, if it parsed. */
 interface Line {
@@ -45,20 +67,43 @@ function linesOf(bytes: Uint8Array): readonly Line[] {
   return lines;
 }
 
-/** A line a person typed: a user record that is not Claude's own note, a side thread, a summary or a tool answer. */
+/**
+ * Conversation's visible user messages, including native queue drains and Ferretry's channel. The reader lives in another
+ * plugin's daemon half; contract/testing/fork-inputs.ts pins both consumers to the same raw fixture across that boundary.
+ */
 function startsTurn(record: Json | undefined): boolean {
-  if (record === undefined || record.type !== 'user') return false;
-  if (record.isMeta === true || record.isSidechain === true || record.isCompactSummary === true) return false;
-  if (record.isVisibleInTranscriptOnly === true) return false;
-  const origin = asObject(record.origin)?.kind;
-  if (typeof origin === 'string' && origin !== '' && origin !== 'human' && origin !== 'channel') return false;
+  if (record === undefined) return false;
+  const channel = (value: unknown): boolean => {
+    const origin = asObject(value);
+    return origin?.kind === 'channel' && origin.server === 'ferretry';
+  };
+  const hasWords = (content: unknown): boolean => {
+    const parts = Array.isArray(content) ? content : [content];
+    return parts.some(part => {
+      const text = typeof part === 'string' ? part : asObject(part)?.type === 'text' ? asObject(part)?.text : undefined;
+      return typeof text === 'string' && text.trim() !== '';
+    });
+  };
+  if (record.type === 'attachment') {
+    const queued = asObject(record.attachment);
+    return (
+      queued?.type === 'queued_command' &&
+      queued.commandMode === 'prompt' &&
+      (asObject(queued.origin)?.kind === 'human' || channel(queued.origin)) &&
+      hasWords(queued.prompt)
+    );
+  }
+  if (record.type !== 'user' || record.isCompactSummary === true) return false;
+  const kind = asObject(record.origin)?.kind;
+  if (
+    !channel(record.origin) &&
+    (record.isMeta === true ||
+      record.isVisibleInTranscriptOnly === true ||
+      (typeof kind === 'string' && kind !== '' && kind !== 'human'))
+  )
+    return false;
   const content = asObject(record.message)?.content;
-  if (typeof content === 'string') return content !== '';
-  return (
-    Array.isArray(content) &&
-    content.some(block => asObject(block)?.type === 'text') &&
-    !content.some(block => asObject(block)?.type === 'tool_result')
-  );
+  return hasWords(content);
 }
 
 /** The tool calls with no answer among these records: a cut that leaves one makes a conversation Claude may refuse to resume. */
@@ -99,7 +144,25 @@ function cutAfter(lines: readonly Line[], at: TurnRef | undefined): number | str
   }
   if (at.turn > starts.length)
     return `turn ${at.turn} does not exist: this conversation has ${starts.length} turn${starts.length === 1 ? '' : 's'}`;
-  return starts[at.turn] ?? lines.length;
+  const end = starts[at.turn] ?? lines.length;
+  if (unansweredCalls(lines.slice(0, end)).length > 0)
+    return `turn ${at.turn} ends inside a tool call; pick a later turn that includes its answer`;
+  return end;
+}
+
+/** A top-level copy cannot resume an Agent whose separate transcript was left behind. Refuse before any write. */
+function includesSubagent(lines: readonly Line[]): boolean {
+  return lines.some(({ record }) => {
+    if (typeof asObject(record?.toolUseResult)?.agentId === 'string') return true;
+    const content = asObject(record?.message)?.content;
+    return (
+      Array.isArray(content) &&
+      content.some(block => {
+        const call = asObject(block);
+        return call?.type === 'tool_use' && call.name === 'Agent';
+      })
+    );
+  });
 }
 
 /** The kept lines under the new conversation id: only the records that carry the old one change, every other byte is kept. */
@@ -122,19 +185,22 @@ export const forkPart = (core: ClaudeCore): Serves<'fork'> => ({
    * Cuts a ferret's conversation into a NEW one (`Harness.fork`). The source transcript is read through the root that
    * proved it and is never written, moved or locked; the cut is written as a new file under a new id in the shared history
    * pool, under the spelling Claude keys `into.folder` by, so the ferret started there resumes it. It is made once and never
-   * over a name that exists. `discard` removes that one file (proved by its device and inode, so a file put there since is
-   * left), and nothing else.
+   * over a name that exists. No discard is offered: a failed launch keeps the new conversation for the owner, since a
+   * pathname identity check followed by removal cannot prove that a concurrent replacement will survive.
    */
   async fork(from: FerretId, at: TurnRef | undefined, into: ForkTarget): Promise<ForkPlan> {
     if (!into.folder.startsWith('/')) throw new Error('the folder to fork into must be an absolute path');
     const source = await resolveTranscriptFile(core, from);
     if (source === undefined) throw new Error('this ferret has no conversation on disk to fork');
-    if (source.stat.size > MAX_FORK_BYTES) throw new Error('that conversation is too large to fork (over 256 MB)');
-    const lines = linesOf(await source.home.readBytes(source.file, MAX_FORK_BYTES));
+    const lines = linesOf(await sourceBytes(source.home, source.file));
     const cut = cutAfter(lines, at);
     if (typeof cut === 'string') throw new Error(cut);
     const kept = lines.slice(0, cut);
     if (kept.length === 0) throw new Error('there is nothing in that conversation to fork');
+    if (includesSubagent(kept))
+      throw new Error(
+        'this cut includes a subagent whose separate transcript cannot be copied safely; pick a cut before it',
+      );
 
     const id = core.deps.newConversationId();
     if (!isConversationId(id) || id === source.conversation)
@@ -146,22 +212,11 @@ export const forkPart = (core: ClaudeCore): Serves<'fork'> => ({
     if (!file.ok || !folder.ok) throw new Error('the new conversation would be outside the folders Ferretry may use');
     await pool.makeDirectory(folder.value, { mode: 0o700 });
     await pool.writeBytes(file.value, renamed(kept, source.conversation, id), { exclusive: true });
-    const written = file.value;
-    const identity = await pool.fileIdentity(written).catch(() => undefined);
 
     return {
       from,
       ...(at === undefined ? {} : { at }),
       harnessConversation: id,
-      discard: async () => {
-        // Only the file this fork made: a name that no longer reaches it is left exactly as it is.
-        if (identity === undefined)
-          throw new Error(`the forked conversation ${id} was not proved to be this fork's own, so it was kept`);
-        const now = await pool.fileIdentity(written);
-        // Gone already, or another file now: nothing of this fork's to remove.
-        if (now === undefined || now.device !== identity.device || now.inode !== identity.inode) return;
-        await pool.remove(written);
-      },
     };
   },
 });
