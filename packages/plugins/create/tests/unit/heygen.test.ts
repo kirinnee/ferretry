@@ -113,6 +113,8 @@ interface World {
   readonly standing: { current: CallStanding };
   /** While true, a write to the jobs file fails (a full or damaged disk). */
   readonly jobsWrite: { fails: boolean };
+  /** While true, a write to the spend ledger fails (a transient fault). */
+  readonly ledgerWrite: { fails: boolean };
 }
 
 async function world(
@@ -162,13 +164,15 @@ async function world(
           .join('\n')}\n`,
       );
   const jobsWrite = { fails: false };
+  const ledgerWrite = { fails: false };
   const files = host.state('create').files;
   const set = files.set.bind(files);
   files.set = (path, text) => {
     if (jobsWrite.fails && path === 'avatar-jobs.jsonl') throw new Error('the disk is full');
+    if (ledgerWrite.fails && path === 'ledger.jsonl') throw new Error('the ledger is busy');
     return set(path, text);
   };
-  return { fake, asks, delivered, host, standing, jobsWrite };
+  return { fake, asks, delivered, host, standing, jobsWrite, ledgerWrite };
 }
 
 const SHORT = 'Hello, and welcome to the show.';
@@ -618,13 +622,27 @@ describe('the reservation is an upper bound, so the spend gates cannot be underc
     expect(ledgerLines(w)).toHaveLength(2);
   });
 
-  test('a video HeyGen made longer than the bound is charged the excess, so the ledger never undercounts', async () => {
-    const w = await world();
+  test('a video HeyGen made longer than the bound is recorded as a visible OVERRUN that counts toward the daily cap and is shown in the result', async () => {
+    const w = await world({ limits: { dailyUsd: 2 } });
     const job = jobOf((await avatar(w)).text);
     w.fake.finish('hv1', { duration: 20 });
-    expect((await status(w, job)).isError).toBeUndefined();
+    const ready = await status(w, job);
+    expect(ready.isError).toBeUndefined();
+    // the money is spent, so the ledger holds it: the reservation plus one line marked as the overrun
     expect(net(w)).toBe(20 * PER_SECOND);
+    expect(ledgerLines(w).at(-1)).toMatchObject({ overrun: true, microUsd: 13 * PER_SECOND });
     expect(ledgerLines(w).at(-1)).not.toHaveProperty('refund');
+    expect(ledgerLines(w).filter(line => line.overrun === true)).toHaveLength(1);
+    // never a silent extra charge: the job's end keeps it and the result says so, now and when asked again
+    expect(jobLines(w).at(-1)).toMatchObject({ outcome: 'delivered', seconds: 20, overrunMicroUsd: 13 * PER_SECOND });
+    expect(ready.text).toContain('overrun');
+    expect((await status(w, job)).text).toContain('overrun');
+    expect(ledgerLines(w).filter(line => line.overrun === true)).toHaveLength(1);
+    // and it counts toward the cap: $1.61 spent of $2, so another $0.56 video is refused
+    const next = await avatar(w, { script: 'a different short script' });
+    expect(next.isError).toBe(true);
+    expect(next.text).toContain('daily limit');
+    expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(1);
   });
 
   test('a video with no reported length stays at the reservation', async () => {
@@ -634,6 +652,52 @@ describe('the reservation is an upper bound, so the spend gates cannot be underc
     await status(w, job);
     expect(net(w)).toBe(SHORT_COST);
     expect(ledgerLines(w)).toHaveLength(1);
+  });
+
+  test('a completed video that reports a duration of 0 is finished and keeps the reservation, not stuck pending', async () => {
+    const w = await world();
+    const job = jobOf((await avatar(w)).text);
+    w.fake.finish('hv1', { duration: 0 });
+    const ready = await status(w, job);
+    expect(ready.isError).toBeUndefined();
+    expect(ready.text).toContain('type: video');
+    expect(net(w)).toBe(SHORT_COST);
+    expect(ledgerLines(w)).toHaveLength(1);
+    expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', outcome: 'delivered' });
+    const polls = w.fake.to('api.heygen.com', 'GET').length;
+    expect((await status(w, job)).text).toContain('type: video');
+    expect(w.fake.to('api.heygen.com', 'GET')).toHaveLength(polls);
+  });
+
+  test('a failed video that reports a duration of 0 takes the normal failed path, not an endless retry', async () => {
+    const w = await world();
+    const job = jobOf((await avatar(w)).text);
+    Object.assign(w.fake.videos.get('hv1')!, { status: 'failed', duration: 0 });
+    const answer = await status(w, job);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('Not made');
+    expect(net(w)).toBe(SHORT_COST);
+    expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', outcome: 'counted' });
+  });
+
+  test('a settlement the ledger refused leaves the job open; the next check writes exactly one settlement', async () => {
+    const w = await world();
+    const job = jobOf((await avatar(w)).text);
+    w.fake.finish('hv1', { duration: 2 });
+    w.ledgerWrite.fails = true;
+    const first = await status(w, job);
+    expect(first.isError).toBe(true);
+    expect(first.text).toContain('call avatar_video_status again');
+    expect(jobLines(w).some(line => line.kind === 'finished')).toBe(false);
+    expect(net(w)).toBe(SHORT_COST);
+    w.ledgerWrite.fails = false;
+    const second = await status(w, job);
+    expect(second.isError).toBeUndefined();
+    expect(net(w)).toBe(2 * PER_SECOND);
+    expect(ledgerLines(w)).toHaveLength(2);
+    expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', settledMicroUsd: 2 * PER_SECOND });
+    await status(w, job);
+    expect(ledgerLines(w)).toHaveLength(2);
   });
 
   test('an end that cannot be saved is retried without a second refund', async () => {

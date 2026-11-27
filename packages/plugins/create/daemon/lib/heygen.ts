@@ -111,8 +111,8 @@ const StatusReplySchema = z.object({
   data: z.object({
     status: z.string().max(32),
     video_url: z.string().max(2048).nullish(),
-    /** The length of the finished video, in seconds. */
-    duration: z.number().positive().max(86_400).nullish(),
+    /** The length of the finished video, in seconds. A length that is 0 or unusable is no length (never a reason to reject the status). */
+    duration: z.number().positive().max(86_400).nullish().catch(undefined),
     error: z.unknown().optional(),
   }),
 });
@@ -198,7 +198,13 @@ async function loadJobs(state: StatePort): Promise<ReadonlyMap<string, Job>> {
 const costLineOf = (job: Submitted, finished?: Finished): string =>
   finished?.settledMicroUsd === undefined || finished.seconds === undefined
     ? job.costLine
-    : `${job.label} · ${usdWords(finished.settledMicroUsd)} (${Math.ceil(finished.seconds)} s made; ${usdWords(job.microUsd)} was held)`;
+    : `${job.label} · ${usdWords(finished.settledMicroUsd)} (${Math.ceil(finished.seconds)} s made; ${usdWords(job.microUsd)} was held${overrunWords(finished)})`;
+
+/** An overrun, said out loud wherever the cost is shown: it was spent already, so it is recorded and flagged, never asked. */
+const overrunWords = (finished: Finished): string =>
+  finished.overrunMicroUsd === undefined
+    ? ''
+    : `; an overrun of ${usdWords(finished.overrunMicroUsd)}: HeyGen billed past the upper bound, recorded and counted toward today’s limit`;
 
 const pasteOf = (job: Submitted, where: string, costLine: string = job.costLine): string[] => [
   'Put these lines in your reply:',
@@ -313,15 +319,19 @@ const settlementRequest = (job: Submitted): string => requestDigest('generate_av
 
 /**
  * Brings the reservation to what the made video really cost: `seconds` (as HeyGen reported them) at Avatar IV's per-second
- * rate. A smaller cost gives the difference back; a larger one (HeyGen made it longer than the upper bound) is charged, so
- * the ledger never undercounts. Written ONCE per job (a line already kept for it is found and left), appended never rewritten.
- * Without a reported length the reservation stands. Answers what the job file keeps of it.
+ * rate. A smaller cost gives the difference back; a larger one (HeyGen made it longer than the upper bound) is already
+ * spent, so it is recorded as a marked OVERRUN line that counts toward the daily cap and is reported in the job's result
+ * (no approval is possible after the fact), so the ledger never undercounts or hides it. Written ONCE per job (a line
+ * already kept for it is found and left), appended never rewritten. Without a reported length the reservation stands.
+ * Answers what the job file keeps of it. A failing ledger read or write THROWS: the caller must not close the job then.
  */
 async function settle(
   deps: AvatarVideoDeps,
   submitted: Submitted,
   seconds: number | undefined,
-): Promise<{ readonly seconds: number; readonly settledMicroUsd: number } | undefined> {
+): Promise<
+  { readonly seconds: number; readonly settledMicroUsd: number; readonly overrunMicroUsd?: number } | undefined
+> {
   if (seconds === undefined) return undefined;
   const settledMicroUsd = avatarCostOf(seconds);
   const request = settlementRequest(submitted);
@@ -339,9 +349,9 @@ async function settle(
       request,
     };
     if (difference < 0) await deps.ledger.refund(line);
-    else await deps.ledger.record(line);
+    else await deps.ledger.record({ ...line, overrun: true });
   }
-  return { seconds, settledMicroUsd };
+  return difference > 0 ? { seconds, settledMicroUsd, overrunMicroUsd: difference } : { seconds, settledMicroUsd };
 }
 
 /** A job that ended without a video stays counted (it may have been billed): its end is written, then said. */
@@ -357,7 +367,7 @@ async function endCounted(deps: AvatarVideoDeps, submitted: Submitted, sentence:
 const paidOf = (job: Submitted, finished?: Finished): string =>
   finished?.settledMicroUsd === undefined || finished.seconds === undefined
     ? job.paid
-    : `${usdWords(finished.settledMicroUsd)} for ${Math.ceil(finished.seconds)} s at the listed price; ${usdWords(job.microUsd)} was held and the difference was settled`;
+    : `${usdWords(finished.settledMicroUsd)} for ${Math.ceil(finished.seconds)} s at the listed price; ${usdWords(job.microUsd)} was held and the difference was settled${overrunWords(finished)}`;
 
 const answerFinished = (submitted: Submitted, finished: Finished): ToolAnswer =>
   finished.outcome === 'delivered' && finished.where !== undefined
@@ -446,9 +456,19 @@ function avatarVideoStatus(deps: AvatarVideoDeps) {
               isError: true,
             };
           // Settled to the real length BEFORE the end is written: the ledger line is idempotent, so an end that fails to
-          // save is retried without a second refund, and the job file only ever says what the ledger holds.
-          const settlement = await settle(deps, submitted, checked.seconds).catch(() => undefined);
-          const notClosed = await closeJob(deps, submitted, { outcome: 'delivered', where, ...settlement });
+          // save is retried without a second refund, and the job file only ever says what the ledger holds. A settlement
+          // that cannot be written leaves the job OPEN (never closed unsettled: a closed job is never settled again), so
+          // the next check retries it.
+          const settlement = await settle(deps, submitted, checked.seconds).then(
+            settled => ({ settled }),
+            () => undefined,
+          );
+          if (settlement === undefined)
+            return {
+              text: `The video for job ${submitted.job} was made and paid for (${submitted.paid}), but its final cost could not be written to the ledger yet. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
+              isError: true,
+            };
+          const notClosed = await closeJob(deps, submitted, { outcome: 'delivered', where, ...settlement.settled });
           if (notClosed !== undefined) return notClosed;
           const finished: Finished = {
             kind: 'finished',
@@ -456,7 +476,7 @@ function avatarVideoStatus(deps: AvatarVideoDeps) {
             at: deps.now().toISOString(),
             outcome: 'delivered',
             where,
-            ...settlement,
+            ...settlement.settled,
           };
           return {
             text: [

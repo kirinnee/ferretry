@@ -123,6 +123,8 @@ export const AvatarJobRecordSchema = z.discriminatedUnion('kind', [
     /** A delivered video's length as HeyGen reported it, and the cost it was settled to. */
     seconds: z.number().positive().optional(),
     settledMicroUsd: z.number().int().nonnegative().optional(),
+    /** Set when HeyGen billed MORE than was reserved: the excess, recorded in the ledger as an overrun and counted toward the daily cap. */
+    overrunMicroUsd: z.number().int().positive().optional(),
     where: z.string().max(300).optional(),
     sentence: z.string().max(400).optional(),
   }),

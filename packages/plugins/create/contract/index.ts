@@ -138,6 +138,12 @@ export const SpendRecordSchema = z.strictObject({
    * repeats the reserved line and cancels it in every sum. The ledger is only ever appended to.
    */
   refund: z.literal(true).optional(),
+  /**
+   * Set on the line that records money already spent ABOVE what was reserved (a provider billed more than the upper bound).
+   * It is a charge like any other (it counts toward the daily cap), kept as its own marked line so it is never a silent
+   * extra: no approval was possible after the fact, so it is recorded and flagged.
+   */
+  overrun: z.literal(true).optional(),
 });
 export type SpendRecord = z.infer<typeof SpendRecordSchema>;
 

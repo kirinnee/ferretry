@@ -195,8 +195,10 @@ on the length: the script at a slow **10 characters a second** plus a fixed **3 
 the whole second. A 31-character script reserves 7 s = $0.57, 180 characters 21 s = $1.69 (over the $1 ask), 300 characters
 33 s = $2.66, 930 characters 96 s = $7.73 (over the default $5 daily limit) and 1 500 characters 153 s = $12.31, refused
 until the owner raises the limit. A faster read only makes the video shorter: once HeyGen reports the made video's length
-the reservation is **settled** to it (a refund line for the difference, or a charge if HeyGen ran longer than the bound),
-once, and the cost line shows the settled cost. A video that reports no length stays at the reservation. A reservation is given back only when HeyGen refused the submit with a 4xx. A video HeyGen
+the reservation is **settled** to it (a refund line for the difference, or, if HeyGen ran longer than the bound, a line marked `overrun: true` for the excess,
+which counts toward the daily limit and is named in the job's result), once, and the cost line shows the settled cost.
+A video that reports no length (or a length of 0) stays at the reservation and is finished. The job is closed only after
+the settlement is written: a ledger that refuses it leaves the job open, and the next check settles it once. A reservation is given back only when HeyGen refused the submit with a 4xx. A video HeyGen
 fails, no longer knows, or finishes with no file stays **counted** (HeyGen's refund rules are not something Create relies
 on), and the ferret is told not to ask again.
 
@@ -230,6 +232,7 @@ on), and the ferret is told not to ask again.
 - **fal's result is kept for an hour.** A job nobody checks within that hour may be unfetchable (it is then counted, not
   refunded).
 - **HeyGen is built against its public API reference, not a live reply.** The request and status shapes (v3: `POST /v3/videos`, `GET /v3/videos/{video_id}`; HeyGen retired the v2 and v1 endpoints on 2026-10-31), the storage hosts (`*.heygen.ai`, `*.heygen.com`) and the price (Avatar IV at $4.83 a minute billed by the second, [HeyGen's API pricing page](https://help.heygen.com/en/articles/10060327-heygen-api-pricing-credits-explained)) are from public pages; the first real video waits for the owner's key. If a real video comes from another host it is refused after it was paid for, and said so.
+- **A HeyGen render longer than the upper bound is billed and flagged, not asked.** The reservation is made before the video exists, so a render that runs past it (a script spoken slower than 10 characters a second plus 3 s) has already been billed when Create learns the length. No approval is possible after the fact: the excess is recorded as an `overrun` line, counted toward the daily limit (later calls are refused once over it) and shown in the job's result.
 - **Estimates, not invoices.** fal returns no cost with a run, so the ledger holds the price that was shown. Its own
   usage page is the authority for the bill.
 - **No real run has been made.** Everything here was built and tested against fake fal and ElevenLabs servers; the first
