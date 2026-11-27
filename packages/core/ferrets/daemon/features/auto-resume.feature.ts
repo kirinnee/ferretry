@@ -71,21 +71,21 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     },
     history: appendHistory,
     clock: { now: () => kernel.clock.now(), nowMs: () => kernel.clock.nowMs() },
-    sleep: async delay => await kernel.clock.sleep(milliseconds(delay)),
+    sleep: async (delay, signal) => await kernel.clock.sleep(milliseconds(delay), signal),
     log,
   });
   kernel.jobs.add({
     id: AUTO_RESUME_JOB,
     schedule: { onceAfterStart: true },
-    run: async () => {
+    run: async signal => {
       try {
         await ready();
         await storeLoaded.catch(() => undefined);
-        await autoResume
-          .run()
-          .catch((error: unknown) =>
-            log.warn('the auto-resume pass stopped early', { error: error instanceof Error ? error.name : 'unknown' }),
-          );
+        // The job's signal reaches the pass: a daemon stopping ends its waits and asks and launches nothing more.
+        await autoResume.run(signal).catch((error: unknown) => {
+          if (!signal.aborted)
+            log.warn('the auto-resume pass stopped early', { error: error instanceof Error ? error.name : 'unknown' });
+        });
       } finally {
         // A pass that failed, or never got to its recorder, still lets the observers settle (the sweep must not be lost).
         bootPass.release();
