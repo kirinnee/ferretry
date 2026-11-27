@@ -67,7 +67,7 @@ import {
   type SecretVaultDocument,
 } from './seal.ts';
 import type { RecipeAsk, RecipeGuard } from './secrets/login-recipes.ts';
-import { isProviderOwnSite } from './provider-hosts.ts';
+import { providerOwnSignIn } from './provider-hosts.ts';
 import { totpCode } from './totp.ts';
 
 /** What a directory reads the time from: an instant, as text. */
@@ -318,14 +318,7 @@ function signInSummary(
   const viaKey = signIn.method?.viaKey;
   const viaHandle = viaKey === undefined ? undefined : handles.get(viaKey);
   const viaAccount = viaHandle === undefined ? undefined : accounts[viaHandle];
-  // The provider's sign-in AT ITS OWN LOGIN HOST, never its first saved site: a Google account that also signs in at
-  // another site holds that site's session there, which proves nothing about Google's.
-  const viaSite =
-    viaKey === undefined
-      ? undefined
-      : signInsOf(signIns, viaKey).find(([, other]) =>
-          isProviderOwnSite(signIn.method?.kind ?? 'password', other.place),
-        );
+  const viaSite = viaKey === undefined ? undefined : providerOwnSignIn(signIn.method?.kind, signInsOf(signIns, viaKey));
   const method: LoginMethod = {
     kind: signIn.method?.kind ?? 'password',
     ...(signIn.method?.name === undefined ? {} : { name: signIn.method.name }),

@@ -13,8 +13,18 @@ const PROVIDER_LOGIN_HOSTS: Readonly<Partial<Record<LoginMethodKind, readonly st
   apple: ['appleid.apple.com'],
 };
 
-/** Whether `place` is a site sign-in at the login host of the provider `kind` names. */
-export function isProviderOwnSite(kind: LoginMethodKind, place: Place): boolean {
-  const hosts = PROVIDER_LOGIN_HOSTS[kind];
-  return hosts !== undefined && place.kind === 'site' && place.domains.some(domain => hosts.includes(domain));
+/**
+ * The provider account's sign-in AT ITS OWN LOGIN HOST, out of its sign-ins (`[id, record]`), never its first saved
+ * site: a Google account that also signs in at another site holds that site's session there, which proves nothing
+ * about Google's.
+ */
+export function providerOwnSignIn<Id extends string>(
+  kind: LoginMethodKind | undefined,
+  providerSignIns: readonly (readonly [Id, { readonly place: Place }])[],
+): readonly [Id, { readonly place: Place }] | undefined {
+  const hosts = kind === undefined ? undefined : PROVIDER_LOGIN_HOSTS[kind];
+  return providerSignIns.find(
+    ([, other]) =>
+      hosts !== undefined && other.place.kind === 'site' && other.place.domains.some(d => hosts.includes(d)),
+  );
 }
