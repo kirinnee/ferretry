@@ -404,6 +404,18 @@ export interface Harness {
    */
   packConversation?(ferret: FerretId): Promise<Result<PackedConversation, { readonly reason: string }>>;
   /**
+   * Additive (C-45, the move to another machine, TARGET side): writes a conversation {@link packConversation} packed on the
+   * other machine into THIS ferret's home, under this machine's own spelling of `spec.folder` (the new worktree), with every
+   * folder the source recorded rewritten to it and, when `spec.harnessConversation` names another id than the packed one,
+   * every self id too. It refuses with one plain sentence, NOTHING written, for a harness version it was not tested on, a
+   * pack it cannot read, or a conversation that does not prove (`hasConversation`) once written. Absent: the harness cannot
+   * be moved to.
+   */
+  unpackConversation?(
+    spec: LaunchSpec,
+    packed: PackedConversation,
+  ): Promise<Result<UnpackedConversation, { readonly reason: string }>>;
+  /**
    * Additive (c58-37, the cross-harness move, SOURCE side): this ferret's conversation in the harness-neutral form
    * ({@link PortableConversation}), at most `budgetTokens` of it (the oldest turns are left out and counted), or one
    * plain sentence saying why it cannot be read. It reads the ferret's OWN home only and writes nothing. Absent: the
@@ -503,4 +515,9 @@ export interface PackedConversation {
   readonly bytes: Uint8Array;
   /** Where it sits relative to the harness's conversation store: a plain relative path, no `..`, no leading `/`. */
   readonly relPath: string;
+}
+
+/** What {@link Harness.unpackConversation} made: the id this harness resumes the unpacked conversation by. */
+export interface UnpackedConversation {
+  readonly conversation: string;
 }
