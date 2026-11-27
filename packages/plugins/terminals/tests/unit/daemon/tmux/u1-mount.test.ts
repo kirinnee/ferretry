@@ -191,16 +191,16 @@ describe('terminals #23 forget-ferret-identity at boot (U1 mount)', () => {
 
     const scrub = calls.filter(call => scriptOf(call.options).includes('set-environment'));
     expect(scrub.map(call => [call.program, ...call.args])).toEqual(
-      Array(3).fill(['tmux', '-u', '-S', SOCKET, 'source-file', '-']),
+      Array(4).fill(['tmux', '-u', '-S', SOCKET, 'source-file', '-']),
     );
     expect(scrub.map(call => scriptOf(call.options))).toEqual(
-      ['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_ID'].map(
+      ['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_ID', 'FY_SESSION_MODE'].map(
         name => `'set-environment' '-g' '-u' '${name}'\n`,
       ),
     );
     const cleared = half.host.logs.filter(entry => entry.message === 'cleared ferret identity from the tmux server');
     expect(cleared).toHaveLength(1);
-    expect(cleared[0]?.fields).toEqual({ count: 3 });
+    expect(cleared[0]?.fields).toEqual({ count: 4 });
     // No variable NAME reaches the log, let alone a value.
     expect(JSON.stringify(half.host.logs)).not.toContain('FY_SESSION');
   });
@@ -211,7 +211,7 @@ describe('terminals #23 forget-ferret-identity at boot (U1 mount)', () => {
     const half = await terminalsHalf({ tmux: freshServer(), socketPath: SOCKET }, undefined, { spawn });
 
     const scrub = calls.filter(call => scriptOf(call.options).includes('set-environment'));
-    expect(scrub).toHaveLength(3);
+    expect(scrub).toHaveLength(4);
     // The kernel kills the child at this bound; the scrub stops waiting at the same one.
     expect(scrub.every(call => Number(call.options?.timeout) === 2_000)).toBe(true);
     expect(half.host.logs.some(entry => entry.message.includes('did not answer the identity scrub'))).toBe(false);
