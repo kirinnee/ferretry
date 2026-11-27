@@ -28,7 +28,9 @@ import {
   VideoModelIdSchema,
   VideoResolutionSchema,
 } from './pricing.ts';
+import { HEYGEN_KEY_REFERENCE } from './heygen.ts';
 
+export * from './heygen.ts';
 export * from './pricing.ts';
 
 export const CREATE_WORDS: readonly Word[] = [
@@ -67,6 +69,7 @@ const UsdSchema = z.number().positive().max(1000);
 export const CreateConfigSchema = z.strictObject({
   fal: z.strictObject({ key: z.literal(FAL_KEY_REFERENCE).optional() }).default({}),
   elevenlabs: z.strictObject({ key: z.literal(ELEVENLABS_KEY_REFERENCE).optional() }).default({}),
+  heygen: z.strictObject({ key: z.literal(HEYGEN_KEY_REFERENCE).optional() }).default({}),
   limits: z
     .strictObject({
       dailyUsd: UsdSchema.default(DEFAULT_DAILY_USD),
@@ -111,6 +114,7 @@ export const SPEND_TOOLS = [
   'generate_sfx',
   'generate_music',
   'generate_video',
+  'generate_avatar_video',
 ] as const;
 export const SpendToolSchema = z.enum(SPEND_TOOLS);
 export type SpendTool = z.infer<typeof SpendToolSchema>;
