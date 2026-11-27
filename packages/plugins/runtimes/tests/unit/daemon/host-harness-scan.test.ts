@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { LoginsApi, LoginView } from '@ferretry/plugin-logins/contract';
 import { HostHarnessScanner } from '../../../daemon/adapters/host-harness-scan.ts';
@@ -68,6 +69,7 @@ const fixtureScan = async (entries: Readonly<Record<string, FixtureEntry>>, clau
     ...entries,
   });
   const scanner = new HostHarnessScanner({
+    kits: () => new Map([['claude', claudeRuntimesKit]]),
     userHome: '/fixture/home',
     ...(claudeConfigDir === undefined ? {} : { claudeConfigDir }),
     files: fixture.files,
@@ -184,6 +186,7 @@ const scan = async (logins: Pick<LoginsApi, 'list'>) => {
     return undefined;
   };
   const scanner = new HostHarnessScanner({
+    kits: () => new Map([['claude', claudeRuntimesKit]]),
     userHome: '/fixture/home',
     files: {
       stat: async path => touch(path),

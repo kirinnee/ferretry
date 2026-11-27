@@ -7,6 +7,7 @@ import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
+import { claudeRuntimesKit } from '../../../claude-code/daemon/lib/runtimes-kit/index.ts';
 import { HostHarnessScanner, type HostHarnessScanDeps } from '../../daemon/adapters/host-harness-scan.ts';
 import type { HostFiles } from '../../daemon/adapters/ports.ts';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
@@ -31,6 +32,7 @@ async function put(file: string, content: string): Promise<void> {
 
 const scanner = (userHome: string, patch: Partial<HostHarnessScanDeps> = {}): HostHarnessScanner =>
   new HostHarnessScanner({
+    kits: () => new Map([['claude', claudeRuntimesKit]]),
     files: nodeHostFiles,
     userHome,
     commands: { resolve: name => (['claude', 'codex', 'npx'].includes(name) ? `/bin/${name}` : undefined) },

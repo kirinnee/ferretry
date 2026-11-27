@@ -6,6 +6,7 @@
  * that) and the build seam: the shell's `vite.config.ts` imports a plugin's
  * `app/vite-<name>.ts`. Type-only imports count: a type edge is still an edge.
  */
+import { dirname, resolve } from 'node:path';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import type { Area, ImportEdge } from '../gen/lib/imports.ts';
 
@@ -198,7 +199,7 @@ export function refusal(edge: ImportEdge): string | undefined {
     return undefined;
 
   // SEVENTH EXEMPTION: E-276's import goldens and threading proof must use the REAL harness kits, just as the settings
-  // sources supply them. Only these four Runtimes tests may import exactly the two kit entry points; no other half.
+  // sources supply them. Only these named Runtimes tests may import exactly the two kit entry points; no other half.
   if (
     from === 'tests' &&
     edge.fromPkg.name === '@ferretry/plugin-runtimes' &&
@@ -207,12 +208,18 @@ export function refusal(edge: ImportEdge): string | undefined {
       'tests/unit/golden/setup-import.golden.test.ts',
       'tests/unit/golden/consumers.golden.test.ts',
       'tests/unit/lib/import-kit-threading.test.ts',
+      'tests/unit/daemon/host-harness-scan.test.ts',
+      'tests/unit/daemon/host-harness-scan-projects.test.ts',
+      'tests/integration/host-harness-scan.test.ts',
+      'tests/integration/daemon/host-harness-scan-roots.test.ts',
+      'tests/integration/daemon/file-deps.test.ts',
+      'tests/unit/daemon/composed-daemon.test.ts',
+      'tests/unit/daemon/generic-runtime.test.ts',
+      'tests/unit/daemon/import-fresh-home.test.ts',
     ].includes(edge.from.slice(edge.fromPkg.dir.length + 1)) &&
     to === 'daemon' &&
-    ((toPkg.name === '@ferretry/plugin-claude-code' &&
-      edge.specifier === '../../../../claude-code/daemon/lib/runtimes-kit/index.ts') ||
-      (toPkg.name === '@ferretry/plugin-codex' &&
-        edge.specifier === '../../../../codex/daemon/lib/runtimes-kit/index.ts'))
+    ['@ferretry/plugin-claude-code', '@ferretry/plugin-codex'].includes(toPkg.name) &&
+    resolve(dirname(edge.from), edge.specifier) === resolve(toPkg.dir, 'daemon/lib/runtimes-kit/index.ts')
   )
     return undefined;
 
