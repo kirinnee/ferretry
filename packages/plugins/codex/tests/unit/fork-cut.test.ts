@@ -12,6 +12,7 @@ const row = (type: string, payload: object) => `${JSON.stringify({ type, payload
 const head = (extra: object = { cli_version: '0.145.0' }) =>
   row('session_meta', { id: ID, cwd: '/work/old', ...extra });
 const turn = (n: number) =>
+  row('response_item', { type: 'message', role: 'user', content: [{ type: 'input_text', text: `asked ${n}` }] }) +
   row('event_msg', { type: 'user_message', message: `asked ${n}` }) +
   row('response_item', { type: 'message', role: 'assistant', content: [{ text: `said ${n}` }] });
 const file = (turns: number, extra?: object) =>
@@ -22,7 +23,7 @@ describe('cutting a rollout at a turn', () => {
   test('keeps the header and turns 1..N, and counts them', () => {
     const cut = cutRollout(file(5), { turn: 2 }, NEW);
     expect(cut).toMatchObject({ kind: 'cut', turns: 2 });
-    expect(text(cut).split('\n').length).toBe(1 + 2 * 2 + 1);
+    expect(text(cut).split('\n').length).toBe(1 + 2 * 3 + 1);
     expect(text(cut)).toContain('said 2');
     expect(text(cut)).not.toContain('asked 3');
   });
@@ -32,9 +33,9 @@ describe('cutting a rollout at a turn', () => {
   });
 
   test('an entry names a line inside the turn, or the cut refuses', () => {
-    // Lines: 1 header, 2-3 turn 1, 4-5 turn 2, 6-7 turn 3.
-    expect(cutRollout(file(3), { turn: 2, entry: `${ID}:5:0:message` }, NEW).kind).toBe('cut');
-    for (const entry of [`${ID}:3:0:message`, `${ID}:6:0:message`, `other:5:0:message`, 'nonsense'])
+    // Lines: 1 header, 2-4 turn 1, 5-7 turn 2, 8-10 turn 3.
+    expect(cutRollout(file(3), { turn: 2, entry: `${ID}:7:0:message` }, NEW).kind).toBe('cut');
+    for (const entry of [`${ID}:4:0:message`, `${ID}:8:0:message`, `other:7:0:message`, 'nonsense'])
       expect(text(cutRollout(file(3), { turn: 2, entry }, NEW))).toMatch(/is not in turn 2/u);
   });
 
@@ -43,10 +44,16 @@ describe('cutting a rollout at a turn', () => {
     expect(text(cutRollout(`${head()}not json\n${turn(1)}`, { turn: 1 }, NEW))).toMatch(/line 2 .* not a record/u);
   });
 
-  test('only a Codex version Ferretry verified, or an older one, is cut; a newer, unnamed or unreadable one is not', () => {
-    for (const cli_version of ['0.145.0', '0.100.2'])
+  test('only the tested rollout writer is cut; an older, newer, unnamed or unreadable one is not', () => {
+    for (const cli_version of ['0.145.0'])
       expect(cutRollout(file(2, { cli_version }), { turn: 1 }, NEW).kind).toBe('cut');
-    for (const extra of [{ cli_version: '0.146.0' }, { cli_version: 'soon' }, { cli_version: 7 }, {}]) {
+    for (const extra of [
+      { cli_version: '0.100.2' },
+      { cli_version: '0.146.0' },
+      { cli_version: 'soon' },
+      { cli_version: 7 },
+      {},
+    ]) {
       expect(text(cutRollout(file(2, extra), { turn: 1 }, NEW))).toMatch(/rollout format Ferretry has not tested/u);
     }
     expect(text(cutRollout(file(2, {}), { turn: 1 }, NEW))).toContain('(unknown version)');

@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CodexTranscriptParser } from '../../../daemon/reader/lib/transcript/codex.ts';
+(await import('../../../../codex/contract/testing/fork-inputs.ts')).forkReaderCases(new CodexTranscriptParser());
 import fixture from '../../fixtures/transcript/codex.jsonl' with { type: 'text' };
 
 describe('CodexTranscriptParser', () => {

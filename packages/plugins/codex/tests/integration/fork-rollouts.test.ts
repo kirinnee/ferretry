@@ -2,10 +2,11 @@
  * Forking a Codex conversation (`Harness.fork`) over the REAL kernel roots in a temp folder: a rollout this test writes
  * is cut at a turn into a NEW rollout in the shared pool. Synthetic rollouts only; no `~/.codex`, no sign-in, no network.
  * What is proved: the cut has exactly the turns asked for under a fresh id, a new ferret can resume it, the source is
- * byte-identical (and its own proof still holds), an unseen rollout format is refused with nothing written, and `discard`
- * takes back only the file the fork made.
+ * byte-identical (and its own proof still holds), an unseen rollout format is refused with nothing written, and no
+ * pathname-based discard is offered.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
+import { renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +17,7 @@ import { ensureInternalRootBases } from '../../../../core/kernel/host/roots.ts';
 import { instantFromEpochMs } from '@ferretry/std';
 import { CODEX_AGENT_HOMES, CODEX_HISTORY_ENTRIES, CODEX_HISTORY_POOL, CODEX_ROLLOUTS } from '../../contract/index.ts';
 import { CodexRollouts } from '../../daemon/adapters/rollouts.ts';
+import { forkInputs, forkRow, nativeTurn, userRow } from '../../contract/testing/fork-inputs.ts';
 
 const parents: string[] = [];
 afterEach(async () => {
@@ -31,7 +33,7 @@ const header = (id: string, marker: string, cli = '0.145.0') =>
     ...(cli === '' ? {} : { cli_version: cli }),
     runtime_workspace_roots: [`${marker}/codex-correlation/unreachable`],
   });
-const asked = (text: string) => line('event_msg', { type: 'user_message', message: text });
+const asked = (text: string) => userRow(text) + line('event_msg', { type: 'user_message', message: text });
 const said = (text: string) =>
   line('response_item', { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] });
 /** A synthetic conversation of `turns` turns: `asked 1`, `said 1`, `asked 2`, … */
@@ -45,7 +47,7 @@ const nameOf = (id: string, day = '2026/11/27') =>
   `sessions/${day}/rollout-${day.replaceAll('/', '-')}T09-00-00-${id}.jsonl`;
 const INTO = { folder: '/work/forked-worktree' };
 
-async function world() {
+async function world(pooled = true) {
   const parent = await mkdtemp(join(tmpdir(), 'ferretry-codex-fork-'));
   parents.push(parent);
   const home = join(parent, 'fy');
@@ -66,29 +68,54 @@ async function world() {
     pooling,
   );
   for (const ferret of ['f1', 'f2']) await mkdir(agent(ferret), { recursive: true, mode: 0o700 });
-  const roots = rootsPortFor(
+  const nativeRoots = rootsPortFor(
     nodeFs(() => crypto.randomUUID()),
     { home, plugin: 'codex', worktrees: join(parent, 'worktrees') },
     ['agent-homes', 'harness-history'],
     () => undefined,
     { hardLinkRoots: [], ...pooling },
   );
+  const listing: { after?: (path: string) => void } = {};
+  const roots: typeof nativeRoots = {
+    ...nativeRoots,
+    root: (...args) => {
+      const root = nativeRoots.root(...args);
+      return {
+        ...root,
+        entries: async path => {
+          const entries = await root.entries(path);
+          listing.after?.(path);
+          return entries;
+        },
+      };
+    },
+  };
   const port = state.createStatePort({
     home,
     pluginId: 'codex',
     files: [CODEX_ROLLOUTS],
     fs: state.createNodeHostFs(),
   });
+  const time: { onNow?: () => void } = {};
   const kernel = {
     roots,
     state: port,
     redaction: { read: async (fn: (scope: { text(s: string): string }) => unknown) => await fn({ text: s => s }) },
-    clock: { after: () => () => undefined, now: () => instantFromEpochMs(NOW), sleep: async () => undefined },
+    clock: {
+      after: () => () => undefined,
+      now: () => {
+        const run = time.onNow;
+        delete time.onNow;
+        run?.();
+        return instantFromEpochMs(NOW);
+      },
+      sleep: async () => undefined,
+    },
   } as unknown as KernelPorts;
   const rollouts = new CodexRollouts(kernel, async () => undefined);
   const specOf = (ferret: string): LaunchSpec =>
     ({ ferret: ferret as FerretId, home: agent(ferret) as FencedPath }) as LaunchSpec;
-  for (const ferret of ['f1', 'f2']) {
+  for (const ferret of pooled ? ['f1', 'f2'] : []) {
     const result = await poolHomeHistory({ roots, ferret: ferret as FerretId, entries: CODEX_HISTORY_ENTRIES });
     expect(result.sentence).toBeUndefined();
   }
@@ -97,7 +124,7 @@ async function world() {
     await rollouts.launched(specOf('f1'));
     await mkdir(join(agent('f1'), nameOf(A), '..'), { recursive: true });
     await writeFile(join(agent('f1'), nameOf(A)), text(agent('f1')));
-    return pool(nameOf(A));
+    return pooled ? pool(nameOf(A)) : join(agent('f1'), nameOf(A));
   };
   /** Every file under the whole state folder, with its bytes: what a fork may and may not change. */
   const everything = async (): Promise<Record<string, string>> => {
@@ -112,7 +139,7 @@ async function world() {
     await walk(join(home, 'state/codex/history-pool'));
     return found;
   };
-  return { rollouts, agent, pool, specOf, source, everything };
+  return { rollouts, agent, pool, specOf, source, everything, time, port, listing };
 }
 
 const turnsOf = (text: string): string[] =>
@@ -182,7 +209,7 @@ describe('forking a Codex conversation', () => {
   });
 
   test('a rollout written by a Codex Ferretry has not tested, or by none it can name, is refused and nothing is written', async () => {
-    for (const cli of ['9.0.0', '0.200.1', '']) {
+    for (const cli of ['0.100.2', '9.0.0', '0.200.1', '']) {
       const w = await world();
       await w.source(marker => conversation(A, marker, 3, cli));
       const before = await w.everything();
@@ -197,7 +224,7 @@ describe('forking a Codex conversation', () => {
     await expect(w.rollouts.fork('f1' as FerretId, { turn: 1 }, INTO)).rejects.toThrow(/nothing to fork/u);
   });
 
-  test('discard removes only the forked file, and again is harmless', async () => {
+  test('MUST 4: no discard is offered; a failed start keeps the new conversation for the owner', async () => {
     const w = await world();
     const file = await w.source(marker => conversation(A, marker, 3));
     const first = await w.rollouts.fork('f1' as FerretId, { turn: 1 }, INTO);
@@ -206,16 +233,105 @@ describe('forking a Codex conversation', () => {
     const mine = (id: string) => Object.keys(before).find(path => path.includes(id)) as string;
     expect(mine(first.harnessConversation)).not.toBe(mine(second.harnessConversation));
 
-    await first.discard?.();
-    await first.discard?.();
+    expect(first.discard).toBeUndefined();
+    expect(second.discard).toBeUndefined();
     const after = await w.everything();
-    expect(Object.keys(after).sort()).toEqual(
-      Object.keys(before)
-        .filter(path => path !== mine(first.harnessConversation))
-        .sort(),
-    );
+    expect(after).toEqual(before);
     expect(await readFile(file, 'utf8')).toBe(conversation(A, w.agent('f1'), 3));
-    expect(await w.rollouts.has('f2' as FerretId, first.harnessConversation)).toBe(false);
+    expect(await w.rollouts.has('f2' as FerretId, first.harnessConversation)).toBe(true);
     expect(await w.rollouts.has('f2' as FerretId, second.harnessConversation)).toBe(true);
+  });
+
+  test('MUST 1/2: reader-shaped inputs fork without the next native prompt, under new self ids and worktree', async () => {
+    const w = await world();
+    await w.source(forkInputs);
+    const plan = await w.rollouts.fork('f1' as FerretId, { turn: 1 }, INTO);
+    const made = Object.values(await w.everything()).find(text => text.includes(plan.harnessConversation))!;
+    expect(made).not.toContain('asked 2');
+    expect(made).not.toContain('turn-2');
+    const records = made
+      .trimEnd()
+      .split('\n')
+      .map(line => JSON.parse(line));
+    expect(records[0].payload).toMatchObject({
+      id: plan.harnessConversation,
+      session_id: plan.harnessConversation,
+      cwd: INTO.folder,
+    });
+    expect(records.find(record => record.type === 'turn_context').payload.cwd).toBe(INTO.folder);
+  });
+
+  test('MUST 3: incomplete baseline or current walk proves nothing for a fork', async () => {
+    const w = await world();
+    await w.source(marker => conversation(A, marker, 2));
+    const before = await w.everything();
+    const binding = await w.port.read(CODEX_ROLLOUTS, 'f1');
+    if (!binding.ok || binding.value === undefined) throw new Error('fixture has no binding');
+    await w.port.write(CODEX_ROLLOUTS, { ...binding.value, baselineComplete: false }, 'f1');
+    await expect(w.rollouts.fork('f1' as FerretId, { turn: 1 }, INTO)).rejects.toThrow();
+    expect(await w.everything()).toEqual(before);
+    await w.port.write(CODEX_ROLLOUTS, binding.value, 'f1');
+    await writeFile(w.pool('sessions/2026/11/27/unreadable.jsonl'), 'not a rollout\n');
+    const incomplete = await w.everything();
+    await expect(w.rollouts.fork('f1' as FerretId, { turn: 1 }, INTO)).rejects.toThrow();
+    expect(await w.everything()).toEqual(incomplete);
+  });
+
+  for (const pooled of [false, true])
+    for (const link of [false, true]) {
+      test(`MUST 3: ${pooled ? 'pooled' : 'unpooled'} source swapped after proof for ${link ? 'an in-root link' : 'a regular replacement'} refuses without writes`, async () => {
+        const w = await world(pooled);
+        const file = await w.source(marker => conversation(A, marker, 2));
+        const before = await w.everything();
+        const other = `${file}.replacement`;
+        // Same self id and marker: identity, not matching header text, must catch a regular replacement.
+        writeFileSync(other, conversation(A, w.agent('f1'), 2).replace('said 1', 'FOREIGN'));
+        w.time.onNow = () => {
+          if (link) {
+            symlinkSync(other, `${file}.link`);
+            renameSync(`${file}.link`, file);
+          } else renameSync(other, file);
+        };
+        await expect(w.rollouts.fork('f1' as FerretId, { turn: 1 }, INTO)).rejects.toThrow();
+        const files = Object.keys(await w.everything());
+        // Only the adversary's fixture changed; no fresh rollout was published.
+        expect(files.filter(path => !path.startsWith(file))).toEqual(
+          Object.keys(before).filter(path => !path.startsWith(file)),
+        );
+      });
+    }
+  test('MUST 3: an unpooled leaf swapped for an in-root link after listing is never proved or copied', async () => {
+    const w = await world(false);
+    const file = await w.source(marker => conversation(A, marker, 2));
+    const before = await w.everything();
+    writeFileSync(`${file}.other`, conversation(A, w.agent('f1'), 2).replace('said 1', 'FOREIGN'));
+    w.listing.after = path => {
+      if (path !== join(file, '..')) return;
+      delete w.listing.after;
+      symlinkSync(`${file}.other`, `${file}.link`);
+      renameSync(`${file}.link`, file);
+    };
+    await expect(w.rollouts.fork('f1' as FerretId, { turn: 1 }, INTO)).rejects.toThrow();
+    expect(await w.everything()).toEqual(before);
+  });
+
+  test('MUST 5: a dependent subagent cut refuses before any pool write; a cut before it works', async () => {
+    const w = await world();
+    await w.source(
+      marker =>
+        header(A, marker) +
+        nativeTurn(1) +
+        asked('asked 2') +
+        forkRow('response_item', { type: 'function_call', name: 'spawn_agent', call_id: 'child', arguments: '{}' }) +
+        forkRow('response_item', {
+          type: 'function_call_output',
+          call_id: 'child',
+          output: '{"agent_id":"synthetic-child"}',
+        }),
+    );
+    const before = await w.everything();
+    await expect(w.rollouts.fork('f1' as FerretId, { turn: 2 }, INTO)).rejects.toThrow(/subagent/u);
+    expect(await w.everything()).toEqual(before);
+    expect((await w.rollouts.fork('f1' as FerretId, { turn: 1 }, INTO)).harnessConversation).not.toBe(A);
   });
 });

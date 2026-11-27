@@ -1,4 +1,12 @@
-import { codexVerification } from './update/index.ts';
+import {
+  beforeNextTask,
+  dependsOnSubagent,
+  forkRecord,
+  incompleteCut,
+  object,
+  startsTurn,
+  type ForkRecord,
+} from './fork-records.ts';
 
 /** What a fork of a rollout needs to know about the conversation it makes. */
 export interface ForkedRollout {
@@ -16,20 +24,21 @@ export type RolloutCut =
 
 const refused = (reason: string): RolloutCut => ({ kind: 'refused', reason });
 
+/** Each writer was exercised by tests/realworld/fork-resume.test.ts with synthetic history and a loopback model. */
+const TESTED_ROLLOUT_WRITERS = new Set(['0.145.0', '0.166.0', '0.170.0']);
+
 /** The file name Codex files a rollout under: `sessions/YYYY/MM/DD/rollout-YYYY-MM-DDTHH-MM-SS-<id>.jsonl`. */
 export function rolloutName(id: string, now: Date): string {
   const stamp = now.toISOString().slice(0, 19).replaceAll(':', '-');
   return `sessions/${stamp.slice(0, 4)}/${stamp.slice(5, 7)}/${stamp.slice(8, 10)}/rollout-${stamp}-${id}.jsonl`;
 }
 
-type RolloutRecord = { type?: unknown; payload?: { type?: unknown; id?: unknown; cli_version?: unknown } & object };
-
 /**
- * Cuts a rollout at the end of turn `at.turn` (a turn is one `user_message` and everything up to the next one; absent: the
+ * Cuts a rollout at the end of turn `at.turn` (one canonical user response_item and its completed answer; absent: the
  * whole conversation) into the text of a NEW rollout. Pure: the source text is read, never changed.
  *
- * The rollout format is versioned, so a rollout is cut only when its header names a Codex version Ferretry verified or an
- * older one (`codexVerification`): a newer writer may have changed the records, and a cut of an unseen format could split
+ * The rollout format is versioned, so a rollout is cut only for the explicitly tested writers. Other writers may
+ * have changed the records, and a cut of an unseen format could split
  * what belongs together. A line that is not a record is not guessed at either: it refuses the whole cut. The unflushed last
  * line (no newline yet) is not part of the cut, as no reader takes it.
  */
@@ -40,10 +49,12 @@ export function cutRollout(
 ): RolloutCut {
   const lines = source.split('\n');
   lines.pop();
-  const records: RolloutRecord[] = [];
+  const records: ForkRecord[] = [];
   for (const [index, line] of lines.entries()) {
     try {
-      records.push(JSON.parse(line) as RolloutRecord);
+      const value = object(JSON.parse(line));
+      if (typeof value?.type !== 'string' || object(value.payload) === undefined) throw new Error('not a record');
+      records.push(value as ForkRecord);
     } catch {
       return refused(`line ${index + 1} of the conversation is not a record, so it cannot be cut safely`);
     }
@@ -53,20 +64,18 @@ export function cutRollout(
   if (header === undefined || headerAt > 7 || typeof header.payload?.id !== 'string')
     return refused('the conversation has no header Ferretry knows how to read, so it cannot be forked');
   const version = header.payload.cli_version;
-  const standing = typeof version === 'string' ? codexVerification(version) : 'unknown';
-  if (standing !== 'verified' && standing !== 'older')
+  if (typeof version !== 'string' || !TESTED_ROLLOUT_WRITERS.has(version))
     return refused(
       `the conversation was written by Codex ${typeof version === 'string' ? version : '(unknown version)'}, a rollout format Ferretry has not tested, so it was not forked`,
     );
 
-  const starts = records.flatMap((record, index) =>
-    record.type === 'event_msg' && record.payload?.type === 'user_message' ? [index] : [],
-  );
+  const starts = records.flatMap((record, index) => (startsTurn(record) ? [index] : []));
   let end = records.length;
   if (at !== undefined) {
     if (!Number.isInteger(at.turn) || at.turn < 1 || at.turn > starts.length)
       return refused(`turn ${at.turn} is not in this conversation, which has ${starts.length}`);
-    end = starts[at.turn] ?? records.length;
+    const next = starts[at.turn];
+    end = next === undefined ? records.length : beforeNextTask(records, starts[at.turn - 1] ?? 0, next);
     if (at.entry !== undefined) {
       const named = /^(.+):(\d+):\d+:[a-z]+$/u.exec(at.entry);
       const line = named?.[1] === header.payload.id ? Number(named[2]) : 0;
@@ -75,9 +84,25 @@ export function cutRollout(
     }
   }
 
+  const selected = records.slice(0, end);
+  if (dependsOnSubagent(selected))
+    return refused(
+      'this cut includes a native subagent whose separate rollout cannot be copied safely; pick a cut before it',
+    );
+  const incomplete = incompleteCut(selected);
+  if (incomplete !== undefined) return refused(incomplete);
   const neutral = `${forked.marker.slice(0, forked.marker.lastIndexOf('/'))}/forked`;
-  const rewritten = { ...header, payload: { ...header.payload, id: forked.id, cwd: forked.folder } };
-  const kept = lines.slice(0, end).map((line, index) => (index === headerAt ? JSON.stringify(rewritten) : line));
+  const kept = selected.map(record =>
+    JSON.stringify(
+      forkRecord(
+        record,
+        header.payload.id as string,
+        typeof header.payload.cwd === 'string' ? header.payload.cwd : '',
+        forked.id,
+        forked.folder,
+      ),
+    ),
+  );
   return {
     kind: 'cut',
     text: `${kept.join('\n').split(forked.marker).join(neutral)}\n`,
