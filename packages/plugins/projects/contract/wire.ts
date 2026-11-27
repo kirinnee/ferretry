@@ -84,12 +84,17 @@ export const cloneFolderName = (url: string): string | null => {
 export const CloneRepoCredentialsMessage =
   'Use Accounts and secrets for sign-in, then paste a repository address without credentials.';
 
-/** SSH usernames (for example `git`) select an account; passwords and HTTPS userinfo embed credentials. */
+/**
+ * SSH usernames (for example `git`) select an account; ANY userinfo on an http(s) address (a token is often sent as the
+ * username) and any password embeds a credential. Judged on the parsed URL AND on the raw authority, because the parser
+ * skips extra slashes (`https:///tok@host`) and git receives the raw text.
+ */
 export const cloneAddressHasCredentials = (value: string): boolean => {
-  if (/^https?:\/\/[^/?#]*@/iu.test(value.trim())) return true;
-  if (!URL.canParse(value)) return false;
-  const url = new URL(value);
-  return url.password !== '';
+  const text = value.trim();
+  if (/^https?:[/\\]*[^/\\?#]*@/iu.test(text)) return true;
+  if (!URL.canParse(text)) return false;
+  const url = new URL(text);
+  return url.password !== '' || (/^https?:$/u.test(url.protocol) && url.username !== '');
 };
 
 /** Existing-project clones accept remote sources only: local sources would bypass the folder reader's policy. */

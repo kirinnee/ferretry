@@ -61,6 +61,23 @@ describe('the project page: Repositories (F-101)', () => {
     expect(calls.filter(call => call.route === CLONE)).toEqual([]);
     await mounted.unmount();
   });
+  it('R2: an https username with no password, or one the parser normalises, is cleared and never sent', async () => {
+    for (const address of [
+      'https://fixture-token@example.invalid/r.git',
+      'https://fixture-user:@example.invalid/r.git',
+      'https:///fixture-token@example.invalid/r.git',
+    ]) {
+      const calls: Call[] = [];
+      const mounted = await open(page({}, calls, () => PROJECT));
+      await cloneNow(mounted, address);
+      const input = must(mounted.container.querySelector<HTMLInputElement>('[data-project-clone-url]'), 'the address');
+      expect(input.value).toBe('');
+      expect(mounted.container.textContent).toContain('Accounts and secrets');
+      expect(mounted.container.innerHTML).not.toContain('fixture-token');
+      expect(calls.filter(call => call.route === CLONE)).toEqual([]);
+      await mounted.unmount();
+    }
+  });
   it('lists the repositories the project holds, and says so when it holds none', async () => {
     const some = await open(page({}, [], () => withRepos('app', 'lib')));
     const rows = [...some.container.querySelectorAll('[data-project-repo]')].map(row =>
