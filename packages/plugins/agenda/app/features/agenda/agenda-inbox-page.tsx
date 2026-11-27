@@ -77,7 +77,9 @@ import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
-import { itemHistory } from '../../lib/agenda-history.ts';
+import { itemHistory, withDeviceEvents } from '../../lib/agenda-history.ts';
+import { pendingAnswerEvents } from '../../lib/pending-answer-history.ts';
+import { inboxOpenCard } from '../../lib/inbox-open-card.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -181,8 +183,8 @@ interface CardHostProps {
 }
 
 /**
- * Answers a task into the undo window. Edit on a lane-proposal task also opens the lane editor: leaving the page
- * flushes the held answer, so the task is still resolved.
+ * Answers a task into the undo window. Edit on a lane-proposal task also opens the lane editor; the answer's
+ * timer keeps running across that navigation.
  */
 const answerCard = (
   { inbox, onNavigate }: Pick<CardHostProps, 'inbox' | 'onNavigate'>,
@@ -334,12 +336,16 @@ function OpenItem({
     board: inbox.boardOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
     records: inbox.recordsOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
   });
+  const deferredState = inbox.deferredState;
   const history = useMemo(
     () =>
-      lifecycle.conversation === null
-        ? itemHistory(card.item, entries)
-        : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
-    [card.item, entries, lifecycle.conversation, lifecycle.conversationGap],
+      withDeviceEvents(
+        lifecycle.conversation === null
+          ? itemHistory(card.item, entries)
+          : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
+        pendingAnswerEvents(deferredState, card.key, card.item),
+      ),
+    [card.item, card.key, entries, lifecycle.conversation, lifecycle.conversationGap, deferredState],
   );
   // A step's tick goes to the machine the task came from, through the one agenda client (as in the chat). Without a
   // client or a paired connection the list stays read-only, never a box that looks live and does nothing.
@@ -1532,8 +1538,11 @@ export function AgendaInboxPage({
   const repliedShown = filterInboxCards(replied, listFilter);
   const parkedCounts = { snoozed: snoozedShown.length, replied: repliedShown.length };
 
-  // The deck deals what waits on the owner, in the order the page lists it: the agenda items and their task asks.
-  const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
+  // A link opens its item even after answering removed it from the queue.
+  const openCard = inboxOpenCard(inbox, open);
+  const queue = groupCards([...sections.stopped, ...sections.needsYou]);
+  const deckCards =
+    openCard === undefined || queue.some(card => card.key === openCard.key) ? queue : [openCard, ...queue];
   const order = deckCards.map(card => card.key);
   const runOrder = order;
   // j/k walk the rows that are showing: the owner's sections, and With ferrets only once it is open.
@@ -1646,12 +1655,6 @@ export function AgendaInboxPage({
   const openedFor = useRef<string | null>(null);
   const wantedKey = open === null ? null : `${open.daemonId}\u0000${open.sessionId}\u0000${open.id}`;
   const openSettled = open?.settled === true;
-  const openCard =
-    open === null
-      ? undefined
-      : inbox.cards.find(
-          card => card.daemonId === open.daemonId && card.view.config.id === open.sessionId && card.item.id === open.id,
-        );
   const openCardKey = openCard?.key;
   const openRecord =
     open === null || !isMachineAgendaId(open.sessionId)
