@@ -29,7 +29,10 @@ export interface ForkedFerret {
  * source untouched.
  */
 export type ForkFailure =
-  | { readonly code: 'no_ferret' | 'forbidden' | 'unsupported' | 'worktree' | 'cut'; readonly reason: string }
+  | {
+      readonly code: 'no_ferret' | 'forbidden' | 'running' | 'unsupported' | 'worktree' | 'cut';
+      readonly reason: string;
+    }
   | { readonly code: 'start'; readonly reason: string; readonly start: StartFailure };
 
 /** A fork of a ferret's conversation into a new ferret (core's `forks` slice; Conversation's alone calls it). */

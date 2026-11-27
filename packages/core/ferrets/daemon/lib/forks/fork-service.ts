@@ -21,6 +21,8 @@ export interface ForkSource {
   readonly runtime?: string;
   readonly login?: string;
   readonly folder: string;
+  /** Whether the ferret is writing its conversation right now (starting or working). */
+  readonly running: boolean;
 }
 
 /** The two harness members a fork uses. */
@@ -35,6 +37,8 @@ export interface ForkWorktrees {
     readonly branch: string;
     readonly base: { readonly kind: 'head' };
   }) => Promise<{ readonly cwd: string; readonly worktree: { readonly path: string; readonly branch: string } }>;
+  /** Removes a checkout `create` just made, with its branch: nothing was ever started in it. */
+  readonly discard: (worktree: { readonly path: string; readonly branch: string }) => Promise<void>;
 }
 
 /** Everything the fork service reaches, as the smallest functions it uses: it owns no state of its own. */
@@ -73,7 +77,7 @@ const slug = (name: string): string =>
  * its home and its conversation are not written, so a refusal at any step leaves it as it was. Every refusal that can be
  * made before the cut is made before it (the harness, the caller, the checkout). A failed start can leave a live pane
  * whose stop failed: the start's failure proves no cleanup, so the cut is kept and named, as is any checkout it made
- * (a worktree is never removed unasked).
+ * (a worktree is never removed unasked). A cut the harness refuses removes the checkout it made for it.
  */
 export class ForkService {
   constructor(private readonly ports: ForkPorts) {}
@@ -88,6 +92,11 @@ export class ForkService {
     if (source === undefined) return refuse('no_ferret', `there is no ferret ${from} to fork`);
     if (caller.kind !== 'person' && !(caller.kind === 'agent' && this.mayAct(caller.ferret, from)))
       return refuse('forbidden', 'a ferret forks only itself and its helpers');
+    if (source.running)
+      return refuse(
+        'running',
+        `${source.name} is working right now, so its conversation is still being written. Fork it when it is idle or stopped; nothing was forked and nothing was written`,
+      );
     const harness = this.ports.harness(source.harness);
     if (harness?.fork === undefined)
       return refuse(
@@ -108,7 +117,7 @@ export class ForkService {
     try {
       plan = await harness.fork(from, at, { folder });
     } catch (error) {
-      return refuse('cut', `the conversation could not be cut: ${messageOf(error)}${this.left(checkout)}`);
+      return refuse('cut', `the conversation could not be cut: ${messageOf(error)}${await this.discarded(checkout)}`);
     }
 
     const started = await this.ports
@@ -175,6 +184,20 @@ export class ForkService {
       );
     } catch (error) {
       return refuse('worktree', `the new worktree could not be made: ${messageOf(error)}`);
+    }
+  }
+
+  /**
+   * A cut the harness refused wrote nothing and started nothing, so the checkout made for it is removed with its branch.
+   * Only when that removal fails is the checkout left, and said so.
+   */
+  private async discarded(checkout: ForkedFerret['worktree']): Promise<string> {
+    if (checkout === undefined) return '';
+    try {
+      await this.ports.worktrees()?.discard(checkout);
+      return '';
+    } catch {
+      return this.left(checkout);
     }
   }
 

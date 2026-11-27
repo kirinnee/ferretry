@@ -16,6 +16,8 @@ interface ConversationMessage {
   readonly role: ConversationMessageRole;
   readonly text: string;
   readonly timestamp?: string;
+  /** Where a user-channel message came from, when the parser knew: a fork counts a turn only for what the owner said. */
+  readonly inputSource?: 'native-queue' | 'harness';
 }
 
 /**
@@ -220,6 +222,7 @@ function conversationPass(sessionId: string, transcript: TranscriptBatch): reado
           role: event.role,
           text: event.text,
           ...(event.timestamp === undefined ? {} : { timestamp: event.timestamp }),
+          ...(event.inputSource === undefined ? {} : { inputSource: event.inputSource }),
         },
       });
       continue;

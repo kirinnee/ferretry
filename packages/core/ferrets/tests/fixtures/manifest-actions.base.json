@@ -1317,24 +1317,6 @@
   "routes": [
     {
       "audit": {
-        "record": "session.opened"
-      },
-      "caller": "person",
-      "capability": {
-        "axis": "configure",
-        "capability": "fleet"
-      },
-      "guard": {
-        "none": "the fresh ferret summary and the public plan projection; no transcript text"
-      },
-      "key": "POST /v1/ferrets/:ferretId/fork",
-      "method": "POST",
-      "minimum": "operator",
-      "noStore": true,
-      "path": "/v1/ferrets/:ferretId/fork"
-    },
-    {
-      "audit": {
         "skip": "drives an existing session; its journal records it"
       },
       "caller": "any",

@@ -51,7 +51,7 @@ export function MessageFooter({
   const [open, setOpen] = useState(false);
   const receipt = record === undefined ? known : sendReceipt(record, answered);
   if (receipt === undefined) {
-    if (clock === undefined && lead === undefined) return null;
+    if (clock === undefined && lead === undefined && trailing === undefined) return null;
     return (
       <>
         <div className="fy-receipt-line" data-message-footer="" data-side={side}>
@@ -68,6 +68,7 @@ export function MessageFooter({
               <time aria-hidden="true">{clock.short}</time>
             </button>
           )}
+          {trailing}
         </div>
         {leadDetail}
         {open && clock !== undefined ? (
