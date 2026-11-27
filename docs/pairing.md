@@ -515,6 +515,18 @@ the browser to pair again; it never describes this as the browser being removed 
 old pairing stays until the person replaces or removes it. The proof is defined in
 [relay-protocol.md](relay-protocol.md#a-replaced-daemon).
 
+A browser that reaches a machine **only over a relay** (it did not pair over a direct address and holds no direct or
+tunnel address for it) can never prove a replacement: a relay's `4404` reads the same for a reinstalled machine and an
+asleep one. So no verdict is drawn. Once such an outage has lasted about ten minutes (`PAIR_AGAIN_AFTER_MS`, measured
+from the first failure of the outage), the machine's Connection panel adds the line "If Ferretry was reinstalled
+there, pair again." and a **Pair again** button, which opens `/pair?unreachable=<machine>`. That page names the machine
+and says this browser has not been able to reach it for a while, with the same conditional; it claims neither
+replacement nor removal. The backoff keeps running underneath, the first answer clears the offer, and nothing
+removes or changes the stored pairing: the person decides. The same offer is drawn on that machine's stop page
+(a machine whose plugin list cannot be read when the app opens or reloads, which has no Connection panel), with the
+same words and the same ten minutes, so it is there in the case it exists for; it stays quiet on every other
+machine's pages.
+
 Two different things are revocable and they are not the same act:
 
 - **A code** — ends the window early. Idempotent for a code the daemon knows; a 404 for an id it never

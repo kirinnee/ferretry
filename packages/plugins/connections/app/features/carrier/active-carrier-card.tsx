@@ -43,10 +43,12 @@ import {
   carrierLines,
   OUTAGE_COPY,
   outageDuration,
+  pairAgainOffered,
   RECONNECTING_LABEL,
   stallCopy,
 } from '../connection/connection-copy.ts';
 import { type CarrierPreferenceAvailability, CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
+import { PairAgainOffer } from './pair-again-offer.tsx';
 import { RelayFallbackNotice, useConnectionCardOnScreen } from './relay-fallback-notice.tsx';
 
 /** This machine's connection preference on this device, and how to change it. */
@@ -67,6 +69,11 @@ export interface ActiveCarrierCardProps {
   readonly now?: number;
   /** Retries THIS machine at once (its health model's `retryNow`); absent where nothing can. */
   readonly onRetry?: () => void;
+  /**
+   * Opens pairing for THIS machine. Passed only for a relay-only pairing (a relay cannot tell a replaced machine from an
+   * asleep one), and offered only once the outage is old enough ({@link pairAgainOffered}); absent, never.
+   */
+  readonly onPairAgain?: () => void;
   /** The machine's display name, for the reconnecting advice. */
   readonly machine?: string;
   /** The connection preference selector; absent where nothing can change it. */
@@ -172,6 +179,7 @@ export function ActiveCarrierCard({
   health,
   now = Date.now(),
   onRetry,
+  onPairAgain,
   machine = 'this machine',
   preference,
   relayFallback,
@@ -230,6 +238,9 @@ export function ActiveCarrierCard({
                 {OUTAGE_COPY.retryNow}
               </Button>
             </div>
+          )}
+          {onPairAgain === undefined || !pairAgainOffered(outage.since, now) ? null : (
+            <PairAgainOffer onPairAgain={onPairAgain} />
           )}
           {outage.failures.length === 0 ? null : (
             <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">

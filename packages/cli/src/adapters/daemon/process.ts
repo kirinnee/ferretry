@@ -1,5 +1,7 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { open, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import type { CommandOutcome, DaemonStartHandle, DetachedLaunch, IDaemonProcessPort } from '../../lib/daemon/ports.ts';
+import { HostProcessIncarnations } from './process-incarnation.ts';
 
 /**
  * Every process touch the daemon-control commands make.
@@ -10,10 +12,12 @@ import type { CommandOutcome, DaemonStartHandle, DetachedLaunch, IDaemonProcessP
  */
 export class BunDaemonProcess implements IDaemonProcessPort {
   /**
-   * Where `holdsOpen` looks. Both default to the host's own; a test points them elsewhere so the
-   * `lsof` answer is exercised on Linux and the `/proc` refusals without another user's process.
+   * Where `holdsOpen`, `alive` and `identify` look. All default to the host's own; a test points them elsewhere so the
+   * `lsof` and `ps` answers are exercised on Linux and the `/proc` refusals without another user's process.
    */
-  constructor(private readonly options: { readonly procDirectory?: string; readonly lsof?: string } = {}) {}
+  constructor(
+    private readonly options: { readonly procDirectory?: string; readonly lsof?: string; readonly ps?: string } = {},
+  ) {}
 
   async run(argv: readonly string[]): Promise<CommandOutcome> {
     const [command, ...args] = argv;
@@ -96,10 +100,40 @@ export class BunDaemonProcess implements IDaemonProcessPort {
     }
   }
 
+  /**
+   * Whether `pid` is a process that can still do anything. `kill(pid, 0)` also succeeds for a zombie, an exited
+   * process whose parent has not reaped it: it holds no lock and answers nothing, so a stop that took it for a daemon
+   * still running waited out its deadline and then refused the kill of a process that was already gone. A zombie reads
+   * as exited wherever the host can say: `/proc` on Linux, `ps` elsewhere (macOS).
+   */
   alive(pid: number): boolean {
     try {
       process.kill(pid, 0);
-      return true;
+    } catch {
+      return false;
+    }
+    return !this.#isZombie(pid);
+  }
+
+  /** The pid's start identity (see `IDaemonProcessPort.identify`): the zombie and the exited are `undefined`, as is a host that cannot say. */
+  async identify(pid: number): Promise<string | undefined> {
+    if (!this.alive(pid)) return undefined;
+    const seen = await new HostProcessIncarnations(this, this.options).observe(pid);
+    return seen.kind === 'running' ? seen.start : undefined;
+  }
+
+  #isZombie(pid: number): boolean {
+    const proc = this.options.procDirectory ?? '/proc';
+    const fromProc = zombieFromProc(proc, pid);
+    if (fromProc !== undefined) return fromProc;
+    // No `/proc` (macOS): ask `ps`. Its state column starts with `Z` for a zombie.
+    try {
+      const listed = Bun.spawnSync([this.options.ps ?? 'ps', '-o', 'stat=', '-p', String(pid)], {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'ignore',
+      });
+      return listed.exitCode === 0 && listed.stdout.toString().trim().startsWith('Z');
     } catch {
       return false;
     }
@@ -118,6 +152,23 @@ export class BunDaemonProcess implements IDaemonProcessPort {
     const listed = await this.run([this.options.lsof ?? 'lsof', '-t', '-a', '-p', String(pid), '--', path]);
     if (listed.code === 127) return undefined;
     return listed.code === 0 && listed.stdout.split('\n').some(line => line.trim() === String(pid));
+  }
+}
+
+/**
+ * `/proc/<pid>/stat` reads `pid (comm) S ...`; `comm` may hold anything, so the state is what follows the LAST `)`.
+ * `undefined` on a host with no `/proc`, where the caller asks `ps` instead.
+ */
+function zombieFromProc(proc: string, pid: number): boolean | undefined {
+  if (!existsSync(`${proc}/self/stat`)) return undefined;
+  try {
+    const stat = readFileSync(`${proc}/${String(pid)}/stat`, 'utf8');
+    return stat
+      .slice(stat.lastIndexOf(')') + 1)
+      .trimStart()
+      .startsWith('Z');
+  } catch {
+    return false;
   }
 }
 

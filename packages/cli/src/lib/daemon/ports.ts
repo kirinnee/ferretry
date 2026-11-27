@@ -23,6 +23,8 @@ export interface DetachedLaunch {
 /** A process this CLI started, so a readiness wait can watch that exact child rather than a pid file. */
 export interface DaemonStartHandle {
   readonly pid?: number | undefined;
+  /** The start identity (`identify`) the process had when this handle was made; a pid now answering with another one is not it. */
+  readonly identity?: string | undefined;
 }
 
 /** Every process touch the daemon-control commands make, behind one interface. */
@@ -33,8 +35,14 @@ export interface IDaemonProcessPort {
   spawnDetached(launch: DetachedLaunch): Promise<DaemonStartHandle>;
   /** Send a signal; `false` when the process was already gone. */
   signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean;
-  /** Does this pid still exist? */
+  /** Does this pid still name a process that can do anything? An exited, unreaped one (a zombie) does not. */
   alive(pid: number): boolean;
+  /**
+   * Which process `pid` is right now: a token that changes when the number is reused (Linux `/proc/<pid>/stat` start
+   * time, macOS `ps -o lstart=`). `undefined` when no such process is running (a zombie is not running) or this host cannot
+   * say. Every signal is tied to the identity seen BEFORE the stop began, so a reused pid is never signalled.
+   */
+  identify(pid: number): Promise<string | undefined>;
   /**
    * Does process `pid` hold `path` open right now?
    *
@@ -149,6 +157,8 @@ export interface DaemonSupervisorReport {
 export interface StopRequest {
   /** The pid the daemon reported for itself, when it was still answering. */
   readonly pidHint?: number | undefined;
+  /** What `identify` said of `pidHint` before this stop began. Present: signal only a process that still has it; gone or changed means the daemon is gone. */
+  readonly identity?: string | undefined;
   /** Escalate to an unconditional kill — only after a polite stop was given time to work. */
   readonly escalate: boolean;
 }
@@ -166,6 +176,8 @@ export interface IDaemonSupervisor {
   stop(request: StopRequest): Promise<void>;
   /** `handle` lets the direct supervisor watch the child it just started. */
   inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport>;
+  /** The start identity of the process `pid` names now (`IDaemonProcessPort.identify`), taken before a stop begins. */
+  identify(pid: number): Promise<string | undefined>;
   /**
    * Throw unless what this supervisor would act on belongs to THIS layout's state home.
    *

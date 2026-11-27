@@ -66,6 +66,7 @@ async function status(scene: Scene, ...flags: string[]) {
     spawnDetached: async () => ({}),
     signal: () => true,
     alive: () => false,
+    identify: async () => undefined,
     holdsOpen: async () => true,
   };
   const files: IServiceFilePort = {
