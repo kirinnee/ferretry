@@ -12,29 +12,13 @@
  * delivered name is, are decided here.
  */
 
-import { basename, extname } from 'node:path';
 import {
   type DeliveredAttachment,
+  deliveredFilename,
   messageWithAttachments as handoffMessageWithAttachments,
 } from '../../contract/index.ts';
 
-export type { DeliveredAttachment };
-
-/**
- * The name a delivered copy is written under: the uploaded file's own basename, reduced to characters
- * that need no quoting in a prompt, never one of the store's reserved entry names, and short enough for any filesystem's
- * name limit (the stem is cut, the extension kept: a harness decides what a file IS from its extension).
- */
-const MAX_DELIVERED_NAME = 120;
-export function deliveredFilename(filename: string): string {
-  const bare = basename(filename.replaceAll('\\', '/'))
-    .replace(/[^\w.-]+/gu, '-')
-    .replace(/^[-.]+/u, '');
-  if (bare === '' || bare === 'original' || bare === 'manifest.json') return `attachment-${bare || 'file'}`;
-  if (bare.length <= MAX_DELIVERED_NAME) return bare;
-  const extension = extname(bare).length <= 16 ? extname(bare) : '';
-  return `${bare.slice(0, MAX_DELIVERED_NAME - extension.length)}${extension}`;
-}
+export { type DeliveredAttachment, deliveredFilename };
 
 /**
  * The person's message, followed by the files the agent should open. The wording is the hand-off's

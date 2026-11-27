@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { type FerretId, FerretStarted, type FerretStartedPayload } from '@ferretry/core-ferrets/contract';
+import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { owner, testHost } from '@ferretry/kernel/testing';
 import type { ProjectInfo } from '../../../contract/index.ts';
 import { implementProjects } from '../../../daemon/index.ts';
@@ -12,29 +14,31 @@ const start = async (registered: readonly string[] = []) => {
     '/work/alpha-wt': '/work/alpha/.git',
     '/work/other': '/work/other/.git',
   });
-  // The half is captured as it is built so a test can call the hook the kernel would call on `ferret.started`.
-  const taken: { half?: { hooks: Record<string, unknown> } } = {};
-  const daemon = implementProjects(machine);
-  const capturing = {
-    ...daemon,
-    build: (ctx: never) => {
-      const half = (daemon.build as (ctx: never) => unknown)(ctx);
-      taken.half = half as never;
-      return half;
+  // Ferrets' stand-in offers `ferret.started` and holds the kernel's hook invoker: a start is the kernel's own observe.
+  const held: { observe?: (payload: FerretStartedPayload) => void } = {};
+  const ferrets = implementDaemon(
+    definePlugin({
+      id: 'ferrets',
+      title: 'Ferrets',
+      version: '5.0.0',
+      api: 5,
+      core: true,
+      kinds: [],
+      hooks: { offers: [{ hook: FerretStarted }] },
+    }),
+    {
+      build: ({ hooks }) => {
+        held.observe = payload => hooks.observe(FerretStarted, payload);
+        return {};
+      },
     },
-  } as typeof daemon;
-  const host = await testHost({ plugins: [capturing] });
+  );
+  const host = await testHost({ plugins: [ferrets, implementProjects(machine)] });
   const list = async () => (await host.request('GET', '/v1/projects', { as: owner() })).json<ProjectInfo[]>();
   for (const path of registered)
     await host.request('POST', '/v1/projects', { body: { kind: 'existing-folder', path }, as: owner() });
   const started = async (folder: string) => {
-    await (taken.half?.hooks['ferret.started'] as ((payload: unknown) => Promise<void>) | undefined)?.({
-      ferret: 'f1',
-      name: 'worker',
-      role: 'worker',
-      folder,
-      by: 'owner',
-    });
+    held.observe?.({ ferret: 'f1' as FerretId, name: 'worker', role: 'helper', folder, by: 'owner' });
     await host.settle();
   };
   return { list, started };

@@ -63,17 +63,18 @@ rule exists so a model cannot fabricate a destination by writing one.
 
 ## 2. The direct authored forms
 
-| Form               | Means               | Example                       | Notes                                                       |
-| ------------------ | ------------------- | ----------------------------- | ----------------------------------------------------------- |
-| `:name`            | An agent's session  | `:zelda`                      | Case-insensitive, 1–32 chars, letters/digits/`-`            |
-| `@path`            | A file              | `@src/api.ts`, `@./README.md` | Session-relative, `./`-relative, or absolute inside the cwd |
-| `@path:line`       | A file at one line  | `@src/api.ts:120`             | 1-based                                                     |
-| `@path:line-end`   | A file line range   | `@src/api.ts:120-140`         | Inclusive; `end` must be ≥ `line`                           |
-| `&ID`              | A task              | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits; machine-wide       |
-| `^AN`              | An agenda item      | `^A3`                         | Always `A` + a positive number; session-scoped              |
-| `/name` or `$name` | A skill             | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill         |
-| `%terminal:<key>`  | A live terminal     | `%terminal:dev`               | The terminal's name, or the daemon's id; session-scoped     |
-| `%browser:<key>`   | A live browser page | `%browser:app`                | The page's name, or the worker's page id; session-scoped    |
+| Form                      | Means                   | Example                        | Notes                                                                      |
+| ------------------------- | ----------------------- | ------------------------------ | -------------------------------------------------------------------------- |
+| `:name`                   | An agent's session      | `:zelda`                       | Case-insensitive, 1–32 chars, letters/digits/`-`                           |
+| `@path`                   | A file                  | `@src/api.ts`, `@./README.md`  | Session-relative, `./`-relative, or absolute inside the cwd                |
+| `@path:line`              | A file at one line      | `@src/api.ts:120`              | 1-based                                                                    |
+| `@path:line-end`          | A file line range       | `@src/api.ts:120-140`          | Inclusive; `end` must be ≥ `line`                                          |
+| `&ID`                     | A task                  | `&F12`, `&B7`, `&I3`, `&C1`    | Case-insensitive prefix, up to 9 digits; machine-wide                      |
+| `^AN`                     | An agenda item          | `^A3`                          | Always `A` + a positive number; session-scoped                             |
+| `/name` or `$name`        | A skill                 | `/summary`, `$summary`         | **Lowercase only**; both sigils mean the same skill                        |
+| `%terminal:<key>`         | A live terminal         | `%terminal:dev`                | The terminal's name, or the daemon's id; session-scoped                    |
+| `%browser:<key>`          | A live browser page     | `%browser:app`                 | The page's name, or the worker's page id; session-scoped                   |
+| `%attachment:<id>/<name>` | A file sent in the chat | `%attachment:att_1f…/spec.pdf` | The folder and name it was delivered under; session-scoped; not proved yet |
 
 Both skill sigils are accepted because the harnesses differ: Claude invokes a skill as `/name` and
 Codex as `$name`. Whichever you type is what the reader keeps seeing — a reference is never rewritten
@@ -94,6 +95,25 @@ dashes, unique within its session, and it may never be twelve hex characters: th
 (`%terminal:0a1b2c3d4e5f`) keeps working for surfaces opened without a name and for every reference
 written before names existed, and a name that could also be an id would make one key mean two shells.
 The key grammar below is unchanged — a name is already a valid key.
+
+**An attachment is named by the folder and file name the agent was handed it under.** A file sent with a
+message is copied into the ferret's own `attachments/<attachment id>/<name>` folder, and the message lists that
+path, so `%attachment:<attachment id>/<name>` is the last two parts of that path and points at exactly that copy:
+two delivered files both called `report.pdf` are two tokens (`%attachment:att_aa…/report.pdf`,
+`%attachment:att_bb…/report.pdf`), the composer never calls the second "already there", and the agent resolves
+the token by joining it onto the attachments folder. The id is the attachment's own (`att_` and 64 hex digits; the
+grammar takes any run of up to 80 letters, digits, `_` and `-` that starts on a letter or digit). The name is
+`deliveredFilename` (`@ferretry/core-mailbox/contract`, one owner for the daemon that writes the copy and the app that
+writes the token): the base name with every character outside letters, digits, `_`, `.` and `-` turned into `-`.
+Unlike a terminal key it may contain dots, because file names do; it starts and ends on a letter, digit or `_` (a
+closing full stop or dash is the sentence's), is at most 128 characters and is case-sensitive. A file whose delivered
+name cannot be written that way cannot be pointed at, and the plus on its tile says so instead of inserting it.
+
+The plus on a stored attachment's tile in the chat inserts this token through the shared
+`conversation.add-to-chat` action (`app/composer/attachment-plus.tsx`). **GAP: nothing proves an attachment yet.**
+No resolver reads a session's stored files, so the token stays plain text in a message — the honest intermediate
+state §8 names — and the agent reads it as the name of the file it was handed. Proof, a link and a scroll to the
+tile are the next step and need a stored-files listing the daemon does not serve today.
 
 ### The attention sigil is `^`, and `!A3` is only an alias
 
@@ -253,14 +273,15 @@ that goes nowhere costs the reader a tap and their trust.
 
 What "proved" means per kind:
 
-| Kind        | Proof                                                                                                                     |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `agent`     | A session in **this daemon's** fleet slice holds that callsign                                                            |
-| `file`      | The session filesystem answers with a canonical, readable path                                                            |
-| `task`      | Any task on this machine's board, whatever its project, or the old id of one of this session's imported tasks (see below) |
-| `attention` | The id is in this session's agenda ledger, open or resolved                                                               |
-| `skill`     | The name is in this session's skills catalog                                                                              |
-| `surface`   | The session's owner is holding that terminal or page right now                                                            |
+| Kind         | Proof                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `agent`      | A session in **this daemon's** fleet slice holds that callsign                                                            |
+| `file`       | The session filesystem answers with a canonical, readable path                                                            |
+| `task`       | Any task on this machine's board, whatever its project, or the old id of one of this session's imported tasks (see below) |
+| `attention`  | The id is in this session's agenda ledger, open or resolved                                                               |
+| `skill`      | The name is in this session's skills catalog                                                                              |
+| `surface`    | The session's owner is holding that terminal or page right now                                                            |
+| `attachment` | Not proved yet: no resolver reads a session's stored files, so the token stays prose (see §2)                             |
 
 **A `&task` click opens the task, not a sheet.** The task detail is the Board's own route, so the link
 survives a reload, Back leaves it, and the id is no longer dropped on the way (the Tasks sheet opened
