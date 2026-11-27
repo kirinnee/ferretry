@@ -18,6 +18,7 @@ const BASE_MEMBERS = [
   'facts',
   'launchSettings',
   'hasConversation',
+  'packConversation',
   'historySources',
   'homeFor',
   'importConversation',
@@ -34,6 +35,7 @@ const BASE_MEMBERS = [
   'transcriptStamp',
   'transcriptTail',
   'turnStop',
+  'unpackConversation',
   'update',
   'usage',
 ].sort();
@@ -51,6 +53,7 @@ const OWNERS: Record<string, string[]> = {
   injectPart: ['inject'],
   launchSettingsPart: ['launchSettings'],
   lifecyclePart: ['resume', 'start', 'stop'],
+  relocatePart: ['packConversation', 'unpackConversation'],
   runtimeSwitchPart: ['runtimeSwitch'],
   startFailurePart: ['startFailure'],
   transcriptPart: ['transcript', 'transcriptBytes', 'transcriptStamp', 'transcriptTail', 'usage'],
