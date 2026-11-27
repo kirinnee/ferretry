@@ -1,6 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile, chmod } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+  chmod,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchSpec, Runner, RunSpec } from '@ferretry/core-ferrets/contract';
@@ -39,10 +51,11 @@ export function harnessHomeCases(): void {
       readonly withoutConfig?: boolean;
       readonly warned?: string[];
       readonly selected?: Parameters<typeof codexHarness>[0]['selected'];
+      readonly fs?: ReturnType<typeof nodeFs>;
     } = {},
   ) {
     const roots = rootsPortFor(
-      nodeFs(() => crypto.randomUUID()),
+      options.fs ?? nodeFs(() => crypto.randomUUID()),
       { home: join(fixture, 'fy-home'), plugin: 'codex', worktrees: join(fixture, 'worktrees') },
       ['agent-homes', 'harness-history'],
       () => undefined,
@@ -60,6 +73,14 @@ export function harnessHomeCases(): void {
           ? undefined
           : { warn: (message: string) => options.warned?.push(message) }) as never,
         clock: realClock(),
+        spawn: {
+          run: async (program, args) => {
+            expect(program).toBe('readlink');
+            expect(args).toHaveLength(1);
+            const target = await readlink(args[0] as string);
+            return { exitCode: 0, signal: null, stdout: `${target}\n`, stderr: '' };
+          },
+        },
         redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
         ...(options.withoutConfig === true
           ? {}
@@ -328,32 +349,122 @@ export function harnessHomeCases(): void {
       expect(await present()).toBe(false);
     });
 
-    test('C-115 a stale link at config.toml is removed and the default config written: launch succeeds, the link’s target is untouched', async () => {
+    test('C-115 a genuinely dangling in-home config link is repaired and launch proceeds', async () => {
       const home = join(AGENT_HOMES(), 'f2');
-      const target = join(fixture, 'elsewhere.toml');
-      await writeFile(target, 'person = "theirs"\n');
-      await symlink(target, join(home, 'config.toml'));
+      const target = join(home, 'missing.toml');
+      await symlink('missing.toml', join(home, 'config.toml'));
       const { harness } = build();
 
-      await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+      const launch = spec('f2', await harness.homeFor('f2' as FerretId));
+      const run = recording();
+      await harness.prepareHome(launch);
+      expect((await harness.start(launch, run.runner, ENV)).ok).toBe(true);
 
+      expect(run.commands).toHaveLength(1);
       expect((await lstat(join(home, 'config.toml'))).isSymbolicLink()).toBe(false);
       expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('check_for_update_on_startup = false\n');
-      expect(await readFile(target, 'utf8')).toBe('person = "theirs"\n');
+      expect(await lstat(target).catch(() => undefined)).toBeUndefined();
     });
 
-    test('C-115 with nothing to say, a stale link at config.toml is removed and its target is left alone', async () => {
+    test('C-115 with empty generated config, a genuinely dangling in-home link is removed', async () => {
       const home = join(AGENT_HOMES(), 'f2');
-      const target = join(fixture, 'elsewhere.toml');
-      await writeFile(target, 'person = "theirs"\n');
+      const target = join(home, 'missing.toml');
       await symlink(target, join(home, 'config.toml'));
       const { harness } = build(new Map([['quiet', { settings: { check_for_update_on_startup: null } }]]));
 
       await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
 
       expect(await lstat(join(home, 'config.toml')).catch(() => undefined)).toBeUndefined();
-      expect(await readFile(target, 'utf8')).toBe('person = "theirs"\n');
+      expect(await lstat(target).catch(() => undefined)).toBeUndefined();
     });
+
+    for (const name of ['config.toml', 'AGENTS.md']) {
+      for (const outside of ['owner', 'sibling']) {
+        for (const empty of [false, true]) {
+          test(`C-115 ${name} refuses an existing ${outside} fake auth target, empty config=${empty}`, async () => {
+            const home = join(AGENT_HOMES(), 'f2');
+            const target =
+              outside === 'owner' ? join(fixture, 'owner/.codex/auth.json') : join(AGENT_HOMES(), 'sibling/auth.json');
+            const fake = '{"tokens":{"access_token":"FAKE-OWNER-OR-SIBLING"}}\n';
+            await mkdir(join(target, '..'), { recursive: true });
+            await writeFile(target, fake);
+            await symlink(target, join(home, name));
+            const { harness } = build(
+              empty ? new Map([['quiet', { settings: { check_for_update_on_startup: null } }]]) : new Map(),
+            );
+            const run = recording();
+
+            await expect(
+              (async () => {
+                await harness.prepareHome(spec('f2', home));
+                await harness.start(spec('f2', home), run.runner, ENV);
+              })(),
+            ).rejects.toThrow('link_escape');
+
+            expect(run.commands).toEqual([]);
+            expect((await lstat(join(home, name))).isSymbolicLink()).toBe(true);
+            expect(await readFile(target, 'utf8')).toBe(fake);
+          });
+        }
+      }
+
+      for (const present of [false, true]) {
+        test(`C-115 ${name} refuses a swapped-in in-home link before write, existing file=${present}`, async () => {
+          const home = join(AGENT_HOMES(), 'f2');
+          const at = join(home, name);
+          const victim = join(home, 'keep.txt');
+          await writeFile(victim, 'keep this fixture');
+          if (present) await writeFile(at, 'previous generated file');
+          const fs = nodeFs(() => crypto.randomUUID());
+          let swapped = false;
+          const { harness } = build(new Map(), {
+            fs: {
+              ...fs,
+              identity: async path => {
+                const found = await fs.identity(path);
+                // The preparer's leaf look: return its original answer, but swap before its write resolves again.
+                if (!swapped && path.endsWith(`/${name}`)) {
+                  swapped = true;
+                  await rm(at, { force: true });
+                  await symlink(victim, at);
+                }
+                return found;
+              },
+            },
+          });
+          const run = recording();
+
+          await expect(
+            (async () => {
+              await harness.prepareHome(spec('f2', home));
+              await harness.start(spec('f2', home), run.runner, ENV);
+            })(),
+          ).rejects.toThrow();
+
+          expect(swapped).toBe(true);
+          expect(run.commands).toEqual([]);
+          expect((await lstat(at)).isSymbolicLink()).toBe(true);
+          expect(await readFile(victim, 'utf8')).toBe('keep this fixture');
+        });
+      }
+
+      for (const target of ['existing.toml', 'outside-missing', 'linked-parent/missing.toml']) {
+        test(`C-115 ${name} preserves an unproved link to ${target}`, async () => {
+          const home = join(AGENT_HOMES(), 'f2');
+          await writeFile(join(home, 'existing.toml'), 'keep this fixture');
+          await mkdir(join(fixture, 'outside'), { recursive: true });
+          await symlink(join(fixture, 'outside'), join(home, 'linked-parent'));
+          const destination = target === 'outside-missing' ? join(fixture, 'outside/missing.toml') : target;
+          await symlink(destination, join(home, name));
+          const { harness } = build();
+
+          await expect(harness.prepareHome(spec('f2', home))).rejects.toThrow('link_escape');
+
+          expect((await lstat(join(home, name))).isSymbolicLink()).toBe(true);
+          expect(await readFile(join(home, 'existing.toml'), 'utf8')).toBe('keep this fixture');
+        });
+      }
+    }
 
     test('S42 first launch on a fresh FY_HOME: the kernel made the agent-homes base 0700 at boot, the launch makes the ferret home under it', async () => {
       const fy = join(fixture, 'fy-home');
