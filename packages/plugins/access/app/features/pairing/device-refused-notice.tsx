@@ -13,11 +13,13 @@ import { DEVICE_NOT_ACCEPTED_SENTENCE } from '../../shell-pairing.ts';
 export interface DeviceRefusedNoticeProps {
   /** The machine's name as this browser shows it. */
   readonly machineName: string;
+  /** A replacement is a different recovery from a revoked or idle-expired browser. */
+  readonly reason?: 'replaced' | 'refused';
   /** Opens the pairing step of the setup guide. */
   readonly onPairAgain: () => void;
 }
 
-export function DeviceRefusedNotice({ machineName, onPairAgain }: DeviceRefusedNoticeProps) {
+export function DeviceRefusedNotice({ machineName, reason, onPairAgain }: DeviceRefusedNoticeProps) {
   return (
     <section
       aria-labelledby="fy-device-refused-title"
@@ -29,7 +31,9 @@ export function DeviceRefusedNotice({ machineName, onPairAgain }: DeviceRefusedN
         {machineName}
       </h2>
       <p role="alert" className="m-0 text-cell leading-base text-fg">
-        {DEVICE_NOT_ACCEPTED_SENTENCE}
+        {reason === 'replaced'
+          ? 'Ferretry on this machine was reinstalled or replaced. Pair this browser with it again.'
+          : DEVICE_NOT_ACCEPTED_SENTENCE}
       </p>
       <button
         type="button"

@@ -96,7 +96,7 @@ import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, relayDataByteBudget } from '@ferret
 import { z } from 'zod';
 import { decodeCompressedAnswer } from './compression.ts';
 import { outgoingRequest } from './outgoing-request.ts';
-import { neverSentCopy, RelaySessionError } from './session-error.ts';
+import { DaemonReplacedError, neverSentCopy, RelaySessionError } from './session-error.ts';
 
 export { RelaySessionError };
 
@@ -803,7 +803,7 @@ export class RelayClientSession {
    * is what every existing caller and test sees — and defers only in the race it exists for.
    */
   #receiving = 0;
-  #deferredClose: { readonly code: number; readonly reason: string } | undefined;
+  #deferredClose: { readonly code: number; readonly reason: string; readonly replaced?: true } | undefined;
   /** Serialises frame handling, so a later frame never overtakes an earlier one mid-decrypt. */
   #inbox: Promise<void> = Promise.resolve();
 
@@ -1099,7 +1099,7 @@ export class RelayClientSession {
    * is how "a `4440` with no sealed outcome" is reported as the protocol violation §14 says it is
    * rather than smoothed into a quiet end.
    */
-  carrierClosed(code: number, reason: string): void {
+  carrierClosed(code: number, reason: string, replaced?: true): void {
     if (this.#done()) return;
     // A record may still be decrypting. Applying a close under it would drop the outcome that record
     // carries — see `#receiving`.
@@ -1109,11 +1109,11 @@ export class RelayClientSession {
     // close genuinely ends it, so deferring there would delay every ordinary teardown by a microtask
     // to protect nothing. The hazard §14 legislates against is specific to pairing and streams.
     if (this.#receiving > 0 && this.deps.mode.kind !== 'auth' && this.deps.mode.kind !== 'member') {
-      this.#deferredClose ??= { code, reason };
+      this.#deferredClose ??= { code, reason, ...(replaced ? { replaced } : {}) };
       return;
     }
     // Quietly: the carrier has already taken this socket away, so there is nothing left to close.
-    this.#quietly(code, this.#closedWithoutOutcome(code, reason));
+    this.#fail(code, this.#closedWithoutOutcome(code, reason), false, replaced);
   }
 
   /** Nothing more will happen to this session, by either route out of it. */
@@ -1201,7 +1201,7 @@ export class RelayClientSession {
       const deferred = this.#receiving === 0 ? this.#deferredClose : undefined;
       if (deferred !== undefined) {
         this.#deferredClose = undefined;
-        this.carrierClosed(deferred.code, deferred.reason);
+        this.carrierClosed(deferred.code, deferred.reason, deferred.replaced);
       }
     }
   }
@@ -1770,13 +1770,13 @@ export class RelayClientSession {
    * `#onControl`'s `closed`/`error` branches are the deliberate exception and call `#quietly`: the
    * rendezvous is already closing, and closing from here would race its own close frame.
    */
-  #fail(code: number, reason: string, close = true): void {
+  #fail(code: number, reason: string, close = true, replaced?: true): void {
     if (this.#done()) return;
     if (close) this.deps.socket.close(code, reason);
     const streaming = this.#phase === 'streaming';
     const serving = this.#phase === 'serving';
     this.#phase = 'ended';
-    const failure = new RelaySessionError(reason, code, serving);
+    const failure = replaced ? new DaemonReplacedError(reason, serving) : new RelaySessionError(reason, code, serving);
     this.#failure = failure;
     // A request whose head is still queued (and not being sealed) never left: its failure says so. A head already sealed
     // or sent may be in the daemon's hands, so it gets the plain failure.

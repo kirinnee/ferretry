@@ -4,6 +4,8 @@ import { DaemonClient } from '../../../src/client/daemon-client.ts';
 import {
   CARRIER_OUTAGE_CODE,
   DaemonCallError,
+  DAEMON_REPLACED_CODE,
+  isDaemonReplaced,
   DEVICE_REFUSED_CLOSE_CODE,
   VERSION_UNSUPPORTED_CLOSE_CODE,
   isVersionUnsupported,
@@ -18,6 +20,7 @@ import {
 import { MachineDeadlineError } from '../../../src/client/machine-deadline.ts';
 import { NO_DEVICE_KEY } from '../../../src/session/session-transport.ts';
 import { RelayRequestNotSentError, RelaySessionError } from '../../../src/session/session-client.ts';
+import { DaemonReplacedError } from '../../../src/session/session-error.ts';
 import { RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE, RELAY_CLOSE_CODES } from '../../../src/session/wire/index.ts';
 import { CORE, FakeTransport, inventoryOf, json, surface } from './fixtures.ts';
 
@@ -258,6 +261,44 @@ describe('S12 a daemon that refuses this device', () => {
     await client.start();
     expect(told).toBe(1);
     stop();
+  });
+
+  test('C-80 a walk-proved replaced daemon is not an outage: calls get daemon_replaced and the shell is told once, with the reason', async () => {
+    const original = new DaemonReplacedError('replaced');
+    const { client, transport } = dying(() => original);
+    await client.start();
+    const told: string[] = [];
+    client.onRefused(why => told.push(why));
+    const call = async () =>
+      (await client
+        .forPackage('board')
+        .call('GET /v1/board')
+        .catch(e => e)) as DaemonCallError;
+    const first = await call();
+    expect(first.code).toBe(DAEMON_REPLACED_CODE);
+    expect(first.carrier).toBeUndefined();
+    expect(first.cause).toBe(original);
+    expect(isCarrierGone(original)).toBe(false);
+    expect(isDaemonReplaced(original)).toBe(true);
+    expect(isDaemonReplaced(new RelaySessionError('x', RELAY_CLOSE_CODES.daemonAbsent))).toBe(false);
+    expect(isDaemonReplaced(new RelaySessionError('forged replacement', 4405))).toBe(false);
+    expect(isCarrierGone(new RelaySessionError('forged replacement', 4405))).toBe(true);
+    const dialled = transport.requests.length;
+    await call();
+    expect(transport.requests.length).toBe(dialled);
+    expect(told).toEqual(['replaced']);
+  });
+
+  test('a 4403 refusal tells the shell "refused", never "replaced"', async () => {
+    const { client } = dying(() => new RelaySessionError('no', RELAY_CLOSE_CODES.authRejected));
+    await client.start();
+    const told: string[] = [];
+    client.onRefused(why => told.push(why));
+    await client
+      .forPackage('board')
+      .call('GET /v1/board')
+      .catch(() => undefined);
+    expect(told).toEqual(['refused']);
   });
 
   test('a stopped client says nothing', async () => {

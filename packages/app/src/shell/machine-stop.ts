@@ -15,6 +15,8 @@ import type { ShellRuntime } from './runtime.ts';
 export type StopKind =
   /** The machine closed a session with `4403`: this browser was removed, or went unused for too long. */
   | 'refused'
+  /** The address answered, but the daemon there is not the one this browser paired (it was reinstalled or replaced). */
+  | 'replaced'
   /** The machine answered the plugin list with a `401`/`403`: it knows this browser and will not serve it. */
   | 'turned-away'
   /** The browser holds a pairing but cannot open any session (no key kept for it, or no carrier). */
@@ -69,6 +71,14 @@ export function describeStop(facts: StopFacts): MachineStop {
         why: `This browser was removed from ${name}, or it went unused for too long. Pair it again to keep using ${name}.`,
         primary: { action: 'pair-again', label: 'Pair again' },
         reference: 'Reference: the machine ended the session as not accepted (4403).',
+      };
+    case 'replaced':
+      return {
+        kind: 'replaced',
+        headline: `${name} was reinstalled or replaced`,
+        why: `Something is answering at the address this browser paired with, but it is not the same ${name} any more. Pair this browser with it again.`,
+        primary: { action: 'pair-again', label: 'Pair again' },
+        reference: 'Reference: the address answered, but not as the machine this browser paired with (4404).',
       };
     case 'turned-away': {
       const said =
@@ -136,6 +146,7 @@ export function stopOf(runtime: ShellRuntime, daemon: string): StopFacts | undef
   const paired = runtime.daemons.get(daemon);
   if (paired === undefined) return { kind: 'not-paired', machine: undefined };
   const machine = daemonTitle(paired);
+  if (runtime.isReplaced(daemon)) return { kind: 'replaced', machine };
   if (runtime.isRefused(daemon)) return { kind: 'refused', machine };
   const connection = runtime.connection(daemon);
   if (connection.kind === 'unreachable') return { kind: 'no-key', machine };
