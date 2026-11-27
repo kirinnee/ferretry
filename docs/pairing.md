@@ -458,6 +458,11 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   document a frame shows now began, against the daemon's own ledger). So a target a link once tainted reads the app's own page again
   once a REAL document load brought it in after the pairing was over: that is why the `/pair` page leaves by a document load
   (`location.assign`) rather than a router move, which would keep the link's own document.
+  **Console and network reads keep the lifetime refusal**: their worker buffers span document loads and may still hold
+  records from the pairing document. A new document authorizes only current-document content, never those older logs.
+  The non-secret, pending "Name this machine" offer stays with the paired machine across this document load until the
+  offer first shows or is settled. Showing it consumes the stored flag while keeping the open form in memory, so
+  subsequent loads do not offer it again.
   **A document a pairing link opened is refused on ANY origin, while it is the page’s current document** (`NavigationEvidence.linked`, v4
   #1598): the daemon cannot know every deployment’s app origin (another daemon’s app, a self-hosted one), and a link-entered page
   is a pairing screen wherever it is served. It falls when a new document replaces that one (an in-document change of its

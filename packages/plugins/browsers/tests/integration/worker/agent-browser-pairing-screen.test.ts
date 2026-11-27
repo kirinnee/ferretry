@@ -84,6 +84,9 @@ beforeAll(async () => {
           headers: { 'content-type': 'text/html' },
         });
       if (url.pathname === '/pair') return html(MARKED_HEAD, CODE_BODY);
+      if (url.pathname === '/history-pair')
+        return html('', `<p>pairing</p><script>console.log('${FAKE_CODE}'); fetch('/history-record')</script>`);
+      if (url.pathname === '/history-record') return new Response(FAKE_CODE, { headers: { 'x-fixture': FAKE_CODE } });
       if (url.pathname === '/plain' || url.pathname === '/d/m1') return html('', '<p id="o">hello</p>');
       if (url.pathname === '/cross-linked')
         return html(
@@ -519,6 +522,42 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     // Assert
     should(read.error).equal(PAIRING_SCREEN_REFUSAL);
     await call({ tool: 'browser.close', name: 'again' });
+  }, 60_000);
+
+  it('V-B20 refuses console and network records written by the pairing document after the post-pair document loads', async () => {
+    pairing.open('vb20-history', Date.now() + 2 * MINUTE);
+    await call({ tool: 'browser.open', name: 'history', url: `${base}/history-pair#v1;code=FAKE-LINK-0001` });
+    await call({ tool: 'browser.wait_for', name: 'history', time: 500 });
+    pairing.close('vb20-history');
+    await new Promise(resolve => setTimeout(resolve, 30));
+    await call({ tool: 'browser.navigate', name: 'history', url: `${base}/d/m1` });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    // The new document can be read. The worker's logs still cover the pairing document's lifetime.
+    should((await call({ tool: 'browser.read', name: 'history' })).error).be.undefined();
+    // Inspect the synthetic records through the person's unguarded service: prove they survived, without handing them
+    // to the agent tool boundary. No live credential is minted anywhere in this fixture.
+    const recordedConsole = await browser.lifecycleOnPage('s1', 'history', { op: 'console' });
+    should(recordedConsole.reply.text).containEql(FAKE_CODE);
+    const recordedNetwork = await browser.lifecycleOnPage('s1', 'history', {
+      op: 'network',
+      action: 'list',
+      filter: '/history-record',
+    });
+    const id = /^(r\d+)\b/mu.exec(recordedNetwork.reply.text)?.[1];
+    should(id).be.a.String();
+    const recordedBody = await browser.lifecycleOnPage('s1', 'history', {
+      op: 'network',
+      action: 'get',
+      id: id ?? 'r2',
+    });
+    should(recordedBody.reply.text).containEql(FAKE_CODE);
+    const consoleRead = await call({ tool: 'browser.console', name: 'history' });
+    const networkList = await call({ tool: 'browser.network', name: 'history', action: 'list' });
+    const networkBody = await call({ tool: 'browser.network', name: 'history', action: 'get', id: id ?? 'r2' });
+    await call({ tool: 'browser.close', name: 'history' });
+    should(consoleRead.error).equal(PAIRING_SCREEN_REFUSAL);
+    should(networkList.error).equal(PAIRING_SCREEN_REFUSAL);
+    should(networkBody.error).equal(PAIRING_SCREEN_REFUSAL);
   }, 60_000);
 
   it('should have handed an agent the fake code in no answer, no refusal and no network body', () => {

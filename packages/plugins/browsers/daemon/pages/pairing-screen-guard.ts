@@ -21,8 +21,8 @@ export interface ProtectionWindows {
   liveSince(sinceMs: number): boolean;
 }
 
-/** Which agent act the guard stands in front of. A script can run on past its own answer, so it is held to a lifetime rule. */
-export type GuardedKind = 'content' | 'script';
+/** Scripts can outlive their answer; historical logs can outlive the document that wrote them. */
+export type GuardedKind = 'content' | 'script' | 'history';
 
 /** An origin that is, or cannot be told from, one of the app's. */
 const isApp = (origin: string, apps: ReadonlySet<string> | undefined): boolean =>
@@ -130,7 +130,8 @@ export function pairingScreenGuard(
       )
     )
       throw refuse();
-    if (kind === 'script') {
+    // Console/network buffers span document loads. A fresh document cannot authorize an older document's records.
+    if (kind === 'script' || kind === 'history') {
       for (const { nav } of before.targets) {
         if (nav.taintSeq > 0) throw refuse();
         const first = firstApp(nav, apps);

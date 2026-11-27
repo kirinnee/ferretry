@@ -371,6 +371,30 @@ describe('P1-1: a pairing link committed in any frame', () => {
     should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
   });
 
+  it('V-B20 keeps historical console and network reads refused after the pairing document is replaced', async () => {
+    const { tabs, tools, app, pairing, clock } = await pairingWorld();
+    pairing.open('pairing-history', clock.at + 120 * SECOND);
+    clock.at += SECOND;
+    pairing.close('pairing-history');
+    clock.at += SECOND;
+    tabs.navigation.set(app.id, {
+      ...cleanNavigation(`${APP_ORIGIN}/d/m1`, clock.at),
+      seq: 3,
+      taintSeq: 2,
+      documentAt: clock.at,
+    });
+    for (const call of [
+      { tool: 'browser.console', name: 'app' },
+      { tool: 'browser.network', name: 'app', action: 'list' },
+      { tool: 'browser.network', name: 'app', action: 'get', id: 'r1' },
+    ] as const) {
+      const { answer, error } = await attempt(tools, call);
+      should(answer).be.undefined();
+      should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
+    }
+    should(contentCalls(tabs)).eql([]);
+  });
+
   it('should refuse a read during which a link of the pairing grammar was committed, wherever the page went after', async () => {
     const { tabs, tools, browser } = await pairingWorld();
     const docs = await browser.openPage('s1', 'docs', {
