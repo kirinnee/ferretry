@@ -1,0 +1,445 @@
+/* ============================================================================
+   RAW BRUTALISM (r10 T11). The look of the unstyled web, kept on purpose: the device's own serif for reading and its own
+   monospace for everything that labels, square corners, hard 2px ink rules on every edge, NO shadow of any kind, links
+   underlined at rest, and no easing at all, so a change simply happens. Colour comes from the palette's roles alone,
+   so every palette takes it.
+
+   It is deliberately NOT Neo-Brutalism. Neo is a polished poster: a webfont display face, a flat OFFSET shadow every block
+   casts and presses into, a yellow "selected" block, a hard pop on choice. Raw has no webfont (nothing to load, no
+   licence), no offset and no shadow (a thing is outlined, never lifted), no pop and no press travel (a pressed control
+   INVERTS: ink on paper becomes paper on ink), and a serif body. Where Neo says "block", Raw says "box with a border".
+
+   Nothing here fights readability: ink on paper at the palette's own contrast, a 3px focus ring that stays hard, and type
+   a size up from the house default because a system serif reads small. So it is not `loud`.
+   ============================================================================ */
+:root[data-style='raw'],
+[data-swatch][data-style='raw'] {
+  /* ═══ structural token layer ═══ */
+  --ghost-bg: transparent;
+  --ghost-edge: var(--border-strong);
+  --ghost-shadow: none;
+  /* No flourish: a choice is shown by its state, never by moving, and nothing eases. */
+  --select-pop: 1;
+  --press-translate: 0px;
+  --motion-fast: 0ms;
+  --motion-base: 0ms;
+  --motion-slow: 0ms;
+  --ease-standard: linear;
+  --ease-emphasis: linear;
+  --hover-fill: color-mix(in srgb, var(--fg) 9%, transparent);
+  --select-fill: color-mix(in srgb, var(--fg) 16%, transparent);
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13.5px;
+  --text-base: 14.5px;
+  --text-md: 15.5px;
+  --text-lg: 17px;
+  --text-display: 1.3rem;
+  --text-input-desktop: 15px;
+  --weight-normal: 400;
+  --weight-medium: 700;
+  --weight-strong: 700;
+  --weight-display: 700;
+  --label-size: 11px;
+  --label-weight: 700;
+  --tracking-label: 0.02em;
+  --prose-measure: 78ch;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --radius-input: 0px;
+  --radius-pill: 0px;
+  --bubble-stroke: 2px;
+  --bubble-radius: 0px;
+  --bubble-shadow: none;
+  --stroke-control: 2px;
+  --stroke-panel: 2px;
+  --divider-width: 2px;
+  --divider-color: var(--border-strong);
+  --card-border: var(--border-strong);
+  /* No shadow anywhere: a menu, a card and a button are told apart from the page by their rule alone. */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-control: none;
+  --shadow-panel: none;
+  --shadow-popover: none;
+  --shadow-active: none;
+  --rail-active: none;
+  --control-h-desktop: 32px;
+  --control-h-sm-desktop: 28px;
+  --row-min-h-desktop: 40px;
+  --pad-control-x-want: 12px;
+  --pad-panel-want: 12px;
+  --pad-row-y: 8px;
+  --pad-cell-x: 10px;
+  --gap-xs: 6px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
+  /* A hard ring that sits right against the rule it marks. */
+  --focus-width: 3px;
+  --focus-offset: calc(-1 * var(--focus-width));
+  --focus-shadow: none;
+  --underline-links: underline;
+  /* The device's own faces, on purpose: a serif to read and a monospace to label. Nothing is downloaded. */
+  --font-display: 'Courier New', Courier, 'Liberation Mono', ui-monospace, monospace;
+  --font-body: 'Times New Roman', Times, 'Liberation Serif', serif;
+  --font-mono: 'Courier New', Courier, 'Liberation Mono', ui-monospace, monospace;
+  --font-size-base: 14.5px;
+  --leading-base: 1.5;
+  --tracking-display: 0;
+  --md-font-size: 15.5px;
+  --md-leading: 1.6;
+  --code-font-size: 13.5px;
+  --chrome-font-size: 12px;
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --border-width: 2px;
+  --border-width-heavy: 3px;
+  --control-transform: none;
+  --tab-sel-fg: var(--fg);
+  --tab-underline: var(--fg);
+  --tab-underline-width: 3px;
+  --appnav-underline: var(--fg);
+  --bubble-fg: var(--fg);
+  --bubble-border: var(--border-strong);
+
+  /* ═══ the component contract (r11 T7): what carries Raw in every slot — the unstyled web, kept on purpose ═══ */
+  /* BACKGROUND: the plain page. No pattern, no grain, no wash: paper is flat (stated, not left to the default, so a future
+     base change cannot decorate it). */
+  --bg-pattern: var(--bg-pattern-none);
+  --grain-alpha: 0;
+  --body-wash: none;
+  --panel-texture: none;
+  /* MARKDOWN: a document as the browser would draw it, plus the ink rules this style puts on every edge. A mono h1 under a 2px
+     rule, a ruled box for code with NO shadow, a quote that is simply indented (no bar, no tint), a 2px grid table with a plain
+     header row, underlined links, the browser's own disc. */
+  --md-h1-size: 1.7em;
+  --md-h1-weight: 700;
+  --md-h1-case: none;
+  --md-h1-rule: var(--stroke-control) solid var(--border-strong);
+  --md-h1-rule-pad: 0.15em;
+  --md-h2-size: 1.3em;
+  --md-h2-weight: 700;
+  --md-h2-case: none;
+  --md-h2-rule: none;
+  --md-code-border: var(--stroke-control) solid var(--border-strong);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 0px;
+  --md-code-shadow: none;
+  --md-quote-bar: none;
+  --md-quote-pad: 2em;
+  --md-quote-bg: transparent;
+  --md-quote-radius: 0px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: var(--stroke-control) solid var(--border-strong);
+  --md-cell-border-y: var(--stroke-control) solid var(--border-strong);
+  --md-th-bg: transparent;
+  --md-th-case: none;
+  --md-th-weight: 700;
+  --md-zebra: transparent;
+  --md-link-decoration: underline;
+  --md-link-bg: transparent;
+  --md-link-pad: 0;
+  --md-link-radius: 0px;
+  --md-stack-radius: 0px;
+  --md-stack-frame: var(--stroke-control) solid var(--border-strong);
+  --md-ul-marker: disc;
+  --md-ol-marker: decimal;
+  --md-list-marker-color: var(--fg);
+  /* SPINNER: a plain outlined square whose corner marker JUMPS from corner to corner (the ring is hidden; the whole mark turns
+     in four whole quarter-turns, nothing eases; shaped below the contract block). */
+  --spinner-ring: none;
+  --spinner-parts: inline;
+  --spinner-speed: 1.2s;
+  --spinner-timing: steps(4, end);
+  /* MOTION: none. A change simply happens: no duration, no easing, no pop, no travel (the tokens above carry the rest). */
+  --motion-pop: 0ms;
+  --ease-in: linear;
+  --ease-out: linear;
+  --ease-in-out: linear;
+  --ease-spring: linear;
+  --motion-loading-ring: 1.2s;
+  --motion-loading-run: 1s;
+  --motion-loading-shimmer: 1.6s;
+  --ease-loading-ring: steps(4, end);
+  --ease-loading-run: steps(10, end);
+  /* HYPERMEDIA (read by r12 H5; no renderer reads an --hm-* slot yet): INK — outlined nodes, a 2px ink rule, square corners,
+     orthogonal edges, a plain label for a header. Not `block`: Raw casts no offset and no shadow of any kind, so nothing is
+     filled in a hard offset; where Neo says block, Raw says box with a border. */
+  --hm-shape: ink;
+  --hm-radius: 0px;
+  --hm-stroke: 2px;
+  --hm-font: var(--font-mono);
+  --hm-node-fill-alpha: 0;
+  --hm-edge: orthogonal;
+  --hm-header: label;
+  /* SURFACES: a ruled box, no shadow; the ring is drawn inside the control. */
+  --panel-edge: line;
+  --focus-line: solid;
+}
+
+@media (max-width: 640px) {
+  :root[data-style='raw'] {
+    --text-2xs: 12.5px;
+    --text-xs: 14px;
+    --text-sm: 15.5px;
+    --text-base: 16.5px;
+    --text-md: 17.5px;
+    --text-lg: 20px;
+    --text-display: 1.6rem;
+    --label-size: 13px;
+  }
+}
+
+/* ============================================================================
+   RAW COMPONENT TOUCHES. The tokens carry the style into everything that reads them; these are the few places a component
+   draws its own state. Colour only from roles.
+   ========================================================================== */
+
+/* Nothing eases: a change simply happens. Components set their own durations as literals (a button 120ms, a switch 150ms),
+   so the motion tokens above cannot reach them; this does. Animations (a spinner) are not transitions and keep running. */
+:root[data-style='raw'] *,
+:root[data-style='raw'] *::before,
+:root[data-style='raw'] *::after {
+  transition-delay: 0s;
+  transition-duration: 0s;
+}
+
+/* Links are underlined at rest, as on the unstyled web. */
+:root[data-style='raw'] a,
+:root[data-style='raw'] .md a {
+  text-decoration-line: var(--underline-links);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+/* A field's own `outline: none` (design-system.css) wins over the shell's ring, so a field showed only a border change.
+   Raw draws the hard ring, hard against the rule. */
+:root[data-style='raw'] .kt-input:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* A panel and a message are ruled in ink, not in the palette's pale hairline; the message is paper, never a tinted block. */
+:root[data-style='raw'] .kt-panel {
+  border-color: var(--border-strong);
+}
+:root[data-style='raw'] .kt-bubble {
+  background: var(--surface);
+}
+
+/* Hover and press INVERT a plain control (ink on paper becomes paper on ink): the one cue, no shadow, no travel. Primary
+   and danger keep their own fills and take the palette's hover for them. */
+:root[data-style='raw']
+.kt-btn:not([data-variant='primary'], [data-variant='danger']):not(:disabled):is(:hover, :active) {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] .kt-btn[data-variant='primary']:active:not(:disabled) {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+
+/* Switch: a plain ruled box and a square marker, no easing. */
+:root[data-style='raw'] [data-neo-switch-track] {
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  box-shadow: none;
+}
+:root[data-style='raw'] [role='switch'][aria-checked='true'] [data-neo-switch-track] {
+  background: var(--fg);
+}
+:root[data-style='raw'] [data-neo-switch-thumb] {
+  background: var(--bg);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 14px;
+  width: 14px;
+}
+
+/* Segmented control: a ruled tray; the chosen segment is inverted ink. */
+:root[data-style='raw'] [data-neo-segmented] {
+  border-width: var(--stroke-control);
+  border-color: var(--border-strong);
+}
+:root[data-style='raw'] [data-neo-segmented] > label {
+  border: var(--stroke-control) solid transparent;
+}
+:root[data-style='raw'] [data-neo-segmented] > label:has(:checked) {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] [data-neo-segmented] > label:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* Choice cards: a ruled box; the chosen one is inverted, with no lift and no pop. The hover fill is for a card that is NOT chosen: the chosen
+   one keeps its ink fill under the pointer (a click leaves the pointer on it), or its paper text would sit on the hover tint. */
+:root[data-style='raw'] .fy-cc__card {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+:root[data-style='raw'] .fy-cc__card:not([aria-disabled='true']):not([data-selected='true']):hover {
+  background: var(--hover-fill);
+  border-color: var(--border-strong);
+}
+:root[data-style='raw'] .fy-cc__card[data-selected='true'] {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] .fy-cc__card[data-selected='true'] .fy-cc__line {
+  color: var(--bg);
+}
+:root[data-style='raw'] .fy-cc__card:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+/* A chosen card is inverted (ink fill), so its inside ring is drawn in paper, the colour that reads on it. */
+:root[data-style='raw'] .fy-cc__card[data-selected='true']:has(:focus-visible) {
+  outline-color: var(--bg);
+}
+:root[data-style='raw'] .fy-cc__check {
+  background: var(--bg);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  color: var(--fg);
+}
+
+/* Progress: empty = paper box, done = solid ink, current = the accent, each a ruled box. */
+:root[data-style='raw'] .fy-sp-progress__segment {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 12px;
+  opacity: 1;
+}
+:root[data-style='raw'] .fy-sp-progress__segment[data-state='done'] {
+  background: var(--fg);
+}
+:root[data-style='raw'] .fy-sp-progress__segment[data-state='current'] {
+  background: var(--accent);
+}
+
+/* Bars: a ruled track with a solid fill. */
+:root[data-style='raw'] [data-option-bar-track] {
+  background: var(--surface);
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: 0;
+  height: 12px;
+}
+
+/* A pressed chip or tab is inverted ink, like the chosen card. */
+:root[data-style='raw'] .kt-tab[aria-pressed='true'],
+:root[data-style='raw'] .kt-tab[aria-selected='true'] {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw'] .kt-tab[aria-pressed='true'] .mono,
+:root[data-style='raw'] .kt-tab[aria-selected='true'] .mono {
+  color: var(--bg);
+}
+
+/* Every badge tone is ruled in ink, whatever its tint. */
+:root[data-style='raw'] .kt-badge,
+:root[data-style='raw'] .kt-badge[data-tone] {
+  border-color: var(--border-strong);
+}
+
+/* THE RAW SPINNER: a plain outlined square (`p1`, ink rule, no fill) with a small solid marker on one corner (`p2`); the WHOLE
+   mark turns in four whole quarter-turns (`steps(4, end)` on the base `.fy-spinner` animation), so the marker jumps from corner
+   to corner and nothing eases. Neither part animates on its own (`animation: none`, which also ends the base per-part stagger,
+   a delay the base `animation` shorthand resets anyway); `p3` and `p4` are not drawn. The ring is hidden.
+   SCOPE: element rules, so the page rule skips a spinner inside a `[data-swatch]` (a swatch preview draws ITS OWN style's
+   mark, not the page's), and the swatch rule matches only a swatch of this style. */
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p3,
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p4,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p3,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p4 {
+  display: none;
+}
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p1,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p2 {
+  animation: none;
+  animation-delay: 0s;
+  opacity: 1;
+}
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p1,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p1 {
+  fill: none;
+  height: 9px;
+  stroke: var(--fg);
+  stroke-linejoin: miter;
+  stroke-width: 2px;
+  width: 9px;
+  x: 3.5px;
+  y: 3.5px;
+}
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *) .fy-spinner__p2,
+[data-swatch][data-style='raw'] .fy-spinner .fy-spinner__p2 {
+  fill: var(--fg);
+  height: 3.5px;
+  width: 3.5px;
+  x: 1.5px;
+  y: 1.5px;
+}
+
+/* ON AN ACCENT FILL (a busy Send) the box and marker take the button's foreground, as the base `.fy-spinner--on-accent` gives every
+   other style's arc, not the page ink (which is the fill's neighbour there: 1.3 to 1.9:1). The class is written after the `:not()` so
+   `--on-accent:` never appears in the file for the style-axis token scan to read as a declaration. */
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *).fy-spinner--on-accent .fy-spinner__p1,
+[data-swatch][data-style='raw'] .fy-spinner--on-accent .fy-spinner__p1 {
+  stroke: var(--spinner-arc);
+}
+:root[data-style='raw'] .fy-spinner:not([data-swatch] *).fy-spinner--on-accent .fy-spinner__p2,
+[data-swatch][data-style='raw'] .fy-spinner--on-accent .fy-spinner__p2 {
+  fill: var(--spinner-arc);
+}
+
+/* The settings nav: the selected item is INVERTED, ink on paper becoming paper on ink, ruled and square (the shell draws a soft
+   accent pill with a literal 6px radius; no radius, no pill here). The icon reads in the same paper. */
+/* SCOPE: the page (outside any `[data-swatch]`) or a swatch of THIS style; a Studio swatch on a Raw page keeps its own fill. */
+:root[data-style='raw'] .fy-settings-nav .fy-tab:not([data-swatch] *),
+[data-swatch][data-style='raw'] .fy-settings-nav .fy-tab {
+  border-radius: var(--radius-tab);
+}
+:root[data-style='raw'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']):not([data-swatch] *),
+[data-swatch][data-style='raw'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) {
+  background: var(--fg);
+  color: var(--bg);
+}
+:root[data-style='raw']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):not([data-swatch] *)
+  .fy-icon,
+[data-swatch][data-style='raw'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']) .fy-icon {
+  color: var(--bg);
+}
+
+/* A FOCUS RING INSIDE A FILLED CONTROL is drawn in the paper that the fill's ink is set against (the selected link: ink fill, paper
+   ring) or in the button's own label ink (Send), 2px in from the edge, so it keeps >= 3:1 on the fill; the page's `--focus-color`
+   is the accent, which on Send is the fill itself (1:1) and on the ink link 1.3 to 1.9:1. */
+:root[data-style='raw'] .fy-composer-send:focus-visible:not([data-swatch] *),
+[data-swatch][data-style='raw'] .fy-composer-send:focus-visible {
+  outline-color: var(--accent-fg);
+  outline-offset: calc(-1 * (var(--focus-width) + 2px));
+}
+:root[data-style='raw']
+  .fy-settings-nav
+  .fy-tab:is(.fy-tab--active, [aria-current='page']):focus-visible:not([data-swatch] *),
+[data-swatch][data-style='raw'] .fy-settings-nav .fy-tab:is(.fy-tab--active, [aria-current='page']):focus-visible {
+  outline-color: var(--bg);
+  outline-offset: calc(-1 * (var(--focus-width) + 2px));
+}

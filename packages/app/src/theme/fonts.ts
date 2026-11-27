@@ -2,39 +2,27 @@
 /**
  * WHICH FONT FILES EACH STYLE DRAWS WITH — and the hint that fetches the first-paint ones early.
  *
- * Type is a STYLE decision (a palette is colour only), so this table is keyed by style. `styles/theme-fonts.css` declares
- * the faces and `styles/style/<id>.css` names them; this file is the third view of the same fact, kept for two things the
- * stylesheet cannot do: telling the browser, before it has laid anything out, which files the ACTIVE style is about to
- * need, and giving the byte budget something to count. `tests/unit/theme-fonts.test.ts` reads all three and fails when
- * they disagree.
+ * A font is a PACK (`theme/packs/font/<id>/`: `font.ts`, its woff2 files and its licence text), and the registry generator
+ * writes every face's `@font-face` into `generated/theme-packs.css` and the built URL of every file into `FONT_FILE_URLS`.
+ * Type is a STYLE decision (a palette is colour only), so each style pack (`theme/packs/style/<id>/style.ts`) names, in its
+ * `fonts`, which font ids draw its text and its code; this file reads them for two things the stylesheet cannot do: telling
+ * the browser, before it has laid anything out, which files the ACTIVE style is about to need, and giving the byte budget
+ * something to count. `tests/unit/theme-fonts.test.ts` fails when the packs and the style stacks disagree.
  *
  * `text` faces draw body, chrome and headings, so they are preloaded. `code` faces draw `pre` and
  * `.mono` only; they load when a code block first appears, which is soon enough, and keeping them out
  * of the preload keeps a sans style's first paint from competing with the JavaScript for bandwidth.
  *
- * A style absent from the table (Contrast) draws with the device's own faces by design.
+ * A style whose pack names no font (Lucid, Raw, Anti-posh) draws with the device's own faces by design.
+ *
+ * Every bundled font is under the SIL Open Font License 1.1 (OFL), the latin-subset woff2 cut Fontsource publishes from each
+ * font's upstream release; its licence text is `LICENSE.txt` in its pack. Deliberately NOT bundled (platform or non-free faces
+ * named first in a stack so an installed copy wins, with an open look-alike answering everywhere else): Tahoma, Trebuchet MS,
+ * Verdana, Lucida Console, Aptos (Public Sans answers), DIN Condensed (Barlow Condensed), Georgia (Gelasio), Arial Black
+ * (Archivo Black), Helvetica Neue. Those three draw with the device's own faces on purpose.
  */
 
-import archivoBlack from '../assets/fonts/archivo-black-latin-400-normal.woff2';
-import bagelFatOne from '../assets/fonts/bagel-fat-one-latin-400-normal.woff2';
-import bricolage from '../assets/fonts/bricolage-grotesque-latin-wght-normal.woff2';
-import cascadiaMono from '../assets/fonts/cascadia-mono-latin-wght-normal.woff2';
-import geist from '../assets/fonts/geist-latin-wght-normal.woff2';
-import geistMono from '../assets/fonts/geist-mono-latin-wght-normal.woff2';
-import hankenGrotesk from '../assets/fonts/hanken-grotesk-latin-wght-normal.woff2';
-import ibmPlexMono400 from '../assets/fonts/ibm-plex-mono-latin-400-normal.woff2';
-import ibmPlexMono700 from '../assets/fonts/ibm-plex-mono-latin-700-normal.woff2';
-import inter from '../assets/fonts/inter-latin-wght-normal.woff2';
-import orbitron from '../assets/fonts/orbitron-latin-wght-normal.woff2';
-import pixelify700 from '../assets/fonts/pixelify-sans-latin-700-normal.woff2';
-import pressStart2p from '../assets/fonts/press-start-2p-latin-400-normal.woff2';
-import jetBrainsMono400 from '../assets/fonts/jetbrains-mono-latin-400-normal.woff2';
-import jetBrainsMono700 from '../assets/fonts/jetbrains-mono-latin-700-normal.woff2';
-import nunito from '../assets/fonts/nunito-latin-wght-normal.woff2';
-import poppins400 from '../assets/fonts/poppins-latin-400-normal.woff2';
-import poppins500 from '../assets/fonts/poppins-latin-500-normal.woff2';
-import poppins600 from '../assets/fonts/poppins-latin-600-normal.woff2';
-import publicSans from '../assets/fonts/public-sans-latin-wght-normal.woff2';
+import { FONT_FILE_URLS, FONT_PACKS, STYLE_PACKS } from '../generated/theme-packs.ts';
 import type { StyleId } from './catalog.ts';
 
 export interface ThemeFontFiles {
@@ -44,30 +32,31 @@ export interface ThemeFontFiles {
   readonly code: readonly string[];
 }
 
-const jetBrainsMono = [jetBrainsMono400, jetBrainsMono700] as const;
+/** The built URLs of a font pack's files, in the order the pack lists its faces. */
+const urlsOf = (id: string): readonly string[] => {
+  const pack = FONT_PACKS.find(candidate => candidate.id === id);
+  if (pack === undefined) throw new Error(`font pack "${id}" does not exist`);
+  return pack.faces.map(face => FONT_FILE_URLS[`${id}/${face.file.slice(2)}`] as string);
+};
 
 /**
  * The built URLs of the code face's regular and bold files, for a plugin half that draws code on a canvas the stylesheet
- * cannot reach (the terminal emulator measures its cells from a face it loads itself). The files are the shell's.
+ * cannot reach (the terminal emulator measures its cells from a face it loads itself). The face is the default style's
+ * first code font; the files are the shell's.
  */
-export const CODE_FACE_URLS = { regular: jetBrainsMono400, bold: jetBrainsMono700 } as const;
-const ibmPlexMono = [ibmPlexMono400, ibmPlexMono700] as const;
+const defaultCode = STYLE_PACKS.find(pack => 'default' in pack)?.fonts.code[0] ?? 'jetbrains-mono';
+const [jetBrainsRegular, jetBrainsBold] = urlsOf(defaultCode) as [string, string];
+export const CODE_FACE_URLS = { regular: jetBrainsRegular, bold: jetBrainsBold } as const;
 
-export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>> = Object.freeze({
-  studio: { text: [inter], code: jetBrainsMono },
-  mission: { text: [publicSans, cascadiaMono], code: [] },
-  neo: { text: [archivoBlack], code: ibmPlexMono },
-  geist: { text: [geist], code: [geistMono] },
-  glass: { text: [inter], code: jetBrainsMono },
-  neumorphism: { text: [nunito], code: jetBrainsMono },
-  retro: { text: [publicSans], code: jetBrainsMono },
-  hud: { text: [orbitron, publicSans], code: [cascadiaMono] },
-  swiss: { text: [hankenGrotesk], code: jetBrainsMono },
-  pixel: { text: [inter, pixelify700, pressStart2p], code: jetBrainsMono },
-  briefing: { text: [poppins400, poppins500, poppins600], code: ibmPlexMono },
-  genz: { text: [bagelFatOne, bricolage], code: jetBrainsMono },
-  exaggerated: { text: [inter], code: jetBrainsMono },
-});
+/** Each style pack's `fonts` as built URLs. A style that names no font (Lucid, Raw, Anti-posh) draws with the device and has no row. */
+export const STYLE_FONT_FILES: Readonly<Partial<Record<StyleId, ThemeFontFiles>>> = Object.freeze(
+  Object.fromEntries(
+    STYLE_PACKS.filter(pack => pack.fonts.text.length + pack.fonts.code.length > 0).map(pack => [
+      pack.id,
+      { text: pack.fonts.text.flatMap(urlsOf), code: pack.fonts.code.flatMap(urlsOf) },
+    ]),
+  ),
+);
 
 /** The scope of the document a preload is added to — injected so a test can stand in for the page. */
 export interface PreloadHost {

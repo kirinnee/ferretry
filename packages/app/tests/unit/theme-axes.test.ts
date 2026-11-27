@@ -1,11 +1,11 @@
 /**
- * THE THREE THEME AXES (style · palette · mode) AND THE ONE RULE THAT KEEPS THEM APART: a STYLE file holds no colour
- * value and a PALETTE file holds no non-colour token. `styles/themes.css` names where every token lives; this suite is the
+ * THE THREE THEME AXES (style · palette · mode) AND THE ONE RULE THAT KEEPS THEM APART: a STYLE pack
+ * (`theme/packs/style/<id>/style.css`) holds no colour value and a PALETTE pack (`theme/packs/palette/<id>/palette.ts`) holds no non-colour token. `styles/themes.css` names where every token lives; this suite is the
  * thing that fails when a token wanders, when the catalogue and the files disagree, or when a stored pre-split
  * `family`, a removed palette or the removed `contrast` style stops reading as the look the migration names.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   PALETTE_IDS,
@@ -17,6 +17,7 @@ import {
 import { memoryStore } from '../../src/storage/records.ts';
 import { APP_STORAGE } from '../../src/storage/names.ts';
 import {
+  DEFAULT_STYLE,
   PALETTES,
   STYLES,
   defaultPaletteOf,
@@ -27,10 +28,16 @@ import {
   swatchAttributes,
   type PaletteId,
 } from '../../src/theme/catalog.ts';
-import { PALETTE_NAMES } from '../../src/theme/palette-names.ts';
+import { PALETTE_PACKS, STYLE_PACKS } from '../../src/generated/theme-packs.ts';
 import { applyThemeAxes, ThemePreferenceStore } from '../../src/theme/preferences.ts';
 import { applyWindowColour } from '../../src/shell/context.tsx';
-import { readCssWithImports, readStyleFile, themeStylesDir } from '../../src/testing/theme-css.ts';
+import {
+  readPaletteCss,
+  readStyleFile,
+  readStylePackCss,
+  readThemeCss,
+  themeStylesDir,
+} from '../../src/testing/theme-css.ts';
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');
 const declared = (css: string): Set<string> =>
@@ -67,31 +74,48 @@ describe('the token partition', () => {
   });
 });
 
-describe('style files are non-colour only', () => {
-  for (const style of STYLE_IDS) {
-    const css = readStyleFile(`style/${style}.css`);
-    it(`${style}: no colour value and no palette-owned token`, () => {
-      expect(withoutComments(css)).not.toMatch(LITERAL_COLOUR);
-      const stray = [...declared(css)].filter(name => !baseStyle.has(name));
-      expect(stray).toEqual([]);
-    });
-    it(`${style}: every rule is keyed by its own style (and optionally the mode)`, () => {
-      const selectors = [...withoutComments(css).matchAll(/(?:^|[{}])([^{}]+)\{/gu)].map(match =>
-        (match[1] as string).trim(),
-      );
-      // At-rules (`@media`, `@keyframes`) and a keyframe's own stops (`from`, `to`, `40%`) are not selectors to key.
-      const keyed = selectors.filter(selector => !selector.startsWith('@') && !/^(?:from|to|\d+%)$/u.test(selector));
-      for (const selector of keyed) {
-        expect(selector).toContain(`[data-style='${style}']`);
-        expect(selector).not.toContain('data-palette');
-      }
-    });
+/** What is wrong with a style pack's stylesheet: a colour literal, a token a palette owns, or a rule not keyed by the pack's own id. */
+function styleViolations(style: string, css: string): string[] {
+  const bare = withoutComments(css);
+  const problems: string[] = [];
+  const colour = bare.match(LITERAL_COLOUR);
+  if (colour !== null) problems.push(`colour literal ${colour[0]}`);
+  for (const name of declared(css)) if (!baseStyle.has(name)) problems.push(`not a style-owned token: ${name}`);
+  const selectors = [...bare.matchAll(/(?:^|[{}])([^{}]+)\{/gu)].map(match => (match[1] as string).trim());
+  // At-rules (`@media`, `@keyframes`) and a keyframe's own stops (`from`, `to`, `40%`) are not selectors to key.
+  const keyed = selectors.filter(selector => !selector.startsWith('@') && !/^(?:from|to|\d+%)$/u.test(selector));
+  for (const selector of keyed) {
+    if (!selector.includes(`[data-style='${style}']`)) problems.push(`unscoped selector: ${selector}`);
+    if (selector.includes('data-palette')) problems.push(`selector reads a palette: ${selector}`);
   }
+  return problems;
+}
+
+describe('style packs are non-colour only', () => {
+  for (const style of STYLE_IDS)
+    it(`${style}: no colour value, no palette-owned token, and every rule keyed by its own style (and optionally the mode)`, () => {
+      expect(styleViolations(style, readStylePackCss(style))).toEqual([]);
+    });
+
+  it('refuses a style pack with a colour literal, a palette token or an unscoped selector', () => {
+    const scoped = ":root[data-style='x'],\n[data-swatch][data-style='x'] { --radius-md: 4px; }";
+    expect(styleViolations('x', scoped)).toEqual([]);
+    expect(styleViolations('x', ":root[data-style='x'] { --radius-md: 4px; color: #fff; }")).toEqual([
+      'colour literal #fff',
+    ]);
+    expect(styleViolations('x', ":root[data-style='x'] { --accent: red; }")).toEqual([
+      'not a style-owned token: --accent',
+    ]);
+    expect(styleViolations('x', '.btn { --radius-md: 4px; }')).toEqual(['unscoped selector: .btn']);
+    expect(styleViolations('x', ":root[data-style='y'] { --radius-md: 4px; }")).toEqual([
+      "unscoped selector: :root[data-style='y']",
+    ]);
+  });
 });
 
-describe('palette files are colour only', () => {
+describe('palette packs are colour only', () => {
   for (const palette of PALETTE_IDS) {
-    const css = readStyleFile(`palette/${palette}.css`);
+    const css = readPaletteCss(palette);
     it(`${palette}: no token that is not a colour role, and no \`color-scheme\``, () => {
       const stray = [...declared(css)].filter(name => !basePalette.has(name));
       expect(stray).toEqual([]);
@@ -114,25 +138,36 @@ describe('palette files are colour only', () => {
 });
 
 describe('the catalogue, the files and themes.css agree', () => {
-  it('has a style file and a palette file per id, and nothing else', () => {
-    expect(files('style')).toEqual(STYLE_IDS.map(id => `${id}.css`).sort());
-    expect(files('palette')).toEqual(PALETTE_IDS.map(id => `${id}.css`).sort());
+  it('has a style pack folder per id and a palette pack folder per id, and nothing else', () => {
+    expect(readdirSync(join(themeStylesDir, '../theme/packs/style')).sort()).toEqual([...STYLE_IDS].sort());
+    expect(STYLE_PACKS.map(pack => pack.id)).toEqual([...STYLE_IDS]);
+    expect(existsSync(join(themeStylesDir, 'style'))).toBe(false);
+    expect(readdirSync(join(themeStylesDir, '../theme/packs/palette')).sort()).toEqual([...PALETTE_IDS].sort());
+    expect(PALETTE_PACKS.map(pack => pack.id)).toEqual([...PALETTE_IDS]);
   });
 
   it('imports every file themes.css lists, floors last', () => {
     const imports = [...readStyleFile('themes.css').matchAll(/^@import '([^']+)';/gmu)].map(
       match => match[1] as string,
     );
-    for (const id of STYLE_IDS) expect(imports).toContain(`./style/${id}.css`);
-    for (const id of PALETTE_IDS) expect(imports).toContain(`./palette/${id}.css`);
+    // A style is not listed here: its pack's `style.css` arrives through the generated stylesheet below.
+    expect(imports.filter(each => each.includes('style/'))).toEqual([]);
     expect(imports.at(-1)).toBe('./tokens/floors.css');
-    expect(imports.indexOf('./tokens/floors.css')).toBeGreaterThan(
-      imports.indexOf(`./palette/${PALETTE_IDS.at(-1)}.css`),
+    const generated = readStyleFile('../generated/theme-packs.css');
+    for (const id of STYLE_IDS) expect(generated).toContain(`@import '../theme/packs/style/${id}/style.css';`);
+    // Every style and palette arrives through the ONE generated stylesheet, which themes.css imports once, AFTER the bases and
+    // BEFORE the floors: a base block (`:root[data-mode='dark']`, the `max-width: 640px` sizes) is as specific as a style block, so a
+    // base that came after a style would win over it, and a floor must come after every style.
+    expect(imports.filter(each => each === '../generated/theme-packs.css')).toHaveLength(1);
+    expect(imports.indexOf('../generated/theme-packs.css')).toBeGreaterThan(
+      imports.indexOf('./tokens/base-palette.css'),
     );
+    expect(imports.indexOf('../generated/theme-packs.css')).toBeLessThan(imports.indexOf('./tokens/floors.css'));
+    const index = [...readStyleFile('index.css').matchAll(/^@import '([^']+)';/gmu)].map(match => match[1] as string);
+    expect(index).not.toContain('../generated/theme-packs.css');
     // The resolved text really contains each block, so a typo in an import path cannot hide.
-    const css = readCssWithImports(join(themeStylesDir, 'themes.css'));
-    for (const id of STYLE_IDS) expect(css).toContain(`[data-style='${id}']`);
-    for (const id of PALETTE_IDS) expect(css).toContain(`[data-palette='${id}']`);
+    for (const id of STYLE_IDS) expect(readThemeCss()).toContain(`[data-style='${id}']`);
+    for (const id of PALETTE_IDS) expect(readThemeCss()).toContain(`[data-palette='${id}']`);
   });
 
   it('lists the same ids in the catalogue as in the Layouts contract, in the same order', () => {
@@ -146,7 +181,7 @@ describe('the catalogue, the files and themes.css agree', () => {
     expect(STYLE_IDS as readonly string[]).not.toContain('contrast');
   });
 
-  it('has 12 palettes, each with its own proper name from the one map, and none a plain colour word', () => {
+  it('has 12 palettes, each with its own proper name from its pack, and none a plain colour word', () => {
     expect(PALETTES.map(entry => entry.label)).toEqual([
       'Inkwell',
       'Skyline',
@@ -161,8 +196,8 @@ describe('the catalogue, the files and themes.css agree', () => {
       'Briefing',
       'High contrast',
     ]);
-    // The ONE map: the catalogue reads every label from it, so a rename is an edit to that file alone.
-    expect(PALETTES.map(entry => [entry.id, entry.label])).toEqual(Object.entries(PALETTE_NAMES));
+    // The pack is the one owner of its name: the catalogue reads every label from it, so a rename is an edit to that pack alone.
+    expect(PALETTES.map(entry => [entry.id, entry.label])).toEqual(PALETTE_PACKS.map(pack => [pack.id, pack.label]));
     expect(new Set(PALETTES.map(entry => entry.label)).size).toBe(PALETTES.length);
     const COLOUR_WORDS = [
       'indigo',
@@ -207,8 +242,16 @@ describe('the catalogue, the files and themes.css agree', () => {
 
   it('names no style after a trademark and bundles no font for Lucid', () => {
     expect(STYLES.map(entry => `${entry.id} ${entry.label}`.toLowerCase()).join(' ')).not.toContain('aqua');
-    const css = readStyleFile('style/lucid.css');
+    const css = readStylePackCss('lucid');
     expect(css).not.toMatch(/\bInter\b|JetBrains/u);
+  });
+
+  it('reads the catalogue from the style packs: their order, their labels, and the one default', () => {
+    expect(STYLES.map(entry => [entry.id, entry.label, entry.blurb, entry.defaultPalette])).toEqual(
+      STYLE_PACKS.map(pack => [pack.id, pack.label, pack.blurb, pack.defaultPalette]),
+    );
+    expect(STYLE_PACKS.filter(pack => 'default' in pack).map(pack => pack.id)).toEqual(['studio']);
+    expect(DEFAULT_STYLE).toBe('studio');
   });
 
   it('lets a style declare it fights the readability rules, and only a style', () => {

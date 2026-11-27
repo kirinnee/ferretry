@@ -4,6 +4,7 @@
  * schema the generator checks them with is the app's own.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -105,6 +106,85 @@ describe('theme pack generation', () => {
       ":root[data-palette='dawn'][data-mode='light'],\n[data-swatch][data-palette='dawn'][data-mode='light'] {\n  --bg: #ffffff;\n  --fg: #111111;\n}",
     );
     expect(css.indexOf("[data-palette='ink'][data-mode='light']")).toBeLessThan(css.indexOf("[data-palette='dawn']"));
+  });
+
+  test('every font file is imported once and listed by `<font id>/<file>`, so the app can name its built URL', () => {
+    const ts =
+      themePackFiles(
+        tree({
+          ...GOOD,
+          'font/inter/font.ts': data(
+            font('inter', {
+              faces: [
+                { file: './inter.woff2', weight: '100 500', style: 'normal' },
+                { file: './inter-bold.woff2', weight: '600 900', style: 'normal' },
+              ],
+            }),
+          ),
+          'font/inter/inter-bold.woff2': 'wOF2',
+        }),
+      ).get(THEME_PACKS_TS) ?? '';
+    expect(ts).toContain('/// <reference path="../theme/woff2.d.ts" />');
+    expect(ts).toContain("import fontfile_inter_inter_woff2 from '../theme/packs/font/inter/inter.woff2';");
+    expect(ts).toContain("import fontfile_inter_inter_bold_woff2 from '../theme/packs/font/inter/inter-bold.woff2';");
+    expect(ts).toContain(
+      'export const FONT_FILE_URLS: Readonly<Record<string, string>> = {\n  "inter/inter.woff2": fontfile_inter_inter_woff2,\n  "inter/inter-bold.woff2": fontfile_inter_inter_bold_woff2,\n};',
+    );
+  });
+
+  /** Node's own parser: it rejects a redeclared import, which is what a bad generated file would do. */
+  const parses = (ts: string): { readonly ok: boolean; readonly stderr: string } => {
+    const file = join(tree({}), 'theme-packs.ts');
+    writeFileSync(file, ts);
+    const run = spawnSync('node', ['--check', file], { encoding: 'utf8' });
+    return { ok: run.status === 0, stderr: run.stderr };
+  };
+
+  test('two faces of one font that reuse a file import it once and list it once', () => {
+    const ts =
+      themePackFiles(
+        tree({
+          ...GOOD,
+          'font/inter/font.ts': data(
+            font('inter', {
+              faces: [
+                { file: './inter.woff2', weight: '100 500', style: 'normal' },
+                { file: './inter.woff2', weight: '600 900', style: 'italic' },
+              ],
+            }),
+          ),
+        }),
+      ).get(THEME_PACKS_TS) ?? '';
+    expect(ts.match(/^import fontfile_/gmu)).toHaveLength(1);
+    expect(ts.match(/"inter\/inter\.woff2"/gu)).toHaveLength(1);
+    expect(parses(ts)).toEqual({ ok: true, stderr: '' });
+  });
+
+  test('files whose names differ only by punctuation get distinct bindings, and the output parses', () => {
+    const ts =
+      themePackFiles(
+        tree({
+          ...GOOD,
+          'font/demo/font.ts': data(
+            font('demo', { faces: [{ file: './var-sans.woff2', weight: '400', style: 'normal' }] }),
+          ),
+          'font/demo/var-sans.woff2': 'wOF2',
+          'font/demo-var/font.ts': data(
+            font('demo-var', { faces: [{ file: './sans.woff2', weight: '400', style: 'normal' }] }),
+          ),
+          'font/demo-var/sans.woff2': 'wOF2',
+        }),
+      ).get(THEME_PACKS_TS) ?? '';
+    const bindings = [...ts.matchAll(/^import (fontfile_\w+) from/gmu)].map(match => match[1] ?? '');
+    expect(bindings.filter(name => name.startsWith('fontfile_demo_var_sans_woff2'))).toHaveLength(2);
+    expect(new Set(bindings).size).toBe(bindings.length);
+    expect(ts).toContain('"demo/var-sans.woff2": fontfile_demo_var_sans_woff2,');
+    expect(ts).toContain('"demo-var/sans.woff2": fontfile_demo_var_sans_woff2_2,');
+    expect(parses(ts)).toEqual({ ok: true, stderr: '' });
+  });
+
+  test('no fonts lists no files', () => {
+    expect(themePackFiles(tree({})).get(THEME_PACKS_TS)).toContain('= {\n};');
   });
 
   test('order is the `order` field, then the id', () => {

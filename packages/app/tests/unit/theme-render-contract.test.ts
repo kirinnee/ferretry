@@ -28,7 +28,7 @@ import {
 } from '../../src/theme/render-contract.ts';
 import { THEME_TOKENS } from '../../src/fy-render/palette.ts';
 import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
-import { readStyleFile } from '../../src/testing/theme-css.ts';
+import { readPaletteCss, readStyleFile, readStylePackCss } from '../../src/testing/theme-css.ts';
 import {
   MAX_HOPS,
   ratioOf,
@@ -47,15 +47,15 @@ const basePalette = readStyleFile('tokens/base-palette.css');
 const sourcesOf = (style: string, palette: string): ThemeSources => ({
   baseStyle,
   basePalette,
-  palette: readStyleFile(`palette/${palette}.css`),
-  style: readStyleFile(`style/${style}.css`),
+  palette: readPaletteCss(palette),
+  style: readStylePackCss(style),
 });
 
 /** Every miss of one combination, each as `path | what | got`. */
 function problems(sources: ThemeSources, style: string, palette: string, mode: ThemeMode): readonly string[] {
   const out: string[] = [];
   const map = tokenMap(sources, { mode, palette, style });
-  const at = `styles/style/${style}.css × styles/palette/${palette}.css × ${mode}`;
+  const at = `theme/packs/style/${style}/style.css × theme/packs/palette/${palette}/palette.ts × ${mode}`;
   for (const token of [...RENDER_PALETTE_TOKENS, ...RENDER_STYLE_TOKENS]) {
     const resolved = resolveToken(map, token);
     if (!resolved.ok) out.push(`${at} | ${token} | ${resolved.reason}`);
@@ -73,7 +73,7 @@ function problems(sources: ThemeSources, style: string, palette: string, mode: T
 function contrastMisses(sources: ThemeSources, palette: string, mode: ThemeMode): readonly string[] {
   const out: string[] = [];
   const map = tokenMap(sources, { mode, palette, style: 'studio' });
-  const at = `styles/palette/${palette}.css × ${mode}`;
+  const at = `theme/packs/palette/${palette}/palette.ts × ${mode}`;
   const page = resolveColour(map, 'bg');
   if (!page.ok) out.push(`${at} | bg | cannot be measured: ${page.reason}`);
   for (const pair of renderContrastPairs(palette === HIGH_CONTRAST)) {
@@ -93,25 +93,13 @@ function contrastMisses(sources: ThemeSources, palette: string, mode: ThemeMode)
 }
 
 /**
- * Misses that exist on base and are pinned, `identity -> why`. A pin is an identity, not a tolerance: it goes stale the day
- * the miss is fixed and then fails (`pins nothing that no longer misses`).
- *
- * `--md-link-weight: inherit` (base-style.css, retro.css, raw.css) is a CSS-wide keyword, which a custom property computes to
- * nothing; the link still reads the inherited weight because `font-weight: var(--x)` falls back to inherit, so nothing is
- * visibly wrong, but the token is not a value a renderer can read. The fix is the styles' (a number, or `normal`), not this test's.
+ * Misses that exist and are pinned, `identity -> why`. A pin is an identity, not a tolerance: it goes stale the day the miss is
+ * fixed and then fails (`pins nothing that no longer misses`). The ledger is empty: the one pin it held (`--md-link-weight:
+ * inherit`, a CSS-wide keyword that computes to nothing) is now an OPTIONAL render token (`RENDER_OPTIONAL_STYLE_TOKENS`): a link
+ * keeps the weight of the text around it, so a style that names none says nothing (G2 U5). A new miss is a failure to fix, not a
+ * line to add here without a reason.
  */
-const INHERIT_STYLES = ['raw', 'retro', 'studio'] as const;
-const INHERIT_WHY = '--md-link-weight is the CSS-wide keyword "inherit", which computes to nothing';
-const KNOWN: Readonly<Record<string, string>> = Object.fromEntries(
-  INHERIT_STYLES.flatMap(style =>
-    PALETTES.flatMap(palette =>
-      MODES.map(mode => [
-        `styles/style/${style}.css × styles/palette/${palette.id}.css × ${mode} | md-link-weight | ${INHERIT_WHY}`,
-        'a CSS-wide keyword computes to nothing; the style owns the fix',
-      ]),
-    ),
-  ),
-);
+const KNOWN: Readonly<Record<string, string>> = {};
 /** What a fixture found that nobody pinned. */
 const unpinned = (lines: readonly string[]): readonly string[] => lines.filter(line => !(line in KNOWN));
 
@@ -209,7 +197,7 @@ describe('every style × palette × mode resolves the contract', () => {
 
   it('pins nothing that no longer misses', () => {
     const seen = new Set(observed);
-    expect(Object.keys(KNOWN).filter(key => key.includes('| md-link-weight |') && !seen.has(key))).toEqual([]);
+    expect(Object.keys(KNOWN).filter(key => !seen.has(key))).toEqual([]);
   });
 });
 
@@ -224,7 +212,7 @@ describe('every palette × mode meets the contract contrast', () => {
 
   it('pins nothing that no longer misses', () => {
     const seen = new Set([...observed]);
-    expect(Object.keys(KNOWN).filter(key => !key.includes('| md-link-weight |') && !seen.has(key))).toEqual([]);
+    expect(Object.keys(KNOWN).filter(key => !seen.has(key))).toEqual([]);
   });
 });
 
@@ -235,7 +223,9 @@ describe('a removed token fails, naming the pack file and the token', () => {
     const without = (css: string): string => css.replace(/^\s*--accent:[^;]*;$/gmu, '');
     const broken = { ...sources, basePalette: without(sources.basePalette), palette: without(sources.palette) };
     const found = problems(broken, 'studio', 'geist', 'light');
-    expect(found.some(line => line.includes('styles/palette/geist.css') && line.includes('| accent |'))).toBe(true);
+    expect(
+      found.some(line => line.includes('theme/packs/palette/geist/palette.ts') && line.includes('| accent |')),
+    ).toBe(true);
     expect(unpinned(problems(sources, 'studio', 'geist', 'light'))).toEqual([]);
   });
 

@@ -445,3 +445,36 @@ describe("r11 T2 review 1 · the Stacked table (the phone's default) takes its o
     }
   });
 });
+
+describe('G2 U5 · a link keeps the weight of the text around it', () => {
+  // Studio, Retro and Raw set no link weight: `--md-link-weight` stays the base's `inherit`, so a link inside a heading or
+  // bold text computes the weight of that heading or bold text, exactly as it did before the styles became packs.
+  for (const style of ['studio', 'retro', 'raw']) {
+    it(`${style}: a link in an h2 and in <strong> computes its parent's font-weight`, async () => {
+      const weights = await page.evaluate((styleId: string) => {
+        const root = document.documentElement;
+        root.setAttribute('data-style', styleId);
+        root.setAttribute('data-palette', 'studio');
+        root.setAttribute('data-mode', 'light');
+        const host = document.createElement('div');
+        host.className = 'md';
+        host.innerHTML =
+          '<h2><a href="#h" id="in-h2">h</a></h2><p><strong><a href="#s" id="in-strong">s</a></strong></p>';
+        document.body.append(host);
+        const weight = (element: Element | null): string => getComputedStyle(element as Element).fontWeight;
+        const out = {
+          h2: weight(host.querySelector('h2')),
+          inH2: weight(host.querySelector('#in-h2')),
+          strong: weight(host.querySelector('strong')),
+          inStrong: weight(host.querySelector('#in-strong')),
+        };
+        host.remove();
+        return out;
+      }, style);
+      expect(Number(weights.h2)).toBeGreaterThan(400);
+      expect(Number(weights.strong)).toBeGreaterThan(400);
+      expect(weights.inH2).toBe(weights.h2);
+      expect(weights.inStrong).toBe(weights.strong);
+    });
+  }
+});

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RENDER_PALETTE_TOKENS, RENDER_STYLE_TOKENS } from './render-contract.ts';
+import { RENDER_OPTIONAL_STYLE_TOKENS, RENDER_PALETTE_TOKENS, RENDER_STYLE_TOKENS } from './render-contract.ts';
 
 /**
  * WHAT A THEME PACK IS. A style, a palette and a font are each ONE folder under `theme/packs/{style,palette,font}/<id>/`,
@@ -289,7 +289,11 @@ const STYLE_ONLY_TOKENS = [
 ] as const;
 
 export const PALETTE_TOKENS: readonly string[] = [...RENDER_PALETTE_TOKENS, ...PALETTE_ONLY_TOKENS];
-export const STYLE_TOKENS: readonly string[] = [...RENDER_STYLE_TOKENS, ...STYLE_ONLY_TOKENS];
+export const STYLE_TOKENS: readonly string[] = [
+  ...RENDER_STYLE_TOKENS,
+  ...RENDER_OPTIONAL_STYLE_TOKENS,
+  ...STYLE_ONLY_TOKENS,
+];
 
 const paletteTokens: ReadonlySet<string> = new Set(PALETTE_TOKENS);
 const styleTokens: ReadonlySet<string> = new Set(STYLE_TOKENS);
@@ -397,6 +401,9 @@ export const StylePackSchema = z.strictObject({
   fonts: z.strictObject({ text: z.array(PackIdSchema).max(4), code: z.array(PackIdSchema).max(2) }),
 });
 
+const isFontWeight = (value: string): boolean =>
+  /^[1-9]\d{0,3}( [1-9]\d{0,3})?$/u.test(value) && value.split(' ').every(part => Number(part) <= 1000);
+
 export const FontPackSchema = z.strictObject({
   id: PackIdSchema,
   family: z.string().regex(/^[A-Za-z0-9 -]{1,40}$/u),
@@ -406,7 +413,8 @@ export const FontPackSchema = z.strictObject({
       z.strictObject({
         /** Beside the pack file: `./inter-latin-wght-normal.woff2`. */
         file: z.string().regex(/^\.\/[a-z0-9-]+\.woff2$/u),
-        weight: z.string().regex(/^\d{3}( \d{3})?$/u),
+        /** One CSS font weight or a range of two, each 1 to 1000 (`400`, `200 1000`). */
+        weight: z.string().refine(isFontWeight, 'a font weight is 1 to 1000, or two of them as a range'),
         style: z.enum(['normal', 'italic']),
       }),
     )
