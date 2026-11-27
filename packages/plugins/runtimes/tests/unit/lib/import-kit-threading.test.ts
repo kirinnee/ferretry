@@ -101,9 +101,9 @@ describe('host import kit threading', () => {
       secrets: {},
     } as never);
     const service = new FleetSetupService(deps);
-    await service.scan();
-    expectKits(new Map());
-    expect(requested).toEqual(['claude', 'codex', 'claude', 'codex', 'claude', 'codex']);
+    await expect(service.scan()).rejects.toThrow('claude is not supported here');
+    expect(calls).toEqual([]);
+    expect(requested).toEqual(['claude', 'codex']);
     calls.length = 0;
     requested.length = 0;
     online = true;

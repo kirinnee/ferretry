@@ -8,6 +8,8 @@
  * hold through the routes, and a seam that is unavailable still answers in a sentence.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { AutoResumeDecide, FerretsChanged } from '@ferretry/core-ferrets/contract';
@@ -28,6 +30,9 @@ import type { Instant } from '@ferretry/std';
 import type { ChildHandle, KernelPorts } from '@ferretry/kernel/contract';
 import {
   type MachineBrowserPorts,
+  PROFILE_COMPONENTS_KEY,
+  ProfileClaudeSettingsSource,
+  ProfileCodexSettingsSource,
   PROFILE_ITEMS,
   RuntimeHomeUnreadable,
   RuntimesPort,
@@ -55,6 +60,30 @@ interface Composed {
   readonly host: TestHost;
   readonly world: FleetWorld;
   readonly stubbed: string[];
+}
+
+/** Synthetic settings collections carrying the real kits offered by the harness settings sources. */
+function settingsOwners(): DaemonImplementation<any>[] {
+  return (
+    [
+      ['claude-code', ProfileClaudeSettingsSource, 'runtimes.components.settings.claude:components', claudeRuntimesKit],
+      ['codex', ProfileCodexSettingsSource, 'runtimes.components.settings.codex:components', codexRuntimesKit],
+    ] as const
+  ).map(
+    ([id, hook, name, kit]) =>
+      implementDaemon(
+        definePlugin({
+          id,
+          title: id,
+          version: '5.0.0',
+          api: 5,
+          core: false,
+          kinds: [],
+          hooks: { takes: [{ hook, key: PROFILE_COMPONENTS_KEY }] },
+        }),
+        { build: () => ({ hooks: { [name]: { kit, list: async () => [], read: async () => undefined } } }) } as never,
+      ) as DaemonImplementation<any>,
+  );
 }
 
 /** The composed daemon over the real roots of a fleet world; `assemble` swaps the composition (the unavailable one). */
@@ -89,7 +118,7 @@ async function compose(
   const real: RuntimesAssembler = ctx =>
     (options.assemble ?? hostAssembly)({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
   const host = await testHost({
-    plugins: [runtimesDaemon(real) as DaemonImplementation<any>],
+    plugins: [...settingsOwners(), runtimesDaemon(real) as DaemonImplementation<any>],
     fakes: {
       ferrets: options.ferrets ?? new FakeFerrets(),
       logins: composedLogins,

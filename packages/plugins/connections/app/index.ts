@@ -1,4 +1,11 @@
-import { type BackgroundViewProps, type ConnectPorts, daemonOfClient, provideToShell } from '@ferretry/app';
+import {
+  type BackgroundViewProps,
+  type ConnectPorts,
+  daemonOfClient,
+  pairAgainHref,
+  provideToShell,
+  useOptionalRouter,
+} from '@ferretry/app';
 import { implementApp, type AppContext } from '@ferretry/kernel/manifest';
 import { createElement, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { PublishedCarriers } from '../contract/index.ts';
@@ -11,6 +18,7 @@ import { CarrierInUse } from './features/carrier/carrier-in-use.tsx';
 import { DeviceConnectionPanel } from './features/carrier/device-connection-panel.tsx';
 import { CarrierDropLog, browserCarrierDropEnvironment } from './lib/carrier-drops.ts';
 import { carrierEscapeView } from './features/carrier/carrier-escape.tsx';
+import { pairAgainView, relayOnly } from './features/carrier/pair-again-offer.tsx';
 import { relayFallbackView } from './features/carrier/relay-fallback-notice.tsx';
 import { CarrierPreferenceSelector, tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { CarrierPreferenceStore, settingOf } from './lib/carrier-preference.ts';
@@ -186,13 +194,20 @@ export function buildConnectionsApp(
   measurements: ConnectionMeasurements = connect?.router ?? unmeasured,
   preferences: CarrierPreferenceStore = connect?.preferences ?? new CarrierPreferenceStore(),
   /** The machine's tunnel switch and the WebRTC dialer: what the preference screen and the panel read (R635, R677). */
-  live: (Pick<Connect, 'tunnelSwitch' | 'webrtc'> & Partial<Pick<Connect, 'health' | 'now'>>) | undefined = connect,
+  live:
+    | (Pick<Connect, 'tunnelSwitch' | 'webrtc'> &
+        Partial<Pick<Connect, 'health' | 'now'>> & {
+          /** The stored pairings: whether a machine is paired over a relay alone decides if "Pair again" is ever offered. */
+          readonly daemons?: Pick<Connect['daemons'], 'get'>;
+        })
+    | undefined = connect,
 ) {
   const daemonId = daemonOfClient(ctx.client);
   const tunnelSwitch = live?.tunnelSwitch;
   const webrtc = live?.webrtc;
   const health = live?.health;
   const clock = live?.now ?? Date.now;
+  const stored = live?.daemons;
   /**
    * The published set as the daemon last answered it, for the screens of this half. It watches the daemon only while a
    * screen is subscribed to it, and stops with the last one, so a half rebuilt on every reconnect leaves no listener
@@ -303,6 +318,7 @@ export function buildConnectionsApp(
       () => (health === undefined || daemonId === undefined ? UNMEASURED_HEALTH : health.state(daemonId)),
     );
     // "Lost 2 minutes ago" keeps counting while the outage is on screen, and the clock stops with it.
+    const router = useOptionalRouter();
     const down = outage.kind === 'reconnecting';
     const [now, setNow] = useState(clock);
     useEffect(() => {
@@ -317,6 +333,11 @@ export function buildConnectionsApp(
       now,
       // Retry THIS machine's loop at once (the same call a back-online signal makes).
       ...(health === undefined || daemonId === undefined ? {} : { onRetry: () => health.retryNow(daemonId) }),
+      // A relay-only pairing cannot tell a replaced machine from an asleep one, so after a long outage the person is
+      // offered pairing again and decides: nothing here changes or removes the stored pairing.
+      ...(router === null || daemonId === undefined || !relayOnly(stored?.get(daemonId))
+        ? {}
+        : { onPairAgain: () => router.navigate(pairAgainHref(daemonId, 'unreachable')) }),
       relayAdvertised: carriers.some(c => c.kind === 'relay'),
       ...(daemonId === undefined ? {} : { daemon: daemonId }),
       ...(relayFallback === undefined ? {} : { relayFallback }),
@@ -386,6 +407,11 @@ export default provideToShell(implementApp(manifest, { build: ctx => buildConnec
       connect === undefined
         ? undefined
         : { preferences: connect.preferences, health: connect.health, daemons: connect.daemons },
+    ),
+    // A machine whose plugin list cannot be read gets one stop page and none of this plugin's panels, so the same
+    // "Pair again" offer for a long relay-only outage is also a device view (it stands down while the card is drawn).
+    'pair-again': pairAgainView(() =>
+      connect === undefined ? undefined : { health: connect.health, now: connect.now, daemons: connect.daemons },
     ),
   },
   background: {

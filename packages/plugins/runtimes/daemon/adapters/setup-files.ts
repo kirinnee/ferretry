@@ -223,7 +223,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
   };
   const layout = catalog.layout;
   const scanner = new HostHarnessScanner({
-    ...(catalog.kits === undefined ? {} : { kits: catalog.kits.bind(catalog) }),
+    kits: () => catalog.kits?.(),
     files: host.files,
     userHome: layout.userHome,
     ...(options.claudeConfigDir === undefined ? {} : { claudeConfigDir: options.claudeConfigDir }),
