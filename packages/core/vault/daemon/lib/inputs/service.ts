@@ -99,7 +99,7 @@ import type {
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
-import { bindingOf, mayRebind, replacedAsShown } from './rebind.ts';
+import { actionOriginsOf, bindingOf, mayRebind, replacedAsShown } from './rebind.ts';
 import {
   codeCardKeys,
   type SavedListing,
@@ -185,6 +185,8 @@ interface Held {
   binding?: string;
   /** The document a page's card was raised on: a card redrawn onto another one says so. */
   raisedOn?: string;
+  /** Where the page's forms sent what is typed when the card was raised (`actionOriginsOf`): a card redrawn onto others says so. */
+  raisedActions?: string;
   /** The card's title as raised, so a card opened again for a code that did not go through reads the same. */
   readonly title?: string;
   /**
@@ -533,7 +535,9 @@ export class InputRequestService {
         binding: bindingOf(seen.facts),
         title,
         formerCards: [],
-        ...(seen.facts.kind === 'page' ? { raisedOn: seen.facts.navigationId } : {}),
+        ...(seen.facts.kind === 'page'
+          ? { raisedOn: seen.facts.navigationId, raisedActions: actionOriginsOf(seen.facts) }
+          : {}),
         ...(matchKey === undefined ? {} : { matchKey }),
         ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
         ...(await this.redactedTypedUsername(sessionId, seen.facts, matchKey)),
@@ -1451,7 +1455,10 @@ export class InputRequestService {
       held.rebinds = 0;
       held.binding = bindingOf(seen.facts);
       rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
-      if (seen.facts.kind === 'page') held.raisedOn = seen.facts.navigationId;
+      if (seen.facts.kind === 'page') {
+        held.raisedOn = seen.facts.navigationId;
+        held.raisedActions = actionOriginsOf(seen.facts);
+      }
       if (shot === undefined) delete held.shot;
       else held.shot = shot;
       held.request = {
@@ -2642,8 +2649,15 @@ export class InputRequestService {
     // A card redrawn onto another document than the one it was raised on says so, above any other flag but red.
     const moved =
       seen.facts.kind === 'page' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
+    // A form that now sends what is typed to another origin says so the same way, whatever else the card says.
+    const flags = [
+      ...(moved ? [NEW_DOCUMENT_FLAG] : []),
+      ...(held.raisedActions !== undefined && actionOriginsOf(seen.facts) !== held.raisedActions
+        ? [ACTION_MOVED_FLAG]
+        : []),
+    ];
     const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true).map(
-      field => (moved ? { ...field, risk: worstRisk([NEW_DOCUMENT_FLAG, field.risk]) as InputRisk } : field),
+      field => (flags.length === 0 ? field : { ...field, risk: worstRisk([...flags, field.risk]) as InputRisk }),
     );
     // The new picture is taken before the owner is asked again, exactly as at raise.
     const shot =
@@ -3121,6 +3135,12 @@ const NEW_DOCUMENT_FLAG: InputRisk = {
   level: 'amber',
   reason:
     'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
+};
+/** A form that now sends what is typed to another origin than when the owner was asked: the card shows the page, not the form. */
+const ACTION_MOVED_FLAG: InputRisk = {
+  level: 'amber',
+  reason:
+    'The form this field belongs to now sends what you type to another site than when you were asked: do not send unless you meant that.',
 };
 const PRIVATE_FLAG =
   'This value will show on screen as it is typed, and the ferret can read the terminal as soon as you send it.';

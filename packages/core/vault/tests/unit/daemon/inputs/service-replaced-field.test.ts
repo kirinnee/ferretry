@@ -179,6 +179,26 @@ describe('a re-found field is typed into only on proof: anything unproved goes b
     await redrawn(w, deliver);
   });
 
+  it('should warn on the redrawn card that the form now sends to another origin (E-314)', async () => {
+    const { w, deliver } = await sent(() => swapped({}, {}, {}, { formAction: 'https://evil.example/collect' }));
+
+    await redrawn(w, deliver);
+
+    const card = await w.pending();
+    should(card.risk?.level).equal('amber');
+    should(card.risk?.reason).containEql('another site than when you were asked');
+  });
+
+  it('should not warn when only the path of the same origin changed, or the card was not redrawn for its action (E-314)', async () => {
+    const { w, deliver } = await sent(() =>
+      swapped({}, {}, {}, { formAction: 'https://github.com/sessions/other-path', label: 'Code 2' }),
+    );
+
+    await redrawn(w, deliver);
+
+    should((await w.pending()).risk?.reason ?? '').not.containEql('another site than when you were asked');
+  });
+
   it('should redraw when another form now owns the field (a new id or name), or none does', async () => {
     for (const change of [
       { formId: 'other' },

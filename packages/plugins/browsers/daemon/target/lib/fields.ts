@@ -1,5 +1,6 @@
 import type { PageFieldFacts } from '@ferretry/core-vault/contract';
 import { recogniseBrowserChallenge } from '../../challenges/recognise.ts';
+import { boundedAction } from './form-action.ts';
 import {
   BROWSER_INPUT_SHOT_MARGIN,
   BROWSER_INPUT_SHOT_MAX_SIDE,
@@ -330,6 +331,7 @@ export function inputFieldAttributes(node: unknown, label?: string, form?: FormR
           ...(form.id === '' ? {} : { formId: form.id }),
           ...(form.name === '' ? {} : { formName: form.name }),
           formAction: form.action,
+          ...(form.digest === undefined ? {} : { formActionDigest: form.digest }),
         }),
   };
 }
@@ -338,7 +340,9 @@ export function inputFieldAttributes(node: unknown, label?: string, form?: FormR
 interface FormRead {
   readonly id: string;
   readonly name: string;
+  /** The action cut to the protocol's bound; when it was cut, `digest` fingerprints the whole. */
   readonly action: string;
+  readonly digest?: string;
 }
 
 const sameAttributes = (left: FieldAttributes, right: FieldAttributes): boolean =>
@@ -725,7 +729,7 @@ interface FieldRead {
   readonly unread?: true;
 }
 
-/** A form fact that does not fit the protocol's bounds, or an action that did not resolve, is not a fact: it is unread. */
+/** A form fact that does not fit the protocol's bounds (an action is cut and fingerprinted first), or an action that did not resolve, is not a fact: it is unread. */
 const formFits = (form: FormRead): boolean =>
   form.action !== '' &&
   form.action.length <= ACTION_LIMIT &&
@@ -754,8 +758,16 @@ async function pageReadOf(trusted: TrustedField, session: InputCdpSession): Prom
     (typeof form.id !== 'string' || typeof form.name !== 'string' || typeof form.action !== 'string')
   )
     throw new Refusal();
+  const bounded = form === null ? undefined : boundedAction(form.action as string, ACTION_LIMIT);
   const owner =
-    form === null ? null : { id: form.id as string, name: form.name as string, action: form.action as string };
+    form === null || bounded === undefined
+      ? null
+      : {
+          id: form.id as string,
+          name: form.name as string,
+          action: bounded.display,
+          ...(bounded.digest === undefined ? {} : { digest: bounded.digest }),
+        };
   if (owner !== null && !formFits(owner)) throw new Refusal();
   return { label: read.label, form: owner };
 }

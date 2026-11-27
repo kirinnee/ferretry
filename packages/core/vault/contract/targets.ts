@@ -97,6 +97,8 @@ const PageFieldSchema = z.strictObject({
   formName: boundedLine(128).optional(),
   /** Where that form sends what is typed: its action (or the default submit button's `formaction`) as origin + path. */
   formAction: boundedLine(256).optional(),
+  /** SHA-256 of the whole action when it was longer than `formAction` could hold (which is then only its readable start). */
+  formActionDigest: Digest.optional(),
 });
 
 export const PageFieldFactsSchema = z.strictObject({

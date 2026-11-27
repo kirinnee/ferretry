@@ -1394,11 +1394,10 @@ describe('the write proves what the card was drawn from, read again (B5-A4 fix r
     should(insertions(world)).equal(0);
   });
 
-  it('calls a form it cannot state in the protocol bounds unread: a malformed answer, an action that did not resolve, a too-long one', async () => {
+  it('calls a form it cannot state in the protocol bounds unread: a malformed answer, an action that did not resolve, a too-long id', async () => {
     const odd: readonly unknown[] = [
       { id: 7, name: '', action: 'https://app.example.com/' },
       { ...FORM, action: '' },
-      { ...FORM, action: `https://app.example.com/${'p'.repeat(300)}` },
       { ...FORM, id: 'i'.repeat(200) },
     ];
     for (const form of odd) {
@@ -1409,6 +1408,41 @@ describe('the write proves what the card was drawn from, read again (B5-A4 fix r
       should(facts.fields[0]?.unread).equal(true);
       should(facts.fields[0]?.field.formAction).be.undefined();
     }
+  });
+
+  describe('a destination longer than the protocol holds (E-313)', () => {
+    const LONG = `https://app.example.com/${'p'.repeat(300)}`;
+    const longWorld = () => {
+      const made = formWorld();
+      made.code.form = { ...FORM, action: LONG };
+      return made;
+    };
+
+    it('reads it: the start as the display and a fingerprint of the whole, never unread', async () => {
+      const { world } = longWorld();
+      const facts = await observed(world, ['#code']);
+
+      should(facts.fields[0]?.unread).be.undefined();
+      should(facts.fields[0]?.field.formAction).equal(LONG.slice(0, 256));
+      should(facts.fields[0]?.field.formActionDigest).match(/^[0-9a-f]{64}$/u);
+    });
+
+    it('types the value when the destination is unchanged', async () => {
+      const { world } = longWorld();
+      const facts = await observed(world, ['#code']);
+
+      should(await typeCode(world, facts)).equal('typed');
+      should(insertions(world)).equal(1);
+    });
+
+    it('types nothing when only the part past the cut changed: the whole destination is compared', async () => {
+      const { world, code } = longWorld();
+      const facts = await observed(world, ['#code']);
+      code.form = { ...FORM, action: `${LONG}/elsewhere` };
+
+      should(await typeCode(world, facts)).equal('target_changed');
+      should(insertions(world)).equal(0);
+    });
   });
 
   it('types nothing when the label can no longer be read at the write', async () => {

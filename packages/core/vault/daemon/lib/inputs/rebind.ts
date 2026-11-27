@@ -59,9 +59,30 @@ type FieldAttributes = Extract<InputTargetFacts, { readonly kind: 'page' }>['fie
  */
 function withoutProofFacts(
   field: FieldAttributes,
-): Omit<FieldAttributes, 'label' | 'formId' | 'formName' | 'formAction'> {
-  const { label: _label, formId: _id, formName: _name, formAction: _action, ...named } = field;
+): Omit<FieldAttributes, 'label' | 'formId' | 'formName' | 'formAction' | 'formActionDigest'> {
+  const {
+    label: _label,
+    formId: _id,
+    formName: _name,
+    formAction: _action,
+    formActionDigest: _digest,
+    ...named
+  } = field;
   return named;
+}
+
+/** Where each field of a page sends what is typed, as an origin: what a card must say when it moved after the owner was asked. */
+export function actionOriginsOf(facts: InputTargetFacts): string {
+  if (facts.kind !== 'page') return '';
+  return facts.fields
+    .map(({ field }) => {
+      try {
+        return field.formAction === undefined ? '' : new URL(field.formAction).origin;
+      } catch {
+        return field.formAction ?? '';
+      }
+    })
+    .join(' ');
 }
 
 /** Every fact of two fields' attributes agrees, one present on one side only included. */
