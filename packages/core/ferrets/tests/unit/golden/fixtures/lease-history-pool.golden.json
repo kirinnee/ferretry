@@ -1,0 +1,13 @@
+{
+  "key=<empty>": null,
+  "key=claude": null,
+  "key=claude-code": {
+    "harness": "claude",
+    "runtime": "runtime-a"
+  },
+  "key=codex": {
+    "harness": "codex",
+    "runtime": "runtime-a"
+  },
+  "key=fake-third": null
+}
