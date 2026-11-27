@@ -37,7 +37,7 @@ export const serveScene = async (cwd: string, entry: string, name: string): Prom
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style><style>html,body,#root{height:100%;margin:0}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
   const server = Bun.serve({
     hostname: '127.0.0.1',
-    port: 0,
+    port: Number(process.env.FY_BROWSER_SCENE_PORT ?? '0'),
     fetch: request => {
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });

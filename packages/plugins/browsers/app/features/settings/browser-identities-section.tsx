@@ -21,10 +21,15 @@ type Reading =
   | { readonly kind: 'unavailable'; readonly sentence: string };
 
 /** Where an identity's traffic goes, by the proxy's name: never how it signs in. */
-const identityProxyWords = (row: BrowserIdentityRow): string =>
-  row.proxy === undefined
+const identityProxyWords = (row: BrowserIdentityRow): string => {
+  if (row.liveProxy !== undefined) {
+    const live = row.liveProxy?.name;
+    return `Now: ${live ?? 'direct'}${live === row.proxy?.name ? '' : ` · Next launch: ${row.proxy?.name ?? 'direct'}`}`;
+  }
+  return row.proxy === undefined
     ? 'Direct, no proxy'
     : `Via ${row.proxy.name}${row.proxy.own ? '' : ' (the machine’s proxy)'}`;
+};
 
 const stateWords = (row: BrowserIdentityRow): string =>
   row.running ? `Running${row.startedAt === undefined ? '' : ` since ${relativeTime(row.startedAt)}`}` : 'Stopped';

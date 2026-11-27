@@ -30,12 +30,13 @@ interface Row {
   readonly running: boolean;
   readonly startedAt?: string;
   readonly proxy?: unknown;
+  readonly liveProxy?: unknown;
 }
 /** The rows an answer carries: the daemon answers JSON text. */
 const rowsOf = (answered: { body: unknown }): readonly Row[] =>
   (JSON.parse(answered.body as string) as { identities: Row[] }).identities;
 
-async function built() {
+async function built(config: unknown = CONFIG) {
   const chromes = new Map<string, Tabs>();
   const closed: string[] = [];
   const chromeOf = (identity: string): Tabs => {
@@ -67,7 +68,7 @@ async function built() {
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate,
     secrets: [],
-    config: { 'browsers.yaml': CONFIG },
+    config: { 'browsers.yaml': config },
   });
   return { host, closed };
 }
@@ -153,5 +154,24 @@ describe('GET /v1/browser/identities and the stop of one identity', () => {
     should(JSON.stringify(answered.body)).containEql('no browser identity named old');
     should(inherited.status).equal(404);
     should(world.closed).deepEqual([]);
+  });
+
+  it('should report the launch proxy while a saved proxy change waits for a restart', async () => {
+    const world = await built({ identities: { docs: {} } });
+    host = world.host;
+    await host.tool('browser_open', { name: 'direct', identity: 'docs' }, { as: ferret('f1') });
+    // The stand-in launcher started direct. A later config change cannot reroute that Chrome.
+    host.setConfig('browsers.yaml', {
+      ...CONFIG,
+      identities: {
+        ...CONFIG.identities,
+        docs: { proxy: { url: 'http://next-proxy.example.test:8080' } },
+      },
+    });
+    const rows = rowsOf(await host.request('GET', '/v1/browser/identities'));
+    const docs = rows.find(row => row.identity === 'docs');
+    should(docs?.running).be.true();
+    should(docs?.liveProxy).equal(null);
+    should(docs?.proxy).deepEqual({ name: 'next-proxy.example.test:8080', own: true });
   });
 });

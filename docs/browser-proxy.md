@@ -101,6 +101,8 @@ page with an error rather than a direct connection.
     owner, and the row says "Waits for you" until it is confirmed. The list shows each identity's proxy **by name only**
     (`host:port`, and whether it is the identity's own or the machine's) — never a credential or a secret name. Credentials for an
     identity's proxy are `${secret:NAME}` references written in the file; the form does not take them.
+    A running identity's **Now** label comes from its launch proxy. When that differs from the configured setting,
+    **Next launch** shows the new setting separately, including a switch to or from direct traffic.
   - **GAP: a credentialed proxy still refuses to launch** for either, until Browsers has a Vault read path for its credentials.
 
 ## Test proxy

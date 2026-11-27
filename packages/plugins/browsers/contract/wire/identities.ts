@@ -25,7 +25,13 @@ export const BrowserIdentityRowSchema = z.strictObject({
   startedAt: InstantSchema.optional(),
   /** When its profile folder last changed, `undefined` for an identity that has never opened a browser. */
   lastUsedAt: InstantSchema.optional(),
+  /** The configured proxy for the NEXT launch; absent means direct. */
   proxy: BrowserIdentityProxySchema.optional(),
+  /** The running Chrome's LAUNCH proxy, name only; null means direct. Absent until Chrome has launched. */
+  liveProxy: z
+    .strictObject({ name: z.string().min(1).max(300) })
+    .nullable()
+    .optional(),
 });
 export type BrowserIdentityRow = z.infer<typeof BrowserIdentityRowSchema>;
 

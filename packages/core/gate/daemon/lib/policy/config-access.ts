@@ -17,7 +17,7 @@ import {
 } from '../../../contract/index.ts';
 import { claimLooseningProof } from './config-judge.ts';
 
-/** The file whose own capability is `warden`; every other config file is the fleet's (today's `configFileCapability`). */
+/** The file whose own capability is `warden`; browser edits additionally ask Browser configure below. */
 const WARDEN_FILE = 'warden.yaml';
 
 const FLEET_USE = { capability: CAPABILITIES.fleet, axis: 'use' } as const;
@@ -53,7 +53,8 @@ const refuse = (response: ApiResponse): ConfigAccessVerdict => ({ allowed: false
  *   admitted (`loosen-config`), which is CLAIMED here, atomically, never read from the admission snapshot (so a confirm that finds nothing still used
  *   its proof — stricter than the snapshot-and-spend it replaces).
  *
- * Anything undetermined (no standing, no grant standing) refuses.
+ * `browsers.yaml` additionally requires Browser configure for every mutation, keeping all Fleet checks. Anything
+ * undetermined (no standing, no grant standing) refuses. Locality is the carrier's decision, never a path or header.
  */
 export function judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVerdict {
   const { path, act } = input;
@@ -98,6 +99,15 @@ export function judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVer
     );
   }
   if (act === 'read') return { allowed: true };
+  if (path === 'browsers.yaml') {
+    const browser = governance.decide({ capability: CAPABILITIES.browser, axis: 'configure' });
+    if (!browser.allowed)
+      return refuse(
+        browser.refusal === 'step-up-required'
+          ? stepUpRefusal(`changing ${path} from this device needs a passkey confirmation`, 'browser', false)
+          : errorResponse(403, `this device may not change ${path}`, grantRefusalCode(browser.refusal)),
+      );
+  }
   const fleet = governance.decide(FLEET_USE);
   if (!fleet.allowed)
     return refuse(

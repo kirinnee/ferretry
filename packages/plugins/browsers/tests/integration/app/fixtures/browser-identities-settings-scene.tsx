@@ -44,6 +44,7 @@ const IDENTITIES = {
       running: true,
       startedAt: new Date(Date.now() - 25 * 60_000).toISOString(),
       proxy: { name: 'work-proxy.example.test:8080', own: true },
+      liveProxy: null,
     },
     { identity: 'docs', builtIn: false, engine: 'chromium', running: false },
   ],

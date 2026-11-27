@@ -179,6 +179,41 @@ describe('Settings › Browser › Identities', () => {
     await view.unmount();
   });
 
+  it('keeps comments inside the identities map when adding another identity', async () => {
+    const text =
+      '# browser notes\nidentities: # separate accounts\n  # work account\n  work: # keep this profile\n    proxy:\n      url: http://work-proxy.example.test:8080 # office exit\n  # personal account\n  personal: {} # keep sign-ins\n';
+    const { calls, view } = await tab({ text });
+    await typeInto(view.container.querySelector('[data-browser-identity-key]'), 'docs');
+    await click(view.container.querySelector('[data-browser-identity-submit]'), 'Add identity');
+    const sent = (body(calls, CONFIG_PUT) as { text: string }).text;
+    for (const comment of [
+      'browser notes',
+      'separate accounts',
+      'work account',
+      'keep this profile',
+      'office exit',
+      'personal account',
+      'keep sign-ins',
+    ])
+      expect(sent).toContain(`# ${comment}`);
+    expect(sent).toContain('docs: {}');
+    await view.unmount();
+  });
+
+  it('shows the live direct connection and a changed proxy only for the next launch', async () => {
+    const { view } = await tab({
+      identities: {
+        maxRunning: 4,
+        identities: [{ ...REAL.identities[1], liveProxy: null }],
+      },
+    });
+    const work = view.container.querySelector('[data-browser-identity="work"]')?.textContent ?? '';
+    expect(work).toContain('Now: direct');
+    expect(work).toContain('Next launch: work-proxy.example.test:8080');
+    expect(work).not.toContain('Via work-proxy');
+    await view.unmount();
+  });
+
   it('a per-identity proxy that loosens shows as waiting for the owner, and the held identity is listed as such', async () => {
     const { calls, view } = await tab({
       put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' },

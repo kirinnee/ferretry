@@ -9,7 +9,7 @@
  * schema refuses a value.
  */
 
-import { readConfigText, setConfigKey } from '@ferretry/std/yaml';
+import { editConfigText, readConfigText, setConfigKey } from '@ferretry/std/yaml';
 import { z } from 'zod';
 import {
   BROWSER_IDENTITY_KEY_PATTERN,
@@ -118,11 +118,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /** `identities:` as the file spells it (so a proxy already there keeps its own words), with one more entry. */
 function withIdentity(text: string, added: { readonly key: string; readonly proxyUrl?: string }): string {
   const read = readConfigText(text);
-  const raw =
-    read.ok && isRecord(read.read.value) && isRecord(read.read.value.identities) ? read.read.value.identities : {};
+  const current = read.ok && isRecord(read.read.value) ? read.read.value : {};
+  const raw = isRecord(current.identities) ? current.identities : {};
   const entry =
     added.proxyUrl === undefined || added.proxyUrl.trim() === '' ? {} : { proxy: { url: added.proxyUrl.trim() } };
-  return setConfigKey(text, 'identities', { ...raw, [added.key]: entry });
+  return editConfigText(text, { ...current, identities: { ...raw, [added.key]: entry } }, current, undefined);
 }
 
 /** The document with the change made, comments and order kept. Pure. */

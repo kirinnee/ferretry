@@ -95,7 +95,7 @@ for (const look of LOOKS)
             expect(listed).toEqual(['agent', 'work', 'docs', 'partner']);
             expect(await page.locator('[data-browser-identity-waits]').textContent()).toContain('Waits for you');
             expect(await page.locator('[data-browser-identity="work"]').textContent()).toContain(
-              'Via work-proxy.example.test:8080',
+              'Now: direct · Next launch: work-proxy.example.test:8080',
             );
             // A bad name: the problem is said under the field and Add stays off.
             await page.locator('[data-browser-identity-key]').fill('Bad Name');

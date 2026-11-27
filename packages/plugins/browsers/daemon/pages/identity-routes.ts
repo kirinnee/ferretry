@@ -42,6 +42,9 @@ async function rowOf(
     ...(state.state === 'running' && state.startedAt !== undefined ? { startedAt: state.startedAt } : {}),
     ...(lastUsedAt === undefined ? {} : { lastUsedAt: InstantSchema.parse(lastUsedAt) }),
     ...(shown === undefined ? {} : { proxy: { name: proxyName(shown.url), own: own !== undefined } }),
+    ...(state.state === 'running'
+      ? { liveProxy: state.proxy === undefined ? null : { name: proxyName(state.proxy.url) } }
+      : {}),
   };
 }
 

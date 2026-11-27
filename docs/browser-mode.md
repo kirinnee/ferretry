@@ -174,6 +174,8 @@ signed in at once, each with its own VNC listener and password.
 refused file, never a guess). It is edited in the app, with `fy config`, or by hand; every route to it is the kernel's config
 file service ([config-files.md](config-files.md)), so a broken file keeps its last good version in effect, a raw secret is
 refused, and **an edit that loosens waits for the owner**.
+For governed callers, edits additionally require **Browser configure**, alongside the existing Fleet grants; adding an
+identity keeps comments inside the file's identities map.
 
 **Settings › Browser › Identities** lists the identities the daemon would open **now**: the built-in `agent` first, then each key
 the file holds, from `GET /v1/browser/identities`. Every row is a real identity, running or not, with its engine, the proxy it
@@ -182,6 +184,8 @@ password or a `${secret:…}` reference), and when its profile folder last chang
 while its Chrome runs). A row that is running has **Stop**, which is `POST /v1/browser/identities/<key>/stop`: it closes **only
 that identity's** Chrome and pages and leaves every other identity's pages live. It never touches a profile folder, so every
 sign-in on the identity is there the next time it opens. Both routes are a person's: a ferret cannot list or stop identities.
+A running row says **Now** from Chrome's launch proxy. If the configured proxy changed meanwhile, **Next launch** names
+the new setting separately: changing the file cannot reroute an already running Chrome.
 
 **Add identity** writes `identities.<name>` into `browsers.yaml` through the same config write the mode and the proxy use (the
 app sends the edited text with the digest it read, so a file changed meanwhile is refused). It is never a second path to the
