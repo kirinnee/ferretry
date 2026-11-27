@@ -11,6 +11,9 @@ import './browser-identities.css';
 /** Said on an identity the file names and the daemon does not yet run with: it loosens, so the owner confirms it first. */
 export const IDENTITY_WAITS_WORDS = 'Waits for you: saved, but not in effect until you confirm it.';
 
+/** How often the list is read again while an identity is starting: a launch that settles (opened or failed) has no event to say so. */
+const STARTING_READ_MS = 1000;
+
 /** What the section says about what an identity is for, once, above the list. */
 const IDENTITIES_INTRO =
   'Each identity is its own Chrome with its own sign-ins, so two accounts on one site can be open at once. Stopping one closes only its pages; everything it signed in to is kept.';
@@ -116,6 +119,18 @@ export function BrowserIdentitiesSection({
     readAt.current = document.etag;
     return load();
   }, [document.etag, load]);
+
+  // A launch in progress settles without telling the page (it opens, or it fails): read again until no row is starting.
+  const starting = reading.kind === 'shown' && reading.view.identities.some(row => row.starting === true);
+  useEffect(() => {
+    if (!starting) return undefined;
+    const reads: (() => void)[] = [];
+    const timer = setInterval(() => reads.push(load()), STARTING_READ_MS);
+    return () => {
+      clearInterval(timer);
+      for (const stopRead of reads) stopRead();
+    };
+  }, [starting, load]);
 
   const problem = key === '' ? undefined : newIdentityProblem(document.text, key, proxyUrl);
   const add = (): void => {
