@@ -75,10 +75,41 @@ const AUTHOR_TEXT = [
   ':::',
 ].join('\n');
 
+/**
+ * `?marks=1` adds the parts that draw SERIES colours (the app's `--viz-1…8`, reached through Durian's `--c1…8`): a tier list
+ * (a tone per tier) and an alignment grid with one cell in each of the eight series colours. A ```chart fence is held as code
+ * in chat and `mermaid` is drawn in a sandbox frame, so these are the series marks the message itself paints. Opt-in so the
+ * other scene tests keep their two messages.
+ */
+const MARKS_TEXT = [
+  'Series marks:',
+  '',
+  `${FENCE}tierlist title="Marks"`,
+  'S: alpha, beta',
+  'A: gamma',
+  'B: delta',
+  'C: epsilon',
+  FENCE,
+  '',
+  `${FENCE}alignment title="Series"`,
+  'x: left .. mid .. right .. far',
+  'y: top .. bottom',
+  'left / top "One" [c1]: first',
+  'mid / top "Two" [c2]: second',
+  'right / top "Three" [c3]: third',
+  'far / top "Four" [c4]: fourth',
+  'left / bottom "Five" [c5]: fifth',
+  'mid / bottom "Six" [c6]: sixth',
+  'right / bottom "Seven" [c7]: seventh',
+  'far / bottom "Eight" [c8]: eighth',
+  FENCE,
+].join('\n');
+
 const entries: readonly TranscriptEntry[] = [
   { id: 'u1', kind: 'user', text: 'Is the release ready?' },
   { id: 'a1', kind: 'assistant', text: MESSAGE },
   { id: 'a2', kind: 'assistant', text: AUTHOR_TEXT },
+  ...(params.get('marks') === '1' ? [{ id: 'a3', kind: 'assistant', text: MARKS_TEXT } as const] : []),
 ];
 
 const surface = {
