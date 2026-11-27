@@ -1,5 +1,6 @@
 import { afterAll, describe, it } from 'bun:test';
 import path from 'node:path';
+import { mkdir, rename, symlink } from 'node:fs/promises';
 import should from 'should';
 import type { ProjectRepository, RepoWorktreeListResponse } from '../../../../contract/index.ts';
 import { worktreeRouteWorld } from '../../../support/daemon/worktree-world.ts';
@@ -26,6 +27,31 @@ const daemon = async (label: string) => {
 
 describe('GET /v1/worktrees/repo for a registered project', () => {
   afterAll(cleanupTempDirectories);
+
+  it('should keep a project registered to a repository subfolder listable', async () => {
+    const { world, projects } = await daemon('proj-subfolder');
+    const folder = path.join(world.repository.root, 'package');
+    await mkdir(folder);
+    projects.set('subfolder', { folder, commonDirectory: path.join(world.repository.root, '.git') });
+    should((await world.call('GET /v1/worktrees/repo', { query: { project: 'subfolder' } })).status).equal(200);
+  });
+
+  it('should refuse a registered project folder swapped for a symlink, even to its original checkout', async () => {
+    const { world, projects } = await daemon('proj-symlink-swap');
+    const root = path.join(await tempDirectory('proj-symlink-linked'), 'checkout');
+    await setupGit(world.repository.root, 'worktree', 'add', '-b', 'swapped', root);
+    projects.set('swapped', { folder: root, commonDirectory: path.join(world.repository.root, '.git') });
+    await rename(root, `${root}-original`);
+    try {
+      await symlink(`${root}-original`, root);
+      const answer = await world.call('GET /v1/worktrees/repo', { query: { project: 'swapped' } });
+      should(answer.status).equal(422);
+    } finally {
+      const { unlink } = await import('node:fs/promises');
+      await unlink(root);
+      await rename(`${root}-original`, root);
+    }
+  });
 
   it('should list main and the linked branch for the project that is the MAIN checkout', async () => {
     const { world, projects } = await daemon('proj-main');

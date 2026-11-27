@@ -14,6 +14,7 @@ import type { ProjectInfo } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
 import { reasonOf } from '../../lib/client.ts';
 import { adoptWorktree, readRepoWorktrees, type WorktreeSource, worktreeSources } from './worktrees-api.ts';
+import { WorktreeMove } from './worktree-move.tsx';
 
 type Reading =
   | { readonly kind: 'unread' }
@@ -61,10 +62,16 @@ function Row({
   row,
   busy,
   onAdopt,
+  client,
+  project,
+  onMoved,
 }: {
   readonly row: RepoWorktreeRow;
   readonly busy: boolean;
   readonly onAdopt: (path: string) => void;
+  readonly client: ProjectsClient;
+  readonly project: string;
+  readonly onMoved: () => Promise<void>;
 }) {
   const stray = isStray(row);
   const blocked = stray ? cannotAdopt(row) : undefined;
@@ -105,6 +112,7 @@ function Row({
           </button>
         </span>
       )}
+      <WorktreeMove row={row} client={client} project={project} onMoved={onMoved} />
     </li>
   );
 }
@@ -112,11 +120,13 @@ function Row({
 function RepoGroup({
   client,
   source,
+  project,
   listedElsewhere,
   onListed,
 }: {
   readonly client: ProjectsClient;
   readonly source: WorktreeSource;
+  readonly project: string;
   /** Every checkout another repository group of this project lists: a folder found here that one of them lists is theirs. */
   readonly listedElsewhere: ReadonlySet<string>;
   readonly onListed: (commonDir: string, paths: readonly string[]) => void;
@@ -128,7 +138,7 @@ function RepoGroup({
 
   const read = useCallback(
     (alive: () => boolean) =>
-      readRepoWorktrees(client, source).then(
+      readRepoWorktrees(client, source, project).then(
         list => {
           if (alive()) setReading({ kind: 'ready', list });
         },
@@ -139,7 +149,7 @@ function RepoGroup({
             );
         },
       ),
-    [client, source],
+    [client, source, project],
   );
   useEffect(() => {
     if (reading.kind === 'ready')
@@ -184,7 +194,15 @@ function RepoGroup({
         <>
           <ul className="m-0 grid list-none gap-xs p-0">
             {reading.list.worktrees.map(row => (
-              <Row key={row.path} row={row} busy={adopting === row.path} onAdopt={adopt} />
+              <Row
+                key={row.path}
+                row={row}
+                busy={adopting === row.path}
+                onAdopt={adopt}
+                client={client}
+                project={project}
+                onMoved={() => read(() => true)}
+              />
             ))}
           </ul>
           {reading.list.truncated && (
@@ -233,6 +251,7 @@ export function ProjectWorktrees({
           key={source.commonDir}
           client={client}
           source={source}
+          project={project.id}
           listedElsewhere={
             new Set(
               Object.entries(listed)

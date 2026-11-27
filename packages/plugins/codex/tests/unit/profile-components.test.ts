@@ -55,10 +55,10 @@ describe('the Codex hooks source', () => {
 });
 
 describe('the Codex runtimes kit', () => {
-  it('is offered through the settings source, empty, and not through the hooks source', () => {
+  it('offers the host-scan kit through the settings source and not through the hooks source', () => {
     const source = codexSettingsSource(() => new Map());
     expect(source.kit).toBe(codexRuntimesKit);
-    expect(Object.keys(codexRuntimesKit)).toEqual([]);
+    expect(source.kit?.scanHost).toBeFunction();
     expect(codexHooksSource(() => new Map()).kit).toBeUndefined();
   });
 });

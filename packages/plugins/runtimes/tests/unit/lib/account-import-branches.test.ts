@@ -1,7 +1,14 @@
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type HostDocumentRead, type HostHarnessScan } from '../../../daemon/lib/account/import.ts';
 import { mergeImport, planImport } from '../../../daemon/lib/account/import-plan.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 const digest = (text: string): string => String(Bun.hash(text));
 
@@ -53,7 +60,7 @@ describe('planImport — an MCP server both harnesses name but configure differe
     ];
 
     // Act
-    const plan = planImport(scans, { digest });
+    const plan = planImport(scans, { kits: IMPORT_KITS, digest });
 
     // Assert
     should(component(plan, 'mcp', 'github')).deepEqual({ command: 'npx', args: ['a'], harness: 'claude' });
@@ -70,7 +77,7 @@ describe('planImport — hooks that are not lists of handlers', () => {
     const scan = claude({ settings: text('/h/.claude/settings.json', JSON.stringify({ hooks: { Stop: 'bell' } })) });
 
     // Act
-    const plan = planImport([scan], { digest });
+    const plan = planImport([scan], { kits: IMPORT_KITS, digest });
 
     // Assert
     should(plan.preview.harnesses[0]?.settings).deepEqual({ source: '/h/.claude/settings.json', count: 0, hooks: 0 });
@@ -81,10 +88,10 @@ describe('planImport — a skills component the person already made', () => {
   it('should take the next free name and leave the copied skill directory where it was planned', () => {
     // Arrange
     const skills = [{ item: 'review', source: '/h/.claude/skills/review', digest: 'one' }];
-    const own = mergeImport(undefined, planImport([claude({ skills })], { digest }));
+    const own = mergeImport(undefined, planImport([claude({ skills })], { kits: IMPORT_KITS, digest }));
 
     // Act
-    const plan = planImport([claude({ skills })], { digest, existing: own });
+    const plan = planImport([claude({ skills })], { kits: IMPORT_KITS, digest, existing: own });
 
     // Assert
     const names = plan.components.filter(item => item.kind === 'skills').map(item => item.name);

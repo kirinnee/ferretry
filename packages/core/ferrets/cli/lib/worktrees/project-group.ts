@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { projectGroup } from '../../../contract/worktree-move.ts';
+export { projectGroup } from '../../../contract/worktree-move.ts';
 
 /**
  * What `--project` needs of a registered project: its id and its name, nothing more.
@@ -9,19 +11,6 @@ import { z } from 'zod';
 const RegisteredProjectsSchema = z.array(z.object({ id: z.string().min(1), name: z.string().min(1) }));
 
 export const PROJECTS_ROUTE = 'GET /v1/projects';
-
-/** The group folder a project's worktrees live in: `<name-slug>-<first 8 of its id>`, one path-safe segment. */
-export function projectGroup(project: { readonly id: string; readonly name: string }): string {
-  const slug = project.name
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 32)
-    .replace(/-+$/g, '');
-  const tag = project.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
-  return `${slug === '' ? 'project' : slug}-${tag}`;
-}
 
 /** Resolves a typed project (its name, case-insensitively, or its id) to its group, refusing none and several by name. */
 export async function resolveProjectGroup(typed: string, readProjects: () => Promise<unknown>): Promise<string> {
