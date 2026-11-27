@@ -7,6 +7,7 @@ verified: '2026-11-27'
 unverified:
   - "Groq's Responses API is marked beta, and its API reference says previous_response_id is not supported, so Codex features that resume a response on the server may not work."
   - 'The default model is the open-weight gpt-oss model Groq lists; no Codex run against Groq was made when this preset was written.'
+catalog: groq
 env:
   GROQ_API_KEY:
     secretName: GROQ_API_KEY

@@ -1265,6 +1265,85 @@
       "id": "ollama",
       "origin": "built-in"
     },
+    "groq": {
+      "label": "Groq",
+      "docs": "https://console.groq.com/docs/models",
+      "verified": "2026-11-27",
+      "unverified": [
+        "Groq does not rank its models for coding, so the tiers follow size; a person's own file can re-rank them.",
+        "The models are not priced here (the price maker list has no Groq); Suggestions carry no Groq list cost.",
+        "Ids and context sizes are the ones Groq's Responses API page and models page show; no Codex run against Groq was made."
+      ],
+      "customIds": true,
+      "codex": {
+        "models": [
+          {
+            "id": "openai/gpt-oss-120b",
+            "label": "GPT-OSS 120B",
+            "tier": "best",
+            "context": 131072,
+            "efforts": ["low", "medium", "high"],
+            "defaultEffort": "medium",
+            "default": true
+          },
+          {
+            "id": "openai/gpt-oss-20b",
+            "label": "GPT-OSS 20B",
+            "tier": "fast",
+            "context": 131072,
+            "efforts": ["low", "medium", "high"],
+            "defaultEffort": "medium",
+            "default": false
+          }
+        ]
+      },
+      "id": "groq",
+      "origin": "built-in"
+    },
+    "mistral-codex": {
+      "label": "Mistral (Codex)",
+      "docs": "https://docs.mistral.ai/studio/conversations/responses",
+      "verified": "2026-11-27",
+      "unverified": [
+        "Mistral's Responses API is stateless, so Codex features that resume a response on the server do not work.",
+        "Mistral does not rank its models for coding, so the tiers follow size; a person's own file can re-rank them.",
+        "The `-latest` aliases and context sizes are the ones mistral.yaml carries (models.dev, 2026-11-23); no Codex run against Mistral was made."
+      ],
+      "customIds": true,
+      "codex": {
+        "models": [
+          {
+            "id": "mistral-large-latest",
+            "label": "Mistral Large (latest)",
+            "tier": "best",
+            "context": 1048576,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          },
+          {
+            "id": "mistral-medium-latest",
+            "label": "Mistral Medium (latest)",
+            "tier": "balanced",
+            "context": 262144,
+            "reasoning": true,
+            "efforts": [],
+            "default": true
+          },
+          {
+            "id": "mistral-small-latest",
+            "label": "Mistral Small (latest)",
+            "tier": "fast",
+            "context": 262144,
+            "reasoning": true,
+            "efforts": [],
+            "default": false
+          }
+        ]
+      },
+      "id": "mistral-codex",
+      "origin": "built-in"
+    },
     "google-gemini": {
       "label": "Google Gemini (AI Studio)",
       "docs": "https://ai.google.dev/gemini-api/docs/models",
@@ -3128,6 +3207,7 @@
         "source": "transcript-pricing",
         "note": "Groq reports no balance to an API key, so cost is counted from the transcript where the model has a price."
       },
+      "catalog": "groq",
       "detect": {
         "hosts": ["api.groq.com"],
         "variables": ["GROQ_*"],
@@ -3194,6 +3274,7 @@
         "source": "transcript-pricing",
         "note": "Mistral reports no balance to an API key, so cost is counted from the transcript where the model has a price."
       },
+      "catalog": "mistral-codex",
       "detect": {
         "hosts": ["api.mistral.ai"],
         "variables": ["MISTRAL_*"],

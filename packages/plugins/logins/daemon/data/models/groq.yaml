@@ -1,0 +1,24 @@
+# Models Groq serves for Codex (Groq's Responses API, https://api.groq.com/openai/v1).
+label: Groq
+docs: https://console.groq.com/docs/models
+verified: '2026-11-27'
+unverified:
+  - "Groq does not rank its models for coding, so the tiers follow size; a person's own file can re-rank them."
+  - 'The models are not priced here (the price maker list has no Groq); Suggestions carry no Groq list cost.'
+  - "Ids and context sizes are the ones Groq's Responses API page and models page show; no Codex run against Groq was made."
+customIds: true
+codex:
+  models:
+    - id: openai/gpt-oss-120b
+      label: GPT-OSS 120B
+      tier: best
+      context: 131072
+      efforts: [low, medium, high]
+      defaultEffort: medium
+      default: true
+    - id: openai/gpt-oss-20b
+      label: GPT-OSS 20B
+      tier: fast
+      context: 131072
+      efforts: [low, medium, high]
+      defaultEffort: medium
