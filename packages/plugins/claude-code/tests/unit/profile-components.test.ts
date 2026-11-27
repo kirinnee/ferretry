@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { HooksItem, SettingsItem } from '../../contract/index.ts';
 import { claudeHooksSource, claudeSettingsSource } from '../../daemon/lib/profile-components.ts';
+import { claudeRuntimesKit } from '../../daemon/lib/runtimes-kit/index.ts';
 
 describe('the Claude Code settings source', () => {
   it('projects an item as the harness and its document, in name order, live', async () => {
@@ -52,5 +53,14 @@ describe('the Claude Code hooks source', () => {
       document: { hooks: { PreToolUse: [{ matcher: 'Bash' }] } },
     });
     expect(await source.read('absent')).toBeUndefined();
+  });
+});
+
+describe('the Claude Code runtimes kit', () => {
+  it('is offered through the settings source, empty, and not through the hooks source', () => {
+    const source = claudeSettingsSource(() => new Map());
+    expect(source.kit).toBe(claudeRuntimesKit);
+    expect(Object.keys(claudeRuntimesKit)).toEqual([]);
+    expect(claudeHooksSource(() => new Map()).kit).toBeUndefined();
   });
 });
