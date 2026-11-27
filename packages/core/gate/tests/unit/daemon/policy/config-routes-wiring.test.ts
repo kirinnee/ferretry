@@ -7,8 +7,10 @@ import {
   headersFrom,
   queryFrom,
 } from '@ferretry/kernel/contract';
-import { config, runInCall } from '@ferretry/kernel/host';
+import { config, runInCall, scopedLog, state } from '@ferretry/kernel/host';
+import { fixedClock } from '@ferretry/kernel/testing';
 import { z } from 'zod';
+import { FULL_DEVICE_GRANTS } from '../../../../contract/index.ts';
 import { CLIENT_HEADER } from '../../../../daemon/lib/api/admission.ts';
 import { ADMIN, admit, descriptor, FERRET_TOKEN, local, type World, world } from '../support.ts';
 
@@ -81,6 +83,50 @@ const standingFor = (w: World, options: Parameters<typeof admit>[2]) => {
 };
 
 describe('R-0419 the kernel’s config route is judged by GateAdmission.judgeConfigAccess, with the call’s own actor and standing', () => {
+  test('browsers.yaml: a carried device needs Browser configure; an allowed proxy proposal stays pending', async () => {
+    const browsers = defineConfig({
+      file: 'browsers.yaml',
+      schema: z.strictObject({
+        identities: z.record(z.string(), z.strictObject({ proxy: z.strictObject({ url: z.string() }) })).default({}),
+      }),
+      axis: 'configure',
+      loosens: () => ['new identity proxy'],
+    });
+    const w = world();
+    w.enrol('denied', { ...FULL_DEVICE_GRANTS, browser: { use: false, configure: false } });
+    w.enrol('allowed');
+    const files = config.createConfigFiles({
+      home: '/home/fy',
+      defs: [{ plugin: 'browsers', def: browsers }],
+      fs: state.createMemoryHostFs(),
+      clock: fixedClock('2026-11-27T09:00:00Z'),
+      log: scopedLog(() => {}, 'test'),
+      binary: 'fy',
+    });
+    await files.reload();
+    const handlers = config.configRoutes({
+      writer: () => files.writer(),
+      admission: () => w.gate,
+      home: '/home/fy',
+      binary: 'fy',
+    });
+    const body = {
+      path: 'browsers.yaml',
+      text: 'identities:\n  work:\n    proxy:\n      url: http://proxy.example.test:8080\n',
+    };
+    const write = async (device: string) => {
+      const decision = standingFor(w, { device });
+      return await runInCall({ actor: decision.actor, standing: decision.standing }, () =>
+        handlers['PUT /v1/config/file']({ request: put(body), params: new Map() } as never),
+      );
+    };
+    expect((await write('denied')).status).toBe(403);
+    expect(files.writer().held()).toEqual([]);
+    const allowed = await write('allowed');
+    expect(allowed.status).toBe(200);
+    expect(JSON.parse(allowed.body).outcome).toBe('pending');
+    expect(files.writer().held()).toHaveLength(1);
+  });
   test('the owner at the machine: Gate lets the real PUT handler write, and may loosen in the same act', async () => {
     const w = world();
     const recorder = recordingWriter();

@@ -75,7 +75,8 @@ export interface AutoResumePorts {
   readonly summary: AutoResumeSummaryPort;
   readonly setting: AutoResumeSettingPort;
   readonly clock: { now(): string; nowMs(): number };
-  readonly sleep: (milliseconds: number) => Promise<void>;
+  /** Rejects when `signal` aborts: a wait the daemon stopping must be able to cut short. */
+  readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 }
 
 export interface AutoResumeSettings {

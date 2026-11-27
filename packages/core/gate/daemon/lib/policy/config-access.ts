@@ -17,7 +17,7 @@ import {
 } from '../../../contract/index.ts';
 import { claimLooseningProof } from './config-judge.ts';
 
-/** The file whose own capability is `warden`; every other config file is the fleet's (today's `configFileCapability`). */
+/** The file whose own capability is `warden`; browser edits additionally ask Browser configure below. */
 const WARDEN_FILE = 'warden.yaml';
 
 const FLEET_USE = { capability: CAPABILITIES.fleet, axis: 'use' } as const;
@@ -53,7 +53,8 @@ const refuse = (response: ApiResponse): ConfigAccessVerdict => ({ allowed: false
  *   admitted (`loosen-config`), which is CLAIMED here, atomically, never read from the admission snapshot (so a confirm that finds nothing still used
  *   its proof — stricter than the snapshot-and-spend it replaces).
  *
- * Anything undetermined (no standing, no grant standing) refuses.
+ * `browsers.yaml` additionally requires Browser configure for every mutation, keeping all Fleet checks. Anything
+ * undetermined (no standing, no grant standing) refuses. Locality is the carrier's decision, never a path or header.
  */
 export function judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVerdict {
   const { path, act } = input;
@@ -85,17 +86,21 @@ export function judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVer
   }
   const capability = capabilityOf(path);
   const axis = act === 'read' ? 'use' : 'configure';
-  const decision = governance.decide({ capability: CAPABILITIES[capability], axis });
-  if (!decision.allowed) {
-    if (decision.refusal === 'step-up-required')
-      return refuse(stepUpRefusal(`changing ${path} from this device needs a passkey confirmation`, capability, false));
-    return refuse(
-      errorResponse(
-        403,
-        `this device may not ${act === 'read' ? 'read' : 'change'} ${path}`,
-        grantRefusalCode(decision.refusal),
-      ),
-    );
+  const capabilities: CapabilityName[] = [capability];
+  if (path === 'browsers.yaml' && act !== 'read') capabilities.push('browser');
+  for (const demanded of capabilities) {
+    const decision = governance.decide({ capability: CAPABILITIES[demanded], axis });
+    if (!decision.allowed) {
+      if (decision.refusal === 'step-up-required')
+        return refuse(stepUpRefusal(`changing ${path} from this device needs a passkey confirmation`, demanded, false));
+      return refuse(
+        errorResponse(
+          403,
+          `this device may not ${act === 'read' ? 'read' : 'change'} ${path}`,
+          grantRefusalCode(decision.refusal),
+        ),
+      );
+    }
   }
   if (act === 'read') return { allowed: true };
   const fleet = governance.decide(FLEET_USE);

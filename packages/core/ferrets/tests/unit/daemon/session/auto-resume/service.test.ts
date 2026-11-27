@@ -164,6 +164,28 @@ describe('auto-resume service', () => {
     should(h.ledger.map(entry => entry.id)).deepEqual(['a']);
   });
 
+  it('D-89 should fail the pass, spending nothing and keeping the ledger, when the setting cannot be read and nobody stopped the job', async () => {
+    // Arrange: the switch question throws; the job was not told to stop.
+    const h = new Harness();
+    h.ledger = [candidate('a')];
+    h.fail('a');
+    const ports = h.ports();
+    ports.setting.enabled = async () => {
+      throw new Error('switch unreadable');
+    };
+
+    // Act
+    const failure = await new AutoResumeService(ports, SETTINGS).run(new AbortController().signal).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+
+    // Assert: a failed question is not a stop and not a "no": the pass fails loudly and the entry stays owed.
+    should(failure?.message).equal('switch unreadable');
+    should(h.resumed).deepEqual([]);
+    should(h.ledger.map(entry => entry.id)).deepEqual(['a']);
+  });
+
   it('BG-044 should not resume an entry an uncleared ledger kept past a day, when the setting is turned on later', async () => {
     // Arrange: the leftover is 25 h old by the time a later boot finds the switch on (the declared window is 24 h).
     const h = new Harness();
