@@ -35,6 +35,7 @@ import {
 import { AlreadyExistsError, type FleetDisk } from './fleet-disk.ts';
 import { FileMutationJournal, isMutationReservedName, STAGE_PREFIX } from './mutation-journal.ts';
 import type { ApplyLock, MutationJournal, SharedHistoryPooling } from './ports.ts';
+import { stampTree } from './tree-stamp.ts';
 
 /*
  * The provisioner is written over `FleetDisk` (`./fleet-disk.ts`): every file call is an asynchronous call on the
@@ -74,6 +75,7 @@ const MaterialisedRecordSchema = z.strictObject({
   hashes: z.record(z.string(), z.string()).readonly().optional(),
   links: z.record(z.string(), z.string()).readonly().optional(),
   dirs: z.array(z.string()).readonly().optional(),
+  trees: z.record(z.string(), z.string()).readonly().optional(),
   members: z.record(z.string(), z.string()).readonly().optional(),
 });
 
@@ -92,9 +94,13 @@ interface RecordView {
   readonly hashes: Readonly<Record<string, string>>;
   readonly links: Readonly<Record<string, string>>;
   readonly dirs: ReadonlySet<string>;
+  /** Each folder's stamp (`./tree-stamp.ts`) as Ferretry left it: what is INSIDE it, which a folder name cannot say. */
+  readonly trees: Readonly<Record<string, string>>;
   readonly members: Readonly<Record<string, string>>;
   /** A record from before links were fingerprinted: it has no `links`, so it cannot vouch for one. */
   readonly withoutLinks: boolean;
+  /** A record from before folders were stamped: it has no `trees`, so it cannot vouch for what is inside one. */
+  readonly withoutTrees: boolean;
   /** A record from before members were recorded: it has no `members`, so every member there reads as the person's. */
   readonly withoutMembers: boolean;
 }
@@ -105,8 +111,10 @@ const NO_RECORD: RecordView = {
   hashes: {},
   links: {},
   dirs: new Set(),
+  trees: {},
   members: {},
   withoutLinks: false,
+  withoutTrees: false,
   withoutMembers: false,
 };
 
@@ -114,7 +122,7 @@ const NO_RECORD: RecordView = {
 type Observed =
   | { readonly kind: 'file'; readonly hash: string }
   | { readonly kind: 'link'; readonly stamp: string }
-  | { readonly kind: 'dir' }
+  | { readonly kind: 'dir'; readonly stamp: string | undefined }
   | { readonly kind: 'other' };
 
 /** Why the entry captured at a name may, or may not, be taken away. */
@@ -137,6 +145,11 @@ function verdictOf(record: RecordView, key: string, seen: Observed): Verdict {
     return stamp === seen.stamp ? 'ours' : 'edited';
   }
   if (seen.kind === 'dir') {
+    // A recorded folder is Ferretry's only while what is INSIDE it is what Ferretry left; the name alone vouches for nothing.
+    if (record.dirs.has(key) && !record.withoutTrees) {
+      const stamp = record.trees[key];
+      return stamp !== undefined && stamp === seen.stamp ? 'ours' : 'edited';
+    }
     const known = record.dirs.has(key);
     const namedOnly = record.entries.has(key) && record.hashes[key] === undefined && record.links[key] === undefined;
     return known || namedOnly ? 'ours' : 'unrecorded';
@@ -219,6 +232,9 @@ function leftReason(name: string, seen: Observed, verdict: Verdict, why: 'write'
   }
   if (seen.kind === 'file' && verdict === 'unrecorded' && why === 'write') {
     return `${name} predates Ferretry's tracking; Ferretry left it. Delete it to get the generated one.`;
+  }
+  if (seen.kind === 'dir' && verdict === 'edited') {
+    return `${name} has something in it that Ferretry did not put there (or changed); Ferretry left the whole folder`;
   }
   if (seen.kind === 'link' && verdict === 'edited') return `${name} is not the link Ferretry made; Ferretry left it`;
   return `${name} was not put there by Ferretry; Ferretry left it`;
@@ -700,7 +716,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async observe(target: string): Promise<Observed | undefined> {
     const found = await this.disk.lstat(target);
     if (found === undefined) return undefined;
-    if (found.kind === 'directory') return { kind: 'dir' };
+    if (found.kind === 'directory') return { kind: 'dir', stamp: await stampTree(this.disk, target) };
     if (found.kind === 'symlink') {
       // The root cannot read where a link leads, so a link is vouched for by WHICH link it is: the object, its size and
       // the time it was made. Swapped for another link, even one to the same place, it is a different one.
@@ -880,6 +896,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const hashes: Record<string, string> = {};
     const links: Record<string, string> = {};
     const dirs: string[] = [];
+    const trees: Record<string, string> = {};
     for (const key of parsed.data.entries) {
       if (declined.has(key)) continue;
       const seen = await this.observe(path.join(home, key));
@@ -887,11 +904,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
       entries.push(key);
       if (seen.kind === 'file') hashes[key] = seen.hash;
       else if (seen.kind === 'link') links[key] = seen.stamp;
-      else dirs.push(key);
+      else {
+        dirs.push(key);
+        if (seen.stamp !== undefined) trees[key] = seen.stamp;
+      }
     }
     const members = state.members.get(operation.path) ?? {};
     // Always all four, even empty: a record without `links` or `members` is one from before they were kept, and is read as that.
-    const record: MaterialisedRecord = { version: 1, entries, hashes, links, dirs, members };
+    const record: MaterialisedRecord = { version: 1, entries, hashes, links, dirs, trees, members };
     return `${JSON.stringify(record)}\n`;
   }
 
@@ -999,9 +1019,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
       hashes: parsed.data.hashes ?? {},
       links: parsed.data.links ?? {},
       dirs: new Set(parsed.data.dirs ?? []),
+      trees: parsed.data.trees ?? {},
       members: parsed.data.members ?? {},
       withoutLinks: parsed.data.links === undefined,
       withoutMembers: parsed.data.members === undefined,
+      withoutTrees: parsed.data.trees === undefined,
     };
   }
 
