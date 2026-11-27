@@ -6,6 +6,7 @@ import { INPUT_MAX_FIELDS } from '../../../../../core/vault/contract/targets.ts'
 import { AccountProposeCallSchema } from '../../../../accounts/contract/routes/accounts.ts';
 import { IDENTITY_KEY_PATTERN } from '../../../../accounts/contract/routes/identity-links.ts';
 import { LOGIN_RECIPE_MAX_LENGTH } from '../../../../accounts/contract/routes/login-recipes.ts';
+import { BROWSER_IDENTITY_KEY_PATTERN, BrowserIdentityKeySchema } from '../../../../browsers/contract/wire.ts';
 import {
   BROWSER_CONSOLE_LEVELS,
   BROWSER_CPU_THROTTLE_MAX,
@@ -51,6 +52,15 @@ describe('the tool schemas’ limits', () => {
     ]);
     should(property('browser_emulate', 'cpuThrottle').maximum).equal(BROWSER_CPU_THROTTLE_MAX);
     should(property('browser_wait_for', 'time').maximum).equal(AGENT_TOOL_MAX_WAIT_MS);
+  });
+
+  it('should carry the browser identity argument on browser_open exactly as the contract’s identity key', () => {
+    // The daemon's browser.open takes the same contract schema (browsers' identity-tools test), so one key grammar rules both rows.
+    const identity = property('browser_open', 'identity');
+    should(identity.pattern).equal(BROWSER_IDENTITY_KEY_PATTERN.source);
+    const mcp = new RegExp(identity.pattern as string, 'u');
+    for (const key of ['b', 'work-2', 'a'.repeat(32), '', 'B', '../agent', '1a', 'a'.repeat(33)])
+      should(mcp.test(key)).equal(BrowserIdentityKeySchema.safeParse(key).success);
   });
 
   it('should carry Vault’s input limits, Lessons’ rule limit and Accounts’ recipe limit', () => {

@@ -309,6 +309,10 @@ describe('browser page helpers', () => {
     expect(
       sessionBrowserIdentity(running([page('PAGE1', { name: 'app', ownerSessionId: 's', ownerName: 'Hadi' })])),
     ).not.toBe(sessionBrowserIdentity(base));
+    // The identity whose Chrome holds a page is something a reader sees (its chip), so a page moving to another one is a change.
+    expect(sessionBrowserIdentity(running([page('PAGE1', { name: 'app', identity: 'work' })]))).not.toBe(
+      sessionBrowserIdentity(base),
+    );
     expect(
       sessionBrowserIdentity({
         sessionId: 'sess-1',

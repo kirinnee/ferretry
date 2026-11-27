@@ -37,6 +37,8 @@ export interface ResolvedSurface {
   readonly incognito?: true;
   /** A popup: the page that opened it. */
   readonly openerId?: string;
+  /** A browser page: the identity whose Chrome holds it. */
+  readonly identity?: string;
   /** Where it was when it was looked up. */
   readonly url?: string;
   /** A page this very call opened. */
