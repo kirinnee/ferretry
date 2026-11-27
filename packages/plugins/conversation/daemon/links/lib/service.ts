@@ -163,12 +163,28 @@ export class LinkService {
    * copy keep uses (the owner's computer copied into the harness's pool; one already pooled needs nothing; the original is
    * never written). It starts no ferret and writes no link: the start that asked for it does. A conversation this machine's
    * index does not hold is `not_found`, one that cannot be copied is `failed`, each with a plain sentence.
+   *
+   * It runs in the keep queue and asks the keep ledger first, so one conversation is never copied for two ferrets: one a
+   * ferret already keeps is refused with that ferret named. It copies the owner's COMPUTER row when there is one, so a newer
+   * ferret-home row that shares the id is never staged in its place (the start names no source, and only the computer's
+   * history is staged for it).
    */
   async stage(harness: string, id: string): Promise<Result<void, { code: 'not_found' | 'failed'; reason: string }>> {
+    const run = this.#serial.then(async () => await this.#stageNow(harness, id));
+    this.#serial = run.catch(() => undefined);
+    return await run;
+  }
+
+  async #stageNow(
+    harness: string,
+    id: string,
+  ): Promise<Result<void, { code: 'not_found' | 'failed'; reason: string }>> {
     await this.needs.index.ready();
-    const found = this.needs.index.get(harness, id);
+    const found = this.needs.index.get(harness, id, ['computer']) ?? this.needs.index.get(harness, id);
     if (found === undefined)
       return err({ code: 'not_found', reason: `No ${harness} conversation ${id} is on this machine.` });
+    const owner = (await this.#kept()).get(`${harness}:${id}`);
+    if (owner !== undefined) return err({ code: 'failed', reason: `Ferret ${owner} already keeps it.` });
     const copied = await this.needs.copier
       .copy({ harness, id, location: { kind: found.kind, label: found.label, path: found.path } })
       .catch((error: unknown) =>

@@ -1109,16 +1109,16 @@ export class FerretsService implements FerretsApi {
    * "Continue a past conversation": the transcript a start names is put where the harness finds it (the one
    * `conversation.stage` provider: the existing indexed copy-on-link); a refusal refuses the start with its reason. With NO
    * provider nothing is copied: a pooled transcript is resumed, and the launch refuses one the harness proves absent (E17).
-   * ONLY THE OWNER'S start stages: the transcript comes from the owner's own computer, and a ferret (or a pack, board or
-   * warden) must never be able to pull a host conversation into the pool by naming it. Any other asker resumes a
-   * conversation the pool already holds, and the launch refuses one it does not.
+   * ONLY A PERSON'S owner start stages (the admitted origin, never the attribution: the daemon's own helpers say `owner`
+   * too): the transcript is the owner's own, and a ferret, pack, board or warden must never pull a host conversation into
+   * the pool by naming it. Any other asker resumes one the pool already holds, and the launch refuses one it does not.
    */
   private async stageConversation(
     harness: HarnessKey,
     conversation: string | undefined,
-    by: StartRequest['by'],
+    person: boolean,
   ): Promise<Result<void, StartFailure>> {
-    const source = conversation === undefined || by !== 'owner' ? undefined : this.ports.conversationStage?.();
+    const source = conversation === undefined || !person ? undefined : this.ports.conversationStage?.();
     if (conversation === undefined || source === undefined) return ok(undefined);
     const staged = await source
       .stage({ harness, conversation })
@@ -1213,7 +1213,7 @@ export class FerretsService implements FerretsApi {
     request = decided.request;
     // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
     const named = admission.conversationInPool === true ? undefined : request.harnessConversation;
-    const staged = await this.stageConversation(harnessKey, named, request.by);
+    const staged = await this.stageConversation(harnessKey, named, request.by === 'owner' && origin.kind === 'person');
     if (!staged.ok) return staged;
     // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
     const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);
