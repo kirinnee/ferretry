@@ -1,4 +1,5 @@
 import type { HarnessKey } from '../ids.ts';
+import type { ConversationSource } from '../kinds/conversation-stage.ts';
 
 /**
  * The new-ferret page's "Continue a past conversation" list: Conversation contributes it (it owns the listing of the
@@ -22,6 +23,7 @@ export interface ContinuePick {
   readonly harness: HarnessKey;
   /** The harness's own conversation id: what a start names to resume it. */
   readonly conversation: string;
+  readonly source?: ConversationSource;
   /** The folder it ran in: it fills the Folder box. */
   readonly folder: string;
   /** What the row is called (its title, else what was first said). */

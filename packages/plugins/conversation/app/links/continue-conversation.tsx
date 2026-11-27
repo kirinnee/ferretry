@@ -195,6 +195,7 @@ function ContinueConversationBody({
       key,
       harness,
       conversation: row.id,
+      ...(row.source === undefined ? {} : { source: row.source }),
       folder: row.project,
       title: conversationHeadline(row).headline,
     });
