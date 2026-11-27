@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, open, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
@@ -25,6 +25,7 @@ import {
   type ProcessIdentity,
   type SignalOutcome,
 } from './orphan-chrome.ts';
+import { tryProfileReclaimLock } from './profile-reclaim-lock.ts';
 
 // GAP (kernel port, banned-globals stays visible here): Chrome takes a REAL `--user-data-dir`, so the agent profile, its
 // lease file and the symlink checks need a real state path and a lease no kernel port gives (`kernel.state` stores
@@ -513,6 +514,23 @@ export class BrowserProfileStore implements BrowserProfilePort {
     expected: BrowserProfileLeaseRecord,
     chromeCleared?: number,
   ): Promise<void> {
+    // The owner record can be abandoned. Its cleanup must share the same mutex as publication and lease removal:
+    // a check followed by unlink alone lets a delayed stale observer remove a successor's LIVE guard. This inode is
+    // never unlinked; the kernel releases the lock even if a reclaimer dies between its owner check and its cleanup.
+    const handle = await open(`${paths.reclaimFile}.mutex`, 'a', 0o600);
+    try {
+      while (!tryProfileReclaimLock(handle.fd, process.platform)) await this.sleep(10);
+      await this.reclaimDeadLeaseUnderLock(paths, expected, chromeCleared);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async reclaimDeadLeaseUnderLock(
+    paths: IdentityPaths,
+    expected: BrowserProfileLeaseRecord,
+    chromeCleared?: number,
+  ): Promise<void> {
     const guard = paths.reclaimFile;
     try {
       await this.createExclusive(guard, {
@@ -581,11 +599,18 @@ export class BrowserProfileStore implements BrowserProfilePort {
   }
 
   private async createExclusive(file: string, value: BrowserProfileLeaseRecord): Promise<void> {
-    const handle = await open(file, 'wx', 0o600);
+    const temporary = `${file}.tmp.${this.daemonPid}.${crypto.randomUUID()}`;
     try {
-      await handle.writeFile(`${JSON.stringify(value)}\n`);
+      const handle = await open(temporary, 'wx', 0o600);
+      try {
+        await handle.writeFile(`${JSON.stringify(value)}\n`);
+      } finally {
+        await handle.close();
+      }
+      // Exclusive publication of a complete record. No reader can mistake a guard still being written for a crash.
+      await link(temporary, file);
     } finally {
-      await handle.close();
+      await rm(temporary, { force: true });
     }
   }
 
