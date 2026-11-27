@@ -10,6 +10,7 @@ import { foldersRoutes } from './features/folders/index.ts';
 import { reposRoutes } from './features/repos/index.ts';
 import type { ScanDeps } from './features/repos/scan.ts';
 import type { ProjectFolders } from './lib/ports.ts';
+import { discoverProject } from './lib/discover.ts';
 import { ProjectRegistry } from './lib/registry.ts';
 import { listRoute, registerRoute, removeRoute } from './lib/routes.ts';
 
@@ -54,7 +55,11 @@ export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps,
           'projects.removed': payload => files.refresh.removed((payload as { id: string }).id),
         },
         // The folders a governed device may start a ferret in as an ordinary act (Ferrets reads this, never the registry).
-        hooks: { 'launch.roots:projects': { roots: async () => (await registry.list()).map(project => project.path) } },
+        hooks: {
+          'launch.roots:projects': { roots: async () => (await registry.list()).map(project => project.path) },
+          // A ferret started in a repository nobody registered: it becomes a project (a known one is left as it is).
+          'ferret.started': async started => await discoverProject(started, machine, registry),
+        },
         provides: {
           projects: {
             list: () => registry.list(),

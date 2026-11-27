@@ -15,6 +15,7 @@ export function fakeMachine(
   directories: readonly string[] = [],
   repositories: Record<string, string> = {},
   fenced: readonly string[] = [],
+  { home = '/home/owner', notCheckouts = [] as readonly string[] } = {},
 ): FakeMachine {
   const dirs = new Set(directories);
   const repos = new Map(Object.entries(repositories));
@@ -50,6 +51,11 @@ export function fakeMachine(
       repos.set(path, `${path}/.git`);
     },
     gitCommonDirectory: async root => repos.get(root),
+    home: async () => home,
+    isCheckout: async (root, common) => {
+      calls.push(`isCheckout ${root}`);
+      return repos.get(root) === common && !notCheckouts.includes(root);
+    },
   };
 }
 
