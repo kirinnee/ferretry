@@ -85,6 +85,16 @@ describe('conversation manifest', () => {
     expect(manifest.data.state.find(file => file.name === 'search')?.store).toBe('sqlite-cache');
     expect(manifest.data.state.find(file => file.name === 'message-token-key')?.mode).toBe(0o600);
   });
+  test('the fork route is a person’s and needs fleet.configure: the kernel refuses a ferret before the handler', () => {
+    const fork = routes.find(route => route.key === 'POST /v1/ferrets/:ferretId/fork');
+    expect(fork).toMatchObject({
+      caller: 'person',
+      minimum: 'operator',
+      noStore: true,
+      capability: { capability: 'fleet', axis: 'configure' },
+    });
+  });
+
   test("a ferret's screen (Terminals') and its recorded events (Ferrets') are not Conversation's routes or verbs", () => {
     const paths = [...routes, ...manifest.actions.sockets].map(route => route.path);
     expect(paths).not.toContain('/v1/ferrets/:ferretId/snapshot');
