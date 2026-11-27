@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { RENDER_PALETTE_TOKENS, RENDER_STYLE_TOKENS } from '../../src/theme/render-contract.ts';
 import {
   AccentRgbSchema,
   isPaletteToken,
@@ -153,6 +154,11 @@ describe('the token partition: a pack writes only what its kind owns', () => {
     expect([isPaletteToken('accent'), isStyleToken('accent')]).toEqual([true, false]);
     expect([isPaletteToken('motion-fast'), isStyleToken('motion-fast')]).toEqual([false, true]);
     expect([isPaletteToken('made-up'), isStyleToken('made-up')]).toEqual([false, false]);
+  });
+
+  it('takes the renderer-read tokens from render-contract.ts, one owner each', () => {
+    for (const name of RENDER_PALETTE_TOKENS) expect([isPaletteToken(name), isStyleToken(name)]).toEqual([true, false]);
+    for (const name of RENDER_STYLE_TOKENS) expect([isPaletteToken(name), isStyleToken(name)]).toEqual([false, true]);
   });
 
   it('owns every name in exactly one list, and the two lists share none', () => {
