@@ -81,6 +81,7 @@ const LOOKS = [
   { style: 'glass', palette: 'aurora' },
   { style: 'lucid', palette: 'mesh' },
   { style: 'briefing', palette: 'briefing' },
+  { style: 'accessible', palette: 'contrast' },
 ].filter(look => onlyLooks.length === 0 || onlyLooks.includes(look.style));
 const VIEWPORTS = [
   { name: '390', width: 390, height: 2_400, phone: true },

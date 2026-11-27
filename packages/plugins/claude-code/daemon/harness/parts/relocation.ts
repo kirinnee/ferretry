@@ -1,60 +1,53 @@
 import type { LaunchSpec, PackedConversation, UnpackedConversation } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
-import { claudeTranscriptPath, isConversationId } from '../../lib/harness/claude-path.ts';
-import type { ClaudeCore, Serves } from './core.ts';
-import { asObject, includesSubagent, type Json, type Line, linesOf, MAX_FORK_BYTES, sourceBytes } from './fork.ts';
+import { claudeProjectFolder, claudeTranscriptPath, isConversationId } from '../../lib/harness/claude-path.ts';
+import { hasRealTurn, type Json, recordMover, sourceFolders } from '../../lib/harness/relocate-records.ts';
+import { type ClaudeCore, claudeHome, type Serves } from './core.ts';
+import { includesSubagent, type Line, linesOf, MAX_FORK_BYTES, sourceBytes } from './fork.ts';
 import { historyPart } from './history.ts';
 import { ensureHome, poolHistory, requirePrivateChain } from './home.ts';
 import { resolveTranscriptFile } from './transcript.ts';
 
-/** The Claude Code versions a conversation was measured to resume on (docs/migration-cross-harness.md, "Versions"). */
-const TESTED_CLAUDE_VERSION = /^2\.1\.[23]\d\d$/u;
+/**
+ * The Claude Code versions a conversation was measured to resume on, each one exactly (docs/migration-cross-harness.md,
+ * "Versions": 2.1.281 and 2.1.304; 2.1.327 by the real-CLI resume in tests/integration/claude-harness-relocate.test.ts).
+ * A version between them was never run, so it is refused: a range would admit 2.1.399 on the strength of 2.1.304.
+ */
+const TESTED_CLAUDE_VERSIONS: ReadonlySet<string> = new Set(['2.1.281', '2.1.304', '2.1.327']);
 const PACKED_PATH = /^projects\/([^/]+)\/([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})\.jsonl$/u;
-/** The keys a record uses for a folder of the work tree, at any depth (a `cwd` on every record, a `worktreeSession`'s paths). */
-const FOLDER_KEYS = new Set(['cwd', 'originalCwd', 'worktreePath']);
-/** The keys a record uses for the conversation's own id, at any depth. A `forkedFrom` id names ANOTHER conversation and is kept. */
-const SELF_ID_KEYS = new Set(['sessionId', 'session_id']);
 
 type Refusal = Result<never, { readonly reason: string }>;
 const refuse = (reason: string): Refusal => err({ reason });
 
-/** `value` moved from the `from` tree to the `to` tree, or `undefined` when it is not inside `from` (a folder elsewhere is kept). */
-function moved(value: string, from: string, to: string): string | undefined {
-  if (value === from) return to;
-  return value.startsWith(`${from}/`) ? `${to}${value.slice(from.length)}` : undefined;
-}
-
-/** Rewrites folders and self ids in place, at any depth; true when something changed. */
-function rewriteRecord(value: unknown, plan: { from?: string; to: string; oldId: string; newId: string }): boolean {
-  let changed = false;
-  if (Array.isArray(value)) {
-    for (const item of value) changed = rewriteRecord(item, plan) || changed;
-    return changed;
-  }
-  const object = asObject(value);
-  if (object === undefined) return false;
-  for (const [key, inner] of Object.entries(object)) {
-    if (typeof inner === 'string') {
-      const next =
-        FOLDER_KEYS.has(key) && plan.from !== undefined
-          ? moved(inner, plan.from, plan.to)
-          : SELF_ID_KEYS.has(key) && inner === plan.oldId && plan.newId !== plan.oldId
-            ? plan.newId
-            : undefined;
-      if (next !== undefined && next !== inner) {
-        object[key] = next;
-        changed = true;
-      }
-    } else changed = rewriteRecord(inner, plan) || changed;
-  }
-  return changed;
-}
-
 /** The folder the source worktree was: the recorded `cwd` Claude spells as the packed folder, else the first one recorded. */
-function sourceFolder(lines: readonly Line[], spelling: string, id: string): string | undefined {
+function sourceFolder(lines: readonly Line[], spelling: string): string | undefined {
   const cwds = lines.flatMap(({ record }) => (typeof record?.cwd === 'string' ? [record.cwd] : []));
-  return cwds.find(cwd => claudeTranscriptPath(cwd, id).split('/')[1] === spelling) ?? cwds[0];
+  return cwds.find(cwd => claudeProjectFolder(cwd) === spelling) ?? cwds[0];
+}
+
+const recordsOf = (lines: readonly Line[]): Json[] =>
+  lines.flatMap(({ record }) => (record === undefined ? [] : [record]));
+
+/**
+ * Whether this home's `projects` is the link to THIS machine's pool: a link that resolves to the pool's real `projects`
+ * folder. Claude reads and writes through that link, so a conversation written into the pool is found by Claude only
+ * if it is the link the launch made; any other link (or none) would make the move claim a conversation Claude cannot see.
+ */
+async function projectsIsPool(core: ClaudeCore, spec: LaunchSpec): Promise<boolean> {
+  const resolve = core.deps.resolveLink;
+  if (resolve === undefined) return false;
+  const home = claudeHome(core, spec.ferret);
+  const link = home.resolve('projects');
+  if (!link.ok || (await home.lstat(link.value))?.kind !== 'symlink') return false;
+  const pool = core.deps.roots.historyPool();
+  const projects = pool.resolve('projects');
+  if (!projects.ok) return false;
+  const [real, leads] = await Promise.all([
+    pool.realPath(projects.value).catch(() => undefined),
+    resolve(String(link.value)),
+  ]);
+  return real !== undefined && leads === String(real);
 }
 
 function joined(parts: readonly Uint8Array[]): Uint8Array {
@@ -75,9 +68,9 @@ export const relocationPart = (core: ClaudeCore): Serves<'packConversation' | 'u
       return 'Claude Code was not found on this machine, so a moved conversation cannot be checked against it.';
     const version = await core.deps.probe.version(location.path);
     if (version.state !== 'ok') return `Claude Code at ${location.path} could not say its version: ${version.reason}`;
-    return TESTED_CLAUDE_VERSION.test(version.version)
+    return TESTED_CLAUDE_VERSIONS.has(version.version)
       ? undefined
-      : `Claude Code ${version.version} was not tested for moving a conversation (tested: 2.1.2xx and 2.1.3xx), so nothing was written.`;
+      : `Claude Code ${version.version} was not tested for moving a conversation (tested: ${[...TESTED_CLAUDE_VERSIONS].join(', ')}), so nothing was written.`;
   }
 
   return {
@@ -91,8 +84,11 @@ export const relocationPart = (core: ClaudeCore): Serves<'packConversation' | 'u
         const source = await resolveTranscriptFile(core, ferret);
         if (source === undefined) return refuse('this ferret has no conversation on disk to move');
         const bytes = await sourceBytes(source.home, source.file, 'move');
-        if (includesSubagent(linesOf(bytes)))
+        const lines = linesOf(bytes);
+        if (includesSubagent(lines))
           return refuse('this conversation ran a subagent whose separate transcript cannot be moved with it');
+        if (!hasRealTurn(recordsOf(lines)))
+          return refuse('this conversation has no turn in it yet (only notes), so Claude Code could not resume it');
         const folder = source.file.slice(0, source.file.lastIndexOf('/'));
         const spelling = folder.slice(folder.lastIndexOf('/') + 1);
         return ok({ bytes, relPath: `projects/${spelling}/${source.conversation}.jsonl` });
@@ -124,26 +120,38 @@ export const relocationPart = (core: ClaudeCore): Serves<'packConversation' | 'u
           return refuse('that is not a whole Claude Code conversation file');
         if (includesSubagent(lines))
           return refuse('that conversation ran a subagent whose separate transcript is not in the pack');
+        const records = recordsOf(lines);
+        if (!hasRealTurn(records))
+          return refuse('that conversation has no turn in it yet (only notes), so Claude Code could not resume it');
         const sentence = await untested();
         if (sentence !== undefined) return refuse(sentence);
 
-        const plan = {
-          from: sourceFolder(lines, spelling, oldId),
+        const move = recordMover({
+          from: sourceFolders(records, sourceFolder(lines, spelling)),
           to: folder.replace(/\/+$/u, '') || '/',
+          home: String(spec.home),
           oldId,
           newId,
-        };
+          spell: claudeProjectFolder,
+        });
         const encoder = new TextEncoder();
-        const body = joined(
-          lines.map(({ bytes, record }) => {
-            const copy = JSON.parse(JSON.stringify(record)) as Json;
-            return rewriteRecord(copy, plan) ? encoder.encode(`${JSON.stringify(copy)}\n`) : bytes;
-          }),
-        );
+        const parts: Uint8Array[] = [];
+        for (const { bytes, record } of lines) {
+          const moved =
+            record === undefined ? { refusal: 'that is not a whole Claude Code conversation file' } : move(record);
+          if ('refusal' in moved) return refuse(moved.refusal);
+          if ('drop' in moved) continue;
+          parts.push(moved.changed ? encoder.encode(`${JSON.stringify(moved.record)}\n`) : bytes);
+        }
+        const body = joined(parts);
 
         const home = await ensureHome(core, spec);
         await requirePrivateChain(home);
         await poolHistory(core, spec.ferret);
+        if (!(await projectsIsPool(core, spec)))
+          return refuse(
+            "this ferret's conversations folder is not linked to this machine's shared history, so Claude Code would not find the moved conversation there and nothing was written",
+          );
         const pool = core.deps.roots.historyPool();
         const relative = claudeTranscriptPath(folder, newId);
         const file = pool.resolve(relative);
