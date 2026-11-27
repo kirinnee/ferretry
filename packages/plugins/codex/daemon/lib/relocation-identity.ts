@@ -1,8 +1,4 @@
-/** One rollout line as a record: a `type` and an object `payload`. */
-export type RolloutRecord = Record<string, unknown> & { type: string; payload: Record<string, unknown> };
-
-export const asObject = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+import { object as asObject, type ForkRecord as RolloutRecord } from './fork-records.ts';
 
 type Rewritten = { readonly kind: 'rewritten'; readonly record: RolloutRecord };
 type Refused = { readonly kind: 'refused'; readonly reason: string };
@@ -161,52 +157,4 @@ export function relocateIdentity(record: RolloutRecord, move: Relocation): Rewri
   };
   const rewritten = walk(record, '') as RolloutRecord;
   return refusal === undefined ? { kind: 'rewritten', record: rewritten } : { kind: 'refused', reason: refusal };
-}
-
-/**
- * Whether the conversation leans on a native subagent: such a child keeps its own rollout, which a copy of this one does
- * not carry, so it cannot be resumed on another machine (refused, as a fork refuses it).
- */
-export function dependsOnSubagent(records: readonly RolloutRecord[]): boolean {
-  return records.some(record => {
-    const payload = record.payload;
-    // Native compaction can carry response items as replacement_history, including stored child tool calls.
-    if (
-      record.type === 'compacted' &&
-      Array.isArray(payload.replacement_history) &&
-      dependsOnSubagent(
-        payload.replacement_history.flatMap(item => {
-          const response = asObject(item);
-          return response === undefined ? [] : [{ type: 'response_item', payload: response }];
-        }),
-      )
-    )
-      return true;
-    if (record.type === 'session_meta' && asObject(payload.source)?.subagent !== undefined) return true;
-    if (record.type === 'event_msg' && String(payload.type).startsWith('collab_')) return true;
-    if (record.type !== 'response_item') return false;
-    const name = typeof payload.name === 'string' ? payload.name.split('.').at(-1) : undefined;
-    return (
-      name !== undefined &&
-      ['spawn_agent', 'resume_agent', 'send_input', 'wait', 'wait_agent', 'close_agent'].includes(name)
-    );
-  });
-}
-
-/** Whether the record is a person's own turn: a user message that is not Codex's environment preamble. */
-export function startsTurn(record: RolloutRecord): boolean {
-  if (record.type === 'event_msg') return record.payload.type === 'user_message';
-  const payload = record.payload;
-  if (record.type !== 'response_item' || payload.type !== 'message' || payload.role !== 'user') return false;
-  const words = (Array.isArray(payload.content) ? payload.content : [payload.content])
-    .flatMap(block => {
-      const text = asObject(block)?.text;
-      return typeof text === 'string' ? [text] : [];
-    })
-    .join('\n')
-    .trimStart();
-  return (
-    words.trim() !== '' &&
-    !['<environment_context>', '<user_instructions>', '<user_environment>'].some(prefix => words.startsWith(prefix))
-  );
 }

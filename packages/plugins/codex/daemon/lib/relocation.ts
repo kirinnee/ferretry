@@ -1,13 +1,6 @@
-import {
-  asObject,
-  dependsOnSubagent,
-  startsTurn,
-  relocateIdentity,
-  type RolloutRecord,
-} from './relocation-identity.ts';
-
-/** The Codex writers whose rollouts were exercised by `tests/realworld/relocate-resume.test.ts` (real binary, loopback model). */
-const RELOCATABLE_ROLLOUT_WRITERS: ReadonlySet<string> = new Set(['0.145.0', '0.166.0', '0.170.0']);
+import { object as asObject, dependsOnSubagent, startsTurn, type ForkRecord as RolloutRecord } from './fork-records.ts';
+import { TESTED_ROLLOUT_WRITERS } from './fork.ts';
+import { relocateIdentity } from './relocation-identity.ts';
 
 /** A rollout's place in a Codex home: `sessions/YYYY/MM/DD/rollout-<stamp>-<id>.jsonl`, one plain relative path. */
 const ROLLOUT_PATH =
@@ -65,7 +58,7 @@ export function relocateRollout(
   if (header === undefined || headerAt > 7 || typeof header.payload.id !== 'string')
     return refused('the conversation has no header Ferretry knows how to read, so it cannot be moved');
   const version = header.payload.cli_version;
-  if (typeof version !== 'string' || !RELOCATABLE_ROLLOUT_WRITERS.has(version))
+  if (typeof version !== 'string' || !TESTED_ROLLOUT_WRITERS.has(version))
     return refused(
       `the conversation was written by Codex ${typeof version === 'string' ? version : '(unknown version)'}, a rollout format Ferretry has not tested, so it was not moved`,
     );

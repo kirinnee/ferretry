@@ -25,7 +25,7 @@ export type RolloutCut =
 const refused = (reason: string): RolloutCut => ({ kind: 'refused', reason });
 
 /** Each writer was exercised by tests/realworld/fork-resume.test.ts with synthetic history and a loopback model. */
-const TESTED_ROLLOUT_WRITERS = new Set(['0.145.0', '0.166.0', '0.170.0']);
+export const TESTED_ROLLOUT_WRITERS = new Set(['0.145.0', '0.166.0', '0.170.0']);
 
 /** The file name Codex files a rollout under: `sessions/YYYY/MM/DD/rollout-YYYY-MM-DDTHH-MM-SS-<id>.jsonl`. */
 export function rolloutName(id: string, now: Date): string {
