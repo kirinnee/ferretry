@@ -27,6 +27,10 @@ const held: ProjectInfo = ProjectInfoSchema.parse({
   })),
 });
 const adopted = new Set<string>();
+let moved = false;
+const MOVE = 'POST /v1/worktrees/move';
+const FROM = '/work/trees/site-nav';
+const TO = '/home/fake/.ferretry-worktrees/ferretry-project1/site-ab12345678/feat-nav-12345678';
 
 const client = scripted({
   'GET /v1/projects': () => [held],
@@ -52,14 +56,35 @@ const client = scripted({
         : [];
     return listAnswer(
       dir,
-      [...(ANSWERS[dir] ?? []), ...extra].map(r =>
-        adopted.has(r.path) ? row(r.path, r.live.branch ?? '', { tracked: 'adopted' }) : r,
-      ),
+      [...(ANSWERS[dir] ?? []), ...extra].map(r => {
+        if (mode.startsWith('move')) {
+          if (r.path === FROM)
+            return row(moved ? TO : FROM, 'feat/nav', {
+              ferrets: [{ id: 'stopped-fixture', active: false }],
+              move: moved
+                ? { worktreeId: 'nav', reason: 'It is already in the project’s worktree root.' }
+                : { worktreeId: 'nav', destination: TO, reviewedIdentity: 'a'.repeat(64) },
+            });
+          return {
+            ...r,
+            move: {
+              worktreeId: r.path,
+              reason: r.main ? 'The main checkout cannot move.' : 'Adopt it first to move it.',
+            },
+          };
+        }
+        return adopted.has(r.path) ? row(r.path, r.live.branch ?? '', { tracked: 'adopted' }) : r;
+      }),
     );
   },
   [ADOPT]: (call: { body?: unknown }) => {
     adopted.add((call.body as { path: string }).path);
     return {};
+  },
+  [MOVE]: () => {
+    if (mode === 'move-refused') throw new Error('a live ferret started in this checkout; nothing was moved');
+    moved = true;
+    return { from: FROM, to: TO };
   },
 });
 

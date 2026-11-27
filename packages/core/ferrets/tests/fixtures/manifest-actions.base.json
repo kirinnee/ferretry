@@ -1931,6 +1931,24 @@
     },
     {
       "audit": {
+        "skip": "moving a checkout preserves its files and branch; the registry retains its ownership"
+      },
+      "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "filesystem"
+      },
+      "guard": {
+        "none": "answers the old and new checkout paths, no file contents"
+      },
+      "key": "POST /v1/worktrees/move",
+      "method": "POST",
+      "minimum": "operator",
+      "noStore": true,
+      "path": "/v1/worktrees/move"
+    },
+    {
+      "audit": {
         "skip": "adopting files ownership in the worktree registry, as creating a checkout does"
       },
       "caller": "any",

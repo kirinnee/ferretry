@@ -22,6 +22,7 @@ export type WorktreeErrorCode =
   | 'unsafe_checkout_filter'
   | 'verification_failed'
   | 'unsafe_remove'
+  | 'unsafe_move'
   | 'unknown_worktree'
   | 'no_managed_root'
   | 'unresolved_base'

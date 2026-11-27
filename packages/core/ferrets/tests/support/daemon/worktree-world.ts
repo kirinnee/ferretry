@@ -6,6 +6,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { fixedClock, MemoryStateFolder } from '@ferretry/kernel/testing';
 import { type ProjectRepository, WorktreesFile } from '../../../contract/index.ts';
 import { buildWorktrees } from '../../../daemon/modules/worktrees.ts';
+import type { WorktreeSessionFact } from '../../../daemon/lib/worktrees/service.ts';
 import type { WorktreeRouteKey } from '../../../daemon/lib/runtime/mounts/worktrees.ts';
 import type { FencedPath, FerretId, SpawnBytesOptions } from '@ferretry/kernel/contract';
 import { bunSpawn } from '../../../../kernel/host/adapters/process.ts';
@@ -98,24 +99,32 @@ export async function worktreeRouteWorld(
   options: WorktreeWorldOptions & {
     /** The daemon's project registry, by id (the real one is Projects'). */
     readonly projects?: ReadonlyMap<string, ProjectRepository>;
+    readonly sessions?: () => Promise<readonly WorktreeSessionFact[] | undefined>;
+    readonly withFerretMove?: <T>(path: string, move: () => Promise<T>) => Promise<T>;
   } = {},
 ) {
   const world = await composeWorktreeWorld(label, options);
   if (world.io === undefined) throw new Error('the worktrees root named no folder');
+  const hostIo = world.io;
   const state = new MemoryStateFolder();
   const clock = fixedClock('2026-11-16T00:00:00.000Z');
+  let nextId = 0;
   const built = buildWorktrees({
     state: state.port([WorktreesFile]),
     clock,
     stateHomeHolding: async folder =>
       isWithinDirectory(path.join(world.parent, 'home'), folder) ? path.join(world.parent, 'home') : undefined,
-    io: world.io,
-    ioFor: world.ioFor,
+    io: hostIo,
+    ioFor: folders => {
+      const scoped = world.ioFor(folders);
+      return scoped === undefined ? undefined : { ...scoped, git: hostIo.git };
+    },
     projectRepository: async project => options.projects?.get(project),
-    sessions: async () => [],
+    sessions: options.sessions ?? (async () => []),
     terminalRoots,
+    withFerretMove: options.withFerretMove,
     ...(withTerminalRemoval === undefined ? {} : { withTerminalRemoval }),
-    newId: () => 'ownership-token-0001',
+    newId: () => `ownership-token-${++nextId}`,
   });
   const call = async (
     key: WorktreeRouteKey,
