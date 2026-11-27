@@ -9,6 +9,7 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
 import { fileFleetCatalogDeps } from '../../../daemon/adapters/account-model-files.ts';
 import { CommandCache } from '../../../daemon/adapters/command-cache.ts';
 import { cloneConfigFilesOver, fileFleetSetupDeps } from '../../../daemon/adapters/setup-files.ts';
@@ -184,7 +185,11 @@ const setupOver = async (world: FleetWorld, patch: Partial<Parameters<typeof fil
   const held: { name: string; value: string }[] = [];
   const setup = fileFleetSetupDeps({
     host,
-    catalog: { layout: catalog.layout, locate: () => '/bin/claude' } as never,
+    catalog: {
+      layout: catalog.layout,
+      locate: () => '/bin/claude',
+      kits: () => new Map([['claude', claudeRuntimesKit]]),
+    } as never,
     logins: fakeLogins(),
     tools: {} as never,
     daemonId: () => 'daemon-1',

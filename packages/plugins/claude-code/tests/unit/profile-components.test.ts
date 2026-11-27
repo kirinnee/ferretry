@@ -57,10 +57,10 @@ describe('the Claude Code hooks source', () => {
 });
 
 describe('the Claude Code runtimes kit', () => {
-  it('is offered through the settings source, empty, and not through the hooks source', () => {
+  it('offers the host-scan kit through the settings source and not through the hooks source', () => {
     const source = claudeSettingsSource(() => new Map());
     expect(source.kit).toBe(claudeRuntimesKit);
-    expect(Object.keys(claudeRuntimesKit)).toEqual([]);
+    expect(source.kit?.scanHost).toBeFunction();
     expect(claudeHooksSource(() => new Map()).kit).toBeUndefined();
   });
 });

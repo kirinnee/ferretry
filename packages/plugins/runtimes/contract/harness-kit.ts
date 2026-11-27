@@ -113,6 +113,52 @@ export interface KitHostLogin {
   readonly reason?: string;
 }
 
+/** One guarded host document read; `source` is its absolute path. */
+export type KitHostDocumentRead =
+  | { readonly kind: 'text'; readonly source: string; readonly text: string; readonly bytes: number }
+  | { readonly kind: 'absent'; readonly source: string }
+  | { readonly kind: 'too-large'; readonly source: string; readonly bytes: number }
+  | { readonly kind: 'unreadable'; readonly source: string; readonly reason: string };
+
+/** A host skill folder and the digest of its whole content. */
+export interface KitHostSkill {
+  readonly item: string;
+  readonly source: string;
+  readonly digest: string;
+}
+
+/** A project instructions file, only checked for existence; its content is never read. */
+export interface KitProjectInstructionHint {
+  readonly path: string;
+  readonly file: string;
+  readonly verified: boolean;
+}
+
+/** Setup documents and safe login facts, before Runtimes locates commands and reports missing MCP commands. */
+export interface KitHostSetup {
+  readonly login: KitHostLogin;
+  readonly instructions: KitHostDocumentRead;
+  readonly settings: KitHostDocumentRead;
+  readonly mcp?: KitHostDocumentRead;
+  readonly projectInstructions?: readonly KitProjectInstructionHint[];
+  readonly skills: readonly KitHostSkill[];
+  readonly problems: readonly string[];
+}
+
+/** Host scan operations remain guarded by Runtimes' kernel roots; the harness chooses its own setup paths. */
+export interface KitHostScanInput {
+  readonly userHome: string;
+  readonly configuredHome?: string;
+  read(home: string, path: string): Promise<KitHostDocumentRead>;
+  readUserMcp(): Promise<KitHostDocumentRead>;
+  skills(
+    home: string,
+    directory: string,
+  ): Promise<{ readonly found: readonly KitHostSkill[]; readonly problems: readonly string[] }>;
+  login(): Promise<KitHostLogin>;
+  projectInstructions(mcp: KitHostDocumentRead): Promise<readonly KitProjectInstructionHint[]>;
+}
+
 /** What a plugin is asked for to name a runtime's extra environment and files. */
 export interface KitExtrasInput {
   readonly home: string;
@@ -170,6 +216,7 @@ export interface RuntimesHarnessKit {
 
   // Login notes and host import.
   loginNote?(login: KitHostLogin): string;
+  scanHost?(input: KitHostScanInput): Promise<KitHostSetup>;
 
   // The launch line.
   readonly wrapper?: {

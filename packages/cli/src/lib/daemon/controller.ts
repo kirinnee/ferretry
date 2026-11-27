@@ -728,11 +728,14 @@ export class DaemonController {
   }
 
   async #stopAndWatch(owner: IDaemonSupervisor, pidHint: number | undefined): Promise<void> {
-    await owner.stop({ pidHint, escalate: false });
+    // The daemon's identity BEFORE the first signal: every later look and signal is tied to it, so a pid reused by an
+    // unrelated process after the daemon exits reads as "gone", never as a daemon still to be killed.
+    const identity = pidHint === undefined ? undefined : await owner.identify(pidHint);
+    await owner.stop({ pidHint, identity, escalate: false });
     const startedAtMs = this.deps.clock.now();
     let escalated = false;
     while (true) {
-      if (await this.#down(owner, pidHint)) return;
+      if (await this.#down(owner, pidHint, identity)) return;
       const decision = decideShutdown(this.deps.clock.now() - startedAtMs, escalated, this.shutdown);
       if (decision === 'give-up') {
         throw new DaemonShutdownFailedError(
@@ -742,15 +745,15 @@ export class DaemonController {
       if (decision === 'escalate') {
         escalated = true;
         this.deps.out.warn(`${this.#name} has not stopped; escalating to an unconditional kill`);
-        await owner.stop({ pidHint, escalate: true });
+        await owner.stop({ pidHint, identity, escalate: true });
       }
       await this.deps.clock.sleep(this.shutdown.cadenceMs);
     }
   }
 
-  async #down(owner: IDaemonSupervisor, pidHint: number | undefined): Promise<boolean> {
+  async #down(owner: IDaemonSupervisor, pidHint: number | undefined, identity: string | undefined): Promise<boolean> {
     if ((await this.deps.health.probe()) !== undefined) return false;
-    const report = await owner.inspect(pidHint === undefined ? undefined : { pid: pidHint });
+    const report = await owner.inspect(pidHint === undefined ? undefined : { pid: pidHint, identity });
     return report.state !== 'running';
   }
 }

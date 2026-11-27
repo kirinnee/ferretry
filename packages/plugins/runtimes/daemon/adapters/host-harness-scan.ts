@@ -39,7 +39,7 @@ import {
   scannedMcpServers,
 } from '../lib/account/import.ts';
 import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
-import { harnessKeyOfKind } from '../lib/harness-kind.ts';
+import { harnessKeyOfKind, UnsupportedHarnessError } from '../lib/harness-kind.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import type { HostEntry, HostFiles } from './ports.ts';
 
@@ -50,7 +50,7 @@ interface HostCommandResolver {
 
 export interface HostHarnessScanDeps {
   /** Each harness plugin's kit, read live for every scan. */
-  readonly kits?: () => ReadonlyMap<HarnessKind, RuntimesHarnessKit>;
+  readonly kits: () => ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined;
   /** The host's files, read only. */
   readonly files: HostFiles;
   /** The home root provided by the permitted host adapter. */
@@ -93,36 +93,23 @@ export class HostHarnessScanner {
 
   /** Both harnesses, installed or not, in a stable order. */
   async scan(): Promise<readonly HostHarnessScan[]> {
-    const kits = this.deps.kits?.();
+    const kits = this.deps.kits();
     return await Promise.all([this.#claude(kits?.get('claude')), this.#codex(kits?.get('codex'))]);
   }
 
-  async #claude(_kit?: RuntimesHarnessKit): Promise<HostHarnessScan> {
-    const named = this.deps.claudeConfigDir?.trim() ?? '';
-    const configured = named !== '' && isAbsolute(named) ? named : undefined;
-    const home = configured ?? join(this.deps.userHome, '.claude');
-    const [instructions, settings, mcp, skills] = await Promise.all([
-      this.#read(home, join(home, 'CLAUDE.md')),
-      this.#read(home, join(home, 'settings.json')),
-      configured === undefined ? this.#readUserClaudeJson() : this.#read(home, join(home, '.claude.json')),
-      this.#skills('claude', home, join(home, 'skills')),
-    ]);
-    const login = await this.#login('claude');
-    const projectInstructions = await this.#projectInstructions({ harness: 'claude', mcp } as HostHarnessScan);
+  async #claude(kit?: RuntimesHarnessKit): Promise<HostHarnessScan> {
+    if (kit?.scanHost === undefined) throw new UnsupportedHarnessError('claude');
     return await this.#complete({
       harness: 'claude',
-      login,
-      instructions,
-      settings,
-      mcp,
-      projectInstructions,
-      skills: skills.found,
-      problems: [
-        ...(named !== '' && configured === undefined
-          ? [`CLAUDE_CONFIG_DIR is the relative path "${named}", so ${home} was read instead.`]
-          : []),
-        ...skills.problems,
-      ],
+      ...(await kit.scanHost({
+        userHome: this.deps.userHome,
+        configuredHome: this.deps.claudeConfigDir,
+        read: (home, path) => this.#read(home, path),
+        readUserMcp: () => this.#readUserClaudeJson(),
+        skills: (home, directory) => this.#skills('claude', home, directory),
+        login: () => this.#login('claude'),
+        projectInstructions: mcp => this.#projectInstructions({ harness: 'claude', mcp } as HostHarnessScan),
+      })),
     });
   }
 
