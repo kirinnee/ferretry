@@ -482,6 +482,21 @@ const measureInPage = ({
   for (const [kind, el, side] of marksOf) {
     const tone = toneOf(kind === 'cell' ? el : (el.parentElement ?? el));
     toneSeen.add(tone);
+    // The browser PAINTS the mark: a box, shown, not transparent, and a border of that side (the colour read below) that is drawn.
+    const box = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    const edge = side === 'borderTopColor' ? 'Top' : 'Right';
+    const unpainted = [
+      box.width <= 0 || box.height <= 0 ? 'no box' : '',
+      style.visibility !== 'visible' ? `visibility ${style.visibility}` : '',
+      opacityOf(el) <= 0 ? 'opacity 0' : '',
+      Number.parseFloat(style[`border${edge}Width` as 'borderTopWidth']) <= 0 ||
+      style[`border${edge}Style` as 'borderTopStyle'] === 'none'
+        ? 'no border'
+        : '',
+    ].filter(why => why !== '');
+    if (unpainted.length > 0)
+      rows.push({ category: 'marks', what: `${tone} ${kind} mark painted`, detail: unpainted.join(', ') });
     const back = behind(kind === 'cell' ? (el.parentElement as Element) : (el.parentElement?.parentElement as Element));
     const [r, gr, b, a] = rgba(getComputedStyle(el)[side]);
     const mark: [number, number, number] = [
@@ -740,6 +755,33 @@ describe('hypermedia across every theme (r12 H5)', () => {
         await close();
       }
     });
+  });
+
+  /** THE MARKS ARE PAINTED: a stylesheet that hides, fades or un-borders the tier and alignment marks is reported, whatever colours they hold. */
+  it('reports series marks the browser does not paint (hidden, invisible, transparent or without a border)', async () => {
+    const SUPPRESS = {
+      'display none': 'display: none',
+      'visibility hidden': 'visibility: hidden',
+      'opacity 0': 'opacity: 0',
+      'no border': 'border-width: 0',
+    } as const;
+    for (const [name, declaration] of Object.entries(SUPPRESS)) {
+      const { tab, close } = await open(VIEWPORTS[1], shipped);
+      try {
+        await tab.addStyleTag({
+          content: `.dh-doc .tl-label, .dh-doc .al-cell.al-tint { ${declaration} !important; }`,
+        });
+        const measured = (await tab.evaluate(measureInPage, {
+          highContrast: false,
+          optional: RENDER_OPTIONAL_STYLE_TOKENS.map(token => `--${token}`),
+        })) as Measured;
+        const unpainted = measured.rows.filter(row => row.category === 'marks' && row.what.endsWith('mark painted'));
+        // All 13 marks of the scene (tiers and alignment cells) are named: none passes unseen.
+        expect([name, unpainted.length >= 13]).toEqual([name, true]);
+      } finally {
+        await close();
+      }
+    }
   });
 
   /** In the page: what a terminal and a callout are drawn with, and what the root says the style's shape and header are. */
