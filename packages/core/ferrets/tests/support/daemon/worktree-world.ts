@@ -4,7 +4,7 @@ import path from 'node:path';
 import should from 'should';
 import { ApiError } from '@ferretry/kernel/contract';
 import { fixedClock, MemoryStateFolder } from '@ferretry/kernel/testing';
-import { WorktreesFile } from '../../../contract/index.ts';
+import { type ProjectRepository, WorktreesFile } from '../../../contract/index.ts';
 import { buildWorktrees } from '../../../daemon/modules/worktrees.ts';
 import type { WorktreeRouteKey } from '../../../daemon/lib/runtime/mounts/worktrees.ts';
 import type { FencedPath, FerretId, SpawnBytesOptions } from '@ferretry/kernel/contract';
@@ -39,7 +39,12 @@ const spawn = {
   },
 };
 
-export async function composeWorktreeWorld(label: string) {
+/** `ferret: false` stands NO ferret in the repository: the daemon has nothing but its project registry to reach it by. */
+export interface WorktreeWorldOptions {
+  readonly ferret?: boolean;
+}
+
+export async function composeWorktreeWorld(label: string, options: WorktreeWorldOptions = {}) {
   const parent = await tempDirectory(`${label}-home`);
   const repository = await tempRepository(`${label}-repo`);
   const folders = {
@@ -62,17 +67,23 @@ export async function composeWorktreeWorld(label: string) {
   const roots = rootsPortFor(
     nodeFs(() => 'x'),
     layout,
-    ['worktrees', 'work'],
+    ['worktrees', 'work', 'imports'],
     () => folders,
     { pins },
   );
-  const io = createKernelWorktreeHostIo({
+  const inputs = {
     worktrees: roots.root('worktrees'),
-    work: ferret => roots.root('work', { ferret }),
-    ferrets: () => [{ id: WORLD_FERRET, folder: repository.root }],
+    work: (ferret: FerretId) => roots.root('work', { ferret }),
+    ferrets: () => (options.ferret === false ? [] : [{ id: WORLD_FERRET, folder: repository.root }]),
     spawn,
-  });
-  return { parent, repository, io };
+  };
+  const io = createKernelWorktreeHostIo(inputs);
+  const ioFor = (registered: readonly string[]) =>
+    createKernelWorktreeHostIo({
+      ...inputs,
+      registered: { folders: registered, root: folder => roots.root('imports', { subfolder: folder }) },
+    });
+  return { parent, repository, io, ioFor };
 }
 
 /**
@@ -84,8 +95,12 @@ export async function worktreeRouteWorld(
   label: string,
   terminalRoots: () => Promise<readonly string[] | undefined> = async () => [],
   withTerminalRemoval?: <T>(path: string, remove: () => Promise<T>) => Promise<T>,
+  options: WorktreeWorldOptions & {
+    /** The daemon's project registry, by id (the real one is Projects'). */
+    readonly projects?: ReadonlyMap<string, ProjectRepository>;
+  } = {},
 ) {
-  const world = await composeWorktreeWorld(label);
+  const world = await composeWorktreeWorld(label, options);
   if (world.io === undefined) throw new Error('the worktrees root named no folder');
   const state = new MemoryStateFolder();
   const clock = fixedClock('2026-11-16T00:00:00.000Z');
@@ -95,6 +110,8 @@ export async function worktreeRouteWorld(
     stateHomeHolding: async folder =>
       isWithinDirectory(path.join(world.parent, 'home'), folder) ? path.join(world.parent, 'home') : undefined,
     io: world.io,
+    ioFor: world.ioFor,
+    projectRepository: async project => options.projects?.get(project),
     sessions: async () => [],
     terminalRoots,
     ...(withTerminalRemoval === undefined ? {} : { withTerminalRemoval }),
