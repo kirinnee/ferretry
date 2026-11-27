@@ -15,6 +15,7 @@ import type { CodexRollouts } from './rollouts.ts';
 const MAX_PACK_BYTES = 256 * 1024 * 1024;
 const HOME_RELATIVE = /(sessions\/\d{4}\/\d{2}\/\d{2}\/rollout-[^/]+\.jsonl)$/u;
 const decoder = new TextDecoder();
+const NOT_POOLED = 'this ferret’s sessions link does not lead to this machine’s history pool, so nothing was written';
 
 type Refusal = { readonly reason: string };
 const refuse = (reason: string): Result<never, Refusal> => err({ reason });
@@ -103,13 +104,12 @@ export class CodexRelocation {
     const kept = relocateRollout(source, { folder, home });
     if (kept.kind === 'refused') return refuse(kept.reason);
     try {
+      // A `sessions` link that leads anywhere but this daemon's pool: a write through it would be found by nothing. It
+      // refuses HERE, before the home is prepared or poolHistory moves the home's own history into the shared pool.
+      if ((await rollouts.sessionsLink(spec.ferret)) === 'stale') return refuse(NOT_POOLED);
       await this.parts.ensureHome(spec);
       await this.parts.poolHistory(spec.ferret);
-      // A `sessions` link that leads anywhere but this daemon's pool: a write through it would be found by nothing.
-      if ((await rollouts.sessionsLink(spec.ferret)) === 'stale')
-        return refuse(
-          'this ferret’s sessions link does not lead to this machine’s history pool, so nothing was written',
-        );
+      if ((await rollouts.sessionsLink(spec.ferret)) === 'stale') return refuse(NOT_POOLED);
       const root = await this.target(spec.ferret);
       let moved: Extract<Relocated, { kind: 'moved' }> = kept;
       let path = packed.relPath;

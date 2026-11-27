@@ -76,6 +76,31 @@ describe('a destination that cannot hold the conversation honestly', () => {
     expect(await allFiles(elsewhere)).toEqual([]);
   });
 
+  test('a refused move over a stale sessions link also leaves the ferret’s own history where it was', async () => {
+    const packed = await packedFrom();
+    const w = await build();
+    const elsewhere = await staleLink(w);
+    // History the ferret already holds in its own home: pooling it would move it into the shared pool.
+    const archive = join(
+      w.agent('f2'),
+      'archived_sessions',
+      `rollout-2025-11-01T01-00-00-${crypto.randomUUID()}.jsonl`,
+    );
+    await mkdir(join(archive, '..'), { recursive: true });
+    await writeFile(archive, 'SYNTHETIC_ARCHIVED\n');
+    await writeFile(join(w.agent('f2'), 'history.jsonl'), 'SYNTHETIC_HISTORY\n');
+    const homeBefore = await allFiles(w.agent('f2'));
+    const poolBefore = await allFiles(w.pool());
+
+    const unpacked = await w.harness.unpackConversation?.(w.specOf('f2', TARGET_FOLDER), packed);
+
+    expect(unpacked).toEqual({ ok: false, error: { reason: expect.stringContaining('history pool') } });
+    expect(await allFiles(w.agent('f2'))).toEqual(homeBefore);
+    expect(await allFiles(w.pool())).toEqual(poolBefore);
+    expect(await readFile(archive, 'utf8')).toBe('SYNTHETIC_ARCHIVED\n');
+    expect(await allFiles(elsewhere)).toEqual([]);
+  });
+
   test('a conversation in the pool is not one a ferret with a stale sessions link has', async () => {
     const w = await build();
     await w.source();
