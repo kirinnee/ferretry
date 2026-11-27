@@ -43,12 +43,12 @@ import {
   carrierLines,
   OUTAGE_COPY,
   outageDuration,
-  PAIR_AGAIN_COPY,
   pairAgainOffered,
   RECONNECTING_LABEL,
   stallCopy,
 } from '../connection/connection-copy.ts';
 import { type CarrierPreferenceAvailability, CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
+import { PairAgainOffer } from './pair-again-offer.tsx';
 import { RelayFallbackNotice, useConnectionCardOnScreen } from './relay-fallback-notice.tsx';
 
 /** This machine's connection preference on this device, and how to change it. */
@@ -240,18 +240,7 @@ export function ActiveCarrierCard({
             </div>
           )}
           {onPairAgain === undefined || !pairAgainOffered(outage.since, now) ? null : (
-            <div className="mt-3" data-pair-again="">
-              <p className="mb-0 text-cell leading-base text-muted">{PAIR_AGAIN_COPY.line}</p>
-              <Button
-                type="button"
-                size="sm"
-                className="mt-2 min-h-[44px]"
-                onClick={onPairAgain}
-                data-pair-again-button=""
-              >
-                {PAIR_AGAIN_COPY.button}
-              </Button>
-            </div>
+            <PairAgainOffer onPairAgain={onPairAgain} />
           )}
           {outage.failures.length === 0 ? null : (
             <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">

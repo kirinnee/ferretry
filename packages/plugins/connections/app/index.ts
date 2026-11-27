@@ -2,7 +2,6 @@ import {
   type BackgroundViewProps,
   type ConnectPorts,
   daemonOfClient,
-  type PairedDaemon,
   pairAgainHref,
   provideToShell,
   useOptionalRouter,
@@ -19,6 +18,7 @@ import { CarrierInUse } from './features/carrier/carrier-in-use.tsx';
 import { DeviceConnectionPanel } from './features/carrier/device-connection-panel.tsx';
 import { CarrierDropLog, browserCarrierDropEnvironment } from './lib/carrier-drops.ts';
 import { carrierEscapeView } from './features/carrier/carrier-escape.tsx';
+import { pairAgainView, relayOnly } from './features/carrier/pair-again-offer.tsx';
 import { relayFallbackView } from './features/carrier/relay-fallback-notice.tsx';
 import { CarrierPreferenceSelector, tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { CarrierPreferenceStore, settingOf } from './lib/carrier-preference.ts';
@@ -408,6 +408,11 @@ export default provideToShell(implementApp(manifest, { build: ctx => buildConnec
         ? undefined
         : { preferences: connect.preferences, health: connect.health, daemons: connect.daemons },
     ),
+    // A machine whose plugin list cannot be read gets one stop page and none of this plugin's panels, so the same
+    // "Pair again" offer for a long relay-only outage is also a device view (it stands down while the card is drawn).
+    'pair-again': pairAgainView(() =>
+      connect === undefined ? undefined : { health: connect.health, now: connect.now, daemons: connect.daemons },
+    ),
   },
   background: {
     'relay-fallback': relayFallbackView(() => connect?.router),
@@ -428,16 +433,3 @@ export default provideToShell(implementApp(manifest, { build: ctx => buildConnec
       hostedRelay: connectFor(ports).discovery.hostedRelay,
     }),
 });
-
-/**
- * Whether this device can reach the machine ONLY over a relay: it did not pair over a direct address and its stored carrier
- * set names no direct address or tunnel. Only then can no direct or tunnel leg ever prove the daemon was replaced
- * (`replacedProof`), which is what makes a long outage ambiguous enough to offer pairing again.
- */
-const relayOnly = (daemon: PairedDaemon | undefined): boolean =>
-  daemon !== undefined &&
-  daemon.pairedOver !== 'direct' &&
-  !daemon.carriers.some(carrier => {
-    const kind = (carrier as { kind?: unknown } | null)?.kind;
-    return kind === 'direct' || kind === 'tunnel';
-  });
