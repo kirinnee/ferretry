@@ -30,7 +30,13 @@ import {
 import { PALETTE_PACKS } from '../../src/generated/theme-packs.ts';
 import { applyThemeAxes, ThemePreferenceStore } from '../../src/theme/preferences.ts';
 import { applyWindowColour } from '../../src/shell/context.tsx';
-import { readCssWithImports, readPaletteCss, readStyleFile, themeStylesDir } from '../../src/testing/theme-css.ts';
+import {
+  readCssWithImports,
+  readPaletteCss,
+  readStyleFile,
+  readThemeCss,
+  themeStylesDir,
+} from '../../src/testing/theme-css.ts';
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');
 const declared = (css: string): Set<string> =>
@@ -125,17 +131,17 @@ describe('the catalogue, the files and themes.css agree', () => {
       match => match[1] as string,
     );
     for (const id of STYLE_IDS) expect(imports).toContain(`./style/${id}.css`);
-    // Every palette arrives through the one generated stylesheet, which must sit after the styles and before the floors.
-    expect(imports).toContain('../generated/theme-packs.css');
     expect(imports.at(-1)).toBe('./tokens/floors.css');
-    expect(imports.indexOf('../generated/theme-packs.css')).toBeGreaterThan(
-      imports.indexOf(`./style/${STYLE_IDS.at(-1)}.css`),
-    );
-    expect(imports.indexOf('./tokens/floors.css')).toBeGreaterThan(imports.indexOf('../generated/theme-packs.css'));
+    // Every palette arrives through the ONE generated stylesheet, which `index.css` imports once, before themes.css (palette
+    // selectors out-rank the bases, so the order never decides a colour); themes.css itself must not import it a second time.
+    expect(imports).not.toContain('../generated/theme-packs.css');
+    const index = [...readStyleFile('index.css').matchAll(/^@import '([^']+)';/gmu)].map(match => match[1] as string);
+    expect(index.filter(each => each === '../generated/theme-packs.css')).toHaveLength(1);
+    expect(index.indexOf('../generated/theme-packs.css')).toBeLessThan(index.indexOf('./themes.css'));
     // The resolved text really contains each block, so a typo in an import path cannot hide.
     const css = readCssWithImports(join(themeStylesDir, 'themes.css'));
     for (const id of STYLE_IDS) expect(css).toContain(`[data-style='${id}']`);
-    for (const id of PALETTE_IDS) expect(css).toContain(`[data-palette='${id}']`);
+    for (const id of PALETTE_IDS) expect(readThemeCss()).toContain(`[data-palette='${id}']`);
   });
 
   it('lists the same ids in the catalogue as in the Layouts contract, in the same order', () => {

@@ -19,8 +19,9 @@ export function readCssWithImports(file: string): string {
   );
 }
 
-/** Every theme token declaration, in cascade order: `themes.css` with all its imports inlined. */
-export const readThemeCss = (): string => readCssWithImports(join(stylesRoot, 'themes.css'));
+/** Every theme token declaration, in cascade order: the generated theme packs (`index.css` imports them first), then `themes.css` with all its imports inlined. */
+export const readThemeCss = (): string =>
+  `${readFileSync(join(stylesRoot, '../generated/theme-packs.css'), 'utf8')}\n${readCssWithImports(join(stylesRoot, 'themes.css'))}`;
 
 /** One file under `src/styles` (`style/neo.css`, `tokens/base-palette.css`, …). */
 export const readStyleFile = (relative: string): string => readFileSync(join(stylesRoot, relative), 'utf8');
