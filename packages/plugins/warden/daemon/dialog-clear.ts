@@ -20,7 +20,11 @@ export function dialogRulesInEffect(
 async function readFrame(seam: HarnessForm | undefined): Promise<ClearFrame | undefined> {
   const read = await seam?.capture().catch(() => undefined);
   return read?.ok === true
-    ? { visible: read.value.visible, blocking: read.value.blocking ?? false, dialog: read.value.dialog }
+    ? {
+        visible: read.value.visible,
+        blocking: read.value.blocking ?? false,
+        ...(read.value.dialog === undefined ? {} : { dialog: read.value.dialog }),
+      }
     : undefined;
 }
 
