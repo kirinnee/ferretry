@@ -1,82 +1,25 @@
 /* Pre-paint theme + text-scale bootstrap. Runs BEFORE first paint, so a hard load flashes neither the wrong theme
    nor the wrong type size. Copied from today's PWA onto the 5.0 storage record.
 
-   THIS FILE IS THE SECOND IMPLEMENTATION OF ONE CONTRACT. The definition lives in `src/theme/preferences.ts` and
-   `src/theme/catalog.ts`: the storage key (`fy:app:theme`), the record shape
-   (`{ format: 1, value: { style, palette, mode, textScale } }`, or the pre-split `{ family, mode, textScale }`), the
-   accepted styles, palettes and modes, the root attributes (`data-style`, `data-palette`, `data-mode` and the legacy
-   `data-theme="<palette>-<mode>"`) and the text-scale factors are all THEIR decisions, restated here because nothing in
+   THIS FILE IS THE SECOND IMPLEMENTATION OF ONE CONTRACT. The definition lives in `src/theme/preferences.ts`: the
+   storage key (`fy:app:theme`), the record shape (`{ format: 1, value: { style, palette, mode, textScale } }`), the
+   accepted modes, the root attributes (`data-style`, `data-palette`, `data-mode` and the legacy
+   `data-theme="<palette>-<mode>"`) and the text-scale factors are THEIR decisions, restated here because nothing in
    `src/` can run this early. `tests/unit/pre-paint.test.ts` executes this script against those modules' own values and
    fails if the two drift.
+
+   IT KEEPS NO LIST OF STYLE OR PALETTE IDS OF ITS OWN: the packs are folders (`src/theme/packs/`), and a list here would be
+   a second place to edit for every new one. The generator writes the ids those folders make to `generated/theme-ids.js`
+   (`window.fyThemeIds`, a classic script that `app/index.html` loads first), and this file reads that. A stored id that is
+   not in it (a retired id, a typo, a script that did not load) paints the default, exactly as React resolves it, so the
+   first frame is already the look React then publishes. The stored record is never touched.
 
    It is a classic, same-origin, parser-blocking script (no `type="module"`, no `defer`) so it satisfies
    `script-src 'self'` and still runs before paint; ES5-shaped and dependency-free because nothing transpiles it. */
 
 (function () {
   var KEY = 'fy:app:theme';
-  // biome-ignore format: pre-paint.test.ts pins this exact one-line text, so the formatter must not wrap it
-  var STYLES = ['studio', 'mission', 'neo', 'geist', 'glass', 'neumorphism', 'retro', 'lucid', 'hud', 'raw', 'swiss', 'pixel', 'antiposh', 'briefing', 'genz', 'exaggerated'];
-  var PALETTES = [
-    'studio',
-    'geist',
-    'mission',
-    'neo',
-    'hacker',
-    'vintage',
-    'vaporwave',
-    'mesh',
-    'aurora',
-    'afterglow',
-    'briefing',
-    'contrast',
-  ];
-  /* A palette id that no longer exists and the kept palette it reads as (`REMOVED_PALETTE_IDS` in the Layouts contract). */
-  var REMOVED_PALETTES = {
-    blueprint: 'mission',
-    broadsheet: 'vintage',
-    wayfinding: 'geist',
-    phosphor: 'hacker',
-    ledger: 'hacker',
-    ma: 'vaporwave',
-    retrofuture: 'vintage',
-    cyberpunk: 'vaporwave',
-  };
-  /* The first style whose default palette this is (`lookOfPalette` in `catalog.ts`): the style a pre-split "family" read as. */
-  var PALETTE_STYLE = {
-    studio: 'studio',
-    geist: 'geist',
-    mission: 'mission',
-    neo: 'neo',
-    hacker: 'pixel',
-    vintage: 'antiposh',
-    vaporwave: 'genz',
-    mesh: 'lucid',
-    aurora: 'glass',
-    afterglow: 'neumorphism',
-    briefing: 'briefing',
-    contrast: 'studio',
-  };
-  /* The pre-split "family" ids a stored value may still carry (`THEME_FAMILY_IDS`, frozen): each is a palette id. */
-  var FAMILIES = [
-    'studio',
-    'mission',
-    'neo',
-    'geist',
-    'contrast',
-    'phosphor',
-    'blueprint',
-    'broadsheet',
-    'wayfinding',
-    'ledger',
-    'ma',
-  ];
-  /* The kept palette an id reads as: itself, the mapped one when removed, otherwise nothing. */
-  function current(id) {
-    if (PALETTES.indexOf(id) >= 0) return id;
-    return typeof id === 'string' && Object.prototype.hasOwnProperty.call(REMOVED_PALETTES, id)
-      ? REMOVED_PALETTES[id]
-      : null;
-  }
+  var IDS = window.fyThemeIds || { style: [], palette: [] };
   var MODES = ['system', 'light', 'dark'];
   var TEXT_SCALES = { default: 1, large: 1.125, larger: 1.25 };
 
@@ -90,19 +33,8 @@
     var record = raw ? JSON.parse(raw) : null;
     var value = record && record.format === 1 ? record.value : null;
     // Each field falls back on its own, so one bad value never resets the others (as `ThemePreferenceSchema`).
-    var fromFamily = value && FAMILIES.indexOf(value.family) >= 0 ? current(value.family) : null;
-    if (fromFamily) {
-      palette = fromFamily;
-      style = PALETTE_STYLE[fromFamily];
-    }
-    // The removed `contrast` style is Studio in the High contrast palette; it wins over a stored palette.
-    if (value && value.style === 'contrast') {
-      style = 'studio';
-      palette = 'contrast';
-    } else {
-      if (value && STYLES.indexOf(value.style) >= 0) style = value.style;
-      if (value && current(value.palette)) palette = current(value.palette);
-    }
+    if (value && IDS.style.indexOf(value.style) >= 0) style = value.style;
+    if (value && IDS.palette.indexOf(value.palette) >= 0) palette = value.palette;
     if (value && MODES.indexOf(value.mode) >= 0) mode = value.mode;
     if (value && Object.prototype.hasOwnProperty.call(TEXT_SCALES, value.textScale)) textScale = value.textScale;
   } catch (error) {

@@ -22,13 +22,11 @@ const calls: string[] = [];
 const theme = {
   preference: { style: 'studio', palette: 'studio', keepPalette: false, mode: 'system', textScale: 'default' },
   resolved: 'light',
-  families: [],
   styles: STYLES,
   palettes: PALETTES,
   setStyle: (id: string) => calls.push(`style:${id}`),
   setPalette: (id: string) => calls.push(`palette:${id}`),
   setMode: (id: string) => calls.push(`mode:${id}`),
-  setFamily: () => undefined,
   setKeepPalette: () => undefined,
   setTextScale: (id: string) => calls.push(`text:${id}`),
 } as unknown as DeviceTheme;

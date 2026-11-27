@@ -63,29 +63,27 @@ describe('theme preference', () => {
     const store = memoryStore();
     const themes = new ThemePreferenceStore(store);
     expect(themes.snapshot()).toEqual(DEFAULT_THEME_PREFERENCE);
-    themes.setFamily('mission');
+    themes.setStyle('mission');
     themes.setMode('dark');
     expect(new ThemePreferenceStore(store).snapshot()).toEqual({
-      family: 'mission',
       style: 'mission',
       palette: 'mission',
       keepPalette: false,
       mode: 'dark',
       textScale: 'default',
     });
-    // Only the axes are stored: `family` is derived on read.
+    // Exactly the axes are stored.
     expect(JSON.parse(store.entries()[APP_STORAGE.theme] ?? '')).toEqual({
       format: 1,
       value: { style: 'mission', palette: 'mission', keepPalette: false, mode: 'dark', textScale: 'default' },
     });
   });
 
-  test('an unknown family falls back on its own and keeps the other fields', () => {
+  test('an unknown key is ignored, so a record with no style or palette reads as the default and keeps the other fields', () => {
     const store = memoryStore({
       [APP_STORAGE.theme]: JSON.stringify({ format: 1, value: { family: 'ember', mode: 'dark', textScale: 'large' } }),
     });
     expect(new ThemePreferenceStore(store).snapshot()).toEqual({
-      family: 'studio',
       style: 'studio',
       palette: 'studio',
       keepPalette: false,

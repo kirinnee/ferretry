@@ -8,6 +8,10 @@
  *
  * Prints one JSON line naming the two files.
  *
+ * `--theme-root <dir>` (optional) reads the theme packs' two generated files (`theme-packs.ts`, `theme-packs.css`) from
+ * `<dir>/packages/app/src/generated/` instead of the checkout's, and skips the build cache: a test that proves a pack added
+ * as a folder builds its own pack tree in a temporary directory and never writes the checkout (see `theme-open-ids.visual.test.ts`).
+ *
  * `--entry` is relative to the test's working directory (each plugin keeps its scenes beside its tests); there is no
  * default scene.
  *
@@ -28,7 +32,7 @@
  */
 import { readdirSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
 import postcss from 'postcss';
 import tailwindcss from 'tailwindcss';
 import { cachedText, cacheRootFor, hashFixtureInputs, sceneInputEnv, sceneInputPatterns } from './fixture-inputs.ts';
@@ -155,6 +159,23 @@ export async function spawnDurianWorker() {
   },
 });
 
+/** `--theme-root`: the generated theme-pack files come from another tree (the plugin is empty without the flag). */
+const themeAt = Bun.argv.indexOf('--theme-root');
+const themeRoot = themeAt === -1 ? undefined : Bun.argv[themeAt + 1];
+const privateThemePacks: readonly Bun.BunPlugin[] =
+  themeRoot === undefined
+    ? []
+    : [
+        {
+          name: 'private-theme-packs',
+          setup(build) {
+            build.onResolve({ filter: /(?:^|\/)generated\/theme-packs\.(?:ts|css)$/u }, args => ({
+              path: resolve(themeRoot, 'packages/app/src/generated', basename(args.path)),
+            }));
+          },
+        },
+      ];
+
 /** What a Bun build made: the script and, when the entry's graph imports stylesheets, their CSS (in import order). */
 const bundleOf = async (entry: string, label: string): Promise<{ readonly js: string; readonly css: string }> => {
   const workerCode = await durianWorkerSource();
@@ -162,7 +183,7 @@ const bundleOf = async (entry: string, label: string): Promise<{ readonly js: st
     entrypoints: [entry],
     target: 'browser',
     throw: false,
-    plugins: [viteAssetUrls, viteDynamicImports, durianSource, durianWorkerForScenes(workerCode)],
+    plugins: [viteAssetUrls, viteDynamicImports, durianSource, durianWorkerForScenes(workerCode), ...privateThemePacks],
     banner: legacyThemeBanner,
   });
   if (!result.success) throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);
@@ -174,7 +195,12 @@ const bundleOf = async (entry: string, label: string): Promise<{ readonly js: st
 
 /** A stylesheet entry with its `@import` graph inlined. */
 const stylesheet = async (entry: string, label: string): Promise<string> => {
-  const result = await Bun.build({ entrypoints: [entry], target: 'browser', throw: false });
+  const result = await Bun.build({
+    entrypoints: [entry],
+    target: 'browser',
+    throw: false,
+    plugins: [...privateThemePacks],
+  });
   const [artifact] = result.outputs;
   if (!result.success || artifact === undefined)
     throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);
@@ -193,7 +219,7 @@ if (asked === undefined) throw new Error('❌ --entry <path> is required');
 const entry = resolve(process.cwd(), asked);
 
 const cacheRoot =
-  process.env.FY_FIXTURE_CACHE === 'off'
+  process.env.FY_FIXTURE_CACHE === 'off' || themeRoot !== undefined
     ? undefined
     : cacheRootFor(
         await hashFixtureInputs({

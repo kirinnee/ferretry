@@ -125,11 +125,7 @@ function useMedia(browser: ShellWindow, query: string): boolean {
  * identified manifest link is repointed (never a second link), and one `theme-color` meta, created on demand, takes
  * the computed `--bg` (never a colour map in TypeScript). A document without these (a test's) is left alone.
  */
-export function applyWindowColour(
-  document: ShellWindow['document'],
-  palette: PaletteId,
-  resolved: 'light' | 'dark',
-): void {
+function applyWindowColour(document: ShellWindow['document'], palette: PaletteId, resolved: 'light' | 'dark'): void {
   const link = document.getElementById?.(MANIFEST_LINK_ID);
   if (link) {
     const current = link.getAttribute('href') ?? '';

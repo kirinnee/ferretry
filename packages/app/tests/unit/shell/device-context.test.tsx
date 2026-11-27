@@ -45,7 +45,7 @@ function Landing(): ReactNode {
   seen.theme = theme;
   return (
     <div>
-      <button type="button" data-testid="mission" onClick={() => theme?.setFamily('mission')}>
+      <button type="button" data-testid="mission" onClick={() => theme?.setStyle('mission')}>
         Mission
       </button>
       <button type="button" data-testid="dark" onClick={() => theme?.setMode('dark')}>
@@ -120,7 +120,7 @@ describe('the device context', () => {
         scroll={new ScrollMemory(null)}
       />,
     );
-    expect(seen.theme?.preference.family).toBe('studio');
+    expect(seen.theme?.preference.palette).toBe('studio');
     expect(seen.theme?.resolved).toBe('light');
     await click(view.container.querySelector('[data-testid="mission"]'));
     expect(document.documentElement.dataset.theme).toBe('mission-light');
@@ -224,7 +224,7 @@ describe('the page theme switch', () => {
     expect((document.activeElement as HTMLInputElement).dataset.pickPalette).toBe('studio');
     await click(view?.container.querySelector('input[data-mode="dark"]'));
     await click(view?.container.querySelector('input[data-pick-palette="neo"]'));
-    expect(themes.snapshot()).toMatchObject({ family: 'neo', mode: 'dark' });
+    expect(themes.snapshot()).toMatchObject({ palette: 'neo', mode: 'dark' });
     expect(panel()).not.toBeNull();
     expect(trigger().getAttribute('aria-label')).toBe('Theme: Pop Art, Dark');
     await click(view?.container.querySelector('[data-theme-done]'));
@@ -244,18 +244,18 @@ describe('the page theme switch', () => {
       await interact(() => list.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
     };
     await press('ArrowDown');
-    expect(themes.snapshot().family).toBe('geist');
+    expect(themes.snapshot().palette).toBe('geist');
     await press('ArrowRight');
-    expect(themes.snapshot().family).toBe('mission');
+    expect(themes.snapshot().palette).toBe('mission');
     await press('ArrowUp');
     await press('ArrowLeft');
-    expect(themes.snapshot().family).toBe('studio');
+    expect(themes.snapshot().palette).toBe('studio');
     await press('End');
     expect(themes.snapshot().palette).toBe(PALETTES[PALETTES.length - 1]?.id as PaletteId);
     await press('Home');
-    expect(themes.snapshot().family).toBe('studio');
+    expect(themes.snapshot().palette).toBe('studio');
     await press('x');
-    expect(themes.snapshot().family).toBe('studio');
+    expect(themes.snapshot().palette).toBe('studio');
     // The frame after a family change re-reveals the focused card.
     await interact(() => new Promise(resolve => setTimeout(resolve, 30)));
     expect((document.activeElement as HTMLInputElement).dataset.pickPalette).toBe('studio');

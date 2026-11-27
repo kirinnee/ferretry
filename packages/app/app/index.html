@@ -36,8 +36,10 @@
          There is no static theme_color because a resolved runtime theme supplies
          it; background_color is the maskable icon's launch-splash field. -->
     <link id="fy-manifest" rel="manifest" href="/manifest.webmanifest" />
-    <!-- Pre-paint stays classic and same-origin so it runs before first paint under CSP. The signed-release
+    <!-- Pre-paint stays classic and same-origin so it runs before first paint under CSP; theme-ids.js (generated from the
+         theme pack folders) tells it which ids are real. The signed-release
          service worker is registered by src/main.tsx. -->
+    <script src="/generated/theme-ids.js"></script>
     <script src="/pre-paint.js"></script>
   </head>
   <body>

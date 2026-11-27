@@ -16,9 +16,6 @@ import {
   type ResolvedMode,
   resolveThemeMode,
   type TextScale,
-  THEME_FAMILIES,
-  type ThemeFamily,
-  type ThemeFamilyId,
   type ThemeMode,
   type ThemePreference,
   type ThemePreferenceStore,
@@ -76,14 +73,12 @@ export interface DeviceTheme {
   readonly preference: ThemePreference;
   /** The mode actually in force — never `system`. */
   readonly resolved: ResolvedMode;
-  readonly families: readonly ThemeFamily[];
   /** The styles and palettes the pickers offer (`theme/catalog.ts`), and the setters for each axis. */
   readonly styles: readonly StyleEntry[];
   readonly palettes: readonly PaletteEntry[];
   readonly setStyle: (style: StyleId) => void;
   readonly setPalette: (palette: PaletteId) => void;
   readonly setMode: (mode: ThemeMode) => void;
-  readonly setFamily: (family: ThemeFamilyId) => void;
   /** "Don't change my colours when I change style": on, picking a style leaves the palette alone. */
   readonly setKeepPalette: (keep: boolean) => void;
   readonly setTextScale: (scale: TextScale) => void;
@@ -104,13 +99,11 @@ export function useDeviceTheme(): DeviceTheme | null {
   return {
     preference,
     resolved: resolveThemeMode(preference.mode, device.systemDark),
-    families: THEME_FAMILIES,
     styles: STYLES,
     palettes: PALETTES,
     setStyle: style => void store.setStyle(style),
     setPalette: palette => void store.setPalette(palette),
     setMode: mode => void store.setMode(mode),
-    setFamily: family => void store.setFamily(family),
     setKeepPalette: keep => void store.setKeepPalette(keep),
     setTextScale: scale => void store.setTextScale(scale),
   };

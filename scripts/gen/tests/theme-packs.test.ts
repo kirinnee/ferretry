@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { staleFiles } from '../registries.ts';
-import { THEME_PACKS_CSS, THEME_PACKS_TS, themePackFiles } from '../lib/theme-packs.ts';
+import { THEME_IDS_JS, THEME_PACKS_CSS, THEME_PACKS_TS, themePackFiles } from '../lib/theme-packs.ts';
 
 const roots: string[] = [];
 afterAll(() => {
@@ -78,7 +78,7 @@ const fail = (files: Readonly<Record<string, string>>): string => {
 describe('theme pack generation', () => {
   test('no packs is valid: empty lists and an empty stylesheet', () => {
     const files = themePackFiles(tree({}));
-    expect([...files.keys()]).toEqual([THEME_PACKS_TS, THEME_PACKS_CSS]);
+    expect([...files.keys()]).toEqual([THEME_PACKS_TS, THEME_PACKS_CSS, THEME_IDS_JS]);
     expect(files.get(THEME_PACKS_TS)).toContain('export const PALETTE_PACKS = [\n] as const;');
     expect(files.get(THEME_PACKS_TS)).toContain('export const STYLE_IDS = [\n] as const;');
     expect(files.get(THEME_PACKS_CSS)).not.toContain('{');
@@ -96,6 +96,8 @@ describe('theme pack generation', () => {
     expect(ts).toContain('export const FONT_IDS = [\n  "inter",\n] as const;');
     const css = files.get(THEME_PACKS_CSS) ?? '';
     // @import first, then fonts, the default palette's dark baseline, then every palette in order.
+    // The ids script pre-paint reads: the same ids, in the same order, as the lists above.
+    expect(files.get(THEME_IDS_JS)).toContain('window.fyThemeIds = {"style":["studio"],"palette":["ink","dawn"]};');
     expect(css.indexOf("@import '../theme/packs/style/studio/style.css';")).toBeLessThan(css.indexOf('@font-face'));
     expect(css).toContain("font-family: 'Inter';");
     expect(css).toContain("src: url('../theme/packs/font/inter/inter.woff2') format('woff2');");
@@ -365,6 +367,7 @@ describe('--check', () => {
     const root = tree(GOOD);
     const before = themePackFiles(root);
     expect(staleFiles(root, before, true).sort()).toEqual([
+      `${THEME_IDS_JS} (missing)`,
       `${THEME_PACKS_CSS} (missing)`,
       `${THEME_PACKS_TS} (missing)`,
     ]);
@@ -380,7 +383,7 @@ describe('--check', () => {
     mkdirSync(join(root, PACKS, 'palette/new'), { recursive: true });
     writeFileSync(join(root, PACKS, 'palette/new/palette.ts'), data(palette('new', { order: 20 })));
     const after = themePackFiles(root);
-    expect(staleFiles(root, after, true).sort()).toEqual([THEME_PACKS_CSS, THEME_PACKS_TS]);
+    expect(staleFiles(root, after, true).sort()).toEqual([THEME_IDS_JS, THEME_PACKS_CSS, THEME_PACKS_TS]);
     expect(after.get(THEME_PACKS_TS)).toContain('palette_new');
     expect(after.get(THEME_PACKS_CSS)).toContain('#fafafa');
   });

@@ -5,20 +5,19 @@
 
        <html data-style="studio" data-palette="geist" data-mode="dark">
 
-   style   ∈ studio | mission | neo | geist | glass | neumorphism | retro | lucid | hud | raw | swiss | pixel
-           | antiposh | briefing | genz | exaggerated      HOW things are drawn: type, weights, tracking, radii,
-                                                            stroke widths, shadow GEOMETRY, spacing, control heights,
-                                                            focus width/offset, texture, motion. NO colour value.
-                                                            Each style comes with a DEFAULT palette (catalog.ts).
-   palette ∈ studio | geist | mission | neo | hacker        WHICH colours: the seed colours, the status/syntax/tool
-           | vintage | vaporwave | mesh | aurora | afterglow  hues, shadow COLOURS. NO non-colour token. Named in
-                                                            each palette pack's own `label`;
-           | briefing | contrast     High contrast is a palette, not a style. Mesh, Aurora, Afterglow draw `--surface-mesh`.
+   style   ∈ one folder under theme/packs/style/     HOW things are drawn: type, weights, tracking, radii,
+                                                      stroke widths, shadow GEOMETRY, spacing, control heights,
+                                                      focus width/offset, texture, motion. NO colour value.
+                                                      Each style comes with a DEFAULT palette (its `style.ts`).
+   palette ∈ one folder under theme/packs/palette/   WHICH colours: the seed colours, the status/syntax/tool
+                                                      hues, shadow COLOURS. NO non-colour token. Named by its
+                                                      pack's own `label`. High contrast is a palette, not a style.
+                                                      Mesh, Aurora, Afterglow draw `--surface-mesh`.
    mode    ∈ light | dark        (already resolved — never "system")
 
-   The CATALOGUE — ids, labels, fonts, suggested pairings — is owned by `src/theme/catalog.ts`, not by this
-   file. A style or palette declared here and missing there is unreachable. Change both together; the
-   `theme-axes` test pins it.
+   The ids, labels, fonts and suggested pairings are the pack folders themselves: the generator finds them
+   (`generated/theme-packs.ts`) and `src/theme/catalog.ts` only reads them. There is no list to edit; an id with no
+   folder reads as the default style and palette.
 
    WHERE A TOKEN LIVES (the lint test `theme-axes.test.ts` enforces it):
      tokens/base-style.css     every style-owned token's default (== Studio)

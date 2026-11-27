@@ -6,8 +6,8 @@
  *
  *   1. Pick Neo on a device on Inkwell → the page's `data-palette` becomes `neo` (labelled Pop Art). With `keepPalette` stored
  *      → it stays Inkwell (Studio's palette). The change shows on the root element the stylesheet reads.
- *   2. A stored `{style:'contrast'}` → the FIRST frame (pre-paint, before any module) is Studio + High contrast, and every
- *      removed palette id paints the id the migration table names, with no flash.
+ *   2. A stored palette paints itself in the FIRST frame (pre-paint, before any module). An id with no pack has no migration:
+ *      `theme-open-ids.visual.test.ts` owns that case.
  *   3. The palette picker draws one chip per catalogue palette, each by the name the ONE map gives it (`theme/palette-names.ts`;
  *      C59 O6: proper names); none is named after a style (Briefing, owner's own ask, is the one allowed).
  *
@@ -27,6 +27,7 @@ setDefaultTimeout(120_000);
 
 const packageRoot = import.meta.dir;
 const prePaint = await readFile(resolve(packageRoot, '../../public/pre-paint.js'), 'utf8');
+const themeIds = await readFile(resolve(packageRoot, '../../public/generated/theme-ids.js'), 'utf8');
 
 let browser: Browser;
 let directory = '';
@@ -56,13 +57,15 @@ beforeAll(async () => {
   const js = await readFile(manifest.js, 'utf8');
   const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
   // The pre-paint page: the REAL script, parser-blocking, then ONE inline reader that runs before anything else could.
-  const bare = `<!doctype html><html><head><meta charset="utf-8"><script src="/pre-paint.js"></script><script>window.__first = { style: document.documentElement.getAttribute('data-style'), palette: document.documentElement.getAttribute('data-palette'), mode: document.documentElement.getAttribute('data-mode') };</script></head><body></body></html>`;
+  const bare = `<!doctype html><html><head><meta charset="utf-8"><script src="/generated/theme-ids.js"></script><script src="/pre-paint.js"></script><script>window.__first = { style: document.documentElement.getAttribute('data-style'), palette: document.documentElement.getAttribute('data-palette'), mode: document.documentElement.getAttribute('data-mode') };</script></head><body></body></html>`;
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: request => {
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
+      if (path === '/generated/theme-ids.js')
+        return new Response(themeIds, { headers: { 'content-type': 'text/javascript' } });
       if (path === '/pre-paint.js') return new Response(prePaint, { headers: { 'content-type': 'text/javascript' } });
       if (path === '/bare') return new Response(bare, { headers: { 'content-type': 'text/html' } });
       return new Response(page, { headers: { 'content-type': 'text/html' } });
@@ -193,7 +196,7 @@ describe('picking a style brings its default palette, unless the device keeps it
   });
 });
 
-describe('pre-paint: the first frame already wears the migrated look', () => {
+describe('pre-paint: the first frame already wears the stored look', () => {
   const firstFrame = async (value: Record<string, unknown>) => {
     const context = await browser.newContext();
     try {
@@ -209,32 +212,11 @@ describe('pre-paint: the first frame already wears the migrated look', () => {
     }
   };
 
-  it('a stored {style:"contrast"} paints Studio + High contrast', async () => {
-    const first = await firstFrame({ style: 'contrast', palette: 'studio', mode: 'light', textScale: 'default' });
-    expect(first).toMatchObject({ style: 'studio', palette: 'contrast', mode: 'light' });
-  });
-
-  const REMOVED: readonly (readonly [string, string])[] = [
-    ['blueprint', 'mission'],
-    ['broadsheet', 'vintage'],
-    ['wayfinding', 'geist'],
-    ['phosphor', 'hacker'],
-    ['ledger', 'hacker'],
-    ['ma', 'vaporwave'],
-    ['retrofuture', 'vintage'],
-    ['cyberpunk', 'vaporwave'],
-  ];
-  // C59 O6: Gradient mesh and Briefing are palettes again (and Aurora and Afterglow are new), so a stored one paints itself, no migration.
+  // C59 O6: Gradient mesh and Briefing are palettes again (and Aurora and Afterglow are new), so a stored one paints itself.
   for (const palette of ['mesh', 'briefing', 'aurora', 'afterglow']) {
     it(`a stored palette "${palette}" paints "${palette}" itself`, async () => {
       const first = await firstFrame({ style: 'studio', palette, mode: 'dark', textScale: 'default' });
       expect(first).toMatchObject({ style: 'studio', palette, mode: 'dark' });
-    });
-  }
-  for (const [removed, kept] of REMOVED) {
-    it(`a stored palette "${removed}" paints "${kept}"`, async () => {
-      const first = await firstFrame({ style: 'studio', palette: removed, mode: 'dark', textScale: 'default' });
-      expect(first).toMatchObject({ style: 'studio', palette: kept, mode: 'dark' });
     });
   }
 });

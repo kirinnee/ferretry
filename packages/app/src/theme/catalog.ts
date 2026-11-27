@@ -1,29 +1,20 @@
 /**
  * THE CATALOGUE of the theme axes: which STYLES and PALETTES exist, what they are called, and which palette a style
- * comes with. The ids are `STYLE_IDS` / `PALETTE_IDS` in the Layouts contract (the one list, so a theme item and this app
- * cannot disagree); this file adds everything a picker needs and nothing a stylesheet decides.
+ * comes with. There is no list here: the ids are the pack folders the generator found (`generated/theme-packs.ts`), so
+ * adding a pack is adding a folder. This file adds what a picker needs and nothing a stylesheet decides.
  *
  *   style   HOW things are drawn   `theme/packs/style/<id>/`  type, radii, strokes, shadow geometry, spacing, motion
  *   palette WHICH colours          `theme/packs/palette/<id>/` seed colours, status/syntax hues, shadow colours
  *   mode    light | dark                                      a third axis: any style takes any palette in either mode
  *
- * `styles/themes.css` says where every token lives; `tests/unit/theme-axes.test.ts` pins that the files, this list and
- * `public/pre-paint.js` agree.
+ * `styles/themes.css` says where every token lives; `tests/unit/theme-axes.test.ts` pins that the files and this
+ * catalogue agree.
  */
-import {
-  currentPaletteId,
-  currentStyleId,
-  PALETTE_IDS,
-  type PaletteId,
-  STYLE_IDS,
-  THEME_FAMILY_IDS,
-  type StyleId,
-} from '@ferretry/plugin-layouts/contract';
-import { PALETTE_PACKS, STYLE_PACKS } from '../generated/theme-packs.ts';
+import { PALETTE_IDS, PALETTE_PACKS, STYLE_IDS, STYLE_PACKS } from '../generated/theme-packs.ts';
 
-export { PALETTE_IDS, type PaletteId, STYLE_IDS, type StyleId };
-/** A single-pick look is a palette (with the style that comes with it): the family ids ARE the palette ids now. */
-export type ThemeFamilyId = PaletteId;
+export { PALETTE_IDS, STYLE_IDS };
+export type StyleId = (typeof STYLE_IDS)[number];
+export type PaletteId = (typeof PALETTE_IDS)[number];
 
 export interface StyleEntry {
   readonly id: StyleId;
@@ -79,17 +70,12 @@ export const DEFAULT_STYLE: StyleId = STYLE_PACKS.find(pack => 'default' in pack
 /** The palette pack flagged `default: true` (the generator pins that there is exactly one). */
 export const DEFAULT_PALETTE: PaletteId = PALETTE_PACKS.find(pack => 'default' in pack)?.id ?? PALETTE_PACKS[0].id;
 
+/** Whether a value is the id of a style pack that exists. Anything else is read as the default, never rewritten. */
+export const isStyleId = (value: unknown): value is StyleId =>
+  typeof value === 'string' && (STYLE_IDS as readonly string[]).includes(value);
+/** Whether a value is the id of a palette pack that exists. Anything else is read as the default, never rewritten. */
 export const isPaletteId = (value: unknown): value is PaletteId =>
   typeof value === 'string' && (PALETTE_IDS as readonly string[]).includes(value);
-export const isFamilyId = (value: unknown): value is ThemeFamilyId =>
-  typeof value === 'string' && (THEME_FAMILY_IDS as readonly string[]).includes(value);
-
-/** A stored `family` (pre-split), read on the new axes: the kept palette it names. `undefined` when it names none. */
-export const paletteOfFamily = (family: unknown): PaletteId | undefined =>
-  isFamilyId(family) ? currentPaletteId(family) : undefined;
-
-/** The stored style id, read on the current axes (the removed `contrast` style is Studio, in the High contrast palette). */
-export { currentPaletteId, currentStyleId };
 
 /** What picking a style brings: its default palette. */
 export const defaultPaletteOf = (style: StyleId): PaletteId =>
@@ -102,11 +88,6 @@ export const defaultPaletteOf = (style: StyleId): PaletteId =>
 export function lookOfPalette(palette: PaletteId): { readonly style: StyleId; readonly palette: PaletteId } {
   if (!isPaletteId(palette)) return { style: DEFAULT_STYLE, palette: DEFAULT_PALETTE };
   return { style: STYLES.find(entry => entry.defaultPalette === palette)?.id ?? DEFAULT_STYLE, palette };
-}
-
-/** What a single-pick family is on the three axes. A family id is a palette id. */
-export function lookOfFamily(family: ThemeFamilyId): { readonly style: StyleId; readonly palette: PaletteId } {
-  return lookOfPalette(family);
 }
 
 /**
