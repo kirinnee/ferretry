@@ -21,8 +21,8 @@ export interface ProtectionWindows {
   liveSince(sinceMs: number): boolean;
 }
 
-/** Which agent act the guard stands in front of. A script can run on past its own answer, so it is held to a lifetime rule. */
-export type GuardedKind = 'content' | 'script';
+/** Scripts can outlive their answer; historical logs can outlive the document that wrote them. */
+export type GuardedKind = 'content' | 'script' | 'history';
 
 /** An origin that is, or cannot be told from, one of the app's. */
 const isApp = (origin: string, apps: ReadonlySet<string> | undefined): boolean =>
@@ -121,9 +121,17 @@ export function pairingScreenGuard(
     // A document a pairing link opened is a pairing screen wherever it is served (v4 #1598): the daemon cannot know every
     // deployment's app origin, so this holds on ANY origin.
     if (before.targets.some(target => target.nav.linked)) throw refuse();
-    // A page that still sits on the app a pairing link arrived on is the screen that holds the link's code.
-    if (before.targets.some(target => target.nav.taintSeq > 0 && onApp(target.nav, apps))) throw refuse();
-    if (kind === 'script') {
+    // A page on the app that a pairing link once arrived on is refused for as long as a credential was live at any instant
+    // its documents have existed. The app's own page that a real navigation brought in AFTER the pairing was over (the
+    // redeemed code's interval ended before it began) is a document no code was ever live in, and is read like any other.
+    if (
+      before.targets.some(
+        target => target.nav.taintSeq > 0 && onApp(target.nav, apps) && windows.liveSince(target.nav.documentAt),
+      )
+    )
+      throw refuse();
+    // Console/network buffers span document loads. A fresh document cannot authorize an older document's records.
+    if (kind === 'script' || kind === 'history') {
       for (const { nav } of before.targets) {
         if (nav.taintSeq > 0) throw refuse();
         const first = firstApp(nav, apps);

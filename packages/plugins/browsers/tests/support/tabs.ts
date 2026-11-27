@@ -30,6 +30,7 @@ export function cleanNavigation(address: string, at = 0): NavigationEvidence {
     taintSeq: 0,
     linked: false,
     watchedSince: at,
+    documentAt: at,
     totals: { links: {}, lost: 0 },
   };
 }

@@ -239,6 +239,39 @@ describe('renderAccountHint', () => {
   });
 });
 
+describe('renderAccountHint with a browser identity', () => {
+  const base: AccountHintList = {
+    v: 1,
+    site: 'github.com',
+    passkeys: 'off',
+    hints: [
+      {
+        signIn: SI(1),
+        account: { id: 'GITHUB_WORK', label: 'work github' },
+        username: 'kirin',
+        role: 'site',
+        place: { kind: 'site', domains: ['github.com'], match: [] },
+        method: { kind: 'password' },
+      },
+    ],
+  };
+
+  it('should say the identity (and the accounts it goes through) the way the JSON and MCP hint do', () => {
+    const text = renderAccountHint({ ...base, identity: { identity: 'work', via: ['IDP_G'] } });
+    should(text).containEql("Browser identity: 'work', through IDP_G.");
+    should(text.split('\n').slice(-2)).eql(['', LOGIN_HINT_PASSKEYS_OFF]);
+  });
+
+  it('should say several identities, or several accounts in one, without picking', () => {
+    should(renderAccountHint({ ...base, identity: { ambiguous: ['home', 'work'] } })).containEql(
+      'held in more than one (home, work); ask the owner which, never guess.',
+    );
+    should(renderAccountHint({ ...base, identity: { identity: 'work', ambiguousAccounts: ['A', 'B'] } })).containEql(
+      "'work' holds more than one account's sign-in here (A, B)",
+    );
+  });
+});
+
 describe('renderDefaults', () => {
   it('should say none are set', () => {
     should(renderDefaults({})).equal('No default accounts are set.');

@@ -263,7 +263,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     copies,
     secureCopyHook,
     secureCopyTools: tools,
-    proposalTools: proposalTools({ recipes, suggestions, plans, redact }),
+    proposalTools: proposalTools({ recipes, suggestions, plans, redact, links: core.links }),
     sessionEnded: ferret => {
       copies.drop(ferret);
       pageRecords.drop(ferret);

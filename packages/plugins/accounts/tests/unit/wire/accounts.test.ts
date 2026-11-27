@@ -33,7 +33,9 @@ import {
   PutAccountRequestSchema,
   PutSignInRequestSchema,
   AccountSummarySchema,
+  AccountProposeCallSchema,
   chosenSignIn,
+  identityWords,
   matchedSignIns,
   MAX_SIGN_INS_PER_ACCOUNT,
   namesSignIn,
@@ -795,6 +797,37 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     expect(summaryText).toContain('passkeys are off');
     expect(summaryText).toContain('Seen: vercel.com: password field (seen 3×, 2026-10-31).');
     expect(accountHintSummary('nothing.example', [])).toContain('No account for nothing.example');
+  });
+
+  it('should say which browser identity holds the sign-in, or that several do and the owner chooses', () => {
+    const hints = accountHintsFor('vercel.com', LIST);
+    const one = accountHintSummary('vercel.com', hints, { identity: 'work', via: ['GOOGLE'] });
+    expect(one).toContain("Browser identity: 'work', through GOOGLE.");
+    expect(accountHintSummary('vercel.com', hints, { identity: 'work', via: [] })).toContain(
+      "Browser identity: 'work'.",
+    );
+    const both = accountHintSummary('vercel.com', hints, { ambiguous: ['home', 'work'] });
+    expect(both).toContain('held in more than one (home, work); ask the owner which, never guess.');
+    expect(identityWords({ ambiguous: ['a', 'b'] })).not.toContain("'a'");
+    expect(accountHintSummary('vercel.com', hints)).not.toContain('Browser identity');
+    expect(accountHintSummary('nothing.example', [], { identity: 'work', via: [] })).not.toContain('Browser identity');
+  });
+
+  it('should take an identity on the hint list, only as a key or two or more keys, never a loose string', () => {
+    const base = { v: 1, site: 'vercel.com', hints: [], passkeys: 'off' };
+    const parse = (identity: unknown) => AccountHintListSchema.safeParse({ ...base, identity }).success;
+    expect(parse({ identity: 'work', via: [] })).toBe(true);
+    expect(parse({ ambiguous: ['home', 'work'] })).toBe(true);
+    expect(parse({ ambiguous: ['work'] })).toBe(false);
+    expect(parse({ identity: '../work', via: [] })).toBe(false);
+    expect(parse({ identity: 'work', via: [], cookie: 'x' })).toBe(false);
+  });
+
+  it('should let account_propose name an identity alone, and refuse a call that names nothing to propose', () => {
+    const call = { tool: 'account.propose', signIn: SI(2), why: 'the login lives there' };
+    expect(AccountProposeCallSchema.safeParse({ ...call, identity: 'work' }).success).toBe(true);
+    expect(AccountProposeCallSchema.safeParse({ ...call, identity: 'Work' }).success).toBe(false);
+    expect(AccountProposeCallSchema.safeParse(call).success).toBe(false);
   });
 
   it('should point to Approve on your phone (push: true) whether or not a sign-in exists or holds a push key', () => {
