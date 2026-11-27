@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { constants, readFileSync } from 'node:fs';
 import { chmod, link, lstat, mkdir, open, readFile, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -517,9 +517,20 @@ export class BrowserProfileStore implements BrowserProfilePort {
     // The owner record can be abandoned. Its cleanup must share the same mutex as publication and lease removal:
     // a check followed by unlink alone lets a delayed stale observer remove a successor's LIVE guard. This inode is
     // never unlinked; the kernel releases the lock even if a reclaimer dies between its owner check and its cleanup.
-    const handle = await open(`${paths.reclaimFile}.mutex`, 'a', 0o600);
+    const mutex = `${paths.reclaimFile}.mutex`;
+    const handle = await open(
+      mutex,
+      constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      0o600,
+    );
     try {
+      const opened = await handle.stat();
+      if (!opened.isFile())
+        throw new BrowserProfileBusyError('unknown', 'browser profile reclaim mutex is not a regular file');
       while (!tryProfileReclaimLock(handle.fd, process.platform)) await this.sleep(10);
+      const current = await lstat(mutex);
+      if (!current.isFile() || current.dev !== opened.dev || current.ino !== opened.ino)
+        throw new BrowserProfileBusyError('unknown', 'browser profile reclaim mutex changed while acquiring it');
       await this.reclaimDeadLeaseUnderLock(paths, expected, chromeCleared);
     } finally {
       await handle.close();

@@ -1,4 +1,5 @@
 import { afterEach, expect, it, spyOn } from 'bun:test';
+import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +17,77 @@ function gate() {
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
+
+for (const kind of ['symlink', 'fifo', 'directory'] as const) {
+  it(`refuses a ${kind} reclaim mutex without changing the stale lease or writing outside state`, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ferretry-profile-unsafe-mutex-'));
+    roots.push(root);
+    const subject = new BrowserProfileStore(path.join(root, 'state'), {
+      daemonPid: 1001,
+      isProcessAlive: pid => pid === 1001,
+    });
+    await (await subject.acquire('work', { sessionId: 'seed' })).release();
+    const paths = subject.paths('work');
+    const dead = JSON.stringify({ sessionId: 'dead', daemonPid: 9999, acquiredAt: new Date(0).toISOString() });
+    await fs.writeFile(paths.leaseFile, dead);
+    const mutex = `${paths.reclaimFile}.mutex`;
+    const outside = path.join(root, 'outside');
+    let reader: Awaited<ReturnType<typeof fs.open>> | undefined;
+    if (kind === 'symlink') await fs.symlink(outside, mutex);
+    else if (kind === 'directory') await fs.mkdir(mutex);
+    else {
+      expect(Bun.spawnSync(['mkfifo', mutex]).exitCode).toBe(0);
+      // Keep the unsafe implementation from blocking on its write-only FIFO open during the red check.
+      reader = await fs.open(mutex, constants.O_RDONLY | constants.O_NONBLOCK);
+    }
+    try {
+      const result = await subject.acquire('work', { sessionId: 'recovered' }).then(
+        lease => lease,
+        () => undefined,
+      );
+      expect(await fs.lstat(outside).catch(() => undefined)).toBeUndefined();
+      expect(await fs.readFile(paths.leaseFile, 'utf8')).toBe(dead);
+      expect(await fs.lstat(paths.reclaimFile).catch(() => undefined)).toBeUndefined();
+      expect(result).toBeUndefined();
+    } finally {
+      await reader?.close();
+    }
+  });
+}
+
+for (const replacement of ['file', 'symlink'] as const) {
+  it(`refuses a mutex replaced by another ${replacement} after open and closes its descriptor`, async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ferretry-profile-replaced-mutex-'));
+    roots.push(root);
+    const subject = new BrowserProfileStore(root, { daemonPid: 1001, isProcessAlive: pid => pid === 1001 });
+    await (await subject.acquire('work', { sessionId: 'seed' })).release();
+    const paths = subject.paths('work');
+    const dead = JSON.stringify({ sessionId: 'dead', daemonPid: 9999, acquiredAt: new Date(0).toISOString() });
+    await fs.writeFile(paths.leaseFile, dead);
+    const mutex = `${paths.reclaimFile}.mutex`;
+    const open = fs.open;
+    let opened: Awaited<ReturnType<typeof fs.open>> | undefined;
+    const watched = spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await open(...args);
+      if (String(args[0]) === mutex) {
+        opened = handle;
+        await fs.rename(mutex, `${mutex}.old`);
+        if (replacement === 'file') await fs.writeFile(mutex, '');
+        else await fs.symlink(path.join(root, 'outside'), mutex);
+      }
+      return handle;
+    });
+    try {
+      await expect(subject.acquire('work', { sessionId: 'recovered' })).rejects.toThrow('mutex changed');
+      expect(await fs.readFile(paths.leaseFile, 'utf8')).toBe(dead);
+      expect(await fs.lstat(paths.reclaimFile).catch(() => undefined)).toBeUndefined();
+      expect(opened).toBeDefined();
+      await expect(opened?.stat()).rejects.toThrow();
+    } finally {
+      watched.mockRestore();
+    }
+  });
+}
 
 it('excludes another process and releases the mutex when its holder crashes without unlinking it', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ferretry-profile-mutex-'));
