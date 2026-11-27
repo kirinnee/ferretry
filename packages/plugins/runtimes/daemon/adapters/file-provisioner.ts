@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
@@ -35,7 +35,6 @@ import {
 import { AlreadyExistsError, type FleetDisk } from './fleet-disk.ts';
 import { FileMutationJournal, isMutationReservedName, STAGE_PREFIX } from './mutation-journal.ts';
 import type { ApplyLock, MutationJournal, SharedHistoryPooling } from './ports.ts';
-import { stampTree } from './tree-stamp.ts';
 
 /*
  * The provisioner is written over `FleetDisk` (`./fleet-disk.ts`): every file call is an asynchronous call on the
@@ -68,6 +67,9 @@ const DEFAULT_FOLDER_MODE = 0o777;
 
 /** The largest file the provisioner reads whole to judge it (a wrapper, a settings file, a record, a document). */
 const MAX_READ_BYTES = 4 * 1024 * 1024;
+
+/** How many entries one folder may hold before it is too big to vouch for (see `stampTree`). A bound on work. */
+const MAX_STAMPED_ENTRIES = 20_000;
 
 const MaterialisedRecordSchema = z.strictObject({
   version: z.literal(1),
@@ -716,7 +718,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async observe(target: string): Promise<Observed | undefined> {
     const found = await this.disk.lstat(target);
     if (found === undefined) return undefined;
-    if (found.kind === 'directory') return { kind: 'dir', stamp: await stampTree(this.disk, target) };
+    if (found.kind === 'directory') return { kind: 'dir', stamp: await this.stampTree(target) };
     if (found.kind === 'symlink') {
       // The root cannot read where a link leads, so a link is vouched for by WHICH link it is: the object, its size and
       // the time it was made. Swapped for another link, even one to the same place, it is a different one.
@@ -913,6 +915,44 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // Always all four, even empty: a record without `links` or `members` is one from before they were kept, and is read as that.
     const record: MaterialisedRecord = { version: 1, entries, hashes, links, dirs, trees, members };
     return `${JSON.stringify(record)}\n`;
+  }
+
+  /**
+   * One fingerprint of the whole folder at `directory`, so a runtime home can tell "the folder Ferretry copied" from "that
+   * folder with something of the person's in it": a recorded folder NAME proves nothing about what is inside it today.
+   * Every name below it, its kind, a file's bytes and permission bits, a link's size. Times are left out: a touched but
+   * unchanged file is not an edit. A folder this cannot summarise whole (too many entries, a file too large or unreadable)
+   * has NO stamp, and a folder with no stamp is never provably Ferretry's, so it is kept.
+   */
+  private async stampTree(directory: string): Promise<string | undefined> {
+    const hasher = createHash('sha256');
+    const budget = { left: MAX_STAMPED_ENTRIES };
+    const fold = async (folder: string, prefix: string): Promise<boolean> => {
+      const found = await this.disk.entries(folder);
+      for (const entry of found.toSorted((left, right) =>
+        left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+      )) {
+        if (budget.left <= 0) return false;
+        budget.left -= 1;
+        const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+        if (entry.kind === 'directory') {
+          hasher.update(`d ${relative}\n`);
+          if (!(await fold(`${folder}/${entry.name}`, relative))) return false;
+        } else if (entry.kind === 'file') {
+          const digest = sha256(await this.disk.readBytes(`${folder}/${entry.name}`, MAX_READ_BYTES));
+          hasher.update(`f ${relative} ${entry.mode & 0o777} ${digest}\n`);
+        } else {
+          hasher.update(`${entry.kind} ${relative} ${entry.size}\n`);
+        }
+      }
+      return true;
+    };
+    try {
+      if (!(await fold(directory, ''))) return undefined;
+    } catch {
+      return undefined;
+    }
+    return hasher.digest('hex');
   }
 
   /** The text of the regular file at `target`, read without following a link. */
