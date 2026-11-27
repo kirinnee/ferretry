@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SurfaceKeySchema, SurfaceNameSchema } from '../../contract/index.ts';
+import { BrowserIdentityKeySchema, SurfaceKeySchema, SurfaceNameSchema } from '../../contract/index.ts';
 import {
   BROWSER_CONSOLE_MAX_LIMIT,
   BROWSER_DIALOG_PROMPT_MAX_CHARS,
@@ -97,6 +97,8 @@ export const BrowserToolCallSchema = z.discriminatedUnion('tool', [
     url: AgentUrlSchema.optional(),
     /** A throwaway page with its own cookies and storage, shared with nothing; gone when it closes. */
     incognito: z.literal(true).optional(),
+    /** Which browser identity's Chrome opens it (its own profile, sign-ins and proxy); absent, the built-in `agent` identity. */
+    identity: BrowserIdentityKeySchema.optional(),
     /** Hand the new page to the owner at once: their tab opens on it, with this as what to do. */
     askOwner: AskOwnerSchema.optional(),
   }),

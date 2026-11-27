@@ -9,7 +9,8 @@ import type { Tabs } from '../../support/tabs.ts';
 const STREAM = '/v1/ferrets/f1/browser/stream';
 /** The page the agent's person views is the one `browser_open` just made (the browser's own first page is not it). */
 const viewed = (tabs: Tabs): { id: string } => tabs.pages.at(-1) as { id: string };
-const TYPE = JSON.stringify({ kind: 'insertText', text: 'typed at the viewer' });
+/** What the screen sends: the text and the page its frame is painted for. */
+const typedOn = (pageId: string): string => JSON.stringify({ kind: 'insertText', text: 'typed at the viewer', pageId });
 
 /**
  * The viewer socket at its boundary: the real route, the real stream and Gate's stand-in admission over a fake browser.
@@ -46,7 +47,7 @@ describe('the browser viewer socket — whose input reaches a page', () => {
     const socket = await host.socket(STREAM);
 
     // Act
-    socket.handler?.fromClient(TYPE);
+    socket.handler?.fromClient(typedOn(viewed(tabs).id));
 
     // Assert
     should(await delivered(host, tabs)).deepEqual(['insertText']);
@@ -58,7 +59,7 @@ describe('the browser viewer socket — whose input reaches a page', () => {
     const socket = await host.socket(STREAM, { as: device('phone') });
 
     // Act
-    socket.handler?.fromClient(TYPE);
+    socket.handler?.fromClient(typedOn(viewed(tabs).id));
 
     // Assert
     should(await delivered(host, tabs)).deepEqual(['insertText']);
@@ -70,7 +71,7 @@ describe('the browser viewer socket — whose input reaches a page', () => {
     const socket = await host.socket(STREAM, as('f1'));
 
     // Act
-    socket.handler?.fromClient(TYPE);
+    socket.handler?.fromClient(typedOn(viewed(tabs).id));
     const inputs = await delivered(host, tabs);
 
     // Assert
@@ -87,7 +88,7 @@ describe('the browser viewer socket — whose input reaches a page', () => {
     const socket = await host.socket(STREAM, as('f1'));
 
     // Act
-    socket.handler?.fromClient(TYPE);
+    socket.handler?.fromClient(typedOn(viewed(tabs).id));
 
     // Assert
     should(await delivered(host, tabs)).deepEqual([]);
