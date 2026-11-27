@@ -194,6 +194,7 @@ describe('analytics schemas', () => {
       'day',
       'week',
       'token_data',
+      'purpose',
       'runtime',
       'project',
       'session',

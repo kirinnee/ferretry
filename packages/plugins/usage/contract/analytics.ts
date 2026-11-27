@@ -24,6 +24,9 @@ export const AnalyticsLabelSchema = z.enum([
   'day',
   'week',
   'token_data',
+  // What the ferret was started FOR (`fy new --purpose`: comms, review, planning, implementation, other). A session
+  // started without one is NULL here and is read as Unlabelled — never guessed from its transcript.
+  'purpose',
   // The v2 vocabulary. Each is a NAME for a fact the row already carries, chosen so a query reads the
   // way the Insights page talks: `runtime` is the session's `agent`, `project` is `repo`, `session`
   // is `id`. `machine` is new evidence — the daemon that answered — and is stamped at query time.
@@ -214,6 +217,8 @@ export const AnalyticsRawSessionSchema = z.object({
   cwd: z.string().nullable(),
   parent: z.string().nullable(),
   tree: z.string().nullable().optional(),
+  /** What the ferret was started for; null when none was named (and for every session from before the field). */
+  purpose: z.string().nullable().optional(),
   day: z.string().nullable(),
   week: z.string().nullable(),
   createdAt: InstantSchema.nullable(),
