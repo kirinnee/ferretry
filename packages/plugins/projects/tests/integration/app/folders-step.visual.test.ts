@@ -246,15 +246,38 @@ describe('the setup flow keeps its folder picks across a refusal and a reload (E
             await tab.reload();
             await tab.waitForSelector('[data-explorer-state="ready"]');
             const listed = await tab.evaluate(() =>
-              [...document.querySelectorAll('[data-projects-step-picks] li')].map(li => li.textContent ?? ''),
+              [...document.querySelectorAll('[data-projects-step-picks] li .mono')].map(path => path.textContent ?? ''),
             );
             expect(listed).toEqual(['/home/sam/atlas']);
+            // E-257 MUST 1: the refusal is still said on the row after the reload, and fits inside it and the screen.
+            const note = await tab.evaluate(() => {
+              const label = document.querySelector('[data-projects-step-refused]');
+              const row = label?.closest('li')?.getBoundingClientRect();
+              const box = label?.getBoundingClientRect();
+              return {
+                text: label?.textContent ?? '',
+                inside:
+                  row !== undefined &&
+                  box !== undefined &&
+                  box.left >= row.left &&
+                  box.right <= row.right &&
+                  box.bottom <= row.bottom &&
+                  box.right <= window.innerWidth,
+              };
+            });
+            expect(note.text).toContain('that folder cannot be a project');
+            expect(note.inside, 'the refusal label sits inside its row and the screen').toBe(true);
             expect(await tab.evaluate(() => window.__passedOver), 'the page is not passed over').toBe(false);
             expect(
               await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
               'no sideways scroll',
             ).toBeLessThanOrEqual(0);
             await shot('2-after-reload');
+            // Next does not send the refused folder again as an ordinary pick.
+            await tab.click('[data-step-next]');
+            await tab.waitForSelector('[data-flow-commit-error]');
+            expect(await tab.evaluate(() => window.__registered), 'a refused pick is not sent again').toEqual([]);
+            expect(await tab.evaluate(() => window.__error)).toContain('that folder cannot be a project');
             expect(problems).toEqual([]);
           } finally {
             await context.close();

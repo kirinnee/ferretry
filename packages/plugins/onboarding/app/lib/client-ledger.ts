@@ -37,6 +37,8 @@ export const EMPTY_LEDGER: ClientLedger = Object.freeze({ format: 1, steps: Obje
 export interface LedgerStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  /** A browser's storage has it; a ledger that cannot forget simply keeps the entry. */
+  removeItem?(key: string): void;
 }
 
 /** The ledger as stored, or the empty one when nothing, something damaged or something of another format is there. */
