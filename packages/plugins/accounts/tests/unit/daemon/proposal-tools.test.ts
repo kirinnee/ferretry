@@ -177,7 +177,10 @@ describe('account_propose', () => {
     should(seen.links).eql([{ signIn: SIGN_IN, identity: 'work', why: 'the login lives there' }]);
     should(seen.recipes).eql([]);
     should(seen.suggestions).eql([]);
-    should(answer.text).containEql(`[${SIGN_IN}] lives in browser identity 'work'`).and.containEql('the owner decides');
+    should(answer.text)
+      .containEql(`[${SIGN_IN}] lives in browser identity 'work'`)
+      .and.containEql('saved for the owner to decide later')
+      .and.not.containEql('the owner decides');
   });
 
   it('should say an edge the graph already holds is known, and say both when a recipe comes with it', async () => {

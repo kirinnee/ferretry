@@ -33,7 +33,23 @@ interface Route {
 const byId = (left: SignInSummary, right: SignInSummary): number =>
   left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
 
-/** Every identity `signIn` lives in: its own edges, else those of the provider account it signs in through. */
+/**
+ * The provider sign-in a site sign-in goes through: the one the listing NAMES (`via.signIn`, the provider account's
+ * site sign-in), never "any sign-in of that account": a provider account that also signs in at some other site holds
+ * its session in that other site's page, which says nothing about the provider's own.
+ */
+const providerOf = (signIn: SignInSummary, list: Listing): SignInSummary | undefined => {
+  const named = signIn.via?.signIn;
+  return list.signIns.find(
+    other => other.id === named && other.account === signIn.method.via && other.place.kind === 'site',
+  );
+};
+
+/**
+ * Every identity `signIn` lives in. Its own edges first: a round trip through the provider keeps the provider on the
+ * path (the page asks the provider's button, not the site's own form), any other edge holds it directly. Else the
+ * identities of the provider sign-in it goes through, which only a link on THAT sign-in proves.
+ */
 function routesOf(
   signIn: SignInSummary,
   links: readonly IdentityLink[],
@@ -41,24 +57,30 @@ function routesOf(
   seen: ReadonlySet<AccountId>,
 ): Route[] {
   const own = links.filter(link => link.signIn === signIn.id);
-  if (own.length > 0) return own.map(link => ({ identity: link.identity, path: [signIn] }));
   const via = signIn.method.via;
-  if (via === undefined || seen.has(via)) return [];
-  const passed = new Set([...seen, via]);
-  return list.signIns
-    .filter(other => other.account === via && other.place.kind === 'site')
-    .sort(byId)
-    .flatMap(provider =>
-      routesOf(provider, links, list, passed).map(route => ({ ...route, path: [signIn, ...route.path] })),
-    );
+  const provider = via === undefined || seen.has(via) ? undefined : providerOf(signIn, list);
+  if (own.length > 0)
+    return own.map(link => ({
+      identity: link.identity,
+      path: link.how === 'provider-round-trip' && provider !== undefined ? [signIn, provider] : [signIn],
+    }));
+  if (via === undefined || provider === undefined) return [];
+  return routesOf(provider, links, list, new Set([...seen, via])).map(route => ({
+    ...route,
+    path: [signIn, ...route.path],
+  }));
 }
 
-/** The routes of every sign-in at `host`, one per identity (the first, in sign-in id order, wins its identity). */
-function routesFor(links: readonly IdentityLink[], list: Listing, host: PlaceKey): ReadonlyMap<string, Route> {
-  const found = new Map<string, Route>();
+/** The routes of every sign-in at `host`, grouped by identity (each group in sign-in id order). */
+function routesFor(
+  links: readonly IdentityLink[],
+  list: Listing,
+  host: PlaceKey,
+): ReadonlyMap<string, readonly Route[]> {
+  const found = new Map<string, Route[]>();
   for (const signIn of list.signIns.filter(each => placeHosts(each.place).includes(host)).sort(byId))
     for (const route of routesOf(signIn, links, list, new Set([signIn.account])))
-      if (!found.has(route.identity)) found.set(route.identity, route);
+      found.set(route.identity, [...(found.get(route.identity) ?? []), route]);
   return found;
 }
 
@@ -71,8 +93,10 @@ export function resolveIdentity(links: readonly IdentityLink[], list: Listing, h
   const [first, second] = identities;
   if (first === undefined) return { none: true };
   if (second !== undefined) return { ambiguous: identities };
-  const route = found.get(first) as Route;
-  return { identity: first, via: route.path.slice(1).map(hop => hop.account) };
+  const routes = found.get(first) as readonly Route[];
+  const accounts = [...new Set(routes.map(route => (route.path[0] as SignInSummary).account))].sort();
+  if (routes.length > 1) return { identity: first, ambiguousAccounts: accounts };
+  return { identity: first, via: (routes[0] as Route).path.slice(1).map(hop => hop.account) };
 }
 
 /** What a page showed, as Browsers reports it. `providerSignedIn`: the provider's own page still holds its session. */
@@ -95,7 +119,7 @@ const fillOrAsk = (signIn: SignInId, facts: PageFacts): RecoveryStep =>
 
 /**
  * The steps that sign `host` back in after its page showed a login, in the one identity that holds it. `[]` when there
- * is nothing to say: no identity holds it, or several do (`resolveIdentity` says `ambiguous`; the owner picks, never us).
+ * is nothing to say: no identity holds it, or several do, or one identity holds it under several accounts (`resolveIdentity` says `ambiguous` or `ambiguousAccounts`; the owner picks, never us).
  * - A password sign-in held directly: fill it, or ask.
  * - A sign-in through a provider: click the provider's button, then choose its account when the provider is still
  *   signed in, else sign the provider in first (fill it, or ask), which the provider's own page then completes.
@@ -107,8 +131,9 @@ export function recoveryPlan(
   facts: PageFacts,
 ): readonly RecoveryStep[] {
   const found = routesFor(links, list, host);
-  if (found.size !== 1) return [];
-  const { path } = [...found.values()][0] as Route;
+  const [only, ...rest] = [...found.values()];
+  if (only === undefined || rest.length > 0 || only.length !== 1) return [];
+  const { path } = only[0] as Route;
   const [site, provider] = path;
   if (site === undefined) return [];
   if (provider === undefined) return [fillOrAsk(site.id, facts)];

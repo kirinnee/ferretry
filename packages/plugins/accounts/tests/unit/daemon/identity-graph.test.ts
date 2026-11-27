@@ -32,9 +32,28 @@ const signIn = (n: number, accountId: string, place: Place, via?: string) => ({
   createdAt: AT,
   updatedAt: AT,
 });
+/** The listing as the daemon builds it: a sign-in that goes via an account names that account's first site sign-in. */
 const list = (accounts: ReturnType<typeof account>[], signIns: ReturnType<typeof signIn>[]): AccountList =>
-  AccountListSchema.parse({ v: 1, health: 'ready', accounts, signIns });
-const link = (n: number, identity: string): IdentityLink => ({ signIn: SI(n), identity, seenAt: AT, how: 'filled' });
+  AccountListSchema.parse({
+    v: 1,
+    health: 'ready',
+    accounts,
+    signIns: signIns.map(each => {
+      const via = each.method.via;
+      if (via === undefined) return each;
+      const provider = signIns.find(other => other.account === via && other.place.kind === 'site');
+      return {
+        ...each,
+        via: { account: { id: via, label: via }, ...(provider === undefined ? {} : { signIn: provider.id }) },
+      };
+    }),
+  });
+const link = (n: number, identity: string, how: IdentityLink['how'] = 'filled'): IdentityLink => ({
+  signIn: SI(n),
+  identity,
+  seenAt: AT,
+  how,
+});
 
 /** "Code Host" signs in with the IdP's account G (`idp.example`); `Plain` has a password of its own. */
 const WORLD = list(
@@ -69,6 +88,49 @@ describe('which identity holds a sign-in (resolveIdentity)', () => {
     should(resolveIdentity([], WORLD, 'code.example')).eql({ none: true });
     should(resolveIdentity([link(3, 'home')], WORLD, 'code.example')).eql({ none: true });
     should(resolveIdentity([link(1, 'work')], WORLD, 'unknown.example')).eql({ none: true });
+  });
+
+  it('should not take a sign-in of the provider account at ANOTHER site as the provider session', () => {
+    // Google's account G signs in at its own page (si 1) and at other.example (si 4); only other.example is linked.
+    const world = list(
+      [account('IDP_G', [SI(1), SI(4)]), account('CODEHOST', [SI(2)])],
+      [
+        signIn(1, 'IDP_G', site('idp.example')),
+        signIn(2, 'CODEHOST', site('code.example'), 'IDP_G'),
+        signIn(4, 'IDP_G', site('other.example')),
+      ],
+    );
+    should(resolveIdentity([link(4, 'personal')], world, 'code.example')).eql({ none: true });
+    should(
+      recoveryPlan([link(4, 'personal')], world, 'code.example', { providerSignedIn: true, standingRule: true }),
+    ).eql([]);
+    should(resolveIdentity([link(1, 'work')], world, 'code.example')).eql({ identity: 'work', via: ['IDP_G'] });
+  });
+
+  it('should keep the provider on the path when the site sign-in itself has a provider-round-trip edge', () => {
+    const own = [link(2, 'work', 'provider-round-trip')];
+    should(resolveIdentity(own, WORLD, 'code.example')).eql({ identity: 'work', via: ['IDP_G'] });
+    should(recoveryPlan(own, WORLD, 'code.example', { providerSignedIn: true, standingRule: false })).eql([
+      { do: 'click-provider', provider: 'IDP_G' },
+      { do: 'choose-account', account: 'IDP_G' },
+    ]);
+  });
+
+  it('should say which accounts when one identity holds the host under two, and plan no recovery', () => {
+    const world = list(
+      [account('IDP_G', [SI(1)]), account('CODEHOST', [SI(2)]), account('CODEHOST_TWO', [SI(5)])],
+      [
+        signIn(1, 'IDP_G', site('idp.example')),
+        signIn(2, 'CODEHOST', site('code.example'), 'IDP_G'),
+        signIn(5, 'CODEHOST_TWO', site('code.example')),
+      ],
+    );
+    const both = [link(1, 'work'), link(5, 'work')];
+    should(resolveIdentity(both, world, 'code.example')).eql({
+      identity: 'work',
+      ambiguousAccounts: ['CODEHOST', 'CODEHOST_TWO'],
+    });
+    should(recoveryPlan(both, world, 'code.example', { providerSignedIn: true, standingRule: true })).eql([]);
   });
 
   it('should follow a chain of providers and keep every account it passed', () => {

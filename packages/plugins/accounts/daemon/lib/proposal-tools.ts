@@ -66,7 +66,7 @@ const IDENTITY_FAILED = 'The browser identity could not be proposed right now; t
 const identityWords = (signIn: SignInId, identity: string, kept: IdentityLinkFiled): string =>
   kept === 'known'
     ? `[${signIn}] is already known to live in browser identity '${identity}'.`
-    : `Proposed that [${signIn}] lives in browser identity '${identity}'; the owner decides. You do not need to wait.`;
+    : `Proposed that [${signIn}] lives in browser identity '${identity}'; saved for the owner to decide later. You do not need to wait.`;
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 

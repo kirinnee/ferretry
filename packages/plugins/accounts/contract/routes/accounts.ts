@@ -1417,6 +1417,8 @@ export function accountHintSummary(site: string, hints: readonly AccountHint[], 
 export function identityWords(answer: IdentityAnswer): string {
   if ('ambiguous' in answer)
     return `Browser identity: held in more than one (${answer.ambiguous.join(', ')}); ask the owner which, never guess.`;
+  if ('ambiguousAccounts' in answer)
+    return `Browser identity: '${answer.identity}' holds more than one account's sign-in here (${answer.ambiguousAccounts.join(', ')}); ask the owner which to sign in as, never guess.`;
   const through = answer.via.length === 0 ? '' : `, through ${answer.via.join(' → ')}`;
   return `Browser identity: '${answer.identity}'${through}.`;
 }

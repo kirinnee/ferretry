@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AccountIdSchema, SignInIdSchema } from './account-ids.ts';
 import { InstantSchema } from './foreign.ts';
-import { oneLine } from './login-entries.ts';
+import { MAX_LOGIN_ENTRIES, oneLine } from './login-entries.ts';
 
 /**
  * THE ACCOUNT → BROWSER-IDENTITY GRAPH (W-124). An EDGE says "sign-in S is live in browser identity I, seen at T".
@@ -57,7 +57,8 @@ export type IdentityLinksDocument = z.infer<typeof IdentityLinksDocumentSchema>;
 
 /**
  * Which identity a site's sign-in lives in, as a ferret may read it: the one identity (and the provider accounts the
- * sign-in goes through to reach it), or several, which is NEVER resolved by a silent pick. Absent from a hint: none.
+ * sign-in goes through to reach it), or several identities, or one identity under several accounts, which are NEVER
+ * resolved by a silent pick. Absent from a hint: none.
  */
 export const IdentityAnswerSchema = z.union([
   z.strictObject({
@@ -65,6 +66,12 @@ export const IdentityAnswerSchema = z.union([
     /** The provider accounts between the site's sign-in and the identity, nearest first. Empty: it is held directly. */
     via: z.array(AccountIdSchema).max(8).readonly(),
   }),
-  z.strictObject({ ambiguous: z.array(IdentityKeySchema).min(2).max(16).readonly() }),
+  /** Several identities hold it. The bound is the one the graph's own edges hold: it can never name more identities than it has. */
+  z.strictObject({ ambiguous: z.array(IdentityKeySchema).min(2).max(MAX_IDENTITY_LINKS).readonly() }),
+  /** One identity holds it, but under more than one account's sign-in: which account to sign in as is the owner's to say. */
+  z.strictObject({
+    identity: IdentityKeySchema,
+    ambiguousAccounts: z.array(AccountIdSchema).min(2).max(MAX_LOGIN_ENTRIES).readonly(),
+  }),
 ]);
 export type IdentityAnswer = z.infer<typeof IdentityAnswerSchema>;
