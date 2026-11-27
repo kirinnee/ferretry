@@ -76,7 +76,6 @@ import {
   clickOn,
   printPdf,
   readPage,
-  shootPage,
   typeInto,
   uploadFiles,
 } from '../pages/page-acts.ts';
@@ -93,18 +92,25 @@ import { disablePasskeys } from './passkeys.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../pages/pointer.ts';
 import { type PointerPage, performPointerAct, pointerActParam } from '../pages/pointer-acts.ts';
 import type { PushNumberPage } from '../challenges/push-number-read.ts';
+import { BrowserCapture, type CaptureFrameEvent } from './capture/index.ts';
 
 const endpoint = process.argv[2];
 /** This worker drives a stealth identity's Chrome (`STEALTH_WORKER_ENVIRONMENT` in `client.ts`): patchright-core, with no `Runtime.enable`. */
 const STEALTH = process.env.FY_BROWSER_WORKER_STEALTH === '1';
-/** What a stealth page's console log says first: the page's console cannot be read without the DevTools domain a page can detect. */
 export const STEALTH_CONSOLE_NOTE =
   'the page console is not captured in a stealth browser: reading it needs the DevTools Runtime domain, which sites detect';
-/** A page's console log; a stealth one opens with the note, so an empty log is not mistaken for a quiet page. */
-function newConsoleLog(): ConsoleLog {
-  const log = new ConsoleLog();
+function newConsoleLog(page: Page): ConsoleLog {
+  const log = new ConsoleLog(text => capture.masks(page).text(text));
   if (STEALTH) log.add('warning', STEALTH_CONSOLE_NOTE);
   return log;
+}
+function newNetworkLog(page: Page): NetworkLog {
+  return new NetworkLog(
+    Date.now,
+    text => capture.masks(page).text(text),
+    async () => await capture.inspect([page]),
+    text => capture.masks(page).queryAllowed(text),
+  );
 }
 /** Where downloads and PDFs are staged for the daemon; without it the worker stages nothing. */
 const stageDirectory = process.argv[3];
@@ -146,12 +152,17 @@ const sessions = new WeakMap<Page, Promise<CDPSession>>();
 const targets = new WeakMap<Page, Promise<string>>();
 /** The context of each incognito page, closed with it. */
 const incognito = new WeakMap<Page, BrowserContext>();
+/** Worker-private helper pages never become tools, tabs, listings or captures. */
+const privateContexts = new WeakSet<BrowserContext>();
 const queues = new Map<string, Promise<unknown>>();
 const viewports = new Map<string, Viewport>();
 /** Where the person's pointer last was on each page, so a bare press can be preceded by its arrival. */
 const pointers = new Map<string, PointerPosition>();
 const screencasts = new Map<string, CDPSession>();
 const heldFrames = new Map<number, HeldFrame>();
+const castEpochs = new Map<string, number>();
+const framesInFlight = new Set<string>();
+const castListeners = new Map<string, (event: CaptureFrameEvent) => void>();
 let global: Promise<unknown> = Promise.resolve();
 /** What each page is holding, logging and emulating — all of it forgotten with the page. */
 const dialogs = new PageDialogs();
@@ -177,6 +188,18 @@ const DIALOG_RACED = new Set([
   'reload',
   'evaluate',
 ]);
+
+const capture = new BrowserCapture(
+  pageSession,
+  async () => {
+    if (!browser) throw new Error('the browser is not connected');
+    const own = await browser.newContext({ viewport: null, serviceWorkers: 'block' });
+    privateContexts.add(own);
+    await own.route('**/*', route => route.abort());
+    return await own.newPage();
+  },
+  work => within(2000, work),
+);
 
 /**
  * Chrome's DevTools pipe on fds 3 and 4, as the transport Playwright's `connectOverCDP` takes (today's): Node reads
@@ -230,9 +253,16 @@ function send(record: unknown): void {
   process.stdout.write(`${JSON.stringify(record)}\n`);
 }
 
-function safeError(error: unknown): string {
+function safeError(error: unknown, page?: Page): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.split(/\r?\n|\r/, 1)[0]?.slice(0, MAX_ERROR_CHARS) || 'unknown error';
+  try {
+    return (
+      (page ? capture.masks(page).text(message) : message).split(/\r?\n|\r/, 1)[0]?.slice(0, MAX_ERROR_CHARS) ||
+      'unknown error'
+    );
+  } catch {
+    return 'browser capture masks are unavailable';
+  }
 }
 
 /** Runs work in order behind everything else queued under the same key. */
@@ -268,7 +298,13 @@ function pageId(page: Page): string {
 }
 
 function setPageState(page: Page, state: PageState['state'], error?: unknown): void {
-  pageStates.set(page, { state, ...(error === undefined ? {} : { error: safeError(error) }) });
+  const raw = error instanceof Error ? error.message : String(error);
+  pageStates.set(page, {
+    state,
+    ...(error === undefined
+      ? {}
+      : { error: raw.length > MAX_ERROR_CHARS ? 'page error withheld: exceeds the safe capture limit' : raw }),
+  });
 }
 
 function logOf<T>(logs: Map<string, T>, key: string, make: () => T): T {
@@ -296,20 +332,20 @@ function watch(page: Page, key: string): void {
   page.on(
     'console',
     guarded(message =>
-      logOf(consoles, key, () => newConsoleLog()).add(message.type(), message.text(), message.location()),
+      logOf(consoles, key, () => newConsoleLog(page)).add(message.type(), message.text(), message.location()),
     ),
   );
   page.on(
     'pageerror',
-    guarded(error => logOf(consoles, key, () => newConsoleLog()).add('error', error.message)),
+    guarded(error => logOf(consoles, key, () => newConsoleLog(page)).add('error', error.message)),
   );
   page.on(
     'request',
-    guarded(request => logOf(networks, key, () => new NetworkLog()).started(request)),
+    guarded(request => logOf(networks, key, () => newNetworkLog(page)).started(request)),
   );
   page.on(
     'response',
-    guarded(response => logOf(networks, key, () => new NetworkLog()).responded(response.request(), response)),
+    guarded(response => logOf(networks, key, () => newNetworkLog(page)).responded(response.request(), response)),
   );
   page.on(
     'response',
@@ -345,7 +381,7 @@ function watch(page: Page, key: string): void {
     'requestfinished',
     guarded(
       request =>
-        void logOf(networks, key, () => new NetworkLog())
+        void logOf(networks, key, () => newNetworkLog(page))
           .finished(request)
           .catch(() => undefined),
     ),
@@ -353,7 +389,7 @@ function watch(page: Page, key: string): void {
   page.on(
     'requestfailed',
     guarded(request =>
-      logOf(networks, key, () => new NetworkLog()).failed(request, request.failure()?.errorText ?? 'request failed'),
+      logOf(networks, key, () => newNetworkLog(page)).failed(request, request.failure()?.errorText ?? 'request failed'),
     ),
   );
 }
@@ -361,7 +397,9 @@ function watch(page: Page, key: string): void {
 /** The agent browser's clipboard, read only here: a context of the worker's own that no tool can name (clipboard-read.ts). */
 const clipboard = new ContextClipboardHelper(async () => {
   if (!browser) throw new Error('the browser is not connected');
-  return (await browser.newContext({ viewport: null })) as never;
+  const own = await browser.newContext({ viewport: null });
+  privateContexts.add(own);
+  return own as never;
 });
 
 /** Lets a page write the clipboard for its own origin, as Chrome does; never read, never another origin. */
@@ -397,6 +435,7 @@ function unwatched(): NavigationLedger {
 }
 
 function registerPage(page: Page): void {
+  if (privateContexts.has(page.context())) return;
   if (pageIds.has(page)) return;
   const key = pageId(page);
   // A normal page's Copy button works as in any Chrome: it may WRITE the clipboard, for its own origin only. READ is never granted
@@ -421,7 +460,35 @@ function registerPage(page: Page): void {
       if (opener) openers.set(page, pageId(opener));
     })
     .catch(() => undefined);
-  page.on('download', download => downloads.accept(pageId(page), download));
+  page.on('download', download => {
+    const protectedAtStart = capture.of(page).protectedInput();
+    const cancel = async () => {
+      await download.cancel().catch(() => undefined);
+      await download.delete().catch(() => undefined);
+    };
+    void (async () => {
+      const rawName = download.suggestedFilename();
+      await capture.inspect([page]);
+      const blocked = protectedAtStart || capture.of(page).protectedInput();
+      downloads.accept(pageId(page), {
+        suggestedFilename: () => (blocked ? 'withheld-sensitive-download' : capture.masks(page).text(rawName)),
+        saveAs: async path => {
+          if (blocked || capture.of(page).protectedInput()) {
+            await cancel();
+            throw new Error('sensitive download withheld');
+          }
+          await download.saveAs(path);
+          if (capture.of(page).protectedInput()) {
+            await rm(path, { force: true });
+            await cancel();
+            throw new Error('sensitive download withheld');
+          }
+        },
+      });
+    })().catch(() => {
+      void cancel();
+    });
+  });
   page.on('request', request => {
     try {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) setPageState(page, 'loading');
@@ -467,7 +534,10 @@ function registerPage(page: Page): void {
 
 /** Every open page, in every context — the shared profile's and each incognito one. */
 function livePages(): readonly Page[] {
-  const pages = (browser?.contexts() ?? []).flatMap(each => each.pages()).filter(page => !page.isClosed());
+  const pages = (browser?.contexts() ?? [])
+    .filter(each => !privateContexts.has(each))
+    .flatMap(each => each.pages())
+    .filter(page => !page.isClosed());
   for (const page of pages) registerPage(page);
   return pages;
 }
@@ -489,12 +559,8 @@ function targetPage(id: unknown): Page {
   return page;
 }
 
-function safeUrl(page: Page): string {
-  try {
-    return (page.url() || 'about:blank').slice(0, MAX_URL_CHARS);
-  } catch {
-    return 'about:blank';
-  }
+function displayUrl(raw: string, page: Page): string {
+  return raw.length > MAX_URL_CHARS ? 'about:blank' : capture.masks(page).url(raw).slice(0, MAX_URL_CHARS);
 }
 
 /** Gives up on slow work after `ms` rather than hang a status behind a page that cannot answer. */
@@ -516,7 +582,8 @@ async function safeTitle(page: Page): Promise<string> {
   const known = titles.get(page) ?? '';
   if (dialogs.pending(pageId(page)) !== undefined) return known;
   try {
-    const title = (await within(TITLE_WAIT_MS, page.title())).slice(0, MAX_TITLE_CHARS);
+    const raw = await within(TITLE_WAIT_MS, page.title());
+    const title = raw.length > MAX_TITLE_CHARS ? '[title withheld: exceeds the safe capture limit]' : raw;
     titles.set(page, title);
     return title;
   } catch {
@@ -574,7 +641,7 @@ async function challengeOf(page: Page): Promise<{ challenge?: { provider: string
   try {
     const challenged = subresourceChallenges.get(pageId(page))?.urls() ?? [];
     const challenge = recogniseBrowserChallenge({
-      url: safeUrl(page),
+      url: page.url(),
       title: await safeTitle(page),
       frameUrls: page.frames().map(each => each.url()),
       challengedSubresources: challenged,
@@ -646,7 +713,7 @@ function inputSubject(page: Page): InputSubject {
     page: {
       locator: (selector: string) => inputLocatorOf(page.locator(selector)),
       isClosed: () => page.isClosed(),
-      url: () => safeUrl(page),
+      url: () => page.url(),
       title: async () => await safeTitle(page),
       mainFrame: () => page.mainFrame(),
       frames: () => page.frames(),
@@ -704,22 +771,44 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
   const listed = shown.length === 0 ? [await anyPage()] : shown;
   const active = focus.isClosed() ? (listed[0] as Page) : focus;
   const state = pageStates.get(active) ?? { state: 'ready' as const };
-  return {
-    url: safeUrl(active),
-    title: await safeTitle(active),
-    activePageId: pageId(active),
-    pages: await Promise.all(
-      listed.map(async item => ({
+  const pages = await Promise.all(
+    listed.map(async item => {
+      const identity = {
         id: pageId(item),
-        url: safeUrl(item),
-        title: await safeTitle(item),
         ...(incognito.has(item) ? { incognito: true } : {}),
         ...(openers.has(item) ? { openerId: openers.get(item) } : {}),
-        ...(await challengeOf(item)),
-      })),
-    ),
+      };
+      try {
+        const url = item.url() || 'about:blank';
+        const title = await safeTitle(item);
+        const challenge = await challengeOf(item);
+        await capture.inspect([item]);
+        return {
+          ...identity,
+          url: displayUrl(url, item),
+          title: capture.masks(item).text(title).slice(0, MAX_TITLE_CHARS),
+          ...challenge,
+        };
+      } catch {
+        return { ...identity, url: 'about:blank', title: '[capture withheld]' };
+      }
+    }),
+  );
+  const current = pages.find(page => page.id === pageId(active));
+  return {
+    url: current?.url ?? 'about:blank',
+    title: current?.title ?? '[capture withheld]',
+    activePageId: pageId(active),
+    pages,
     pageState: state.state,
-    ...(state.state === 'error' ? { pageError: state.error ?? 'unknown error' } : {}),
+    ...(state.state === 'error'
+      ? {
+          pageError:
+            current?.title === '[capture withheld]'
+              ? 'page capture withheld'
+              : capture.masks(active).text(state.error ?? 'unknown error'),
+        }
+      : {}),
     canGoBack,
     canGoForward,
     ...extra,
@@ -727,13 +816,19 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
 }
 
 async function acted(page: Page, extra: Readonly<Record<string, unknown>> = {}): Promise<Record<string, unknown>> {
-  const dialog = dialogs.pending(pageId(page));
-  const started = await downloads.notices(pageId(page));
+  const safe = await capture.inspect([page]).then(
+    () => true,
+    () => false,
+  );
+  const pending = dialogs.pending(pageId(page));
+  const dialog = pending === undefined || safe ? pending : { type: pending.type, message: '[capture withheld]' };
+  const notices = await downloads.notices(pageId(page));
+  const started = safe ? notices : notices.map(notice => ({ ...notice, name: 'withheld-download' }));
   return {
-    ...(await snapshot(page, extra)),
+    ...(await snapshot(page, safe ? (capture.masks(page).data(extra) as Record<string, unknown>) : {})),
     actedPageId: pageId(page),
-    ...(dialog === undefined ? {} : { dialog }),
-    ...(started.length === 0 ? {} : { downloads: started }),
+    ...(dialog === undefined ? {} : { dialog: capture.masks(page).data(dialog) }),
+    ...(started.length === 0 ? {} : { downloads: capture.masks(page).data(started) }),
   };
 }
 
@@ -747,7 +842,9 @@ async function racing(request: Request): Promise<Record<string, unknown>> {
   const page = targetPage(request.params.pageId);
   const key = pageId(page);
   if (dialogs.pending(key) === undefined) {
-    const work = act(request);
+    const work = RENDERER_WRITES.has(request.method)
+      ? capture.write(page, async () => await act(request))
+      : act(request);
     work.catch(() => undefined);
     const opened = dialogs.opened(key);
     try {
@@ -771,18 +868,28 @@ async function lifecycle(params: Readonly<Record<string, unknown>>): Promise<Rec
   const parsed = BrowserPageLifecycleRequestSchema.safeParse(params.request);
   if (!parsed.success) throw new Error(`invalid lifecycle request: ${parsed.error.issues[0]?.message ?? 'unknown'}`);
   const key = pageId(page);
+  if (parsed.data.op === 'dialog' && dialogs.pending(key) === undefined) {
+    const opened = dialogs.opened(key);
+    try {
+      await within(250, opened.promise).catch(() => undefined);
+    } finally {
+      opened.cancel();
+    }
+  }
   const reply = await runLifecycleRequest(
     {
       pageKey: key,
+      mask: text => capture.masks(page).text(text),
+      queryAllowed: text => capture.masks(page).queryAllowed(text),
       page: page as unknown as WaitablePage,
       dialogs,
-      messages: logOf(consoles, key, () => newConsoleLog()),
-      network: logOf(networks, key, () => new NetworkLog()),
+      messages: logOf(consoles, key, () => newConsoleLog(page)),
+      network: logOf(networks, key, () => newNetworkLog(page)),
       emulation: logOf(emulations, key, () => new PageEmulation()),
       targets: {
         session: await pageSession(page),
         setViewport: async viewport => await resizeTo(page, viewport),
-        url: () => safeUrl(page),
+        url: () => page.url(),
         grantPermissions: async (permissions, origin) =>
           await page.context().grantPermissions([...permissions], { origin }),
         clearPermissions: async () => await page.context().clearPermissions(),
@@ -790,7 +897,14 @@ async function lifecycle(params: Readonly<Record<string, unknown>>): Promise<Rec
     },
     parsed.data,
   );
-  return { ...(await acted(page)), lifecycle: reply };
+  const safe = await capture.inspect([page]).then(
+    () => true,
+    () => false,
+  );
+  return {
+    ...(await acted(page)),
+    lifecycle: safe ? capture.masks(page).data(reply) : { text: 'The dialog was answered; its message is withheld.' },
+  };
 }
 
 async function resizeTo(page: Page, viewport: Viewport): Promise<void> {
@@ -840,7 +954,25 @@ async function startScreencast(page: Page, viewport: Viewport): Promise<void> {
   await stopScreencast(id);
   const session = await pageSession(page);
   screencasts.set(id, session);
-  session.on('Page.screencastFrame', event => frame(event, session, page));
+  const epoch = castEpochs.get(id) ?? 0;
+  const listener = (event: CaptureFrameEvent) => {
+    if (castEpochs.get(id) !== epoch) return;
+    if (framesInFlight.has(id)) {
+      if (typeof event.sessionId === 'number')
+        void session.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => undefined);
+      return;
+    }
+    framesInFlight.add(id);
+    void frame(event, session, page, epoch)
+      .catch(() => {
+        // A failed inspection/paint drops the pixels. Acknowledge so a later safe frame can still arrive.
+        if (typeof event.sessionId === 'number')
+          void session.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => undefined);
+      })
+      .finally(() => framesInFlight.delete(id));
+  };
+  castListeners.set(id, listener);
+  session.on('Page.screencastFrame', listener);
   await session.send('Page.enable');
   await applyViewport(page, viewport);
   await session.send('Page.startScreencast', {
@@ -853,20 +985,22 @@ async function startScreencast(page: Page, viewport: Viewport): Promise<void> {
 }
 
 async function stopScreencast(id: string): Promise<void> {
+  castEpochs.set(id, (castEpochs.get(id) ?? 0) + 1);
   const session = screencasts.get(id);
   screencasts.delete(id);
   for (const [ackId, held] of heldFrames) if (held.session === session) heldFrames.delete(ackId);
   if (!session) return;
+  const listener = castListeners.get(id);
+  if (listener) session.off('Page.screencastFrame', listener);
+  castListeners.delete(id);
   await session.send('Page.stopScreencast').catch(() => undefined);
 }
 
-function frame(
-  event: { data?: unknown; sessionId?: unknown; metadata?: { deviceWidth?: unknown; deviceHeight?: unknown } },
-  session: CDPSession,
-  page: Page,
-): void {
+async function frame(event: CaptureFrameEvent, session: CDPSession, page: Page, epoch: number): Promise<void> {
   const id = pageId(page);
   if (screencasts.get(id) !== session || typeof event.data !== 'string' || typeof event.sessionId !== 'number') return;
+  const pixels = await capture.frame(page);
+  if (screencasts.get(id) !== session || castEpochs.get(id) !== epoch) return;
   frameSerial += 1;
   heldFrames.set(frameSerial, { session, cdpSessionId: event.sessionId });
   const viewport = viewports.get(id) ?? DEFAULT_VIEWPORT;
@@ -874,7 +1008,7 @@ function frame(
   const height = typeof event.metadata?.deviceHeight === 'number' ? event.metadata.deviceHeight : viewport.height;
   send({
     type: 'screencast-frame',
-    dataBase64: event.data,
+    dataBase64: pixels,
     width: Math.max(1, Math.round(width)),
     height: Math.max(1, Math.round(height)),
     pageId: id,
@@ -894,7 +1028,9 @@ async function input(page: Page, value: unknown): Promise<void> {
   if (next !== undefined) pointers.set(id, next);
   // Every event is SENT before any reply is awaited: input is never queued, so awaiting the arrival first
   // would let the next event — this press's own release — reach Chrome ahead of the press.
-  await Promise.all(pointerSequence(last, received).map(event => dispatch(session, event)));
+  await capture.write(page, async () => {
+    await Promise.all(pointerSequence(last, received).map(event => dispatch(session, event)));
+  });
 }
 
 async function dispatch(session: CDPSession, event: BrowserInputEvent): Promise<void> {
@@ -943,16 +1079,48 @@ function unqueued(request: Request): boolean {
   return op === 'dialog' || op === 'console' || op === 'network';
 }
 
+const RENDERER_WRITES = new Set([
+  'navigate',
+  'evaluate',
+  'upload',
+  'back',
+  'forward',
+  'reload',
+  'resize',
+  'startScreencast',
+]);
 async function run(request: Request): Promise<Record<string, unknown>> {
-  if (request.method === 'lifecycle') return await lifecycle(request.params);
+  if (request.method === 'lifecycle') {
+    const work = async () => await lifecycle(request.params);
+    return (request.params.request as { op?: unknown } | undefined)?.op === 'emulate'
+      ? await capture.write(targetPage(request.params.pageId), work)
+      : await work();
+  }
   if (DIALOG_RACED.has(request.method)) return await racing(request);
+  if (RENDERER_WRITES.has(request.method))
+    return await capture.write(targetPage(request.params.pageId), async () => await act(request));
+  if (request.method === 'newPage' && request.params.incognito !== true)
+    return await capture.writeContext(requireContext(), async () => await act(request));
   return await act(request);
 }
 
 async function act(request: Request): Promise<Record<string, unknown>> {
   const params = request.params;
   // The page input seam is one copy (`../target/lib/worker-serve.ts`): it parses every parameter and answers a word.
-  if (isInputMethod(request.method)) return await serveInputMethod(INPUT_PAGES, request.method, params);
+  if (isInputMethod(request.method)) {
+    const page = targetPage(params.pageId);
+    if (request.method === 'inputType') capture.rememberInput(page, params);
+    const serve = async () => await serveInputMethod(INPUT_PAGES, request.method, params);
+    if (request.method === 'inputShot') return await capture.fieldShot(page, serve);
+    if (
+      request.method === 'inputType' ||
+      request.method === 'inputClear' ||
+      request.method === 'inputProbe' ||
+      request.method === 'captchaInject'
+    )
+      return await capture.write(page, serve);
+    return await serve();
+  }
   switch (request.method) {
     case 'navigate': {
       const page = targetPage(params.pageId);
@@ -968,11 +1136,15 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'click': {
       const page = targetPage(params.pageId);
-      const clicked = await clickOn(page, requiredTarget(params), {
-        ...(isButton(params.button) ? { button: params.button } : {}),
-        ...(params.double === true ? { double: true } : {}),
-        ...(Array.isArray(params.modifiers) ? { modifiers: params.modifiers.filter(isModifier) } : {}),
-      });
+      const clicked = await capture.write(
+        page,
+        async () =>
+          await clickOn(page, requiredTarget(params), {
+            ...(isButton(params.button) ? { button: params.button } : {}),
+            ...(params.double === true ? { double: true } : {}),
+            ...(Array.isArray(params.modifiers) ? { modifiers: params.modifiers.filter(isModifier) } : {}),
+          }),
+      );
       // A click that starts a download hears of it a moment later; the act should be able to say so.
       await downloads.awaitStart(pageId(page), 250);
       return await acted(
@@ -984,10 +1156,15 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       const page = targetPage(params.pageId);
       const target = browserElementParam(params.target);
       if (target === undefined) throw new Error('target is required');
-      const typed = await typeInto(page, target, typeof params.text === 'string' ? params.text : '', {
-        ...(params.submit === true ? { submit: true } : {}),
-        ...(params.slowly === true ? { slowly: true } : {}),
-      });
+      await capture.rememberType(page, target, typeof params.text === 'string' ? params.text : '');
+      const typed = await capture.write(
+        page,
+        async () =>
+          await typeInto(page, target, typeof params.text === 'string' ? params.text : '', {
+            ...(params.submit === true ? { submit: true } : {}),
+            ...(params.slowly === true ? { slowly: true } : {}),
+          }),
+      );
       return await acted(
         page,
         typed.passwordField
@@ -1030,7 +1207,20 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'pointer': {
       const page = targetPage(params.pageId);
-      const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));
+      const act = pointerActParam(params.act);
+      if (act.action === 'fill-form')
+        for (const entry of act.fields) {
+          const target =
+            entry.ref === undefined
+              ? { kind: 'selector' as const, selector: entry.selector ?? '' }
+              : { kind: 'ref' as const, ref: entry.ref };
+          if (entry.text !== undefined || entry.value !== undefined)
+            await capture.rememberType(page, target, entry.text ?? entry.value ?? '');
+        }
+      const outcome = await capture.write(
+        page,
+        async () => await performPointerAct(page as unknown as PointerPage, act),
+      );
       return await acted(
         page,
         outcome.passwordField
@@ -1045,21 +1235,28 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       const target = browserElementParam(params.target);
       // The snapshot names what can be clicked and typed into, each with a ref an act accepts; the
       // visible text is what a person reads.
-      const read = await readPage(page, {
-        ...(target === undefined ? {} : { target }),
-        mode: params.mode === 'a11y' || params.mode === 'snapshot' ? params.mode : 'text',
-        ...(typeof params.find === 'string' && params.find ? { find: params.find } : {}),
-        ...(typeof params.depth === 'number' && Number.isSafeInteger(params.depth) && params.depth > 0
-          ? { depth: params.depth }
-          : {}),
-        ...(params.boxes === true ? { boxes: true } : {}),
-      });
+      const read = await readPage(
+        page,
+        {
+          ...(target === undefined ? {} : { target }),
+          mode: params.mode === 'a11y' || params.mode === 'snapshot' ? params.mode : 'text',
+          ...(typeof params.find === 'string' && params.find ? { find: params.find } : {}),
+          ...(typeof params.depth === 'number' && Number.isSafeInteger(params.depth) && params.depth > 0
+            ? { depth: params.depth }
+            : {}),
+          ...(params.boxes === true ? { boxes: true } : {}),
+        },
+        async text => {
+          await capture.inspect([page]);
+          return capture.masks(page).text(text);
+        },
+      );
       return await acted(page, { text: read });
     }
     case 'screenshot': {
       const page = targetPage(params.pageId);
       const target = browserElementParam(params.target);
-      const shot = await shootPage(page, {
+      const shot = await capture.screenshot(page, {
         ...(target === undefined ? {} : { target }),
         ...(params.fullPage === true ? { fullPage: true } : {}),
         format: params.format === 'jpeg' ? 'jpeg' : 'png',
@@ -1093,21 +1290,30 @@ async function act(request: Request): Promise<Record<string, unknown>> {
             : {}),
         },
         () => crypto.randomUUID(),
+        async text => {
+          await capture.inspect([page]);
+          return capture.masks(page).text(text);
+        },
       );
       return await acted(page, { text: ran.text, ...(ran.origin === undefined ? {} : { scriptOrigin: ran.origin }) });
     }
     case 'download': {
       const page = targetPage(params.pageId);
+      await capture.of(page).binary();
       const staged = await downloads.claim(
         pageId(page),
         typeof params.downloadId === 'string' ? params.downloadId : undefined,
       );
+      await capture.of(page).binary();
       return await acted(page, { staged });
     }
     case 'pdf': {
       const page = targetPage(params.pageId);
+      await capture.of(page).binary();
       const base64 = await printPdf(await cdpOf(page));
-      const staged = await downloads.stagePdf(pageId(page), base64, await safeTitle(page));
+      const title = await safeTitle(page);
+      await capture.of(page).binary();
+      const staged = await downloads.stagePdf(pageId(page), base64, capture.masks(page).text(title));
       return await acted(page, { staged });
     }
     case 'back': {
@@ -1206,12 +1412,37 @@ function parse(line: string): Request {
 }
 
 async function answer(request: Request): Promise<void> {
+  let page: Page | undefined;
   try {
+    page = typeof request.params.pageId === 'string' ? targetPage(request.params.pageId) : undefined;
+    const internal =
+      isInputMethod(request.method) || ['copyRead', 'clipboardRead', 'clipboardClear'].includes(request.method);
+    const dialog =
+      request.method === 'lifecycle' && (request.params.request as { op?: unknown } | undefined)?.op === 'dialog';
+    const content =
+      !internal &&
+      !dialog &&
+      ['read', 'evaluate', 'screenshot', 'pdf', 'download', 'location', 'lifecycle'].includes(request.method);
+    if (content && page) await capture.inspect([page]);
     const result = await run(request);
+    if (content && page) await capture.inspect([page]);
+    // Observations and sealed-copy values stay on their daemon-private seams; masking would falsify Vault facts.
     send({ id: request.id, ok: true, result });
     if (request.method === 'close') process.exit(0);
   } catch (error) {
-    send({ id: request.id, ok: false, error: safeError(error) });
+    const inspected =
+      page !== undefined &&
+      (await capture.inspect([page]).then(
+        () => true,
+        () => false,
+      ));
+    send({
+      id: request.id,
+      ok: false,
+      error: inspected
+        ? safeError(error, page)
+        : 'browser capture withheld: sensitive fields could not be inspected safely',
+    });
   }
 }
 

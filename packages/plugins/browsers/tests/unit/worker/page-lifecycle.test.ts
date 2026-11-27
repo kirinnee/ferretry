@@ -133,7 +133,7 @@ describe('page dialogs', () => {
     should(dialogs.pending('p1')?.message).equal('second');
   });
 
-  it('should clip a long message and name an unknown type an alert', () => {
+  it('should withhold a long message whole and name an unknown type an alert', () => {
     // Arrange
     const dialogs = new PageDialogs(new ManualTimers());
 
@@ -142,7 +142,7 @@ describe('page dialogs', () => {
 
     // Assert
     should(dialogs.pending('p1')?.type).equal('alert');
-    should(dialogs.pending('p1')?.message.length).equal(1_024);
+    should(dialogs.pending('p1')?.message).equal('[dialog message withheld: exceeds the safe capture limit]');
   });
 
   it('should refuse to answer a page that has no dialog', async () => {
@@ -261,7 +261,7 @@ describe('console log', () => {
     should(few).not.containEql('#598 ');
   });
 
-  it('should clip a long line, and drop user-info from the place it came from', () => {
+  it('should withhold a long line whole, and drop user-info from the place it came from', () => {
     // Arrange
     const log = new ConsoleLog();
     log.add('log', 'y'.repeat(5_000), { url: 'https://user:pw@app.test/a.js' });
@@ -272,7 +272,7 @@ describe('console log', () => {
     // Assert
     should(text).not.containEql('user:pw');
     should(text).not.containEql('y'.repeat(2_001));
-    should(text).containEql('y'.repeat(2_000));
+    should(text).containEql('[console message withheld: exceeds the safe capture limit]');
   });
 
   it('should map every browser console type to one of the five levels', () => {

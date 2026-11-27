@@ -79,9 +79,9 @@ rendered:
 
 - the output of a `use` child, on both stdout and stderr;
 - an operator read of a session's **screen**, its **transcript**, and its **journal**;
-- what a **browser page** shows through the browser tools — a read, a snapshot, the page's address —
-  to an agent and to a person ([agent-tools.md](agent-tools.md#what-is-enforced-and-where)); a screenshot
-  is pixels and is not;
+- what a **browser page** shows through the browser tools, to an agent and to a person
+  ([agent-tools.md](agent-tools.md#what-is-enforced-and-where)); the worker also masks sensitive fields at capture,
+  as described below;
 - a ferret's **Processes** tab: every command line and every byte of a process's output
   ([processes.md](processes.md#secrets) says what that cannot catch).
 
@@ -94,6 +94,53 @@ cannot scrub is text it must not serve.
 Each read opens the vault **once**: a whole page of a journal or a transcript is scrubbed under one
 open (`SecretRedactor.batch`), and the opened values are let go when that read returns. Nothing
 caches them between reads, so plaintext lives no longer than the read that needed it.
+
+### Browser captures
+
+The browser worker keeps a private exact-value mask for values delivered through an input request or a vault fill,
+and for values of at least six characters observed in password inputs or fields with `current-password`, `new-password` or `one-time-code`
+autocomplete. It applies these masks to text reads, snapshots, accessibility trees, DOM/eval results, console logs,
+network bodies and headers, page titles, addresses, dialogs and download metadata before returning them. A field
+remains sensitive after page JavaScript changes its type or autocomplete. Masks are scoped to the identity's browser
+context; they are not returned, logged or written to disk. Input-request/vault masks last for that context's life.
+Each native field keeps just its last nonempty observed value, replacing its previous mask on a nonempty edit;
+clearing or removing the field retains its last settled mask. The daemon's vault masking remains behind this boundary.
+Durable masks and binary taint come only from full input-request/vault values or native sensitive-field values.
+Ordinary viewer typing and search do not register per-keystroke masks or taint a context. Private routing identifiers,
+staging paths and origin proofs are preserved. Native line-ending changes are covered for the full values.
+
+Screenshots, input-request field pictures and the shared CDP screencast used by viewers and recordings have sensitive
+field rectangles and literal DOM text echo rectangles painted black before leaving the worker. A sensitive child frame is masked as a whole, including
+cross-origin frames; closed shadow roots are inspected by DevTools too. The compositor is private to the worker and
+cannot be named by a tool. Captures freeze related pages and pause field animations for one bounded turn, use one
+explicit clip, and refuse a changed renderer generation or geometry. Screencast events trigger fresh captures;
+their older pixels are never forwarded. A failed inspection or paint withholds the capture. Long renderer work
+withholds pixels without blocking another page's input or dialog dismissal.
+
+PDF and download exports stay refused for that browser context after protected input or an observed sensitive value,
+including related pages, frames and popups. Clearing a field, opening another page in that context or waiting does
+not make an opaque file safe. Restart that identity's browser to reset the in-memory taint; other identities are
+unaffected. Downloads generated in a protected context are cancelled and permanently unclaimable, and staging paths
+never contain page-provided names. An isolated new context has its own guard.
+The terminal quarantine remains 120 seconds. Normal answered input requests still add **zero seconds** of read delay.
+Five seconds is the submitted-fill cleanup deadline, never permission to export unsafe bytes. A submitted plan/rule
+password fill clears two seconds before it, after about three seconds (previously about eight or 118). An unsubmitted
+fill (`submit=agent`) keeps the 120-second deadline and clears after about 118 seconds, so the agent can still submit.
+
+**Known gap:** page JavaScript can redraw a value into pixels elsewhere, such as a canvas or an image it builds.
+Field rectangles do not recognise those pixels. Arbitrary encodings, reformatted or split values are also outside
+exact-value masking; ordinary JSON, URL, form and HTML representations are masked before output limits. The
+five-second cleanup does not mitigate a canvas echo before or after it; this residual remains explicit.
+An origin can also retain a typed value in its own storage and render it after the identity browser is relaunched;
+the in-memory taint and masks do not survive that relaunch. Restarting is a reset, not a promise about a site's data.
+**Unproved direct-viewer race:** a page can clear or reclassify a field during a native edit before the next capture
+inspection learns its value. Its transient echo is not guaranteed to be masked. Use an input request for a secret;
+those full values are registered before insertion, at every length. Native values under six characters are not text
+masked; a prefix seen mid-typing and re-rendered elsewhere before the field settles may also escape after a later
+edit replaces its mask. Native fields are still painted and binary exports tainted at every nonempty length.
+Arbitrary eval/selector Boolean probes can also infer data;
+exact-value masking is not a defence against an agent actively reconstructing a value it is allowed to use.
+This is still the bounded, use-never-read contract below, not a sandbox.
 
 ### A file or diff that holds a value: refused to an agent, masked for a person
 
