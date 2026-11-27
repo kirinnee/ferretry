@@ -120,6 +120,12 @@ describe('the font packs', () => {
     expect(existsSync(join(srcDir, 'assets/fonts'))).toBe(false);
   });
 
+  it('keep Nunito’s variable weight range as before the move (200 to 1000)', () => {
+    const nunito = FONT_PACKS.find(pack => pack.id === 'nunito');
+    expect(nunito?.faces.map(face => face.weight)).toEqual(['200 1000']);
+    expect(generatedCss).toContain('font-weight: 200 1000;');
+  });
+
   it('keep the built asset names: the same files, so the content-hashed URLs and the service worker cache do not change', () => {
     const names = FONT_PACKS.flatMap(pack => pack.faces.map(face => face.file.slice(2))).sort();
     const before = [

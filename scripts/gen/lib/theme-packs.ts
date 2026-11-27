@@ -243,14 +243,20 @@ export function themePackFiles(root: string): ReadonlyMap<string, string> {
       '',
     ];
   };
+  // One import per distinct `<font id>/<file>` (faces may share a file), each with a binding no other file has: names that
+  // differ only by punctuation (`demo/var-sans`, `demo-var/sans`) collide once `ident` flattens them, so the later one is suffixed.
+  const bound = new Set<string>();
   const fontFiles = sorted.font.flatMap(entry =>
-    entry.pack.faces.map(face => {
+    entry.pack.faces.flatMap(face => {
       const file = face.file.slice(2);
-      return {
-        key: `${entry.pack.id}/${file}`,
-        name: ident('fontfile', `${entry.pack.id}-${file}`),
-        abs: join(entry.abs, '..', file),
-      };
+      const key = `${entry.pack.id}/${file}`;
+      if (bound.has(`key:${key}`)) return [];
+      bound.add(`key:${key}`);
+      const base = ident('fontfile', key);
+      let name = base;
+      for (let n = 2; bound.has(name); n += 1) name = `${base}_${n}`;
+      bound.add(name);
+      return [{ key, name, abs: join(entry.abs, '..', file) }];
     }),
   );
   const ts = [

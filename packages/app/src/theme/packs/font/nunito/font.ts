@@ -3,6 +3,6 @@ export default {
   id: 'nunito',
   family: 'Nunito',
   licence: 'OFL-1.1',
-  faces: [{ file: './nunito-latin-wght-normal.woff2', weight: '200 900', style: 'normal' }],
+  faces: [{ file: './nunito-latin-wght-normal.woff2', weight: '200 1000', style: 'normal' }],
   range: 'latin',
 };
