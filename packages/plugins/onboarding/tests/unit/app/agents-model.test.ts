@@ -241,6 +241,7 @@ describe('the provider list over the real catalog', () => {
   });
   test('a Codex-only provider is offered for Codex alone', () => {
     expect(harnessesOf('openai-api-key')).toEqual(['codex']);
+    for (const id of ['groq', 'mistral']) expect(harnessesOf(id)).toEqual(['codex']);
   });
   test('every harness any offered half names is one the page can run (none is silently dropped)', () => {
     const named = new Set(realCatalog.presets.flatMap(row => row.halves.map(half => half.harness)));

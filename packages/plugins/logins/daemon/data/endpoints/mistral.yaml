@@ -1,0 +1,30 @@
+# Codex on Mistral (its Responses endpoint). Mistral has no Anthropic-compatible endpoint, so Claude Code is not offered.
+label: Mistral
+harness: codex
+summary: Codex on Mistral models with one Mistral API key, through Mistral's Responses API.
+docs: https://docs.mistral.ai/studio/conversations/responses
+verified: '2026-11-27'
+unverified:
+  - "Mistral's Responses API is stateless, so Codex features that resume a response on the server do not work."
+  - "Mistral's docs show the Responses endpoint on https://api.mistral.ai/v1 and also describe an OpenAI-compatible route under /openai/v1; this preset uses the first, as the Responses reference does."
+  - 'No Codex run against Mistral was made when this preset was written.'
+env:
+  MISTRAL_API_KEY:
+    secretName: MISTRAL_API_KEY
+codexProvider:
+  id: mistral
+  name: Mistral
+  baseUrl: https://api.mistral.ai/v1
+  keyVariable: MISTRAL_API_KEY
+  model: mistral-medium-latest
+test:
+  kind: request
+  url: https://api.mistral.ai/v1/models
+  keyVariable: MISTRAL_API_KEY
+  note: Lists the models the key can use. Spends nothing.
+quota:
+  source: transcript-pricing
+  note: Mistral reports no balance to an API key, so cost is counted from the transcript where the model has a price.
+detect:
+  hosts: [api.mistral.ai]
+  variables: [MISTRAL_*]

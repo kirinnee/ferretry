@@ -222,6 +222,8 @@ community sources or search results only — and said so in the preset's `unveri
 | Custom gateway                | Claude         | `GATEWAY_API_KEY` (+ `ANTHROPIC_API_KEY=""`)    | `GET /v1/models`                     | transcript × pricing                                     |
 | OpenAI API key                | Codex          | `OPENAI_API_KEY`                                | `GET /v1/models`                     | transcript × pricing                                     |
 | Azure OpenAI                  | Codex          | `AZURE_OPENAI_API_KEY`                          | `GET …/openai/v1/models` (M)         | transcript × pricing                                     |
+| Groq                          | Codex          | `GROQ_API_KEY`                                  | `GET /openai/v1/models` (M)          | transcript × pricing                                     |
+| Mistral                       | Codex          | `MISTRAL_API_KEY`                               | `GET /v1/models` (M)                 | transcript × pricing                                     |
 | Ollama (local)                | Codex          | —                                               | `GET localhost:11434/api/tags`       | none                                                     |
 
 (¹) GLM's Codex half is in the preset but **not offered**: Codex runs GLM only with a
@@ -235,6 +237,8 @@ verified.
 
 ## Declared gaps
 
+- **No Cerebras preset.** Cerebras documents Chat Completions only (no Responses endpoint, no Anthropic-compatible
+  one), so neither Codex nor Claude Code can use it directly; it waits for an owner decision on a translating gateway.
 - **Cloud logins have no Test.** Bedrock and Mantle need SigV4, Vertex a Google access token and Foundry
   over Entra an Azure token; Ferretry signs none of them. The preset says which CLI command checks it.
 - **No draft Test.** A login is tested once it is saved, so a key always goes where a saved login sends

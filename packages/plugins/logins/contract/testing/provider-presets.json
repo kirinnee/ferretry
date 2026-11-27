@@ -1250,6 +1250,107 @@
       }
     },
     {
+      "id": "groq",
+      "label": "Groq",
+      "harness": "codex",
+      "summary": "Codex on models Groq serves, with one Groq API key, through Groq's Responses API.",
+      "docs": "https://console.groq.com/docs/responses-api",
+      "origin": "built-in",
+      "variables": [
+        {
+          "name": "GROQ_API_KEY",
+          "kind": "secret",
+          "secret": "GROQ_API_KEY",
+          "required": true,
+          "allowEmpty": false,
+          "harnesses": ["codex"]
+        }
+      ],
+      "models": [],
+      "test": {
+        "available": true,
+        "spends": "nothing",
+        "note": "Lists the models the key can use. Spends nothing."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Groq reports no balance to an API key, so cost is counted from the transcript where the model has a price."
+      },
+      "unverified": [
+        "Groq's Responses API is marked beta, and its API reference says previous_response_id is not supported, so Codex features that resume a response on the server may not work.",
+        "The default model is the open-weight gpt-oss model Groq lists; no Codex run against Groq was made when this preset was written."
+      ],
+      "verified": "2026-11-27",
+      "offered": {
+        "available": true
+      },
+      "halves": [
+        {
+          "harness": "codex",
+          "offered": {
+            "available": true
+          },
+          "models": []
+        }
+      ],
+      "detect": {
+        "hosts": ["api.groq.com"],
+        "variables": ["GROQ_*"],
+        "keyPrefixes": ["gsk_"]
+      }
+    },
+    {
+      "id": "mistral",
+      "label": "Mistral",
+      "harness": "codex",
+      "summary": "Codex on Mistral models with one Mistral API key, through Mistral's Responses API.",
+      "docs": "https://docs.mistral.ai/studio/conversations/responses",
+      "origin": "built-in",
+      "variables": [
+        {
+          "name": "MISTRAL_API_KEY",
+          "kind": "secret",
+          "secret": "MISTRAL_API_KEY",
+          "required": true,
+          "allowEmpty": false,
+          "harnesses": ["codex"]
+        }
+      ],
+      "models": [],
+      "test": {
+        "available": true,
+        "spends": "nothing",
+        "note": "Lists the models the key can use. Spends nothing."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Mistral reports no balance to an API key, so cost is counted from the transcript where the model has a price."
+      },
+      "unverified": [
+        "Mistral's Responses API is stateless, so Codex features that resume a response on the server do not work.",
+        "Mistral's docs show the Responses endpoint on https://api.mistral.ai/v1 and also describe an OpenAI-compatible route under /openai/v1; this preset uses the first, as the Responses reference does.",
+        "No Codex run against Mistral was made when this preset was written."
+      ],
+      "verified": "2026-11-27",
+      "offered": {
+        "available": true
+      },
+      "halves": [
+        {
+          "harness": "codex",
+          "offered": {
+            "available": true
+          },
+          "models": []
+        }
+      ],
+      "detect": {
+        "hosts": ["api.mistral.ai"],
+        "variables": ["MISTRAL_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
       "id": "ollama-codex",
       "label": "Ollama (local)",
       "harness": "codex",

@@ -16,11 +16,13 @@ import bedrockMantle from '../../data/endpoints/bedrock-mantle.yaml' with { type
 import customGateway from '../../data/endpoints/custom-gateway.yaml' with { type: 'text' };
 import deepseek from '../../data/endpoints/deepseek.yaml' with { type: 'text' };
 import googleVertex from '../../data/endpoints/google-vertex.yaml' with { type: 'text' };
+import groq from '../../data/endpoints/groq.yaml' with { type: 'text' };
 import kimi from '../../data/endpoints/kimi.yaml' with { type: 'text' };
 import litellm from '../../data/endpoints/litellm.yaml' with { type: 'text' };
 import microsoftFoundryApiKey from '../../data/endpoints/microsoft-foundry-api-key.yaml' with { type: 'text' };
 import microsoftFoundryAzureCli from '../../data/endpoints/microsoft-foundry-azure-cli.yaml' with { type: 'text' };
 import minimax from '../../data/endpoints/minimax.yaml' with { type: 'text' };
+import mistral from '../../data/endpoints/mistral.yaml' with { type: 'text' };
 import ollamaCodex from '../../data/endpoints/ollama-codex.yaml' with { type: 'text' };
 import openaiApiKey from '../../data/endpoints/openai-api-key.yaml' with { type: 'text' };
 import openrouter from '../../data/endpoints/openrouter.yaml' with { type: 'text' };
@@ -54,6 +56,8 @@ const BUILT_IN_PRESET_TEXTS: Readonly<Record<string, string>> = Object.freeze({
   'custom-gateway': customGateway,
   'openai-api-key': openaiApiKey,
   'azure-openai': azureOpenai,
+  groq,
+  mistral,
   'ollama-codex': ollamaCodex,
 });
 
