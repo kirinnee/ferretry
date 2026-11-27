@@ -85,3 +85,19 @@ test('creation refuses a parent that other users can write without changing its 
   expect((await lstat(`${f.parent}/worktrees`)).mode & 0o777).toBe(0o777);
   expect(await f.root.lstat(f.path)).toBeUndefined();
 });
+
+test('an owner root refuses exclusive directory creation even in a private owner folder', async () => {
+  const f = await fresh();
+  const folder = `${f.parent}/owner`;
+  await mkdir(folder, { mode: 0o700 });
+  const owner = rootsPortFor(
+    nodeFs(() => crypto.randomUUID()),
+    { home: `${f.parent}/home`, worktrees: `${f.parent}/worktrees`, plugin: 'relocate' },
+    ['project-files'],
+    () => undefined,
+    { projectFiles: ['move/**'] },
+  ).root('project-files', { subfolder: folder });
+  const path = at(owner, 'move');
+  await expect(create(owner, path)).rejects.toMatchObject({ refusal: 'read_only' });
+  expect(await owner.lstat(path)).toBeUndefined();
+});
