@@ -150,6 +150,8 @@ export function makeRepository(): Fixture {
   git(folder, 'push', '-q', 'origin', 'main');
   // A network-shaped address, so a move can match the project by it; the bare repository above is where the commits are.
   git(folder, 'remote', 'set-url', 'origin', REMOTE_URL);
+  // ... and a push (a test that publishes the local commit) still lands in the bare repository, never on the network.
+  git(folder, 'remote', 'set-url', '--push', 'origin', remote);
   writeFileSync(join(folder, 'second.txt'), 'two\n');
   git(folder, 'add', '.');
   git(folder, 'commit', '-q', '-m', 'second (not pushed)');
