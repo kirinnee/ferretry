@@ -61,6 +61,20 @@ describe('the built-in preset catalogue', () => {
     );
   });
 
+  it.each([['mistral', 'https://api.mistral.ai/v1', 'MISTRAL_API_KEY']])(
+    'should ship %s as a Codex-only preset that points Codex at its Responses endpoint with one secret key',
+    (id, baseUrl, key) => {
+      const found = PRESETS.find(entry => entry.id === id);
+      should(found).not.be.undefined();
+      should(found?.origin).equal('built-in');
+      should(presetHarnesses(found as ProviderPreset)).deepEqual(['codex']);
+      should(found?.unavailable).be.undefined();
+      should(found?.halves.codex?.codexProvider).containDeep({ id, baseUrl, keyVariable: key });
+      should(found?.halves.codex?.env[key]?.secretName).equal(key);
+      should(found?.test).containDeep({ kind: 'request', keyVariable: key });
+    },
+  );
+
   it('should carry the real custom gateway shape: ANTHROPIC_API_KEY a PLAIN variable that is deliberately empty', () => {
     const variable = preset('custom-gateway').env.ANTHROPIC_API_KEY;
     should(variable?.secretName).be.undefined();

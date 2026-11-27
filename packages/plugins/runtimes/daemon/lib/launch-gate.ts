@@ -34,6 +34,8 @@ interface RuntimeLaunchFacts {
   readonly kind: HarnessKind;
   /** Where ferrets on this account compact, in tokens, when the manifest names a number (`auto` is absent). */
   readonly compactAt?: number;
+  /** Why an AUTO launch of it alone is refused (the account's `autoRefusal`); absent when none is. */
+  readonly autoRefusal?: string;
   /** The account's default model and the context window its catalog declares per model: what caps a trigger. */
   readonly windows: ModelWindows;
 }

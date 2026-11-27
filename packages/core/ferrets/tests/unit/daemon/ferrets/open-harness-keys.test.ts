@@ -97,6 +97,24 @@ describe('a harness the contract never named', () => {
     expect(f.service.harnessFacts(THIRD_HARNESS_KEY)?.instructionFile).toBe('THIRD.md');
   });
 
+  test('reports an Auto check only when the installed harness supplies the member, for any key', () => {
+    const f = fixture();
+    const port = ferretsPort(f.service, 'runtimes');
+    let calls = 0;
+    const autoLaunchRefusal = async () => {
+      calls++;
+      return undefined;
+    };
+    expect(port.harnessFacts('claude-code')?.checksAutoLaunch).toBeUndefined();
+    expect(port.harnessFacts('codex')?.checksAutoLaunch).toBeUndefined();
+    expect(port.harnessFacts(THIRD_HARNESS_KEY)?.checksAutoLaunch).toBeUndefined();
+    Object.assign(f.third, { autoLaunchRefusal });
+    expect(port.harnessFacts(THIRD_HARNESS_KEY)?.checksAutoLaunch).toBe(true);
+    expect(calls).toBe(0);
+    Object.assign(f.third, { autoLaunchRefusal: undefined });
+    expect(port.harnessFacts(THIRD_HARNESS_KEY)?.checksAutoLaunch).toBeUndefined();
+  });
+
   test('starts a ferret that is recorded on it, launched on it and on no other harness', async () => {
     const f = fixture();
 

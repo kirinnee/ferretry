@@ -2,6 +2,7 @@ import type { Instant } from '@ferretry/std';
 import type { ProjectInfo, ProjectsFile } from '../../../contract/index.ts';
 import { ProjectRegistry } from '../../../daemon/lib/registry.ts';
 import type { ProjectFolders, RegistryStore } from '../../../daemon/lib/ports.ts';
+import type { FolderBrowser } from '../../../daemon/features/folders/port.ts';
 
 /** A machine of folders in a map: what exists, what git says about it, and every call made. */
 export interface FakeMachine extends ProjectFolders {
@@ -20,7 +21,7 @@ export function fakeMachine(
   const dirs = new Set(directories);
   const repos = new Map(Object.entries(repositories));
   const calls: string[] = [];
-  return {
+  const machine: FakeMachine = {
     directories: dirs,
     repositories: repos,
     calls,
@@ -50,6 +51,12 @@ export function fakeMachine(
       dirs.add(path);
       repos.set(path, `${path}/.git`);
     },
+    gitCloneInto: async (url, parent, name, verdict) => {
+      const path = `${parent}/${name}`;
+      if ((await verdict(parent)) || (await verdict(path))) throw new Error('folder refused');
+      if (dirs.has(path)) throw new Error('destination exists');
+      await machine.gitClone(url, path);
+    },
     gitCommonDirectory: async root => repos.get(root),
     home: async () => home,
     isCheckout: async (root, common) => {
@@ -57,6 +64,7 @@ export function fakeMachine(
       return repos.get(root) === common && !notCheckouts.includes(root);
     },
   };
+  return machine;
 }
 
 /** The registry file in memory, with the same one-at-a-time update the kernel's state port gives. */
@@ -91,3 +99,37 @@ export function registryOver(machine: FakeMachine = fakeMachine(), store = memor
   });
   return { registry, store, said, machine };
 }
+
+/** A folder browser over `root` whose repositories are whatever `names()` says now (a clone adds one while a test runs). */
+export const listingBrowser = (root: string, names: () => readonly string[]): FolderBrowser => ({
+  home: async () => '/home/me',
+  holdsSignIn: async () => false,
+  leaf: async () => 'present',
+  realPaths: async paths => [...paths],
+  open: async (path, verdict) => {
+    if ((await verdict(path)) !== undefined) return { ok: false, reason: 'refused' };
+    return {
+      ok: true,
+      folder: {
+        real: path,
+        entries: async () => ({
+          entries:
+            path === root
+              ? names().map(name => ({
+                  name,
+                  kind: 'directory' as const,
+                  modified: '2026-11-19T00:00:00.000Z' as Instant,
+                }))
+              : [],
+          more: false,
+        }),
+        lookup: async () => 'missing',
+        readText: async () => '[remote "origin"]\n\turl = https://github.com/o/cloned.git\n',
+        hasGit: async name => names().includes(name),
+        device: async () => 'd1',
+        makeLeaf: async () => ({ kind: 'failed' }),
+        close: async () => undefined,
+      },
+    };
+  },
+});
