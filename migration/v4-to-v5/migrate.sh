@@ -958,8 +958,19 @@ verify)
     row "panes" "SKIP" "no live ferret at baseline"
   else
     psock="${H}/state/terminals/tmux.sock"
-    if panes="$(tmux -S "${psock}" list-panes -a -F '#{session_name} #{pane_id}')"; then
-      sort <<<"${panes}" >"${work}/panes.now"
+    # A pane whose agent ENDED stays listed (v5 sets remain-on-exit, so `pane_dead` is 1): only a LIVE row is a pane that is
+    # still there or was restarted. When the last pane is removed the private tmux server exits and answers "no server running"
+    # (or cannot connect to its removed socket): that is no live panes, so the ferrets' exit history decides. Any other read
+    # error is still a FAIL.
+    panes_ok=0
+    if panes="$(tmux -S "${psock}" list-panes -a -F '#{session_name} #{pane_id} #{pane_dead}' 2>"${work}/tmux.err")"; then
+      panes_ok=1
+    elif grep -qE 'no server running|error connecting to .*\(No such file or directory\)' "${work}/tmux.err"; then
+      panes_ok=1
+      panes=""
+    fi
+    if [ "${panes_ok}" = 1 ]; then
+      awk '$3 != 1 {print $1, $2}' <<<"${panes}" | sort >"${work}/panes.now"
       # The last restart event in a ferret's v5 history: restarted, gave_up, blocked, none, or unreadable.
       restart_of() {
         local file="${H}/state/ferrets/$1/history.jsonl" last

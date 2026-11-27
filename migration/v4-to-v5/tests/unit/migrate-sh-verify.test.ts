@@ -319,6 +319,133 @@ describe('verify: compares each field with its own v5 destination', () => {
     expect(result.out).toMatch(/panes +FAIL +1 baseline panes missing/);
   });
 
+  // ---- Real remain-on-exit panes on a PRIVATE tmux server (-L <unique name>; never the owner's tmux or the default socket).
+  // The v5 runner sets `remain-on-exit`, so an exited harness stays listed with pane_dead=1; a fake that only prints
+  // live rows cannot tell the migration check that. The fake `tmux` on PATH hands the verify's reads to the private server.
+  const realTmux = Bun.which('tmux', { PATH: process.env.PATH ?? '' });
+  const privateServers: { name: string; dir: string }[] = [];
+  afterEach(async () => {
+    for (const { name, dir } of privateServers.splice(0))
+      Bun.spawnSync([realTmux ?? 'tmux', '-L', name, 'kill-server'], { env: { ...process.env, TMUX_TMPDIR: dir } });
+  });
+  const tmuxOn = (server: { name: string; dir: string }, ...args: string[]) =>
+    Bun.spawnSync([realTmux ?? 'tmux', '-L', server.name, ...args], {
+      env: { ...process.env, TMUX_TMPDIR: server.dir },
+    });
+  const waitFor = async (what: string, ready: () => boolean) => {
+    for (let tries = 0; tries < 100; tries += 1) {
+      if (ready()) return;
+      await Bun.sleep(50);
+    }
+    throw new Error(`timed out waiting for ${what}`);
+  };
+  /**
+   * A private server holding a keeper session (so the server outlives the test pane), `remain-on-exit on`, and session
+   * `fy-f1` whose one pane (never the baseline's %1) ran `exit <code>` and stays, dead. `removeDeadPane` then removes it,
+   * which also ends the server (no sessions are left) when `keeper` is false.
+   */
+  const privateDeadPane = async (exitCode: number, keeper: boolean) => {
+    const dir = join(sb.fakeDir, 'tmux-private');
+    await mkdir(dir, { recursive: true });
+    const server = { name: `fx2671-${process.pid}-${Math.random().toString(36).slice(2, 8)}`, dir };
+    privateServers.push(server);
+    expect(tmuxOn(server, 'new-session', '-d', '-s', 'keeper', 'sleep 600').exitCode).toBe(0);
+    expect(tmuxOn(server, 'set-option', '-g', 'remain-on-exit', 'on').exitCode).toBe(0);
+    // Burn pane id %1 (the baseline's pane) so the restarted pane is a NEW one, as after a real restart.
+    expect(tmuxOn(server, 'new-session', '-d', '-s', 'burn', 'sleep 600').exitCode).toBe(0);
+    expect(tmuxOn(server, 'kill-session', '-t', 'burn').exitCode).toBe(0);
+    expect(tmuxOn(server, 'new-session', '-d', '-s', 'fy-f1', `exit ${exitCode}`).exitCode).toBe(0);
+    await waitFor(
+      'the pane to die',
+      () => tmuxOn(server, 'list-panes', '-t', 'fy-f1', '-F', '#{pane_dead}').stdout.toString().trim() === '1',
+    );
+    if (!keeper) expect(tmuxOn(server, 'kill-session', '-t', 'keeper').exitCode).toBe(0);
+    await sb.fake('tmux', [
+      {
+        match: '*session_name*',
+        run: `export TMUX_TMPDIR=${JSON.stringify(dir)}; exec ${JSON.stringify(realTmux ?? 'tmux')} -L ${server.name} "\${@:3}"`,
+      },
+      { match: '*window_activity*', out: '%1 1' },
+    ]);
+    return server;
+  };
+
+  test('D-105 (real panes): a restarted ferret whose retained dead pane exited 0 is a REVIEW, not "1 restarted"', async () => {
+    await privateDeadPane(0, true);
+    await historyWith(
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'stopped', pane: 'dead', exitCode: 0, signal: null } },
+    );
+    const result = await sb.run('verify');
+    expect(result.code).toBe(0);
+    expect(result.out).toMatch(/panes +REVIEW +.*f1 exited cleanly after v5 restarted it .*the work is done/);
+    expect(result.out).not.toMatch(/panes +OK/);
+  });
+
+  test('D-105 (real panes): a restarted ferret whose retained dead pane exited 7 is a FAIL, not "1 restarted"', async () => {
+    await privateDeadPane(7, true);
+    await historyWith(
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'failed', pane: 'dead', exitCode: 7, signal: null } },
+    );
+    const result = await sb.run('verify');
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+  });
+
+  test('D-105 (real panes): a retained dead pane with no clean-exit evidence in the history is a FAIL', async () => {
+    await privateDeadPane(0, true);
+    await history('session.created', 'session.restarted');
+    const result = await sb.run('verify');
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+  });
+
+  test('D-105 (real panes): the last pane removed ends the private server; a recorded clean exit is still a REVIEW', async () => {
+    const server = await privateDeadPane(0, false);
+    expect(tmuxOn(server, 'kill-pane', '-t', 'fy-f1').exitCode).toBe(0);
+    await waitFor('the private server to exit', () => tmuxOn(server, 'list-panes', '-a').exitCode !== 0);
+    await historyWith(
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'stopped', pane: 'dead', exitCode: 0, signal: null } },
+    );
+    const result = await sb.run('verify');
+    expect(result.code).toBe(0);
+    expect(result.out).toMatch(/panes +REVIEW +.*f1 exited cleanly after v5 restarted it/);
+    expect(result.out).not.toMatch(/panes +FAIL/);
+  });
+
+  test('D-105 (real panes): the server gone with no clean-exit evidence (or a crash) is still a FAIL', async () => {
+    const server = await privateDeadPane(7, false);
+    expect(tmuxOn(server, 'kill-pane', '-t', 'fy-f1').exitCode).toBe(0);
+    await waitFor('the private server to exit', () => tmuxOn(server, 'list-panes', '-a').exitCode !== 0);
+    await history('session.restarted');
+    const none = await sb.run('verify');
+    expect(none.code).toBe(1);
+    expect(none.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+    await historyWith(
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'failed', pane: 'dead', exitCode: 7, signal: null } },
+    );
+    const crashed = await sb.run('verify');
+    expect(crashed.code).toBe(1);
+    expect(crashed.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+  });
+
+  test('D-105: a genuine tmux read error is still "tmux could not be read", even with a clean exit on record', async () => {
+    await historyWith(
+      { type: 'session.restarted' },
+      { type: 'session.exited', data: { status: 'stopped', pane: 'dead', exitCode: 0, signal: null } },
+    );
+    await sb.fake('tmux', [
+      { match: '*session_name*', err: 'error connecting to the socket (Permission denied)', code: 1 },
+      { match: '*window_activity*', out: '%1 1' },
+    ]);
+    const result = await sb.run('verify');
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/panes +FAIL +tmux could not be read/);
+  });
+
   test('run 7: a blocked restart that later went through is OK', async () => {
     await panesNow('fy-f1 %8');
     await history('session.restart_blocked', 'session.resumed', 'session.restarted');
