@@ -50,6 +50,8 @@ export interface ClearFrame {
   readonly visible: string;
   /** The runner's own reader says which kind blocks the frame (its closed code), or that nothing does. */
   readonly blocking: 'permission' | 'dialog' | false;
+  /** What the runner's reader read of THIS frame (title, row count, footer) when it is a dialog: the only parse a notice rule trusts. */
+  readonly dialog?: { readonly title: string; readonly options: number; readonly footer: string } | undefined;
 }
 
 /**
@@ -125,7 +127,7 @@ export class WardenDialogClear {
           const frame = await this.ports.frame(sessionId);
           const reported = memory[sessionId]?.[1] === FAILED;
           next[sessionId] = reported ? [dialog.id, FAILED] : [dialog.id];
-          if (frame !== undefined && blocksAs(rule, dialog, frame) && frameShows(rule, dialog, frame.visible)) {
+          if (frame !== undefined && blocksAs(rule, dialog, frame) && frameShows(rule, dialog, frame)) {
             if (!reported) {
               next[sessionId] = [dialog.id, FAILED];
               this.ports.record('fleet.warden_dialog_clear_failed', {
@@ -161,10 +163,8 @@ export class WardenDialogClear {
     rule: DialogRule,
   ): Promise<'sent' | 'failed' | 'stale'> {
     const frame = await this.ports.frame(sessionId);
-    if (frame === undefined || !blocksAs(rule, dialog, frame) || !frameShows(rule, dialog, frame.visible))
-      return 'stale';
-    const stillOn = (live: ClearFrame): boolean =>
-      blocksAs(rule, dialog, live) && frameShows(rule, dialog, live.visible);
+    if (frame === undefined || !blocksAs(rule, dialog, frame) || !frameShows(rule, dialog, frame)) return 'stale';
+    const stillOn = (live: ClearFrame): boolean => blocksAs(rule, dialog, live) && frameShows(rule, dialog, live);
     const plan = planKeys(rule, dialog, frame.visible);
     if (typeof plan === 'string') {
       this.ports.record('fleet.warden_dialog_clear_skipped', {

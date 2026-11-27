@@ -19,6 +19,7 @@
  */
 import type { FormKey } from '@ferretry/core-ferrets/contract';
 import { type DialogRule, isGrantLabel } from '../../contract/dialog-rules.ts';
+import type { ClearFrame } from './dialog-clear.ts';
 import type { ClearableDialogWords } from './dialog-words.ts';
 
 /** How many of the frame's last lines a screen may sit in. */
@@ -55,30 +56,19 @@ const tail = (frame: string): readonly string[] =>
     .filter(line => line !== '')
     .slice(-FRAME_WINDOW_LINES);
 
-/** A line of a frame that is one of a list's rows or a composer's chevron: a cursor glyph, or a numbered row. */
-const ROW_LINE = /^(?:[❯›>»▌]|[1-9][.)]\s)/u;
-
-/** A divider line (a rule of box-drawing dashes) that opens a screen. */
-const DIVIDER = /^[─━—-]{3,}$/u;
-
 /**
- * Whether the frame's own last block IS a notice with no rows: the rule's footer is the frame's last line, the block above
- * it (back to the divider that opens the screen) starts with the rule's title line and holds no row, cursor or chevron.
- * The recorded words are not consulted: this reads the very frame a key is about to land on.
+ * Whether the live frame still shows what the rule names. A rule with no rows (a notice) is read from the RUNNER's own
+ * reading of this very frame (`frame.dialog`: title, row count, footer) and nowhere else: the Warden keeps no screen
+ * parse of its own, so it can never see a notice where the reader sees a dialog with rows.
  */
-function showsNotice(rule: DialogRule, lines: readonly string[]): boolean {
-  const footer = lines.length - 1;
-  if (footer < 0 || !matches(rule.text, lines[footer] as string)) return false;
-  let start = footer;
-  while (start > 0 && !DIVIDER.test(lines[start - 1] as string)) start -= 1;
-  const block = lines.slice(start, footer);
-  return block.length > 0 && matches(rule.title, block[0] as string) && !block.some(line => ROW_LINE.test(line));
-}
-
-/** Whether the live frame still shows what the rule names: its title line and its fixed printed phrase. */
-export function frameShows(rule: DialogRule, dialog: ClearableDialogWords, frame: string): boolean {
-  const lines = tail(frame);
-  if (rule.rows === 'none') return showsNotice(rule, lines);
+export function frameShows(rule: DialogRule, dialog: ClearableDialogWords, frame: ClearFrame): boolean {
+  if (rule.rows === 'none') {
+    const read = frame.dialog;
+    return (
+      read !== undefined && read.options === 0 && matches(rule.title, read.title) && matches(rule.text, read.footer)
+    );
+  }
+  const lines = tail(frame.visible);
   if (rule.text !== undefined && !lines.some(line => matches(rule.text, line))) return false;
   if (rule.text === undefined && !lines.some(line => line.includes(dialog.title.slice(0, 40).trim()))) return false;
   return true;

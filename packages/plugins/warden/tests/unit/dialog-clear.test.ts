@@ -204,6 +204,9 @@ function frameOf(screen: Screen, cursor: number): string {
   return ['', ...screen.header, '', ...rows, '', screen.footer].join('\n');
 }
 
+/** A frame as the runner reads it, with the dialog reading the runner would attach (none for a screen no rule asks it of). */
+const shown = (visible: string, dialog?: ClearFrame['dialog']): ClearFrame => ({ visible, blocking: 'dialog', dialog });
+
 /** What the runner's reader says blocks a screen of this kind. */
 const blockingOf = (screen: Screen): 'permission' | 'dialog' =>
   screen.dialog.kind === 'permission' ? 'permission' : 'dialog';
@@ -216,7 +219,13 @@ function fakePane(screen: Screen, options: { readonly stuck?: boolean; readonly 
     frame: async (): Promise<ClearFrame | undefined> =>
       state.gone
         ? { visible: '\n  ❯ \n', blocking: false }
-        : { visible: frameOf(screen, state.cursor), blocking: blockingOf(screen) },
+        : {
+            visible: frameOf(screen, state.cursor),
+            blocking: blockingOf(screen),
+            ...(screen.rule === 'claude-chrome-notice'
+              ? { dialog: { title: 'Claude in Chrome', options: 0, footer: screen.footer.trim() } }
+              : {}),
+          },
     key: async (_session: string, key: FormKey): Promise<boolean> => {
       if (options.refuse === true) return false;
       state.pressed.push(key);
@@ -426,10 +435,10 @@ describe('planning the keys', () => {
     );
 
     // Assert
-    should(frameShows(dangerous, rm.dialog, frameOf(rm, 1))).equal(true);
-    should(frameShows(dangerous, rm.dialog, ordinary)).equal(false);
-    should(frameShows(rule, screen.dialog, frameOf(screen, 1))).equal(true);
-    should(frameShows(rule, screen.dialog, '\n  something else\n')).equal(false);
+    should(frameShows(dangerous, rm.dialog, shown(frameOf(rm, 1)))).equal(true);
+    should(frameShows(dangerous, rm.dialog, shown(ordinary))).equal(false);
+    should(frameShows(rule, screen.dialog, shown(frameOf(screen, 1)))).equal(true);
+    should(frameShows(rule, screen.dialog, shown('\n  something else\n'))).equal(false);
   });
 
   it('should treat a pattern that stopped compiling as matching nothing', () => {
@@ -776,11 +785,12 @@ describe('the ferret’s REGISTERED harness chooses the rule and the keys, never
 describe('a key is sent only if the live notice is still on screen when it is written (Claude in Chrome)', () => {
   const chrome = SCREENS.find(screen => screen.rule === 'claude-chrome-notice') as Screen;
   const NOTICE = frameOf(chrome, 1);
+  const NOTICE_READING = { title: 'Claude in Chrome', options: 0, footer: 'Enter to continue · Esc to close' };
   /** A working Claude composer: its footer says Esc interrupts the agent's work. */
   const COMPOSER = ['● Reading the files…', '', '─'.repeat(40), '❯ ', '─'.repeat(40), '  esc to interrupt'].join('\n');
 
   /** Ferrets' form seam over a pane that shows the notice for `noticeReads` captures, then a working composer. */
-  function seam(noticeReads: number, later = COMPOSER, laterBlocking: 'dialog' | undefined = undefined) {
+  function seam(noticeReads: number, later = COMPOSER, laterDialog: ClearFrame['dialog'] = undefined) {
     let reads = 0;
     const pressed: FormKey[] = [];
     const harness = {
@@ -788,7 +798,17 @@ describe('a key is sent only if the live notice is still on screen when it is wr
         capture: async () => {
           reads += 1;
           const shown = reads <= noticeReads;
-          return { ok: true, value: { visible: shown ? NOTICE : later, blocking: shown ? 'dialog' : laterBlocking } };
+          // The runner's own reading rides on the frame: the notice reads as the notice, the later frame as given.
+          return shown
+            ? { ok: true, value: { visible: NOTICE, blocking: 'dialog', dialog: NOTICE_READING } }
+            : {
+                ok: true,
+                value: {
+                  visible: later,
+                  blocking: laterDialog === undefined ? undefined : 'dialog',
+                  dialog: laterDialog,
+                },
+              };
         },
         key: async (key: FormKey) => {
           pressed.push(key);
@@ -843,17 +863,46 @@ describe('a key is sent only if the live notice is still on screen when it is wr
   ].join('\n');
   /** The notice's title only in prose above a different screen that carries the same footer. */
   const TITLE_IN_PROSE = ['  the Claude in Chrome', '', '  Another heading', '', FOOTER].join('\n');
-  const FRESH: readonly (readonly [string, string])[] = [
-    ['another title and the exact footer', OTHER_TITLE],
-    ['the title, the footer and rows', WITH_ROWS],
-    ['the title, the footer and numbered rows', NUMBERED_ROWS],
-    ['the title only in prose above another screen with the footer', TITLE_IN_PROSE],
+  /** A short separator inside a selected row's details: a line scan loses the row, the reader keeps it. */
+  const TRAP = [
+    '─'.repeat(80),
+    '  Other dialog',
+    '',
+    '  ❯ 1. Keep this dialog open',
+    '       ---',
+    '       Claude in Chrome',
+    '       a detail line',
+    '',
+    FOOTER,
+  ].join('\n');
+  const FRESH: readonly (readonly [string, string, NonNullable<ClearFrame['dialog']>])[] = [
+    [
+      'another title and the exact footer',
+      OTHER_TITLE,
+      { title: 'Something else entirely', options: 0, footer: FOOTER.trim() },
+    ],
+    ['the title, the footer and rows', WITH_ROWS, { title: 'Claude in Chrome', options: 2, footer: FOOTER.trim() }],
+    [
+      'the title, the footer and numbered rows',
+      NUMBERED_ROWS,
+      { title: 'Claude in Chrome', options: 2, footer: FOOTER.trim() },
+    ],
+    [
+      'the title only in prose above another screen with the footer',
+      TITLE_IN_PROSE,
+      { title: 'Another heading', options: 0, footer: FOOTER.trim() },
+    ],
+    [
+      'a separator in a row’s details that hides the row from a line scan (the reader sees one row)',
+      TRAP,
+      { title: 'Other dialog', options: 1, footer: FOOTER.trim() },
+    ],
   ];
 
-  for (const [name, fresh] of FRESH) {
+  for (const [name, fresh, reading] of FRESH) {
     it(`should press nothing, and tell the owner, when the fresh frame at the write shows ${name}`, async () => {
       // Arrange: the look and the recorded words say the Chrome notice; the write path's own re-read says otherwise
-      const { pressed, ports } = seam(1, fresh, 'dialog');
+      const { pressed, ports } = seam(1, fresh, reading);
       const { clear, events } = stand(ports);
 
       // Act
@@ -872,8 +921,10 @@ describe('a key is sent only if the live notice is still on screen when it is wr
     const rule = BUILT_IN.find(each => each.id === 'claude-chrome-notice') as NonNullable<(typeof BUILT_IN)[number]>;
 
     // Assert
-    for (const [, fresh] of FRESH) should(frameShows(rule, chrome.dialog, fresh)).equal(false);
-    should(frameShows(rule, chrome.dialog, NOTICE)).equal(true);
+    for (const [, fresh, reading] of FRESH) should(frameShows(rule, chrome.dialog, shown(fresh, reading))).equal(false);
+    should(frameShows(rule, chrome.dialog, shown(NOTICE, NOTICE_READING))).equal(true);
+    // No reading of the frame, no notice: the Warden keeps no parse of its own.
+    should(frameShows(rule, chrome.dialog, shown(NOTICE))).equal(false);
   });
 
   it('should not match a Claude in Chrome title that has rows, nor a frame without the notice’s own footer', () => {
@@ -887,9 +938,9 @@ describe('a key is sent only if the live notice is still on screen when it is wr
 
     // Assert
     should(ruleFor(withRows, BUILT_IN)).be.undefined();
-    should(frameShows(rule, chrome.dialog, ['  Claude in Chrome', '  ❯ ', '  esc to interrupt'].join('\n'))).equal(
-      false,
-    );
-    should(frameShows(rule, chrome.dialog, NOTICE)).equal(true);
+    should(
+      frameShows(rule, chrome.dialog, shown(['  Claude in Chrome', '  ❯ ', '  esc to interrupt'].join('\n'))),
+    ).equal(false);
+    should(frameShows(rule, chrome.dialog, shown(NOTICE, NOTICE_READING))).equal(true);
   });
 });

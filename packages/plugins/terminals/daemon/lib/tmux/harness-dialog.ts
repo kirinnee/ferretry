@@ -362,6 +362,16 @@ export function dialogCursorMoves(dialog: HarnessDialog, number: number): string
   return (distance > 0 ? DIALOG_KEYS.down : DIALOG_KEYS.up).repeat(Math.abs(distance));
 }
 
+/** What the reader read of a dialog frame, for a caller that acts on exactly that frame: its title, row count and footer. */
+export function readDialogFrame(
+  pane: string,
+): { readonly title: string; readonly options: number; readonly footer: string } | undefined {
+  const dialog = parseHarnessDialog(pane);
+  if (dialog === undefined) return undefined;
+  const footer = (pane.replaceAll('\r\n', '\n').trimEnd().split('\n').at(-1) ?? '').trim();
+  return { title: dialog.title, options: dialog.options.length, footer };
+}
+
 /**
  * The harness dialog a frame is parked on, in one line — what a send that cannot land reports as
  * blocking it — or `undefined` when it shows none.

@@ -19,7 +19,9 @@ export function dialogRulesInEffect(
 /** One read of a ferret's pane through its form seam, or `undefined` when it cannot be read. */
 async function readFrame(seam: HarnessForm | undefined): Promise<ClearFrame | undefined> {
   const read = await seam?.capture().catch(() => undefined);
-  return read?.ok === true ? { visible: read.value.visible, blocking: read.value.blocking ?? false } : undefined;
+  return read?.ok === true
+    ? { visible: read.value.visible, blocking: read.value.blocking ?? false, dialog: read.value.dialog }
+    : undefined;
 }
 
 /**
