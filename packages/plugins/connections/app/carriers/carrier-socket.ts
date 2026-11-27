@@ -75,14 +75,14 @@ export interface WalkObserver {
   untried(method: ConnectionMethod, detail: string): void;
   /** A leg failed before the daemon accepted a session over it; the walk tries the next. */
   failed(failure: LegFailure): void;
-  /**
-   * The daemon accepted a session over this leg: this is the session's carrier now, and the walk's answer. Answers a
-   * callback run once when THAT session ends (it closed, was cancelled, or its carrier dropped), so the router knows
-   * which accepted sessions are still live.
-   */
+  /** The accepted carrier. Its callback runs once when this session ends, keeping the router's live set current. */
   committed(method: ConnectionMethod): (() => void) | undefined;
   /** Every leg failed (or there were none): the session ends with this close. */
-  exhausted(failures: readonly LegFailure[]): { readonly code: number; readonly reason: string };
+  exhausted(failures: readonly LegFailure[]): {
+    readonly code: number;
+    readonly reason: string;
+    readonly identityReplaced?: true;
+  };
   /** A request on an accepted session was lost because its carrier ended under this browser: it stopped carrying. */
   lost?(method: ConnectionMethod): void;
   /** An accepted session's carrier ended under this browser (not a close this side made). */
@@ -329,7 +329,7 @@ class WalkingSocket implements ScopedSocket {
     if (this.#ended || this.#phase !== 'walking' || this.#staleReason() !== undefined) return;
     this.walk.finish();
     const close = this.walk.observer.exhausted(this.walk.failures);
-    this.#end(close.code, close.reason);
+    this.#end(close.code, close.reason, close.identityReplaced);
   }
 
   /** Records one leg that did not carry a session the daemon accepted. */
@@ -571,13 +571,13 @@ class WalkingSocket implements ScopedSocket {
     this.#pongDeadline = undefined;
   }
 
-  #end(code: number, reason: string): void {
+  #end(code: number, reason: string, identityReplaced?: true): void {
     if (this.#ended) return;
     this.#ended = true;
     this.#untrack();
     const onEnded = this.#onEnded;
     this.#onEnded = undefined;
     onEnded?.();
-    this.events.onClose(code, reason);
+    this.events.onClose(code, reason, identityReplaced);
   }
 }

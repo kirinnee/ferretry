@@ -509,6 +509,12 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
 
 ## Revoking
 
+A carrier walk that proves the daemon at the paired address was replaced offers **Pair again** and opens
+`/pair?replaced=<machine>`. That page says Ferretry on the machine was reinstalled or replaced and asks
+the browser to pair again; it never describes this as the browser being removed or idle-expired. The
+old pairing stays until the person replaces or removes it. The proof is defined in
+[relay-protocol.md](relay-protocol.md#a-replaced-daemon).
+
 Two different things are revocable and they are not the same act:
 
 - **A code** — ends the window early. Idempotent for a code the daemon knows; a 404 for an id it never

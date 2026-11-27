@@ -10,11 +10,15 @@
  * without a filesystem.
  */
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+import type { HarnessKind } from './manifest.ts';
 
 /** The config formats the supported harnesses read. */
 export type SettingsFormat = 'json' | 'toml';
 
 export type SettingsObject = Readonly<Record<string, unknown>>;
+
+/** The document format each harness's settings file is in. */
+export const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, SettingsFormat>;
 
 const isPlainObject = (value: unknown): value is SettingsObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

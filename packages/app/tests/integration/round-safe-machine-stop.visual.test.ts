@@ -61,6 +61,7 @@ const VIEWPORTS = [
 ] as const;
 const STATES = [
   'refused',
+  'replaced',
   'turned-away',
   'no-key',
   'unreadable',

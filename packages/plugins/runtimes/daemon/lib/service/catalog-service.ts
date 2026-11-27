@@ -48,7 +48,7 @@ import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { nextDisableExpiry } from '../account/disabled.ts';
 import type { BudgetHolds } from '../account/disabled-runtime.ts';
-import { parseSettings, type SettingsObject } from '../settings.ts';
+import { parseSettings, SETTINGS_FORMAT, type SettingsObject } from '../settings.ts';
 import {
   type AccountChange,
   type ApplyOutcome,
@@ -67,6 +67,7 @@ import {
   type ProfileDraftView,
   type RunningSession,
   type RuntimeCatalog,
+  type RuntimesHarnessKit,
 } from '../../../contract/index.ts';
 import { cap, type CallerGovernance } from '@ferretry/core-gate/contract';
 import { ApiError } from '@ferretry/kernel/contract';
@@ -89,6 +90,7 @@ import {
   runtimesUsingCredential,
 } from './catalog.ts';
 import type { RuntimeRename, SessionStatus } from './foreign.ts';
+import { harnessFactsOf } from './harness-facts.ts';
 import { failedApplySentence } from './failed-apply.ts';
 import { expandAssetPath, joinPath } from '../paths.ts';
 import type { ModelCatalogSources } from '../models/catalog.ts';
@@ -269,6 +271,8 @@ export interface FleetCatalogServiceDeps {
   ids(): Promise<RuntimeIds | undefined>;
   /** The harness command this daemon's one rule resolves. Nothing is launched to find it. */
   locate(harness: HarnessKind): string | undefined;
+  /** What each harness's own plugin hands Runtimes, read live. Absent: no plugin gives any. */
+  kits?(): ReadonlyMap<HarnessKind, RuntimesHarnessKit>;
   /**
    * Whether every wrapper file this plan would write already holds exactly that content on disk. A
    * republish whose manifest is unchanged still has to rewrite a wrapper whose harness path moved, which
@@ -373,18 +377,6 @@ const countRunningSessions = (statuses: readonly SessionStatus[]): number => sta
  * Whether a planned manifest says what the published one already says, the moment it was made
  * aside. Anything else that differs — a model, a default, a catalog — is worth publishing again.
  */
-/** The absolute path each located harness resolved to, which a wrapper execs instead of a bare name. */
-export function harnessCommandsOf(
-  locate: (harness: HarnessKind) => string | undefined,
-): Partial<Record<HarnessKind, string>> {
-  const claude = locate('claude');
-  const codex = locate('codex');
-  return {
-    ...(claude === undefined ? {} : { claude }),
-    ...(codex === undefined ? {} : { codex }),
-  };
-}
-
 function sameManifest(planned: { readonly generatedAt: string }, published: unknown): boolean {
   if (published === null || typeof published !== 'object') return false;
   const { generatedAt: _planned, ...next } = planned;
@@ -393,9 +385,6 @@ function sameManifest(planned: { readonly generatedAt: string }, published: unkn
 }
 
 // ── Component bodies ─────────────────────────────────────────────────────────────────────────────
-
-/** The document format each harness's settings file is in. */
-const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, 'json' | 'toml'>;
 
 /** A document that parses, or nothing: an unreadable body is reported by the plan, not here. */
 function parsed(text: string | undefined, format: 'json' | 'toml'): SettingsObject | undefined {
@@ -637,7 +626,7 @@ export class FleetCatalogService {
         bodies: await this.#bodies(reading.model),
         claudeStatusline: this.deps.claudeStatusline,
         fyCommand: this.deps.fyCommand,
-        harnessCommands: harnessCommandsOf(this.deps.locate),
+        ...harnessFactsOf(this.deps),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
         ...this.#budgetHolds(),
@@ -1036,7 +1025,7 @@ export class FleetCatalogService {
         bodies,
         claudeStatusline: this.deps.claudeStatusline,
         fyCommand: this.deps.fyCommand,
-        harnessCommands: harnessCommandsOf(this.deps.locate),
+        ...harnessFactsOf(this.deps),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
         ...(await this.#loginStores()),
