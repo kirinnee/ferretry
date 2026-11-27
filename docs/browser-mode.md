@@ -164,8 +164,35 @@ identity, or one `identities:` does not hold, is a 400) opens a window on that i
 own. It closes **only that identity's** agent browser first: every other identity's pages stay live, and two identities can be
 signed in at once, each with its own VNC listener and password.
 
-- **GAP: the app's login button is still `agent`'s.** The owner picks which identity to sign in to from Settings › Browsers ›
-  Identities, which is the next step.
+- **GAP: the app's login button is still `agent`'s.** Settings › Browser › Identities (below) lists, adds and stops identities,
+  but does not yet open an identity's sign-in window: the route and the daemon take `?identity=`, the app's button does not.
+
+### `browsers.yaml` and Settings › Browser › Identities
+
+`config/browsers.yaml` is the file the identities live in; the keys are `mode`, `proxy`, `engine`, `maxRunning`, `captcha`,
+`stealth` and `identities:` (each entry takes `engine`, `proxy` and the `stealth: false` opt-out, and nothing else: a typo is a
+refused file, never a guess). It is edited in the app, with `fy config`, or by hand; every route to it is the kernel's config
+file service ([config-files.md](config-files.md)), so a broken file keeps its last good version in effect, a raw secret is
+refused, and **an edit that loosens waits for the owner**.
+
+**Settings › Browser › Identities** lists the identities the daemon would open **now**: the built-in `agent` first, then each key
+the file holds, from `GET /v1/browser/identities`. Every row is a real identity, running or not, with its engine, the proxy it
+goes through **by name only** (`host:port`, and whether it is the identity's own or the machine's: never a user name, a
+password or a `${secret:…}` reference), and when its profile folder last changed ("Never opened" when it has none; "In use now"
+while its Chrome runs). A row that is running has **Stop**, which is `POST /v1/browser/identities/<key>/stop`: it closes **only
+that identity's** Chrome and pages and leaves every other identity's pages live. It never touches a profile folder, so every
+sign-in on the identity is there the next time it opens. Both routes are a person's: a ferret cannot list or stop identities.
+
+**Add identity** writes `identities.<name>` into `browsers.yaml` through the same config write the mode and the proxy use (the
+app sends the edited text with the digest it read, so a file changed meanwhile is refused). It is never a second path to the
+profile folders: the daemon creates an identity's folder on its first launch, and a name is checked against the key grammar
+(lowercase letters, digits and dashes, starting with a letter, up to 32) and against the names already taken before anything is
+sent. An identity with a proxy of its own is a loosening — it sees every site that identity visits — so the daemon **holds it for
+the owner**: the row shows "Waits for you" (read back from the file, so it outlasts a reload) and the identity is not in effect, and
+not listed as running or openable, until it is confirmed. An identity with no proxy applies at once. The form takes a proxy
+**address** only; a credential is a `${secret:NAME}` reference added to the file, and a credentialed proxy still refuses to launch
+(see [browser-proxy.md](browser-proxy.md)). No identity's profile folder is ever deleted by this view: a name that leaves the
+file stops being openable, and its folder stays on disk.
 
 ## Stealth
 

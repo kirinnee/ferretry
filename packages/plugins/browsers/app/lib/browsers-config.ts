@@ -12,6 +12,9 @@
 import { readConfigText, setConfigKey } from '@ferretry/std/yaml';
 import { z } from 'zod';
 import {
+  BROWSER_IDENTITY_KEY_PATTERN,
+  BrowserProxySettingSchema,
+  DEFAULT_BROWSER_IDENTITY,
   type BrowserMode,
   type BrowserProxySetting,
   type StealthSwitch,
@@ -91,14 +94,46 @@ export interface BrowsersChange {
   readonly stealth?: StealthSwitch;
   /** `null` turns the proxy off. */
   readonly proxy?: BrowserProxySetting | null;
+  /** A new identity, written under `identities:`. Its own proxy is an address only: a credential is a `${secret:NAME}` reference the file's owner adds. */
+  readonly identity?: { readonly key: string; readonly proxyUrl?: string };
+}
+
+/** Why an identity cannot be added as typed, or `undefined` when it can. The daemon checks the same grammar again when it reads the file. */
+export function newIdentityProblem(text: string, key: string, proxyUrl: string): string | undefined {
+  if (!BROWSER_IDENTITY_KEY_PATTERN.test(key))
+    return 'A name is lowercase letters, digits and dashes, up to 32, starting with a letter.';
+  const read = readConfigText(text);
+  const named =
+    read.ok && isRecord(read.read.value) && isRecord(read.read.value.identities) ? read.read.value.identities : {};
+  if (key === DEFAULT_BROWSER_IDENTITY || Object.hasOwn(named, key))
+    return `There is already an identity named ${key}.`;
+  if (proxyUrl.trim() === '') return undefined;
+  const proxy = BrowserProxySettingSchema.safeParse({ url: proxyUrl });
+  return proxy.success ? undefined : (proxy.error.issues[0]?.message ?? 'That is not a proxy address.');
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** `identities:` as the file spells it (so a proxy already there keeps its own words), with one more entry. */
+function withIdentity(text: string, added: { readonly key: string; readonly proxyUrl?: string }): string {
+  const read = readConfigText(text);
+  const raw =
+    read.ok && isRecord(read.read.value) && isRecord(read.read.value.identities) ? read.read.value.identities : {};
+  const entry =
+    added.proxyUrl === undefined || added.proxyUrl.trim() === '' ? {} : { proxy: { url: added.proxyUrl.trim() } };
+  return setConfigKey(text, 'identities', { ...raw, [added.key]: entry });
 }
 
 /** The document with the change made, comments and order kept. Pure. */
 function editedBrowsersText(text: string, change: BrowsersChange): string {
   const withMode = change.mode === undefined ? text : setConfigKey(text, 'mode', change.mode);
   const withStealth = change.stealth === undefined ? withMode : setConfigKey(withMode, 'stealth', change.stealth);
-  if (change.proxy === undefined) return withStealth;
-  return setConfigKey(withStealth, 'proxy', change.proxy === null ? undefined : change.proxy);
+  const withProxy =
+    change.proxy === undefined
+      ? withStealth
+      : setConfigKey(withStealth, 'proxy', change.proxy === null ? undefined : change.proxy);
+  return change.identity === undefined ? withProxy : withIdentity(withProxy, change.identity);
 }
 
 /** Writes the change against the digest it was read at; the daemon refuses a file changed since. */

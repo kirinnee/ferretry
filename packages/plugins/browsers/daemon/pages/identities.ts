@@ -282,6 +282,14 @@ export class IdentityBrowsers implements BrowserSubsystem {
     return { state: starting || this.starting.size > 0 ? 'starting' : 'stopped' };
   }
 
+  /** Whether one identity's Chrome runs, and since when: stopped for one that has not been asked for yet. */
+  identityState(identity: string): BrowserStateView {
+    const service = this.services.get(identity);
+    if (service === undefined) return { state: 'stopped' };
+    const state = service.overview();
+    return state.state === 'stopped' && (this.starting.get(identity) ?? 0) > 0 ? { state: 'starting' } : state;
+  }
+
   /** The identities whose Chrome runs, or is being started, right now. */
   runningIdentities(): readonly string[] {
     return [...this.services]
