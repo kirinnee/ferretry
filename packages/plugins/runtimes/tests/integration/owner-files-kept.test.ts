@@ -107,10 +107,10 @@ const left = (result: { readonly skipped?: readonly { readonly path: string }[] 
   (result.skipped ?? []).map(entry => entry.path);
 
 describe('the skills folder of a runtime home', () => {
-  it('should keep a skill somebody added by hand and prune only what Ferretry recorded', async () => {
+  it('should keep owner skills and a named skill whose incomplete record cannot prove ownership', async () => {
     const host = await machine();
     await host.apply('First words.\n');
-    // Ferretry put one skill there earlier (the record says so); the owner and the harness each added one by hand.
+    // A name without a tree stamp is no ownership proof, even if an incomplete record claims the skill.
     const record = path.join(host.home, '.fy', 'materialised.json');
     const recorded = JSON.parse(await text(record)) as { entries: string[] };
     await writeFile(record, JSON.stringify({ ...recorded, entries: [...recorded.entries, 'skills/from-ferretry'] }));
@@ -123,10 +123,11 @@ describe('the skills folder of a runtime home', () => {
 
     should(await text(path.join(host.home, 'skills', 'owner-skill', 'SKILL.md'))).equal('# owner-skill\n');
     should(await text(path.join(host.home, 'skills', 'harness-skill', 'SKILL.md'))).equal('# harness-skill\n');
-    await should(readFile(path.join(host.home, 'skills', 'from-ferretry', 'SKILL.md'))).be.rejected();
+    should(await text(path.join(host.home, 'skills', 'from-ferretry', 'SKILL.md'))).equal('# from-ferretry\n');
     should(left(result)).containDeep([
       path.join(host.home, 'skills', 'harness-skill'),
       path.join(host.home, 'skills', 'owner-skill'),
+      path.join(host.home, 'skills', 'from-ferretry'),
     ]);
   });
 });
