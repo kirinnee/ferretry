@@ -27,6 +27,10 @@ describe('cutting a rollout at a turn', () => {
     expect(text(cut)).not.toContain('asked 3');
   });
 
+  test('a turn the conversation does not have refuses, saying how many it has', () => {
+    for (const turn of [0, 4, 1.5]) expect(text(cutRollout(file(3), { turn }, NEW))).toContain('which has 3');
+  });
+
   test('an entry names a line inside the turn, or the cut refuses', () => {
     // Lines: 1 header, 2-3 turn 1, 4-5 turn 2, 6-7 turn 3.
     expect(cutRollout(file(3), { turn: 2, entry: `${ID}:5:0:message` }, NEW).kind).toBe('cut');
@@ -37,6 +41,16 @@ describe('cutting a rollout at a turn', () => {
   test('the unflushed last line is not carried, and a line that is no record refuses the cut', () => {
     expect(text(cutRollout(`${file(2)}{"type":"event_msg","torn`, { turn: 2 }, NEW))).not.toContain('torn');
     expect(text(cutRollout(`${head()}not json\n${turn(1)}`, { turn: 1 }, NEW))).toMatch(/line 2 .* not a record/u);
+  });
+
+  test('only a Codex version Ferretry verified, or an older one, is cut; a newer, unnamed or unreadable one is not', () => {
+    for (const cli_version of ['0.145.0', '0.100.2'])
+      expect(cutRollout(file(2, { cli_version }), { turn: 1 }, NEW).kind).toBe('cut');
+    for (const extra of [{ cli_version: '0.146.0' }, { cli_version: 'soon' }, { cli_version: 7 }, {}]) {
+      expect(text(cutRollout(file(2, extra), { turn: 1 }, NEW))).toMatch(/rollout format Ferretry has not tested/u);
+    }
+    expect(text(cutRollout(file(2, {}), { turn: 1 }, NEW))).toContain('(unknown version)');
+    expect(text(cutRollout(file(2, { cli_version: '0.146.0' }), { turn: 1 }, NEW))).toContain('Codex 0.146.0');
   });
 
   test('a header Ferretry cannot read, or no header, refuses', () => {
