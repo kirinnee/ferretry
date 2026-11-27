@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { KitHostScanInput } from '@ferretry/plugin-runtimes/contract';
+import type { KitHarvestInput, KitHostLogin, KitHostScanInput } from '@ferretry/plugin-runtimes/contract';
 import { codexImportKit } from '../../daemon/lib/runtimes-kit/import.ts';
 
 const world = (configuredHome?: string) => {
@@ -73,4 +73,120 @@ describe('Codex host scan kit', () => {
       problems: [],
     });
   });
+});
+
+describe('Codex host harvest kit', () => {
+  const imported = { env: { FIXTURE: 'x' }, secretKeys: [], dropped: [], gated: [], plain: [], minted: [] };
+  const harvestWorld = (
+    rest: Record<string, unknown>,
+    options: { skippedEnv?: boolean; hooks?: KitHarvestInput['hooks'] } = {},
+  ) => {
+    const calls: unknown[][] = [];
+    const input: KitHarvestInput = {
+      rest,
+      source: '/fixture/config.toml',
+      mcpSource: '/ignored/.claude.json',
+      skippedEnv: options.skippedEnv ?? false,
+      skippedModelSet: false,
+      ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
+      countHooks: block => {
+        calls.push(['hooks', block]);
+        return 3;
+      },
+      importEnvironment: (...args) => {
+        calls.push(['env', ...args]);
+        return imported;
+      },
+    };
+    return { input, calls };
+  };
+
+  it('names its own import documents', () => {
+    expect(codexImportKit.importSetup).toEqual({
+      settingsFormat: 'toml',
+      settingsFile: 'config.toml',
+      instructionsName: 'AGENTS.md',
+    });
+  });
+
+  it('drops MCP servers and plumbing keys, delegates the shell environment and keeps the other policy keys', () => {
+    const set = { FIXTURE: 'x' };
+    const rest: Record<string, unknown> = {
+      model: 'fixture-model',
+      mcp_servers: { notes: {} },
+      cli_auth_credentials_store: 'file',
+      sqlite_home: '/fixture/sqlite',
+      shell_environment_policy: { inherit: 'core', set },
+    };
+    const w = harvestWorld(rest);
+    const result = codexImportKit.harvest!(w.input);
+    expect(rest).toEqual({ model: 'fixture-model', shell_environment_policy: { inherit: 'core' } });
+    expect(w.calls).toEqual([['env', set, 'shell_environment_policy.set.', 'config.toml']]);
+    expect(result.envImport).toBe(imported);
+    expect(result.modelEnvironment).toBeUndefined();
+    expect(result.hooks).toBeUndefined();
+    expect(result.mcpSource).toBe('/fixture/config.toml');
+  });
+
+  it('removes a policy that held only the environment, and imports nothing when the person skipped env', () => {
+    const rest: Record<string, unknown> = { shell_environment_policy: { set: { FIXTURE: 'x' } } };
+    const w = harvestWorld(rest, { skippedEnv: true });
+    const result = codexImportKit.harvest!(w.input);
+    expect(rest).toEqual({});
+    expect(w.calls).toEqual([]);
+    expect(result.envImport).toBeUndefined();
+  });
+
+  it('leaves a policy without a settable environment alone', () => {
+    const rest: Record<string, unknown> = { shell_environment_policy: { inherit: 'all' } };
+    const w = harvestWorld(rest);
+    expect(codexImportKit.harvest!(w.input).envImport).toBeUndefined();
+    expect(rest).toEqual({ shell_environment_policy: { inherit: 'all' } });
+    expect(w.calls).toEqual([]);
+  });
+
+  it('counts the hooks block of a hooks document, or the whole document when it has none, and ignores an empty one', () => {
+    const block = { Stop: [{ hooks: [{ command: 'never executed' }] }] };
+    const nested = harvestWorld({}, { hooks: { source: '/fixture/hooks.json', document: { hooks: block } } });
+    expect(codexImportKit.harvest!(nested.input).hooks).toEqual({ source: '/fixture/hooks.json', count: 3 });
+    expect(nested.calls).toEqual([['hooks', block]]);
+    const flat = harvestWorld({}, { hooks: { source: '/fixture/hooks.json', document: block } });
+    expect(codexImportKit.harvest!(flat.input).hooks).toEqual({ source: '/fixture/hooks.json', count: 3 });
+    expect(flat.calls).toEqual([['hooks', block]]);
+    const empty = harvestWorld({}, { hooks: { source: '/fixture/hooks.json', document: {} } });
+    expect(codexImportKit.harvest!(empty.input).hooks).toBeUndefined();
+    expect(empty.calls).toEqual([]);
+  });
+});
+
+describe('Codex host login notes', () => {
+  const notes: readonly [KitHostLogin, string][] = [
+    [
+      { state: 'signed-in', email: 'fixture@example.invalid' },
+      'Login · fixture@example.invalid. Ferretry and your own `codex` share this login: signing out in one signs out both.',
+    ],
+    [{ state: 'refresh-due' }, 'Login · your login · Refresh due. Ferretry renews it the first time you launch.'],
+    [
+      { state: 'not-signed-in' },
+      "Codex isn't signed in on this machine. Your setup was still imported; sign in later and every runtime on this login can launch.",
+    ],
+    [
+      { state: 'unknown' },
+      'Codex sign-in is unknown (Logins has no host discovery fact). Your login stays shared in place.',
+    ],
+    [
+      { state: 'unreadable', reason: 'fixture read refused' },
+      "Ferretry couldn't read your Codex login (fixture read refused). It is still shared in place; check it on the Sign-ins tab.",
+    ],
+    [
+      { state: 'not-shareable' },
+      "Your Codex login can't be shared in place (it is not kept in a file), so this login needs its own sign-in.",
+    ],
+  ];
+
+  for (const [login, note] of notes) {
+    it(`keeps the ${login.state} message`, () => {
+      expect(codexImportKit.loginNote!(login)).toBe(note);
+    });
+  }
 });

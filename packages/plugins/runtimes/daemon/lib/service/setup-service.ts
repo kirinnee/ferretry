@@ -96,7 +96,7 @@ import {
   type ImportPlan,
   type ImportRecord,
 } from '../account/import.ts';
-import { mergeImport, planImport } from '../account/import-plan.ts';
+import { mergeImport, planImportRefusing, scansRefusing } from '../account/import-plan.ts';
 import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
 import { type ComponentWriter, handedText, withoutHookChanges } from '../account/owner-components.ts';
 import { parseImportRecord } from '../account/import-record.ts';
@@ -375,7 +375,8 @@ export class FleetSetupService {
     if (options.fresh === true) await this.deps.tools.refresh?.();
     const catalog = this.deps.catalog;
     const reading = await this.#read();
-    const plan = planImport(await this.#scans(), {
+    const refuse = (m: string) => new FleetSetupRefusal('fleet_setup_refused', m);
+    const plan = planImportRefusing(refuse, await this.#scans(refuse), {
       kits: catalog.kits?.(),
       ...(reading.format === 'none' ? {} : { existing: reading.model }),
       ...(await this.#recordOption()),
@@ -667,7 +668,8 @@ export class FleetSetupService {
     const catalog = this.deps.catalog;
     const reading = await this.#read();
     const existing = reading.format === 'none' ? undefined : reading.model;
-    const scans = await this.#scans();
+    const refuse = (sentence: string) => new FleetCatalogRefusal('fleet_change_refused', sentence);
+    const scans = await this.#scans(refuse);
     const installed = scans.filter(scan => scan.command !== undefined).map(scan => scan.harness);
     let existingSecrets: readonly string[];
     try {
@@ -692,18 +694,18 @@ export class FleetSetupService {
     } satisfies ImportOptions;
     // A retry after a failed apply: a key an earlier import filed with this very value is used again, not filed as `NAME_2`.
     // The keys of the updates the person accepted are filed by the apply too, so they are asked about as well.
-    const probe = planImport(scans, { ...planning, existingSecrets: [] });
-    const accepting = new Set<string>(change.acceptedUpdates ?? []);
+    const probe = planImportRefusing(refuse, scans, { ...planning, existingSecrets: [] });
+    const accepted = change.acceptedUpdates ?? [];
     const probed = uniqueByName([
       ...probe.secrets,
-      ...probe.updates.filter(update => accepting.has(update.reference)).flatMap(update => update.secrets),
+      ...probe.updates.filter(update => accepted.includes(update.reference)).flatMap(update => update.secrets),
     ]);
     const reusableSecretsHeld = await reusableSecrets(
       probed,
       existingSecrets,
       this.deps.secrets.filedSame?.bind(this.deps.secrets),
     );
-    const raw = planImport(scans, { ...planning, reusableSecrets: reusableSecretsHeld });
+    const raw = planImportRefusing(refuse, scans, { ...planning, reusableSecrets: reusableSecretsHeld });
     // The wire keys the names by the Ferrets harness key; the library keys them by its own word.
     const plan = this.#named(
       raw,
@@ -713,7 +715,6 @@ export class FleetSetupService {
       },
       reading.model,
     );
-    const accepted = change.acceptedUpdates ?? [];
     const offered = new Set(plan.updates.map(update => update.reference));
     const unknown = accepted.filter(reference => !offered.has(reference as LayerReferenceText));
     if (unknown.length > 0) {
@@ -1582,15 +1583,13 @@ export class FleetSetupService {
     }
   }
 
-  async #scans(): Promise<readonly HostHarnessScan[]> {
-    try {
-      return await this.deps.scan();
-    } catch (error) {
-      throw new FleetSetupRefusal(
+  #scans(refuse: (sentence: string) => Error): Promise<readonly HostHarnessScan[]> {
+    const unreadable = (error: unknown) =>
+      new FleetSetupRefusal(
         'fleet_setup_unreadable',
         `this machine's own Claude Code and Codex setup could not be read: ${errorMessage(error)}`,
       );
-    }
+    return scansRefusing(() => this.deps.scan(), refuse, unreadable);
   }
 }
 
