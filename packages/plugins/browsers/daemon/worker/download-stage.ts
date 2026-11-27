@@ -80,7 +80,7 @@ export class DownloadStage {
     this.serial += 1;
     const id = `dl-${this.serial.toString(36)}`;
     const name = sanitizeFileName(download.suggestedFilename(), 'download');
-    const path = join(directory, `${id}-${name}`);
+    const path = join(directory, `${id}.download`);
     const entry: Entry = {
       id,
       pageId,
@@ -128,7 +128,7 @@ export class DownloadStage {
     const id = `pdf-${this.serial.toString(36)}`;
     const stem = sanitizeFileName(title.replace(/\.pdf$/iu, ''), 'page');
     const name = `${stem}.pdf`;
-    const path = join(directory, `${id}-${name}`);
+    const path = join(directory, `${id}.pdf`);
     const bytes = Buffer.from(base64, 'base64');
     await disk.mkdirp(directory);
     await disk.write(path, bytes);

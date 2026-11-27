@@ -78,8 +78,8 @@ describe('a task-plan line fills a sign-in at the raise', () => {
 
 /**
  * No lock after an answer: the ferret reads the surface at once. The deadline of the field's own cleanup (and of the
- * grant's did-not-move-on check) is a separate fact: 10 s for a form the daemon has proven hides the value, 120 s
- * otherwise, each run 2 s early, whatever the ferret reads or does after the fill.
+ * grant's did-not-move-on check) is a separate fact: a submitted 5 s browser window, run 2 s early,
+ * whatever the ferret reads or does after the fill. Terminal quarantine keeps its independent duration.
  */
 const proven = () => ({
   accounts: [account()],
@@ -101,13 +101,26 @@ const proven = () => ({
 });
 
 describe('the cleanup deadline of a grant fill is independent of what the ferret reads', () => {
-  it("should empty a proven form's field about 8 s after the write, and stop the line at that deadline", async () => {
+  for (const submit of ['agent', 'offer-owner'] as const)
+    it(`G27 keeps the ${submit} cleanup deadline when the write outcome is uncertain`, async () => {
+      const w = world({ facts: page(), grants: [planLine()], accounts: github() });
+      w.state.typed = 'uncertain';
+      await w.service.raise(SESSION, { ...PAGE_LOGIN, submit });
+      should(w.timers.map(timer => timer.ms)).eql([submit === 'agent' ? 118_000 : 3_000]);
+    });
+  it('G27 keeps 120 seconds for an unsubmitted fill so the agent can click Sign in', async () => {
+    const w = world({ facts: page(), grants: [planLine()], accounts: github() });
+    await w.service.raise(SESSION, { ...PAGE_LOGIN, submit: 'agent' });
+    should(w.writes[0]?.submit).equal(false);
+    should(w.timers.map(timer => timer.ms)).eql([118_000]);
+  });
+  it("G27 should empty a proven form's field 3 s after the write, and stop the line at that deadline", async () => {
     const w = world({ facts: page(), grants: [planLine()], accounts: proven() });
     w.state.clearOutcome = 'cleared';
 
     await w.service.raise(SESSION, PAGE_LOGIN);
 
-    should(w.timers.map(timer => timer.ms)).eql([8_000]);
+    should(w.timers.map(timer => timer.ms)).eql([3_000]);
     should(w.cleared).have.length(0);
     for (const timer of w.timers) timer.fire();
     await new Promise(resolve => setTimeout(resolve, 0));
@@ -115,15 +128,15 @@ describe('the cleanup deadline of a grant fill is independent of what the ferret
     should(w.grantLog.stopped.map(each => each.because)).eql(['did-not-move-on']);
   });
 
-  it('should keep the full window (118 s before the clear) for a form nothing has proven', async () => {
+  it('G27 should clear an unproven browser form after 3 s', async () => {
     const w = world({ facts: page(), grants: [planLine()], accounts: github() });
 
     await w.service.raise(SESSION, PAGE_LOGIN);
 
-    should(w.timers.map(timer => timer.ms)).eql([118_000]);
+    should(w.timers.map(timer => timer.ms)).eql([3_000]);
   });
 
-  it('should keep the full window for a page whose saved facts say it showed the value', async () => {
+  it('G27 should clear a page whose saved facts say it showed the value after 3 s', async () => {
     const contrary = proven();
     const [first] = contrary.signIns;
     const bad = {
@@ -143,10 +156,10 @@ describe('the cleanup deadline of a grant fill is independent of what the ferret
 
     await w.service.raise(SESSION, PAGE_LOGIN);
 
-    should(w.timers.map(timer => timer.ms)).eql([118_000]);
+    should(w.timers.map(timer => timer.ms)).eql([3_000]);
   });
 
-  it('should keep the full window when the saved logins cannot be read at the write: nothing is proven', async () => {
+  it('G27 should clear the browser after 3 s even when saved facts cannot be read', async () => {
     let filled = false;
     const port = {
       listing: async () => {
@@ -163,7 +176,7 @@ describe('the cleanup deadline of a grant fill is independent of what the ferret
 
     await w.service.raise(SESSION, PAGE_LOGIN);
 
-    should(w.timers.map(timer => timer.ms)).eql([118_000]);
+    should(w.timers.map(timer => timer.ms)).eql([3_000]);
   });
 
   it('should hold nothing from a read of the page while the deadline runs', async () => {
