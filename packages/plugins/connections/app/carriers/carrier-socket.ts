@@ -211,6 +211,7 @@ class WalkingSocket implements ScopedSocket {
   #closedHere = false;
   #ended = false;
   #keyed = false;
+  #lost = false;
   /** Held until the session finishes any pending handshake/decryption and asks to walk on, once. */
   #unsent: LegFailure | undefined;
   #servingSince: number | undefined;
@@ -235,7 +236,11 @@ class WalkingSocket implements ScopedSocket {
   ) {
     this.#lastHeardAt = deps.now();
     this.adapted = {
-      lost: () => this.#carrierEnded(1006, 'the connection was lost', { close: 'connection lost' }),
+      lost: () => {
+        // The raw close may already have ended this socket while the session was still verifying its handshake.
+        this.#lost = true;
+        this.#carrierEnded(1006, 'the connection was lost', { close: 'connection lost' });
+      },
       keyed: () => {
         this.#keyed = true;
       },
@@ -467,8 +472,8 @@ class WalkingSocket implements ScopedSocket {
     if (failure === undefined) return undefined;
     if (this.walk.scope.stale() !== undefined || this.walk.finished()) return undefined;
     // A close may have landed while verification was awaiting crypto. Publish only after the session settles that
-    // boundary: a keyed leg's raw 4404 cannot become replacement proof on the next leg (nor 4429 stop a stream walk).
-    const settled = this.#keyed ? { ...failure, code: 1006, reason: 'the connection was lost' } : failure;
+    // boundary: a verified or rejected handshake's raw close cannot prove replacement or stop a stream walk.
+    const settled = this.#keyed || this.#lost ? { ...failure, code: 1006, reason: 'the connection was lost' } : failure;
     this.#legFailed(settled);
     if (this.#streamRefused(settled.code)) return undefined;
     return events => new WalkingSocket(this.deps, this.walk, events).adapted;

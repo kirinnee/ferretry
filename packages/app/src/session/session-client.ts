@@ -1321,7 +1321,7 @@ export class RelayClientSession {
     if (!completed.ok) {
       // The fingerprint check lives inside `completeClientHandshake` and runs first,
       // so a wrong daemon is refused here having never been shown a device proof.
-      this.#fail(RELAY_CLOSE_CODES.protocolError, completed.reason);
+      this.#connectionLost(completed.reason);
       return;
     }
     this.#consume();
@@ -1788,8 +1788,8 @@ export class RelayClientSession {
     else this.#fail(code, reason, false);
   }
 
-  #connectionLost(): void {
-    this.#fail(1006, 'the connection was lost', false);
+  #connectionLost(reason = 'the connection was lost'): void {
+    this.#fail(1006, reason, false);
     if (this.deps.socket.lost !== undefined) this.deps.socket.lost();
     else this.deps.socket.close(1000, 'connection lost');
   }
