@@ -71,6 +71,20 @@ export const ProjectCloneUrlSchema = z
   .string()
   .refine(isProjectCloneUrl, { message: ProjectCloneUrlUnsupportedMessage });
 
+/** The folder `git clone` makes for an address: its last segment without `.git` (`…/you/project.git` → `project`). */
+export const cloneFolderName = (url: string): string | null => {
+  const text = url.trim();
+  // The address's PATH names the repository: `https://github.com/` has none, and its host is not a folder name.
+  const path = URL.canParse(text) ? new URL(text).pathname : '';
+  const name = (path.split('/').filter(Boolean).pop() ?? '').replace(/\.git$/u, '');
+  // One folder name, never a way out of the project: `..` and `.` name no repository.
+  return name === '' || name === '.' || name === '..' ? null : name;
+};
+
+/** `POST /v1/projects/:id/repos`: clone this repository into the project's folder, beside what is already there. */
+export const CloneRepoRequestSchema = z.strictObject({ url: ProjectCloneUrlSchema });
+export type CloneRepoRequest = z.infer<typeof CloneRepoRequestSchema>;
+
 /** Every route is explicit: scanning a path is never a registration operation (today's `RegisterProjectRequestSchema`). */
 export const RegisterProjectRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({

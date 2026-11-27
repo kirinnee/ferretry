@@ -1,5 +1,13 @@
 import { ApiError, decodeParameter, jsonResponse, type RouteHandler } from '@ferretry/kernel/contract';
-import { type ProjectId, ProjectIdSchema, SetProjectAccountsRequestSchema } from '../../../contract/index.ts';
+import {
+  CloneRepoRequestSchema,
+  cloneFolderName,
+  type ProjectId,
+  ProjectIdSchema,
+  type ProjectInfo,
+  SetProjectAccountsRequestSchema,
+} from '../../../contract/index.ts';
+import type { ProjectFolders } from '../../lib/ports.ts';
 import { parseBody } from '../../lib/body.ts';
 import type { ProjectRegistry } from '../../lib/registry.ts';
 import { belowHome } from '../folders/fence.ts';
@@ -36,30 +44,42 @@ export const reposRoute =
       decided ??= outsideHomeGate(call)();
       return decided;
     };
-    // Only the gate's own refusal means "saved results only"; a daemon that cannot decide (503) stays an error.
-    const savedOnly = (refusal: unknown) => {
-      if (!(refusal instanceof ApiError) || refusal.status !== 403) throw refusal;
-      return jsonResponse({ repos: project.repos ?? [], truncated: true });
-    };
-    if (belowHome(project.path, await scan.browser.home()) === undefined) {
-      try {
-        await gate();
-      } catch (refusal) {
-        return savedOnly(refusal);
-      }
-    }
-    let result: Awaited<ReturnType<typeof scanRepos>>;
+    return await keepScan(registry, scan, listChanged, project, gate);
+  };
+
+/** Scans the project folder, keeps what it found on the record and answers it; the gate is the call's one outside-home decision. */
+const keepScan = async (
+  registry: ProjectRegistry,
+  scan: ScanDeps,
+  listChanged: (id: ProjectId) => void,
+  project: ProjectInfo,
+  gate: () => Promise<void>,
+) => {
+  const id = project.id;
+  // Only the gate's own refusal means "saved results only"; a daemon that cannot decide (503) stays an error.
+  const savedOnly = (refusal: unknown) => {
+    if (!(refusal instanceof ApiError) || refusal.status !== 403) throw refusal;
+    return jsonResponse({ repos: project.repos ?? [], truncated: true });
+  };
+  if (belowHome(project.path, await scan.browser.home()) === undefined) {
     try {
-      result = await scanRepos(project.path, { ...scan, outsideHome: gate });
+      await gate();
     } catch (refusal) {
       return savedOnly(refusal);
     }
-    // A scan that changed the list means the folder changed under what the file index holds (plan §3.5): it is out of date.
-    // The registry says so from inside its serial update: a scan that overlapped another is judged against what that one wrote.
-    const kept = await registry.recordRepos(id, result.repos, !result.truncated, () => listChanged(id));
-    if (!kept.ok) throw new ApiError(404, kept.error.message, 'not-found');
-    return jsonResponse({ repos: kept.value.repos ?? [], truncated: result.truncated });
-  };
+  }
+  let result: Awaited<ReturnType<typeof scanRepos>>;
+  try {
+    result = await scanRepos(project.path, { ...scan, outsideHome: gate });
+  } catch (refusal) {
+    return savedOnly(refusal);
+  }
+  // A scan that changed the list means the folder changed under what the file index holds (plan §3.5): it is out of date.
+  // The registry says so from inside its serial update: a scan that overlapped another is judged against what that one wrote.
+  const kept = await registry.recordRepos(id, result.repos, !result.truncated, () => listChanged(id));
+  if (!kept.ok) throw new ApiError(404, kept.error.message, 'not-found');
+  return jsonResponse({ repos: kept.value.repos ?? [], truncated: result.truncated });
+};
 
 /** `PUT /v1/projects/:id/accounts` `{accounts}`: the whole list, in order. Answers the project. */
 export const accountsRoute =
@@ -70,4 +90,51 @@ export const accountsRoute =
     const set = await registry.setAccounts(id, body.accounts);
     if (!set.ok) throw new ApiError(404, set.error.message, 'not-found');
     return jsonResponse(set.value);
+  };
+
+/** The one sentence a clone refused for a reason the owner can fix says; each is a 422 `project_clone_failed`. */
+const cloneRefused = (message: string): ApiError => new ApiError(422, message, 'project_clone_failed');
+
+/**
+ * `POST /v1/projects/:id/repos` `{url}`: clones another repository into an existing project, as a folder named after it,
+ * then scans the project so the new repository is on the record. The same clone the create flow runs (`gitClone`, the same
+ * address schema and transports), never over something that is already there. A project that is itself a repository is
+ * refused: a scan never looks inside a repository, so a clone made there would not be listed.
+ *
+ * The route declares `filesystem.configure` (it writes the disk). A project outside the home is gated BEFORE anything is cloned,
+ * as the scan is, and the one decision serves both. Answers what `GET .../repos` answers.
+ */
+export const cloneRoute =
+  (
+    registry: ProjectRegistry,
+    folders: ProjectFolders,
+    scan: ScanDeps,
+    listChanged: (id: ProjectId) => void = () => undefined,
+  ): RouteHandler =>
+  async call => {
+    const id = projectId(call.params.get('id'));
+    const body = await parseBody(call.request, CloneRepoRequestSchema);
+    const project = await registry.find(id);
+    if (project === undefined) throw new ApiError(404, `no project ${id}`, 'not-found');
+    const leaf = cloneFolderName(body.url);
+    if (leaf === null) throw cloneRefused('That address does not name a repository to clone.');
+    const target = `${project.path === '/' ? '' : project.path}/${leaf}`;
+    let decided: Promise<void> | undefined;
+    const gate = (): Promise<void> => {
+      decided ??= outsideHomeGate(call)();
+      return decided;
+    };
+    if (belowHome(project.path, await scan.browser.home()) === undefined) await gate();
+    if (!(await folders.mayName(target))) throw cloneRefused('That folder is one Ferretry keeps for itself.');
+    if ((await folders.gitCommonDirectory(project.path)) !== undefined)
+      throw cloneRefused(
+        'This project is itself a repository, so a clone inside it would not be listed. Clone beside it.',
+      );
+    if (await folders.isDirectory(target)) throw cloneRefused(`${leaf} already exists in this project.`);
+    try {
+      await folders.gitClone(body.url, target);
+    } catch (failure) {
+      throw cloneRefused(failure instanceof Error && failure.message !== '' ? failure.message : 'git clone failed');
+    }
+    return await keepScan(registry, scan, listChanged, project, gate);
   };
