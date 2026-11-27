@@ -39,6 +39,32 @@ const period = (level: 'ok' | 'over_trigger' | 'over_hard') => ({
 const OK = login('oauth');
 
 describe('runtimeStartAnswer', () => {
+  test('E-245: an auto-only refusal stops an auto launch and admits every other mode, per launch', async () => {
+    const answer = runtimeStartAnswer({
+      ...resolving(READY),
+      logins: listing(OK),
+      autoRefusal: async runtime => (runtime === 'rt' ? 'Claude Code does not accept Auto mode' : undefined),
+    });
+
+    expect(await answer.resolve('rt', undefined, 'interactive')).toMatchObject({ ok: true, login: 'oauth' });
+    expect(await answer.resolve('rt')).toMatchObject({ ok: true });
+    const refused = await answer.resolve('rt', undefined, 'auto');
+    expect(refused.ok).toBe(false);
+    expect(refused.ok ? '' : refused.sentence).toContain(
+      'cannot start an auto ferret: Claude Code does not accept Auto mode',
+    );
+  });
+  test('E-245: a refusal that cannot be read never refuses a launch (the wrapper still does)', async () => {
+    const answer = runtimeStartAnswer({
+      ...resolving(READY),
+      logins: listing(OK),
+      autoRefusal: async () => {
+        throw new Error('manifest being rebuilt');
+      },
+    });
+
+    expect(await answer.resolve('rt', undefined, 'auto')).toMatchObject({ ok: true });
+  });
   test('C-62: a default-runtime lookup that fails rejects, so Ferrets refuses instead of reading "no default"', async () => {
     const failing = runtimeStartAnswer({
       ...resolving(READY),

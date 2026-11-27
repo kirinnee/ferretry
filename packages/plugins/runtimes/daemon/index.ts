@@ -660,6 +660,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
                 logins: ctx.needs.logins,
                 // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.
                 catalog: facts.catalog,
+                autoRefusal: async runtime => (await launchFacts.facts(runtime))?.autoRefusal,
               }),
             ),
           },

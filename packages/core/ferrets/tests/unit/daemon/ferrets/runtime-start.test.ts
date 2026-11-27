@@ -29,7 +29,7 @@ const startedId = (started: Awaited<ReturnType<FerretsService['start']>>) => {
 const OFF = 'off';
 const CAPPED = 'capped';
 
-type Resolve = (runtime: string) => Promise<RuntimeStartResolution>;
+type Resolve = (runtime: string, harness?: string, mode?: 'auto' | 'interactive') => Promise<RuntimeStartResolution>;
 
 const rt: Resolve = async runtime =>
   runtime === 'rt'
@@ -130,6 +130,25 @@ function fixture(
 }
 
 describe('a start by runtime launches with the runtime’s login', () => {
+  test('E-245: the launch’s own mode reaches the runtime answer, on a start and on the restart check (absent is auto)', async () => {
+    const modes: (string | undefined)[] = [];
+    const f = fixture(async (runtime, _harness, mode) => {
+      modes.push(mode);
+      return rt(runtime);
+    });
+
+    const interactive = startedId(
+      await f.service.start(
+        { folder: '/work', by: 'owner', runtime: 'rt', options: { mode: 'interactive' } },
+        PERSON_ORIGIN,
+      ),
+    );
+    startedId(await f.service.start({ folder: '/work', by: 'owner', runtime: 'rt' }, PERSON_ORIGIN));
+    await f.service.startable(interactive);
+
+    expect(modes).toEqual(['interactive', 'auto', 'interactive']);
+  });
+
   test('a start that chooses nothing is a start on the machine default runtime: recorded with it, through the same login gate', async () => {
     const f = fixture(rt, undefined, async () => 'rt');
 

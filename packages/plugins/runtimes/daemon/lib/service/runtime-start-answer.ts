@@ -33,6 +33,11 @@ export interface RuntimeStartAnswerDeps {
    * member, which a move onto another runtime reads as "not built yet".
    */
   readonly catalog?: RuntimesApi['catalog'];
+  /**
+   * Why an AUTO launch of the runtime NAMED is refused while every other mode is not (the published account's
+   * `autoRefusal`); `undefined` when none is or it cannot be read (the wrapper itself still refuses that launch).
+   */
+  readonly autoRefusal?: (runtime: string) => Promise<string | undefined>;
 }
 
 const REMEDY = 'run `fy runtimes` to see what can start, or fix it in Runtimes';
@@ -66,7 +71,11 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
     const reason = whyNot(found);
     return reason === undefined ? { ok: true } : { ok: false, sentence: reason };
   };
-  const resolve = async (runtime: string, harness?: string): Promise<RuntimeStartResolution> => {
+  const resolve = async (
+    runtime: string,
+    harness?: string,
+    mode?: 'auto' | 'interactive',
+  ): Promise<RuntimeStartResolution> => {
     const id = RuntimeIdSchema.safeParse(runtime);
     if (!id.success) return { ok: false, sentence: `${JSON.stringify(runtime)} is not a runtime name; ${REMEDY}` };
     const resolved = await deps.resolve(id.data, harness);
@@ -75,6 +84,10 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
     const spendable = await login(resolved.runtime.login);
     if (!spendable.ok)
       return { ok: false, sentence: `runtime ${id.data} was not started: ${spendable.sentence}; ${REMEDY}` };
+    // Admission is per launch mode: a refusal that stops only an auto ferret never stops the others.
+    const autoRefusal = mode === 'auto' ? await deps.autoRefusal?.(id.data).catch(() => undefined) : undefined;
+    if (autoRefusal !== undefined)
+      return { ok: false, sentence: `runtime ${id.data} cannot start an auto ferret: ${autoRefusal}; ${REMEDY}` };
     return {
       ok: true,
       harness: resolved.runtime.harness,

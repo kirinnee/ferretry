@@ -222,7 +222,7 @@ export interface FerretsPorts {
    * Which harness and login a runtime starts with (Runtimes' `runtime.start`). Unbound only in a unit fixture; the daemon
    * always binds it, and with no provider it answers a refusal, so a runtime-named start never launches signed out.
    */
-  runtimeStart?(runtime: string, harness?: string): Promise<RuntimeStartResolution>;
+  runtimeStart?(runtime: string, harness?: string, mode?: 'auto' | 'interactive'): Promise<RuntimeStartResolution>;
   /**
    * The machine's default runtime, or `undefined` when it has none (Runtimes' `runtime.start`, `defaultRuntime`). A start
    * that names no runtime, login or harness starts on it. Unbound in a unit fixture: such a start is then as it was.
@@ -1166,7 +1166,12 @@ export class FerretsService implements FerretsApi {
     const fallback = await this.defaultRuntimeFor(request);
     if (!fallback.ok) return fallback;
     const runtimeName = request.runtime ?? fallback.value;
-    const resolved = await this.resolveRuntime(runtimeName, { harness: request.harness, login: request.login });
+    const resolved = await this.resolveRuntime(
+      runtimeName,
+      { harness: request.harness, login: request.login },
+      undefined,
+      launchMode(request.options?.mode),
+    );
     if (!resolved.ok) return resolved;
     request = withRuntimeModel(request, resolved.value?.model);
     const login = resolved.value?.login ?? request.login;
@@ -1484,7 +1489,12 @@ export class FerretsService implements FerretsApi {
   async startable(ferret: FerretId): Promise<Result<void, StartFailure>> {
     const found = this.registry.get(ferret);
     if (found === undefined) return failed('failed', `no ferret `);
-    const account = await this.resolveRuntime(found.runtime, { harness: found.harness }, found.login);
+    const account = await this.resolveRuntime(
+      found.runtime,
+      { harness: found.harness },
+      found.login,
+      launchMode(effectiveMode(found, this.registry.detailsOf(found.id))),
+    );
     if (!account.ok) return account;
     const record = account.value === undefined ? found : withLogin(found, account.value.login);
     if (this.ports.harness(record.harness) === undefined) return failed('harness_unavailable', ` is off`);
@@ -1625,6 +1635,7 @@ export class FerretsService implements FerretsApi {
       retargetedRecord.runtime,
       { harness: retargetedRecord.harness },
       retargetedRecord.login,
+      launchMode(effectiveMode(retargetedRecord, this.registry.detailsOf(retargetedRecord.id))),
     );
     if (!account.ok) return account;
     const onAccount = (record: FerretRecord): FerretRecord =>
@@ -2786,6 +2797,7 @@ export class FerretsService implements FerretsApi {
     runtime: string | undefined,
     asked: { readonly harness?: HarnessKey | undefined; readonly login?: string | undefined },
     stored?: string,
+    mode?: 'auto' | 'interactive',
   ): Promise<Result<RuntimeAccount | undefined, StartFailure>> {
     if (runtime === undefined) {
       // No runtime: the login the caller named (or the one the stored record holds) is spent as it is, but it is the SAME
@@ -2807,7 +2819,7 @@ export class FerretsService implements FerretsApi {
     }
     if (this.ports.runtimeStart === undefined) return ok(undefined);
     const answer = await this.withinDeadline(
-      this.ports.runtimeStart(runtime, asked.harness).catch(
+      this.ports.runtimeStart(runtime, asked.harness, mode).catch(
         (): RuntimeStartResolution => ({
           ok: false,
           sentence: `runtime ${runtime} could not be checked, so the ferret was not started`,
