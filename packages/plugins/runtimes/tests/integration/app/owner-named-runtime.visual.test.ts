@@ -57,7 +57,8 @@ afterAll(async () => {
 
 const WINDOWS = [
   { name: '1440', width: 1_440, height: 900, phone: false },
-  { name: '390', width: 390, height: 844, phone: true },
+  // Tall enough to show the whole list: the app scrolls inside its own frame, so a page capture cannot.
+  { name: '390', width: 390, height: 1_300, phone: true },
 ] as const;
 
 const LOOKS = [
