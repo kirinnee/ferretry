@@ -4,6 +4,7 @@
  * - **Status** — whether it is running, and whether its traffic goes through the proxy.
  * - **Browser mode** — Headless, or a Real window an owner browses through.
  * - **Browser proxy** — where its traffic goes, with secret-store credentials, and **Test proxy**.
+ * - **Identities** — each browser identity (its own Chrome and sign-ins): add one, stop one.
  * - **User agent** — what the browser says about itself, and nothing more than is true.
  *
  * The mode and the proxy live in `browsers.yaml`, read and written through the kernel's `/v1/config/file` (D2 #3).
@@ -25,6 +26,7 @@ import {
   type SaveOutcome,
   UNNAMED_MACHINE,
 } from './browser-mode-section.tsx';
+import { BrowserIdentitiesSection } from './browser-identities-section.tsx';
 import { BrowserProxySection } from './browser-proxy-section.tsx';
 import { BrowserStealthSection } from './browser-stealth-section.tsx';
 import { BrowserStateLine } from './browser-state-line.tsx';
@@ -113,6 +115,7 @@ export function BrowserTab({ client }: { readonly client: CallClient }) {
             held={reading.document.stealthHeld}
             save={(stealth: StealthSwitch) => save({ stealth })}
           />
+          <BrowserIdentitiesSection client={client} document={reading.document} authority={authority} save={save} />
           <BrowserProxySection
             client={client}
             machineName={machineName}

@@ -535,3 +535,5 @@ route	POST /v1/relocate/:ferretId/export	added	new in G15 U13 (relocate): stops 
 route	GET /v1/relocate/exports/:exportId/chunks/:index	added	new in G15 U13 (relocate): one chunk of that export as ciphertext the app carries to the other machine; fleet.configure, no store, nothing readable without the target's one-time key
 route	POST /v1/relocate/exports/:exportId/complete	added	new in G15 U13 (relocate): records where the ferret went so the source is a stub that keeps every file; fleet.configure, two ids and an instant
 route	POST /v1/projects/:id/repos	added	new in F-101: clone another repository into an existing project; filesystem configure, a person's act
+route	GET /v1/browser/identities	added	new in G4 U4 (browsers): the browser identities the daemon would open now (running or not, engine, proxy by name only, last used) for Settings > Browser > Identities; a person's read on browser use, no store, no credential
+route	POST /v1/browser/identities/:identity/stop	added	new in G4 U4 (browsers): closes one configured identity's Chrome and pages and no other identity's; a person's act on browser use, audited as surface.control, keeps the profile folder
