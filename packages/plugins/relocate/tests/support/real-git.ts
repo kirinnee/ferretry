@@ -15,7 +15,7 @@ const GIT_ENV = {
   GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
 };
 
-function git(cwd: string, ...args: string[]): string {
+export function git(cwd: string, ...args: string[]): string {
   const done = Bun.spawnSync(['git', ...args], { cwd, env: GIT_ENV });
   if (done.exitCode !== 0) throw new Error(`git ${args.join(' ')} failed: ${done.stderr.toString()}`);
   return done.stdout.toString();

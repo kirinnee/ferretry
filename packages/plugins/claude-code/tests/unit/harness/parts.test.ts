@@ -33,6 +33,7 @@ const NOT_SERVED = [
   'adoptConversation',
   'exportConversation',
   'fork',
+  'packConversation',
   'inject',
   'provedConversation',
   'runtime',

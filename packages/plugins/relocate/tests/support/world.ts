@@ -27,7 +27,11 @@ export interface World {
 
 /** One source machine with a ferret in a real git working tree, a target identity, and a clock the test drives. */
 export async function world(
-  options: FakeSourceOptions & { readonly state?: 'idle' | 'working' | 'stopped'; readonly noTree?: boolean } = {},
+  options: FakeSourceOptions & {
+    readonly state?: 'idle' | 'working' | 'stopped';
+    readonly noTree?: boolean;
+    readonly crypto?: typeof crypto;
+  } = {},
 ): Promise<World> {
   const fixture = makeRepository();
   const source = fakeSource(options);
@@ -55,7 +59,7 @@ export async function world(
     movedLedger,
     now: NOW_MS,
     relocation: new Relocation({
-      crypto,
+      crypto: options.crypto ?? crypto,
       ferrets: ferrets.port,
       treeOf: folder => kernelWorkingTree(kernel, folder),
       daemonId: sourceIdentity.daemonId,

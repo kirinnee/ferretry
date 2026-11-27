@@ -70,7 +70,7 @@ export interface FakeFerrets {
   state: FerretSummary['state'];
 }
 
-function summaryOf(state: FerretSummary['state']): FerretSummary {
+export function summaryOf(state: FerretSummary['state']): FerretSummary {
   return {
     id: FERRET,
     name: 'Mover',
