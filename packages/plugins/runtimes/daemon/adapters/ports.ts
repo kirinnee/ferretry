@@ -156,6 +156,8 @@ export interface ConfigFileService {
 export interface MutationJournal {
   beginOperation(): number;
   sealOperation(from: number): Promise<void>;
+  /** Seal the private replacement BEFORE it is published; later arrivals must never become our undo evidence. */
+  sealCopy(target: string, staged: string): Promise<void>;
   /** Runs `read` with the name the capture of `target` moved it to; `undefined` when nothing was there. */
   withBackup<T>(target: string, read: (backup: string) => Promise<T>): Promise<T | undefined>;
   capture(target: string): Promise<boolean>;

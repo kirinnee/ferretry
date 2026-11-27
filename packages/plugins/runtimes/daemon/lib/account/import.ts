@@ -35,7 +35,7 @@
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { looksSecret } from '@ferretry/std/credential-words';
 import { GITHUB_TOKEN_NAMES, maskedVariableName, nameLooksLikeKey } from '@ferretry/plugin-logins/contract';
-import { importItemId, importNamedItemId } from '../../../contract/index.ts';
+import { importItemId, importNamedItemId, type RuntimesHarnessKit } from '../../../contract/index.ts';
 import { harnessNamed } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
@@ -299,6 +299,8 @@ export interface ImportPlan {
 }
 
 export interface ImportOptions {
+  /** The kit each installed harness's own plugin gives this import. */
+  readonly kits?: ReadonlyMap<HarnessKind, RuntimesHarnessKit>;
   /** The harnesses the person chose to import. Default: every installed one. */
   readonly include?: readonly HarnessKind[];
   /**
@@ -737,6 +739,7 @@ export function harvest(
   skip: ReadonlySet<string>,
   ticked: ReadonlySet<string>,
   starters: StarterModels,
+  _kit?: RuntimesHarnessKit,
 ): HarnessHarvest {
   const { harness } = scan;
   const key = itemHarness(harness);
@@ -1134,7 +1137,7 @@ export function credentialOf(harness: HarnessKind, login: HostLogin): Credential
   return login.state === 'not-shareable' ? { harness, store: 'ferretry' } : { harness, store: 'host' };
 }
 
-export function loginNote(harness: HarnessKind, login: HostLogin): string {
+export function loginNote(harness: HarnessKind, login: HostLogin, _kit?: RuntimesHarnessKit): string {
   const label = HARNESS_DISPLAY_NAMES[harness];
   const own = byHarness(harness, { claude: () => 'claude', codex: () => 'codex' });
   const who = login.email === undefined ? 'your login' : login.email;

@@ -28,6 +28,7 @@
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import { hostCodexHome, isSignInName } from '../lib/account/credentials.ts';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
+import type { RuntimesHarnessKit } from '../../contract/index.ts';
 import {
   type HostDocumentRead,
   type HostHarnessScan,
@@ -48,6 +49,8 @@ interface HostCommandResolver {
 }
 
 export interface HostHarnessScanDeps {
+  /** Each harness plugin's kit, read live for every scan. */
+  readonly kits?: () => ReadonlyMap<HarnessKind, RuntimesHarnessKit>;
   /** The host's files, read only. */
   readonly files: HostFiles;
   /** The home root provided by the permitted host adapter. */
@@ -90,10 +93,11 @@ export class HostHarnessScanner {
 
   /** Both harnesses, installed or not, in a stable order. */
   async scan(): Promise<readonly HostHarnessScan[]> {
-    return await Promise.all([this.#claude(), this.#codex()]);
+    const kits = this.deps.kits?.();
+    return await Promise.all([this.#claude(kits?.get('claude')), this.#codex(kits?.get('codex'))]);
   }
 
-  async #claude(): Promise<HostHarnessScan> {
+  async #claude(_kit?: RuntimesHarnessKit): Promise<HostHarnessScan> {
     const named = this.deps.claudeConfigDir?.trim() ?? '';
     const configured = named !== '' && isAbsolute(named) ? named : undefined;
     const home = configured ?? join(this.deps.userHome, '.claude');
@@ -122,7 +126,7 @@ export class HostHarnessScanner {
     });
   }
 
-  async #codex(): Promise<HostHarnessScan> {
+  async #codex(_kit?: RuntimesHarnessKit): Promise<HostHarnessScan> {
     const home = hostCodexHome(this.deps.codexHome, this.deps.userHome);
     if (home === undefined) {
       const reason = 'CODEX_HOME is set to a relative path, so your Codex setup could not be found';
