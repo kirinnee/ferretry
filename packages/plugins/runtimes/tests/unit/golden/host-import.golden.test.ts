@@ -6,6 +6,8 @@
 import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { HostHarnessScanner } from '../../../daemon/adapters/host-harness-scan.ts';
 import { type HostLogin, credentialOf, loginNote } from '../../../daemon/lib/account/import.ts';
 import { planImport } from '../../../daemon/lib/account/import-plan.ts';
@@ -14,6 +16,10 @@ import { HOST_HOME, HOSTS, memoryHostFiles } from './support/host-world.ts';
 import { outcome, THIRD_KEY } from './support/thrown.ts';
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
+const kits = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 const INSTALLED = new Map([
   ['claude', '/opt/harness/bin/claude'],
   ['codex', '/opt/harness/bin/codex'],
@@ -22,6 +28,7 @@ const INSTALLED = new Map([
 
 const scanHost = async (name: string, installed: boolean, logins: 'signed-in' | 'none') =>
   await new HostHarnessScanner({
+    kits: () => kits,
     files: memoryHostFiles(HOSTS[name] as never),
     userHome: HOST_HOME,
     commands: { resolve: command => (installed ? INSTALLED.get(command) : undefined) },
@@ -87,7 +94,7 @@ describe('host import goldens', () => {
   for (const scenario of SCENARIOS) {
     it(`should scan and plan the import of ${scenario.name} exactly as the base does`, async () => {
       const scans = await scanHost(scenario.host, scenario.installed, scenario.logins);
-      const options = { digest, existingSecrets: [] as string[], ...scenario.options } as never;
+      const options = { digest, kits, existingSecrets: [] as string[], ...scenario.options } as never;
       expectGolden(`import/${scenario.name}`, { scans, plan: planImport(scans, options) });
       // Deterministic by construction: a second scan and plan renders the same bytes.
       const again = await scanHost(scenario.host, scenario.installed, scenario.logins);
@@ -111,12 +118,12 @@ describe('host import goldens', () => {
     expectGolden('import/login-notes', {
       claude: logins.map(login => ({
         login,
-        note: loginNote('claude', login),
+        note: loginNote('claude', login, kits.get('claude')),
         credential: credentialOf('claude', login),
       })),
       codex: logins.map(login => ({
         login,
-        note: loginNote('codex', login),
+        note: loginNote('codex', login, kits.get('codex')),
         credential: credentialOf('codex', login),
       })),
       thirdKey: outcome(() => loginNote(THIRD_KEY as never, { state: 'signed-in' })),
