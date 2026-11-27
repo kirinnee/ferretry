@@ -11,6 +11,7 @@ import {
   type PickerKey,
   type HarnessDeliveryFailure,
   type HarnessFile,
+  type Harness,
   type HarnessForm,
   type HarnessInterrupted,
   type HarnessQueueOptions,
@@ -31,6 +32,12 @@ import {
 import { isFileBackedQueue, queuedMessageInstruction } from '../protocol/turn-handoff.ts';
 import type { FerretRegistry } from '../registry/registry.ts';
 import type { FerretsPorts } from './service.ts';
+
+/** The optional Auto check is a fact of the installed harness member, never a list of harness names. */
+export function harnessFacts(harness: Harness | undefined): Harness['facts'] | undefined {
+  if (harness === undefined) return undefined;
+  return harness.autoLaunchRefusal === undefined ? harness.facts : { ...harness.facts, checksAutoLaunch: true };
+}
 
 /**
  * What the harness facade takes from Ferrets, handed in whole so it holds no state of its own and reaches no global:

@@ -86,7 +86,7 @@ describe('DownloadStage — what a page downloaded', () => {
     // Assert
     should(first).deepEqual([{ id: 'dl-1', name: 'Quarterly Report.csv', state: 'ready', size: 2048 }]);
     should(second).deepEqual([]);
-    should([...disk.files.keys()]).deepEqual(['/stage/dl-1-Quarterly Report.csv']);
+    should([...disk.files.keys()]).deepEqual(['/stage/dl-1.download']);
   });
 
   it('should report a download still arriving every time, then once it is whole', async () => {
@@ -125,7 +125,7 @@ describe('DownloadStage — what a page downloaded', () => {
     const notices = await stage.notices('p1');
 
     should(notices[0]?.state).equal('failed');
-    should(disk.removed).deepEqual(['/stage/dl-1-huge.bin']);
+    should(disk.removed).deepEqual(['/stage/dl-1.download']);
   });
 
   it('should stage and report nothing when the daemon named no directory', async () => {
@@ -157,7 +157,7 @@ describe('DownloadStage — saving what was staged', () => {
     const latest = await stage.claim('p1');
     const chosen = await stage.claim('p1', 'dl-1');
 
-    should(latest).deepEqual({ path: '/stage/dl-2-two.csv', name: 'two.csv', size: 2 });
+    should(latest).deepEqual({ path: '/stage/dl-2.download', name: 'two.csv', size: 2 });
     should(chosen.name).equal('one.csv');
   });
 
@@ -196,7 +196,7 @@ describe('DownloadStage — saving what was staged', () => {
     // Assert
     should(kept.size).equal(1);
     should(error.message).containEql('kept for 15 minutes');
-    should(disk.removed).deepEqual(['/stage/dl-1-a.csv']);
+    should(disk.removed).deepEqual(['/stage/dl-1.download']);
   });
 });
 
@@ -213,7 +213,7 @@ describe('DownloadStage — a printed PDF', () => {
     );
 
     // Assert
-    should(staged).deepEqual({ path: '/stage/pdf-1-My Bank_ Statement.pdf', name: 'My Bank_ Statement.pdf', size: 14 });
+    should(staged).deepEqual({ path: '/stage/pdf-1.pdf', name: 'My Bank_ Statement.pdf', size: 14 });
     should(disk.files.get(staged.path)).equal(14);
     should(await stage.notices('p1')).deepEqual([]);
     should((await refusal(stage.claim('p1', 'pdf-1'))).message).containEql('no download pdf-1');

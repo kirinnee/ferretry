@@ -143,6 +143,12 @@ The owner decided that one-time codes are not secrets: a ferret may read an e-ma
 and may see a TOTP code. `code` is the sensitivity for them; `private` stays for a value that echoes but is not
 one-time.
 
+Browser capture masking adds a separate floor: password/autocomplete-sensitive fields, including `one-time-code`,
+are painted over in pictures, and input-request values are scrubbed from browser text for the worker's life.
+This does not stop a ferret from reading a code from its inbox or typing one into the sign-in page. The terminal
+code behavior below is unchanged. Pictures mask the field; script results receive the same exact-match text scrub.
+An agent's own eval can re-encode or probe a value beyond that scrub's declared bounds.
+
 - **The input** says "One-time code: the ferret can see it.", flags it neutral (not the red of `plain`, not the amber
   of `private`), and shows the value as it is typed (no Show toggle, no numeric pad: a device code may hold letters).
 - **Nothing is held**: no lock, no quarantine, no page hold, no redaction window. The ferret's next read shows the
@@ -404,15 +410,16 @@ of blindness after every password, on every sign-in).
   and can still be ended or revealed by the owner (`POST .../input-quarantines/:key/end`, "Show anyway", both audited).
 - **A sign-in plan or rule fill** that types a password into a page still has that field emptied shortly before a
   deadline (the browser's own cleanup, armed before the write). That cleanup holds nothing from the ferret, and its
-  deadline is its own fact, **never shortened or lengthened by what the ferret reads**: 10 s when the daemon has PROVEN
-  the form hides the value (a saved login's observed facts for that very field: masked, no echo after the submit, and the
-  page moved on), 120 s otherwise (nothing proven, the facts contrary, the saved logins unreadable, or a `private`
-  value). The clear runs 2 s before it, and the line stops (`did-not-move-on`) at the same moment, so a password sits
-  in a proven form's field about 8 s and in any other for about 118 s, exactly as before the lock was removed.
+  deadline is its own fact, **never shortened or lengthened by what the ferret reads**: five seconds after a submitted
+  browser fill, or 120 seconds when `submit=agent` leaves the agent to click Sign in. The clear runs two seconds
+  before it, so a submitted password sits in the field for about three seconds (previously about eight or 118),
+  and an unsubmitted one for about 118 seconds, unchanged. Neither deadline delays a read.
   A terminal fill has no field to clear and so no deadline.
 - **What still applies:**
-  - _Value masking_ ([Redaction](#redaction)): the typed text is scrubbed from the ferret's reads for the redaction
-    window. It blocks nothing but the value itself.
+  - _Value masking_ ([Redaction](#redaction)): the typed text is scrubbed from terminal reads for the redaction
+    window. Browser text captures keep an additional exact-value mask for the browser context's life and sensitive field
+    rectangles are painted black in screenshots and the shared viewer/recording stream. See
+    [browser captures](secrets.md#browser-captures), including the lifetime binary-export refusal after protected input.
   - _The pending-input rules_: while an input waits, the ferret's `terminal_send` / `browser_type` and the like are still
     refused (those values are the owner's to type); a code-only input lets typing through.
   - _The restart replay lock_: from boot until the input half has restored, reads of every terminal and page
@@ -420,8 +427,8 @@ of blindness after every password, on every sign-in).
 - **Declared GAP: a page or program that echoes a password is now readable by the ferret.** Masking recognises a
   value as it was typed; a page that shows it back in another form (reformatted, split, in an image), or a program
   that prints it differently, is shown. Before this change the quarantine was the boundary behind the mask; there is
-  none now. The ferret may also read a password a page echoes in the clear. The owner accepted this to remove
-  the post-answer wait.
+  none now. A literal browser text echo is masked at capture; pixels outside the sensitive fields, such as a
+  canvas a page draws, remain a gap. The owner accepted the bounded guarantee to remove the post-answer wait.
 - **Gone:** the old adaptive lock (10 s / 120 s by what the daemon proved), its reasons, the raise-time dummy probe, the
   page hold that followed its document, and the live-lock estimate on a pending input. The wire still has an optional
   `lock` field and `lockSeconds`; they are never set.
@@ -1417,7 +1424,7 @@ or nothing is typed:
   browser arms (its own `inputArm` call) a `pagehide` listener in an isolated world that empties every password
   input when the page is hidden (the back/forward cache would otherwise keep the value). A worker that refuses the
   call (one from before it) types nothing. The write takes no hold on the page: shortly before the field's cleanup
-  deadline (10 s for a proven form, 120 s otherwise, see [no lock after an answer](#no-lock-after-an-answer)) the daemon
+  deadline (five seconds submitted, 120 seconds unsubmitted; see [no lock after an answer](#no-lock-after-an-answer)) the daemon
   asks the browser whether a typed field still holds ANY value (same document, node still connected). It sends only which nodes, never a value. A field that holds one is emptied,
   whatever it holds (a character added during the hold changes nothing), and the line stops (`did-not-move-on`). A
   node DevTools says is gone, an empty field or another document is `moved`; any other failure is `unknown`, which
@@ -1425,7 +1432,7 @@ or nothing is typed:
   browser runs with the back/forward cache off, so a page never comes back with its old heap; the `pagehide` arm is
   defence in depth. A single-page app that swapped the form has moved on once the node is gone. Terminals need
   none: a line-mode prompt consumes the line. A write that could not say whether it typed (`uncertain`: the
-  password may have landed) gets the same clear, on the full 120 s deadline, and stops the line at once (`did-not-move-on`).
+  password may have landed) gets the same submitted/unsubmitted cleanup deadline, and stops the line at once (`did-not-move-on`).
 - **Audited, never a value.** `input.delivered` carries `by: 'plan'`, the plan, the line and the sign-in beside the
   usual names and flags. A miss is recorded as `input.requested` with `preapproval: 'did-not-apply'`, the plan, the
   line and `because`. A stopped line is recorded as `task-plan-line-stopped`; a write back the plan record refuses
@@ -1481,7 +1488,7 @@ in the table above holds for a rule too, plus these:
   `browser_eval` is seen: a ferret editing the browser profile on disk, or an extension, is outside it.
 - **The clear suspends.** A password left in its field at the cleanup deadline (`cleared`), or a clear that can't tell
   (`unknown`), suspends the rule (`did-not-move-on`), exactly as it stops a plan line. A write that could not say whether it
-  typed (`uncertain`) gets the same clear on the full 120 s deadline, and suspends the rule at once.
+  typed (`uncertain`) gets the same submitted/unsubmitted cleanup deadline, and suspends the rule at once.
 - **What the ferret is told.** On a fill: "Filled under a rule the owner approved in advance." and `source: saved`,
   never the rule or the account. On a miss: **nothing at all**. Its view, its words and its agenda item are
   byte-identical to a sign-in no rule was ever about (no "didn't apply" note, no context line), and so are the states
@@ -1674,7 +1681,11 @@ makes the input stricter.
   approval; under a restricted sudoers it could set a password the ferret then knows. Approve a terminal line only
   where that is acceptable.
 - **A `plain` value is visible by design.** It is marked on the input.
-- **A browser `private` value can appear in an after-screenshot** (a later phase).
+- **A browser value drawn into pixels outside its sensitive field can appear in a screenshot.** The field itself is
+  painted over; a canvas or generated image elsewhere is outside that mask.
+- **A slow submitted login can lose its field before it changes documents.** Submitted browser fills clear at about
+  three seconds. If the page has not moved on, cleanup reports `did-not-move-on` and suspends the owner's
+  pre-approved rule or plan line. A login needing longer must be retried with that limitation in mind.
 - **A one-time `code` is weaker than `private` on purpose** (the owner's decision, see [one-time codes](#one-time-codes-code)).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
   and core dumps are out of scope.

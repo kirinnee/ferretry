@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { fakeProjects, projectsConformance } from '../../contract/testing/index.ts';
 import {
+  CloneRepoRequestSchema,
+  cloneAddressHasCredentials,
   isProjectsConnectAccount,
   isProjectsInsights,
   PROJECTS_APP_HOOKS,
@@ -32,6 +34,21 @@ describe('projects wire schemas', () => {
       expect(ProjectCloneUrlSchema.safeParse(bad).success).toBe(false);
     for (const good of ['https://host/r.git', 'ssh://git@host/r.git', 'file:///srv/r.git'])
       expect(ProjectCloneUrlSchema.safeParse(good).success).toBe(true);
+  });
+  test('R2: any parsed userinfo on an https address is refused, the username alone included; an ssh username is not', () => {
+    for (const bad of [
+      'https://tok@host.invalid/r.git',
+      'https://user:@host.invalid/r.git',
+      'https://:pw@host.invalid/r.git',
+      'HTTPS://tok@host.invalid/r.git',
+      'https:///tok@host.invalid/r.git',
+      'https:////user:@host.invalid/r.git',
+    ]) {
+      expect(cloneAddressHasCredentials(bad)).toBe(true);
+      expect(CloneRepoRequestSchema.safeParse({ url: bad }).success).toBe(false);
+    }
+    for (const good of ['https://host.invalid/r.git', 'ssh://git@host.invalid/r.git'])
+      expect(CloneRepoRequestSchema.safeParse({ url: good }).success).toBe(true);
   });
   test('the stored file is format 1 and refuses an unknown field', () => {
     expect(ProjectsFileSchema.safeParse({ format: 1, projects: [] }).success).toBe(true);

@@ -22,7 +22,8 @@ const SERVED = {
   homePart: ['homeFor', 'prepareHome'],
   identityPart: ['accepts', 'facts', 'key', 'turnStop'],
   launchSettingsPart: ['launchSettings'],
-  lifecyclePart: ['discover', 'resume', 'start', 'stop', 'update'],
+  lifecyclePart: ['autoLaunchRefusal', 'discover', 'resume', 'start', 'stop', 'update'],
+  relocationPart: ['packConversation', 'unpackConversation'],
   runtimeSwitchPart: ['runtimeSwitch'],
   transcriptPart: ['transcript', 'transcriptBytes', 'transcriptStamp', 'transcriptTail'],
   usagePart: ['usage'],
@@ -33,8 +34,6 @@ const NOT_SERVED = [
   'screenReader',
   'adoptConversation',
   'exportConversation',
-  'packConversation',
-  'unpackConversation',
   'inject',
   'provedConversation',
   'runtime',
@@ -69,6 +68,7 @@ describe('the Claude harness parts', () => {
     const ABSENT: Record<keyof Harness, true> = {
       screenReader: true,
       accepts: true,
+      autoLaunchRefusal: true,
       adoptConversation: true,
       conversations: true,
       deliver: true,
@@ -76,7 +76,6 @@ describe('the Claude harness parts', () => {
       discover: true,
       exportConversation: true,
       packConversation: true,
-      unpackConversation: true,
       facts: true,
       fork: true,
       hasConversation: true,
@@ -100,6 +99,7 @@ describe('the Claude harness parts', () => {
       transcriptTail: true,
       turnStop: true,
       update: true,
+      unpackConversation: true,
       usage: true,
     };
     const unsaid = Object.keys(ABSENT).filter(

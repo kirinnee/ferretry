@@ -5,21 +5,21 @@ import type { ClaudeCore, Serves } from './core.ts';
 import { resolveTranscriptFile } from './transcript.ts';
 
 /** The largest conversation a fork copies: the copy is held whole in memory (the same bound copy-on-link keeps). */
-const MAX_FORK_BYTES = 256 * 1024 * 1024;
+export const MAX_FORK_BYTES = 256 * 1024 * 1024;
 const NEWLINE = 0x0a;
 
-type Json = Record<string, unknown>;
+export type Json = Record<string, unknown>;
 
-const asObject = (value: unknown): Json | undefined =>
+export const asObject = (value: unknown): Json | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined;
 
 /** Hold one no-link descriptor, including on an unpooled home; a stat followed by readBytes would follow an in-root link. */
-async function sourceBytes(home: RootHandle, file: FencedPath): Promise<Uint8Array> {
+export async function sourceBytes(home: RootHandle, file: FencedPath, purpose = 'fork'): Promise<Uint8Array> {
   const opened = await home.openBytes?.(file);
   if (opened === undefined) throw new Error('the source conversation could not be opened without following a link');
   try {
     const { size } = await opened.stat();
-    if (size > MAX_FORK_BYTES) throw new Error('that conversation is too large to fork (over 256 MB)');
+    if (size > MAX_FORK_BYTES) throw new Error(`that conversation is too large to ${purpose} (over 256 MB)`);
     const bytes = new Uint8Array(size);
     let offset = 0;
     while (offset < size) {
@@ -36,13 +36,13 @@ async function sourceBytes(home: RootHandle, file: FencedPath): Promise<Uint8Arr
 }
 
 /** One transcript line: its exact bytes (newline included) and what it parsed to, if it parsed. */
-interface Line {
+export interface Line {
   readonly bytes: Uint8Array;
   readonly record: Json | undefined;
 }
 
 /** The lines of a transcript with their exact bytes. A last line with no newline is kept only when it is a whole record. */
-function linesOf(bytes: Uint8Array): readonly Line[] {
+export function linesOf(bytes: Uint8Array): readonly Line[] {
   const decoder = new TextDecoder();
   const lines: Line[] = [];
   let begin = 0;
@@ -151,7 +151,7 @@ function cutAfter(lines: readonly Line[], at: TurnRef | undefined): number | str
 }
 
 /** A top-level copy cannot resume an Agent whose separate transcript was left behind. Refuse before any write. */
-function includesSubagent(lines: readonly Line[]): boolean {
+export function includesSubagent(lines: readonly Line[]): boolean {
   return lines.some(({ record }) => {
     if (typeof asObject(record?.toolUseResult)?.agentId === 'string') return true;
     const content = asObject(record?.message)?.content;

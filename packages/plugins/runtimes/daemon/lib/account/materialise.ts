@@ -213,8 +213,10 @@ interface PlannedRuntime {
   readonly secretEnv: Readonly<Record<string, string>>;
   /** The login's, profile's and model variables whose value names no secret (an MCP check fills `${VAR}` from them). */
   readonly launchEnv?: Readonly<Record<string, string>>;
-  /** Why it cannot launch, when it cannot. */
+  /** Why it cannot launch at all, when it cannot. */
   readonly blocked?: string;
+  /** Why it cannot start an AUTO ferret only: every other launch is still admitted. */
+  readonly autoRefusal?: string;
 }
 
 const sorted = (record: Readonly<Record<string, string>>): Readonly<Record<string, string>> =>
@@ -491,9 +493,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       ...(codexCatalog === undefined ? [] : codexCatalogArguments(codexCatalogPath)),
     ];
     // The wrapper refuses only what stops EVERY launch. An auto launch the harness cannot honour is refused inside the
-    // wrapper's auto block, and is still published as unavailable: a start's default mode is auto.
-    const wrapperBlocked = reasons.length === 0 ? undefined : reasons.join('; ');
-    const blocked = [...reasons, ...(autoRefusal === undefined ? [] : [autoRefusal])].join('; ') || undefined;
+    // wrapper's auto block and published as `autoRefusal`, so a start admits it per launch mode and the runtime stays
+    // available for every other mode.
+    const blocked = reasons.length === 0 ? undefined : reasons.join('; ');
+    const wrapperBlocked = blocked;
     operations.push({
       kind: 'file',
       path: wrapper,
@@ -542,6 +545,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       ),
       ...(Object.keys(plainLaunchEnv).length === 0 ? {} : { launchEnv: sorted(plainLaunchEnv) }),
       ...(blocked === undefined ? {} : { blocked }),
+      ...(autoRefusal === undefined ? {} : { autoRefusal }),
     });
   }
 
@@ -582,6 +586,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
         ...(runtime.launchEnv === undefined ? {} : { launchEnv: runtime.launchEnv }),
+        ...(runtime.autoRefusal === undefined ? {} : { autoRefusal: runtime.autoRefusal }),
       };
     }),
     runtimes: planned.map(runtime => ({
