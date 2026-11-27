@@ -33,7 +33,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import should from 'should';
-import { THEME_FAMILIES } from '@ferretry/app';
+import { PALETTES } from '@ferretry/app';
 import { fakeTilePng } from '../../support/app/fake-tile.ts';
 import { FY_RENDER_VISUAL_CASES } from './fixtures/fy-render-visual-cases.ts';
 import { sharedChromium } from '@ferretry/app/testing/browser';
@@ -1134,7 +1134,7 @@ describe('fy-render component evidence — Chart', () => {
 
   test('should keep every theme’s series colours apart, in every family and mode', async () => {
     // Arrange — every theme the reader can pick: each family in each mode, from the app's own list.
-    const names = THEME_FAMILIES.flatMap(family => [`${family.id}-light`, `${family.id}-dark`]);
+    const names = PALETTES.flatMap(palette => [`${palette.id}-light`, `${palette.id}-dark`]);
     // Twelve palettes (the r10 T1 three-axis catalog, `theme/catalog.ts` PALETTES; r11 T1 re-cut it) in two modes each:
     // the old 11-family list this guard was written against (22 names) is gone, and a literal still catches a palette
     // dropped from the list the reader picks from by accident.

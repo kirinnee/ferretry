@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadTerminalFont, terminalFontLoader } from '../../../app/components/terminal-font-loader.ts';
 import { TERMINAL_FONT_FACE, terminalFontFamily } from '../../../app/lib/terminal-font.ts';
-import { THEME_FAMILIES } from '@ferretry/app';
+import { PALETTES } from '@ferretry/app';
 import { ensureDom, readThemeCss } from '@ferretry/app/testing';
 
 // These suites read the document directly; register one before any hook or test runs.
@@ -34,7 +34,7 @@ describe('the terminal font stack', () => {
     expect(monoStacks.length).toBeGreaterThan(0);
     expect(themes).toContain(`--font-mono`);
     // The catalog owns how many families exist; this guard only proves there is something to check.
-    expect(THEME_FAMILIES.length).toBeGreaterThan(0);
+    expect(PALETTES.length).toBeGreaterThan(0);
     for (const stack of monoStacks) {
       const family = terminalFontFamily(stack);
       expect(family.endsWith(`"${TERMINAL_FONT_FACE}", monospace`)).toBe(true);

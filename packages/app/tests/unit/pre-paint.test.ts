@@ -20,8 +20,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REMOVED_PALETTE_IDS, THEME_FAMILY_IDS } from '@ferretry/plugin-layouts/contract';
-import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
+import { DEFAULT_PALETTE, DEFAULT_STYLE, PALETTES, STYLES } from '../../src/theme/catalog.ts';
 import { memoryStore } from '../../src/storage/records.ts';
 import {
   resolveThemeMode,
@@ -96,26 +95,14 @@ const STORED_VALUES: readonly (string | null)[] = [
   '   ',
   // The record shape (style + palette), including per-field fallback for bad fields.
   record({ style: 'neo', palette: 'geist', mode: 'dark', textScale: 'large' }),
-  record({ style: 'geist', palette: 'phosphor', mode: 'light', textScale: 'default' }),
-  record({ style: 'nope', palette: 'ledger', mode: 'dark', textScale: 'default' }),
-  record({ style: 'mission', palette: 'nope', mode: 'system', textScale: 'larger' }),
-  // The removed `contrast` style is Studio in the High contrast palette; every removed palette reads as its kept one.
-  record({ style: 'contrast', palette: 'studio', mode: 'light', textScale: 'default' }),
-  record({ style: 'contrast', palette: 'neo', mode: 'dark', textScale: 'default' }),
-  record({ style: 'contrast', mode: 'dark', textScale: 'default' }),
-  ...Object.keys(REMOVED_PALETTE_IDS).map(palette =>
-    record({ style: 'neo', palette, mode: 'light', textScale: 'default' }),
-  ),
-  ...THEME_FAMILY_IDS.map(family => record({ family, mode: 'dark', textScale: 'default' })),
+  // A style or palette that is not even shaped like a pack id reads as the default on both sides.
+  record({ style: 'geist', palette: 'No Such', mode: 'light', textScale: 'default' }),
+  record({ style: 'NOPE', palette: 7, mode: 'dark', textScale: 'default' }),
+  record({ style: 'x'.repeat(40), palette: '../x', mode: 'system', textScale: 'larger' }),
+  // A pre-split `family` is just an unknown key now: ignored.
+  record({ family: 'mission', mode: 'dark', textScale: 'large' }),
   // A `keepPalette` the painter has no use for must not disturb it.
   record({ style: 'neo', palette: 'geist', keepPalette: true, mode: 'dark', textScale: 'default' }),
-  // The pre-split record shape: a family is a palette with the style it was drawn for; an explicit axis beside it wins.
-  record({ family: 'phosphor', mode: 'dark', textScale: 'default' }),
-  record({ family: 'ma', mode: 'light', textScale: 'default' }),
-  record({ family: 'neo', style: 'studio', mode: 'light', textScale: 'default' }),
-  record({ family: 'mission', mode: 'dark', textScale: 'large' }),
-  record({ family: 'notebook', mode: 'system', textScale: 'larger' }),
-  record({ family: 'geist', mode: 'light', textScale: 'default' }),
   record({ family: 'nope', mode: 'dark', textScale: 'huge' }),
   // Another format, or no format: read as absent (clean slate, no converter).
   record({ family: 'mission', mode: 'dark', textScale: 'large' }, 2),
@@ -151,14 +138,9 @@ describe('the pre-paint bootstrap and the theme module resolve identically', () 
     }
   });
 
-  it('accepts exactly the styles and palettes the catalogue lists', () => {
+  it('keeps no list of ids: it paints every pack the catalogue lists, and any well-formed id', () => {
     const ids = (list: { readonly id: string }[]) => list.map(entry => entry.id);
-    expect(source).toContain(
-      `var STYLES = [${ids([...STYLES])
-        .map(id => `'${id}'`)
-        .join(', ')}];`,
-    );
-    for (const palette of ids([...PALETTES])) expect(source).toContain(`'${palette}',`);
+    expect(source).not.toMatch(/var (?:STYLES|PALETTES)\b/u);
     for (const style of ids([...STYLES])) {
       const { attributes } = runBootstrap(
         record({ style, palette: 'studio', mode: 'light', textScale: 'default' }),
@@ -173,6 +155,15 @@ describe('the pre-paint bootstrap and the theme module resolve identically', () 
       );
       expect(attributes['data-palette']).toBe(palette);
     }
+    // An id no pack answers to is painted as stored (it matches no pack selector, so the base tokens show) and React
+    // publishes the default in its place: the two only disagree here, and only for the first paint.
+    const { attributes } = runBootstrap(
+      record({ style: 'unknown-style', palette: 'unknown-palette', mode: 'dark', textScale: 'default' }),
+      false,
+    );
+    expect(attributes).toMatchObject({ 'data-style': 'unknown-style', 'data-palette': 'unknown-palette' });
+    const read = parseThemePreference(record({ style: 'unknown-style', palette: 'unknown-palette' }));
+    expect({ style: read.style, palette: read.palette }).toEqual({ style: DEFAULT_STYLE, palette: DEFAULT_PALETTE });
   });
 
   it('publishes the text scale and the same factor the module applies', () => {
@@ -181,17 +172,6 @@ describe('the pre-paint bootstrap and the theme module resolve identically', () 
       const scale = parseThemePreference(raw).textScale;
       expect(attributes['data-text-scale']).toBe(scale);
       expect(properties['--fy-text-scale']).toBe(String(TEXT_SCALE_FACTORS[scale]));
-    }
-  });
-
-  it('restates the removed-palette table the contract owns', () => {
-    for (const [removed, kept] of Object.entries(REMOVED_PALETTE_IDS)) {
-      expect(source).toContain(`${removed}: '${kept}',`);
-      const { attributes } = runBootstrap(
-        record({ style: 'studio', palette: removed, mode: 'light', textScale: 'default' }),
-        false,
-      );
-      expect(attributes['data-palette']).toBe(kept);
     }
   });
 

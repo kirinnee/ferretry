@@ -6,8 +6,8 @@
  *
  *   1. Pick Neo on a device on Inkwell → the page's `data-palette` becomes `neo` (labelled Pop Art). With `keepPalette` stored
  *      → it stays Inkwell (Studio's palette). The change shows on the root element the stylesheet reads.
- *   2. A stored `{style:'contrast'}` → the FIRST frame (pre-paint, before any module) is Studio + High contrast, and every
- *      removed palette id paints the id the migration table names, with no flash.
+ *   2. A stored palette paints itself in the FIRST frame (pre-paint, before any module). An id with no pack has no migration:
+ *      `theme-open-ids.visual.test.ts` owns that case.
  *   3. The palette picker draws one chip per catalogue palette, each by the name the ONE map gives it (`theme/palette-names.ts`;
  *      C59 O6: proper names); none is named after a style (Briefing, owner's own ask, is the one allowed).
  *
@@ -193,7 +193,7 @@ describe('picking a style brings its default palette, unless the device keeps it
   });
 });
 
-describe('pre-paint: the first frame already wears the migrated look', () => {
+describe('pre-paint: the first frame already wears the stored look', () => {
   const firstFrame = async (value: Record<string, unknown>) => {
     const context = await browser.newContext();
     try {
@@ -209,32 +209,11 @@ describe('pre-paint: the first frame already wears the migrated look', () => {
     }
   };
 
-  it('a stored {style:"contrast"} paints Studio + High contrast', async () => {
-    const first = await firstFrame({ style: 'contrast', palette: 'studio', mode: 'light', textScale: 'default' });
-    expect(first).toMatchObject({ style: 'studio', palette: 'contrast', mode: 'light' });
-  });
-
-  const REMOVED: readonly (readonly [string, string])[] = [
-    ['blueprint', 'mission'],
-    ['broadsheet', 'vintage'],
-    ['wayfinding', 'geist'],
-    ['phosphor', 'hacker'],
-    ['ledger', 'hacker'],
-    ['ma', 'vaporwave'],
-    ['retrofuture', 'vintage'],
-    ['cyberpunk', 'vaporwave'],
-  ];
-  // C59 O6: Gradient mesh and Briefing are palettes again (and Aurora and Afterglow are new), so a stored one paints itself, no migration.
+  // C59 O6: Gradient mesh and Briefing are palettes again (and Aurora and Afterglow are new), so a stored one paints itself.
   for (const palette of ['mesh', 'briefing', 'aurora', 'afterglow']) {
     it(`a stored palette "${palette}" paints "${palette}" itself`, async () => {
       const first = await firstFrame({ style: 'studio', palette, mode: 'dark', textScale: 'default' });
       expect(first).toMatchObject({ style: 'studio', palette, mode: 'dark' });
-    });
-  }
-  for (const [removed, kept] of REMOVED) {
-    it(`a stored palette "${removed}" paints "${kept}"`, async () => {
-      const first = await firstFrame({ style: 'studio', palette: removed, mode: 'dark', textScale: 'default' });
-      expect(first).toMatchObject({ style: 'studio', palette: kept, mode: 'dark' });
     });
   }
 });

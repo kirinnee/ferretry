@@ -1,36 +1,28 @@
 /**
  * THE THREE THEME AXES (style · palette · mode) AND THE ONE RULE THAT KEEPS THEM APART: a STYLE pack
  * (`theme/packs/style/<id>/style.css`) holds no colour value and a PALETTE pack (`theme/packs/palette/<id>/palette.ts`) holds no non-colour token. `styles/themes.css` names where every token lives; this suite is the
- * thing that fails when a token wanders, when the catalogue and the files disagree, or when a stored pre-split
- * `family`, a removed palette or the removed `contrast` style stops reading as the look the migration names.
+ * thing that fails when a token wanders, when the catalogue and the files disagree, or when a stored id with no pack
+ * stops reading as the default. The ids are the pack folders the generator found: no test here (or anywhere in the
+ * app) lists them.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  PALETTE_IDS,
-  REMOVED_PALETTE_IDS,
-  STYLE_IDS,
-  ThemeSchema,
-  THEME_FAMILY_IDS,
-} from '@ferretry/plugin-layouts/contract';
+import { ThemeSchema } from '@ferretry/plugin-layouts/contract';
 import { memoryStore } from '../../src/storage/records.ts';
 import { APP_STORAGE } from '../../src/storage/names.ts';
 import {
+  DEFAULT_PALETTE,
   DEFAULT_STYLE,
   PALETTES,
   STYLES,
   defaultPaletteOf,
-  isFamilyId,
   isPaletteId,
-  lookOfFamily,
-  lookOfPalette,
+  isStyleId,
   swatchAttributes,
-  type PaletteId,
 } from '../../src/theme/catalog.ts';
-import { PALETTE_PACKS, STYLE_PACKS } from '../../src/generated/theme-packs.ts';
-import { applyThemeAxes, ThemePreferenceStore } from '../../src/theme/preferences.ts';
-import { applyWindowColour } from '../../src/shell/context.tsx';
+import { PALETTE_IDS, PALETTE_PACKS, STYLE_IDS, STYLE_PACKS } from '../../src/generated/theme-packs.ts';
+import { ThemePreferenceStore } from '../../src/theme/preferences.ts';
 import {
   readPaletteCss,
   readStyleFile,
@@ -170,15 +162,13 @@ describe('the catalogue, the files and themes.css agree', () => {
     for (const id of PALETTE_IDS) expect(readThemeCss()).toContain(`[data-palette='${id}']`);
   });
 
-  it('lists the same ids in the catalogue as in the Layouts contract, in the same order', () => {
+  it('lists in the catalogue exactly the packs the generator found, in the same order', () => {
     expect(STYLES.map(entry => entry.id)).toEqual([...STYLE_IDS]);
     expect(PALETTES.map(entry => entry.id)).toEqual([...PALETTE_IDS]);
-    // Every style comes with a palette that exists; the removed ones map onto kept ones.
+    // Every style comes with a palette that exists.
     for (const style of STYLES) expect(PALETTE_IDS).toContain(style.defaultPalette);
-    for (const kept of Object.values(REMOVED_PALETTE_IDS)) expect(PALETTE_IDS).toContain(kept);
-    for (const removed of Object.keys(REMOVED_PALETTE_IDS))
-      expect(PALETTE_IDS as readonly string[]).not.toContain(removed);
-    expect(STYLE_IDS as readonly string[]).not.toContain('contrast');
+    for (const id of STYLE_IDS) expect(isStyleId(id)).toBe(true);
+    for (const id of PALETTE_IDS) expect(isPaletteId(id)).toBe(true);
   });
 
   it('has 12 palettes, each with its own proper name from its pack, and none a plain colour word', () => {
@@ -262,56 +252,49 @@ describe('the catalogue, the files and themes.css agree', () => {
   });
 });
 
-describe('a stored pre-split family reads as the palette it names, on the style that comes with it', () => {
-  for (const family of THEME_FAMILY_IDS) {
-    it(`${family}`, () => {
-      const store = memoryStore({
-        [APP_STORAGE.theme]: JSON.stringify({ format: 1, value: { family, mode: 'dark', textScale: 'large' } }),
-      });
-      const read = new ThemePreferenceStore(store).snapshot();
-      expect({ style: read.style, palette: read.palette }).toEqual(
-        lookOfFamily((REMOVED_PALETTE_IDS as Record<string, PaletteId>)[family] ?? (family as PaletteId)),
-      );
-      expect(read.keepPalette).toBe(false);
+describe('an id with no pack reads as the default and is never rewritten', () => {
+  const stored = (value: unknown) => memoryStore({ [APP_STORAGE.theme]: JSON.stringify({ format: 1, value }) });
+
+  for (const gone of ['blueprint', 'phosphor', 'ledger', 'contrast-style', 'zz']) {
+    it(`a stored style and palette "${gone}" read as the default look`, () => {
+      const read = new ThemePreferenceStore(
+        stored({ style: gone, palette: gone, mode: 'dark', textScale: 'large' }),
+      ).snapshot();
+      expect({ style: read.style, palette: read.palette }).toEqual({ style: DEFAULT_STYLE, palette: DEFAULT_PALETTE });
+      // Every other field still reads on its own.
       expect(read.mode).toBe('dark');
       expect(read.textScale).toBe('large');
     });
   }
 
-  it('an explicit style or palette beside a family wins, field by field', () => {
-    const store = memoryStore({
-      [APP_STORAGE.theme]: JSON.stringify({
-        format: 1,
-        value: { family: 'phosphor', style: 'neo', palette: 'nope', mode: 'light', textScale: 'default' },
-      }),
-    });
-    const read = new ThemePreferenceStore(store).snapshot();
-    expect({ style: read.style, palette: read.palette }).toEqual({ style: 'neo', palette: 'hacker' });
+  it('reads one field on its own: a good palette beside a style with no pack stays', () => {
+    const read = new ThemePreferenceStore(
+      stored({ style: 'nope', palette: 'hacker', mode: 'light', textScale: 'default' }),
+    ).snapshot();
+    expect({ style: read.style, palette: read.palette }).toEqual({ style: DEFAULT_STYLE, palette: 'hacker' });
   });
 
-  it('writes the new shape on the next change, so the old one is gone after one write', () => {
-    const store = memoryStore({
-      [APP_STORAGE.theme]: JSON.stringify({
-        format: 1,
-        value: { family: 'ledger', mode: 'dark', textScale: 'default' },
-      }),
-    });
-    new ThemePreferenceStore(store).setMode('light');
+  it('a pre-split `family` is an unknown key: ignored, not read', () => {
+    const read = new ThemePreferenceStore(stored({ family: 'hacker', mode: 'dark', textScale: 'default' })).snapshot();
+    expect({ style: read.style, palette: read.palette }).toEqual({ style: DEFAULT_STYLE, palette: DEFAULT_PALETTE });
+    expect(Object.keys(read)).not.toContain('family');
+  });
+
+  it('keeps the stored record byte for byte until the next explicit change', () => {
+    const store = stored({ style: 'ghost', palette: 'ghost', mode: 'dark', textScale: 'default' });
+    const before = store.entries()[APP_STORAGE.theme];
+    const themes = new ThemePreferenceStore(store);
+    themes.snapshot();
+    themes.adopt();
+    expect(store.entries()[APP_STORAGE.theme]).toBe(before);
+    themes.setMode('light');
     expect(JSON.parse(store.entries()[APP_STORAGE.theme] ?? '').value).toEqual({
-      style: 'pixel',
-      palette: 'hacker',
+      style: DEFAULT_STYLE,
+      palette: DEFAULT_PALETTE,
       keepPalette: false,
       mode: 'light',
       textScale: 'default',
     });
-  });
-
-  it('a single-pick look sets both axes', () => {
-    const themes = new ThemePreferenceStore(memoryStore());
-    themes.setFamily('hacker');
-    expect(themes.snapshot()).toMatchObject({ style: 'pixel', palette: 'hacker', family: 'hacker' });
-    themes.setFamily('contrast');
-    expect(themes.snapshot()).toMatchObject({ style: 'studio', palette: 'contrast' });
   });
 });
 
@@ -355,76 +338,6 @@ describe('the style → palette direction', () => {
     themes.setKeepPalette(false);
     themes.setStyle('pixel');
     expect(themes.snapshot()).toMatchObject({ style: 'pixel', palette: 'hacker', keepPalette: false });
-  });
-
-  it('a stored {style:"contrast"} is Studio in the High contrast palette', () => {
-    const store = memoryStore({
-      [APP_STORAGE.theme]: JSON.stringify({
-        format: 1,
-        value: { style: 'contrast', palette: 'neo', mode: 'light', textScale: 'default' },
-      }),
-    });
-    expect(new ThemePreferenceStore(store).snapshot()).toMatchObject({ style: 'studio', palette: 'contrast' });
-  });
-
-  for (const [removed, kept] of Object.entries(REMOVED_PALETTE_IDS)) {
-    it(`a stored palette "${removed}" reads as "${kept}"`, () => {
-      const store = memoryStore({
-        [APP_STORAGE.theme]: JSON.stringify({
-          format: 1,
-          value: { style: 'neo', palette: removed, mode: 'light', textScale: 'default' },
-        }),
-      });
-      expect(new ThemePreferenceStore(store).snapshot()).toMatchObject({ style: 'neo', palette: kept });
-    });
-  }
-});
-
-describe('a new palette needs no edit outside its own files', () => {
-  // The seam's claim, exercised: register a scratch palette in PALETTE_IDS ALONE (THEME_FAMILY_IDS untouched) and
-  // read it through the theme code. The signatures are pinned at compile time: window colour and the swatch take a
-  // PALETTE, so a widened PaletteId typechecks without a frozen family entry.
-  const windowColourTakesAPalette: (
-    d: Parameters<typeof applyWindowColour>[0],
-    p: PaletteId,
-    r: 'light' | 'dark',
-  ) => void = applyWindowColour;
-  const swatchTakesAnyPalette: (palette: PaletteId) => unknown = lookOfPalette;
-  const scratch = 'scratch-zz' as PaletteId;
-  const ids = PALETTE_IDS as unknown as string[];
-  beforeAll(() => ids.push(scratch));
-  afterAll(() => ids.splice(ids.indexOf(scratch), 1));
-
-  it('is a palette, not a legacy family', () => {
-    expect(windowColourTakesAPalette).toBe(applyWindowColour);
-    expect(swatchTakesAnyPalette).toBe(lookOfPalette);
-    expect(isPaletteId(scratch)).toBe(true);
-    expect(isFamilyId(scratch)).toBe(false);
-    expect((THEME_FAMILY_IDS as readonly string[]).includes(scratch)).toBe(false);
-  });
-
-  it('is stored, read back and published on the root as its own palette', () => {
-    const store = memoryStore();
-    const themes = new ThemePreferenceStore(store);
-    themes.setPalette(scratch);
-    const read = new ThemePreferenceStore(store).snapshot();
-    expect(read.palette).toBe(scratch);
-    expect(read.family).toBe(scratch);
-    const root = { dataset: {} as Record<string, string>, style: { setProperty() {} } } as unknown as HTMLElement;
-    applyThemeAxes(root, read, 'dark');
-    expect(root.dataset.palette).toBe(scratch);
-  });
-
-  it('previews as itself, and moves the window colour on its own manifest name', () => {
-    expect(swatchAttributes(`${scratch}-dark`)).toMatchObject({ 'data-palette': scratch, 'data-mode': 'dark' });
-    const attributes: Record<string, string> = { href: '/manifest-studio-light.abc.webmanifest' };
-    const link = {
-      getAttribute: (name: string) => attributes[name],
-      setAttribute: (name: string, v: string) => (attributes[name] = v),
-    };
-    const document = { getElementById: () => link } as unknown as Parameters<typeof applyWindowColour>[0];
-    applyWindowColour(document, scratch, 'dark');
-    expect(attributes.href).toBe(`/manifest-${scratch}-dark.abc.webmanifest`);
   });
 });
 

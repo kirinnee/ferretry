@@ -478,7 +478,7 @@ describe('the app shell', () => {
     go('/d/d1/board');
     const { runtime, storage } = setup({});
     const themes = new ThemePreferenceStore(storage);
-    themes.setFamily('mission');
+    themes.setStyle('mission');
     const view = await mount(
       <App
         runtime={runtime}

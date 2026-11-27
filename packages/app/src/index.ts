@@ -233,9 +233,6 @@ export { CODE_FACE_URLS } from './theme/fonts.ts';
 export * from './theme/render-contract.ts';
 export {
   DEFAULT_THEME_PREFERENCE,
-  THEME_FAMILIES,
-  type ThemeFamily,
-  type ThemeFamilyId,
   type ThemeMode,
   type ThemePreference,
   ThemePreferenceSchema,
