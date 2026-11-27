@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { gitEnvironment, HARDENED_GIT_ARGUMENTS } from '@ferretry/core-ferrets/contract';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import type { ProjectFolders } from '../lib/ports.ts';
 
@@ -14,7 +15,7 @@ const CLONE_PROTOCOLS = 'https:ssh:file';
  * owner names the folder, so it is read through the `imports` root (outside Ferretry's own home, links resolved,
  * device files refused) rather than by path.
  */
-export function kernelFolders(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): ProjectFolders {
+export function kernelFolders(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 'paths'>): ProjectFolders {
   const git = async (args: readonly string[], env?: Readonly<Record<string, string>>) => {
     try {
       return await kernel.spawn.run('git', args, env === undefined ? undefined : { env });
@@ -67,6 +68,37 @@ export function kernelFolders(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Pro
       const relative = await git(['-C', root, 'rev-parse', '--git-common-dir']);
       const plain = relative?.exitCode === 0 ? relative.stdout.trim() : '';
       return plain === '' ? undefined : resolve(root, plain);
+    },
+    home: async () => {
+      const home = kernel.paths.home();
+      const handle = kernel.roots.root('imports', { subfolder: home });
+      const fenced = handle.resolve('');
+      if (!fenced.ok) return home;
+      try {
+        return await handle.realPath(fenced.value);
+      } catch {
+        return home;
+      }
+    },
+    isCheckout: async (root, common) => {
+      // The hardened arguments and scrubbed environment every other Git child of the product gets: this runs in a folder a
+      // ferret chose, so the repository's own configuration must run nothing.
+      const done = await git(
+        [
+          ...HARDENED_GIT_ARGUMENTS,
+          '-C',
+          root,
+          'rev-parse',
+          '--path-format=absolute',
+          '--is-bare-repository',
+          '--show-toplevel',
+          '--git-common-dir',
+        ],
+        gitEnvironment({}, false),
+      );
+      if (done?.exitCode !== 0) return false;
+      const [bare, top, commonDirectory] = done.stdout.split('\n');
+      return bare === 'false' && top === root && commonDirectory === common;
     },
   };
 }

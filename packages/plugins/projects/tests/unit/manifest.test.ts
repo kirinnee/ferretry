@@ -42,6 +42,9 @@ describe('projects first-run steps', () => {
 
 describe('projects launch roots', () => {
   test('takes launch.roots under its one key: the known projects are what Ferrets reads', () => {
-    expect(manifest.hooks.takes.map(take => [take.hook.name, take.key])).toEqual([['launch.roots', 'projects']]);
+    expect(manifest.hooks.takes.map(take => [take.hook.name, 'key' in take ? take.key : undefined])).toEqual([
+      ['launch.roots', 'projects'],
+      ['ferret.started', undefined],
+    ]);
   });
 });
