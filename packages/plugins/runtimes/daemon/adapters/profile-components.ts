@@ -21,10 +21,11 @@ import {
   type ProfileComponentDocument,
   type ProfileComponentKind,
   type ProfileComponentSource,
+  type RuntimesHarnessKit,
 } from '../../contract/index.ts';
 import type { ComponentReading, KindReading } from '../lib/account/runtimes-model.ts';
 import { parseForeignComponent } from '../lib/account/schema.ts';
-import { type HarnessKind, supportedKindOfKey } from '../lib/harness-kind.ts';
+import { type HarnessKind, supportedKindOfKey, supportedKinds } from '../lib/harness-kind.ts';
 
 /** Who provides a source: the plugin that took the hook, or `unavailable` (nobody took it, or it is not running). */
 export type ComponentSourceLookup = (
@@ -70,6 +71,20 @@ export function sourceHookFor(kind: ProfileComponentKind, harness?: HarnessKind)
   const sources = SOURCES[kind];
   const source = sources.length === 1 ? sources[0] : sources.find(candidate => candidate.harness === harness);
   return source?.hook;
+}
+
+/**
+ * What each harness's own plugin hands Runtimes (`RuntimesHarnessKit`), read live from the harness's settings source.
+ * A harness whose plugin is off or gives no kit has no entry: nothing here substitutes another harness's.
+ */
+export function harnessKits(lookup: ComponentSourceLookup): ReadonlyMap<HarnessKind, RuntimesHarnessKit> {
+  const kits = new Map<HarnessKind, RuntimesHarnessKit>();
+  for (const kind of supportedKinds()) {
+    const hook = sourceHookFor('settings', kind);
+    const source = hook === undefined ? 'unavailable' : lookup(hook);
+    if (source !== 'unavailable' && source.kit !== undefined) kits.set(kind, source.kit);
+  }
+  return kits;
 }
 
 const unread = (reason: string): KindReading => ({ state: 'unread', reason });

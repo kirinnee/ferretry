@@ -677,6 +677,30 @@ describe('the reservation is an upper bound, so the spend gates cannot be underc
     expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(1);
   });
 
+  test('a completed render is settled BEFORE its download starts: while storage is still answering, a second paid call is refused at the cap', async () => {
+    const w = await world({ limits: { dailyUsd: 2 } });
+    const job = jobOf((await avatar(w)).text);
+    w.fake.finish('hv1', { duration: 30 });
+    let open!: () => void;
+    w.fake.cdnGate = new Promise<void>(resolve => (open = resolve));
+    const checking = status(w, job);
+    await Bun.sleep(200);
+    // the fetch is in flight (held), yet the $2.415 the poll already knew is in the ledger
+    expect(w.fake.to('resource2.heygen.ai')).toHaveLength(1);
+    expect(net(w)).toBe(30 * PER_SECOND);
+    expect(ledgerLines(w).filter(line => line.overrun === true)).toHaveLength(1);
+    // so a second paid request is refused at the cap and never reaches HeyGen
+    const next = await avatar(w, { script: 'a different short script' });
+    expect(next.isError).toBe(true);
+    expect(next.text).toContain('daily limit');
+    expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(1);
+    open();
+    const done = await checking;
+    expect(done.text).toContain('overrun');
+    expect(ledgerLines(w).filter(line => line.overrun === true)).toHaveLength(1);
+    expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(1);
+  });
+
   test('a video with no reported length stays at the reservation', async () => {
     const w = await world();
     const job = jobOf((await avatar(w)).text);

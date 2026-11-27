@@ -395,8 +395,11 @@ const settledWords = (
 interface ToFetch {
   readonly submitted: Submitted;
   readonly url: string;
-  readonly seconds: number | undefined;
+  /** What settling the render found, already written to the ledger before the fetch was started. */
+  readonly settled: Settled;
 }
+
+type Settled = Awaited<ReturnType<typeof settle>>;
 
 /** THE CHECK IS SERIAL, THE DOWNLOAD IS NOT (as for `generation_status`): a two-minute fetch must not hold the other tools. */
 function avatarVideoStatus(deps: AvatarVideoDeps) {
@@ -433,9 +436,24 @@ function avatarVideoStatus(deps: AvatarVideoDeps) {
             submitted,
             `${poll.sentence}. It may have been billed, so ${usdWords(submitted.microUsd)} still counts toward today’s limit.`,
           );
-        case 'completed':
+        case 'completed': {
+          // HeyGen said the render completed, so what it cost is known whatever becomes of the delivery: settled HERE, inside the
+          // serialized check and BEFORE the fetch is started or queued, so while storage is slow a second paid request already
+          // meets the settled spend (a refund, or an OVERRUN line that counts toward the daily cap). The ledger line is
+          // idempotent, so a retry never writes it twice; one that cannot be written leaves the job OPEN (never closed
+          // unsettled: a closed job is never settled again) and starts no fetch, so the next check retries it.
+          const settlement = await settle(deps, submitted, poll.seconds).then(
+            settled => ({ settled }),
+            () => undefined,
+          );
+          if (settlement === undefined)
+            return {
+              text: `The video for job ${submitted.job} was made and paid for (${submitted.paid}), but its final cost could not be written to the ledger yet. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
+              isError: true,
+            };
           fetching.add(submitted.job);
-          return { submitted, url: poll.url, seconds: poll.seconds };
+          return { submitted, url: poll.url, settled: settlement.settled };
+        }
       }
     });
 
@@ -447,19 +465,7 @@ function avatarVideoStatus(deps: AvatarVideoDeps) {
       const placed = await slots.run(async () => {
         const got = await download(deps.fetch, checked.url, VIDEO_TYPES, 'video', VIDEO_DOWNLOAD, HEYGEN_STORE);
         return await deps.serial(async (): Promise<ToolAnswer> => {
-          // HeyGen said the render completed, so what it cost is known whatever becomes of the delivery: settled FIRST (a refund,
-          // or an OVERRUN line that counts toward the daily cap), so a failed fetch can never drop spend from the ledger. The
-          // ledger line is idempotent, so a retry never writes it twice; one that cannot be written leaves the job OPEN (never
-          // closed unsettled: a closed job is never settled again), so the next check retries it.
-          const settlement = await settle(deps, submitted, checked.seconds).then(
-            settled => ({ settled }),
-            () => undefined,
-          );
-          if (settlement === undefined)
-            return {
-              text: `The video for job ${submitted.job} was made and paid for (${submitted.paid}), but its final cost could not be written to the ledger yet. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
-              isError: true,
-            };
+          const settlement = { settled: checked.settled };
           if ('why' in got) {
             // A refused host or a file that is the wrong kind is the same on every retry: closed as counted. Anything else is read again, free.
             if (got.hostRefused === true || got.permanent === true) {

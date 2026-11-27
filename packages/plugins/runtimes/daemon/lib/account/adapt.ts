@@ -47,6 +47,7 @@
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames } from '../foreign.ts';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import { byHarness, isKind } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
@@ -799,3 +800,30 @@ export function componentPartialSupport(facts: PartialSupportFacts): readonly Pa
 /** A partial-support entry in the product's words (E22): "Partly supported on Codex: …". */
 export const describePartialSupport = (entry: PartialSupport): string =>
   `Partly supported on ${HARNESS_DISPLAY_NAMES[entry.harness]}: ${entry.reason}`;
+
+/** The plumbing facts the caller knows, as `harness` takes them. */
+export function plumbingOf(
+  harness: string,
+  facts: { readonly claudeStatusline: ClaudeStatuslineCommand; readonly codexSqliteHome: string },
+  _kit?: RuntimesHarnessKit,
+): AdaptPlumbing {
+  return byHarness<AdaptPlumbing>(harness, {
+    claude: () => ({ harness: 'claude', statusLine: facts.claudeStatusline }),
+    codex: () => ({ harness: 'codex', sqliteHome: facts.codexSqliteHome }),
+  });
+}
+
+/**
+ * The servers of the machine's own (those the profile in effect does not contribute) as the harness's document spells
+ * them: the ones an upgrade proves were Ferretry's. A harness whose document keeps none of them answers none.
+ */
+export function priorServersOf(
+  harness: string,
+  servers: () => Readonly<Record<string, McpComponent>>,
+  _kit?: RuntimesHarnessKit,
+): Readonly<Record<string, SettingsObject>> {
+  return byHarness<Readonly<Record<string, SettingsObject>>>(harness, {
+    claude: () => renderMcpComponents('claude', servers()),
+    codex: () => ({}),
+  });
+}
