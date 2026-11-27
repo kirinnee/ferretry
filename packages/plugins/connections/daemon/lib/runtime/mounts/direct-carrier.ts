@@ -43,6 +43,8 @@ import {
 } from '../../relay/direct-carrier.ts';
 import { SESSION_CLOSE_CODES } from '@ferretry/kernel/wire';
 
+/** What a direct arrival addressed to another daemon's fingerprint is told, in the close that ends it. */
+const NOT_THIS_DAEMON_REASON = 'this daemon does not answer for that fingerprint';
 /** How long an admitted upgrade may take to attach before its slot is handed back. */
 const ATTACH_DEADLINE_MS = 10_000;
 /** Peers remembered at once; past this, windows that have ended are forgotten first. */
@@ -181,8 +183,16 @@ function boundedRoute(deps: DirectCarrierDependencies, carrier: CarrierKey): Soc
       // socket table, and a nested direct session would be a carrier inside a carrier with nobody's
       // locality to stamp on it.
       if (request.principal !== undefined) throw new ApiError(404, 'no stream is served at this path', 'not_found');
+      // A fingerprint that is not this daemon's is ANSWERED OVER THE SOCKET, not with an HTTP 404 a browser cannot read: a
+      // pairing made with a daemon that was since reinstalled or replaced at this address can then tell "someone is here and
+      // it is not the one I paired" from "nobody answered", and stop dialling. It says exactly what the 404 said and names no
+      // identity of this daemon; it holds no slot, so it spends no one's budget.
       if (params.get('daemonId') !== deps.identity.daemonId)
-        throw new ApiError(404, 'this daemon does not answer for that fingerprint', 'not_found');
+        return async downstream => ({
+          open: async () => downstream.close(SESSION_CLOSE_CODES.daemonAbsent, NOT_THIS_DAEMON_REASON),
+          fromClient: () => undefined,
+          close: () => undefined,
+        });
       // A peer with no address is keyed as one — never waved through as nobody.
       const peer = request.clientAddress ?? 'unknown-peer';
       // Every tab on the host shares one loopback address, so the per-address bound would refuse the

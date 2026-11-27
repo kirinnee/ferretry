@@ -109,11 +109,17 @@ describe('direct carrier', () => {
     expect(h.closes).toEqual([{ code: 4441, reason: 'the access lease ended' }]);
     expect(h.released()).toBe(1);
   });
-  test('R35 another daemon fingerprint gets 404 before any reservation', async () => {
+  test('R35 C-80 another daemon fingerprint is answered over the socket with 4404, before any reservation', async () => {
     const h = harness(),
       r = directCarrierSocketRoute(h.deps);
-    await expect(r.accept(call('other'))).rejects.toMatchObject({ status: 404, code: 'not_found' });
+    const attach = await r.accept(call('other'));
+    const socket = await attach(h.downstream);
+    await socket.open();
+    // The same words the HTTP 404 carried, and nothing of this daemon's own identity.
+    expect(h.closes).toEqual([{ code: 4404, reason: 'this daemon does not answer for that fingerprint' }]);
+    expect(h.closes[0]?.reason).not.toContain(h.deps.identity.daemonId);
     expect(h.timers.size).toBe(0);
+    expect(h.layer.links).toHaveLength(0);
   });
   test('R625 direct loopback can only open a carried Kernel session', async () => {
     const h = harness(),
