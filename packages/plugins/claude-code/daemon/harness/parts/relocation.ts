@@ -29,26 +29,34 @@ function sourceFolder(lines: readonly Line[], spelling: string): string | undefi
 const recordsOf = (lines: readonly Line[]): Json[] =>
   lines.flatMap(({ record }) => (record === undefined ? [] : [record]));
 
+/** What this home's `projects` is: the link to THIS machine's pool, some other link, or not a link at all (absent or a folder). */
+type ProjectsLink = 'pool' | 'foreign' | 'unlinked';
+
 /**
  * Whether this home's `projects` is the link to THIS machine's pool: a link that resolves to the pool's real `projects`
  * folder. Claude reads and writes through that link, so a conversation written into the pool is found by Claude only
- * if it is the link the launch made; any other link (or none) would make the move claim a conversation Claude cannot see.
+ * if it is the link the launch made; any other link would make the move claim a conversation Claude cannot see. A read
+ * only: it never changes the home or the pool.
  */
-async function projectsIsPool(core: ClaudeCore, spec: LaunchSpec): Promise<boolean> {
-  const resolve = core.deps.resolveLink;
-  if (resolve === undefined) return false;
+async function projectsLink(core: ClaudeCore, spec: LaunchSpec): Promise<ProjectsLink> {
   const home = claudeHome(core, spec.ferret);
   const link = home.resolve('projects');
-  if (!link.ok || (await home.lstat(link.value))?.kind !== 'symlink') return false;
+  if (!link.ok) return 'foreign';
+  const there = await home.lstat(link.value);
+  if (there?.kind !== 'symlink') return there === undefined || there.kind === 'directory' ? 'unlinked' : 'foreign';
+  const resolve = core.deps.resolveLink;
   const pool = core.deps.roots.historyPool();
   const projects = pool.resolve('projects');
-  if (!projects.ok) return false;
+  if (resolve === undefined || !projects.ok) return 'foreign';
   const [real, leads] = await Promise.all([
     pool.realPath(projects.value).catch(() => undefined),
     resolve(String(link.value)),
   ]);
-  return real !== undefined && leads === String(real);
+  return real !== undefined && leads === String(real) ? 'pool' : 'foreign';
 }
+
+const NOT_POOLED =
+  "this ferret's conversations folder is not linked to this machine's shared history, so Claude Code would not find the moved conversation there and nothing was written";
 
 function joined(parts: readonly Uint8Array[]): Uint8Array {
   const all = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
@@ -147,11 +155,10 @@ export const relocationPart = (core: ClaudeCore): Serves<'packConversation' | 'u
 
         const home = await ensureHome(core, spec);
         await requirePrivateChain(home);
+        // A link to anywhere but the pool refuses HERE, before poolHistory moves the home's own history into the pool.
+        if ((await projectsLink(core, spec)) === 'foreign') return refuse(NOT_POOLED);
         await poolHistory(core, spec.ferret);
-        if (!(await projectsIsPool(core, spec)))
-          return refuse(
-            "this ferret's conversations folder is not linked to this machine's shared history, so Claude Code would not find the moved conversation there and nothing was written",
-          );
+        if ((await projectsLink(core, spec)) !== 'pool') return refuse(NOT_POOLED);
         const pool = core.deps.roots.historyPool();
         const relative = claudeTranscriptPath(folder, newId);
         const file = pool.resolve(relative);

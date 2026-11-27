@@ -8,7 +8,7 @@
  * The REAL `claude --worktree` writes the worktree conversation moved below, and the REAL `claude` resumes it again.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchSpec } from '@ferretry/core-ferrets/contract';
@@ -521,6 +521,33 @@ describe('what a move refuses before it writes', () => {
       expect(await readdir(decoy)).toEqual([]);
       expect(await readlink(join(b.homeOf('dst'), 'projects'))).toBe(elsewhere);
     }
+  });
+
+  test('a decoy `projects` link refuses BEFORE anything is moved: the home keeps its own history and the pool is untouched', async () => {
+    const a = await machine('a');
+    const b = await machine('b');
+    await seedSource(a);
+    const packed = await a.harness.packConversation!('src' as FerretId);
+    if (!packed.ok) throw new Error(packed.error.reason);
+    const target = spec(b, 'dst', join(fixture, 'b/wt'), NEW_ID);
+    await b.harness.prepareHome(target);
+    const decoy = join(fixture, 'decoy');
+    await mkdir(decoy, { recursive: true });
+    const home = b.homeOf('dst');
+    await rm(join(home, 'projects'), { force: true });
+    await symlink(decoy, join(home, 'projects'));
+    // The home's own (local, not yet pooled) history: a link-the-pool step would move it into the pool.
+    await rm(join(home, 'history.jsonl'), { force: true, recursive: true });
+    await writeFile(join(home, 'history.jsonl'), 'local-history\n');
+    const poolBefore = await readdir(b.pool('.'), { recursive: true });
+    const done = await b.harness.unpackConversation!(target, packed.value);
+    expect(done.ok).toBe(false);
+    if (!done.ok) expect(done.error.reason).toContain('shared history');
+    expect(await readFile(join(home, 'history.jsonl'), 'utf8')).toBe('local-history\n');
+    expect((await lstat(join(home, 'history.jsonl'))).isSymbolicLink()).toBe(false);
+    expect(await readdir(b.pool('.'), { recursive: true })).toEqual(poolBefore);
+    expect(await readdir(decoy)).toEqual([]);
+    expect(await readlink(join(home, 'projects'))).toBe(decoy);
   });
 
   test('the link the launch made is accepted', async () => {
