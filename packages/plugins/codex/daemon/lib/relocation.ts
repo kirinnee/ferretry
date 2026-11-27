@@ -1,4 +1,10 @@
-import { asObject, dependsOnSubagent, relocateIdentity, type RolloutRecord } from './relocation-identity.ts';
+import {
+  asObject,
+  dependsOnSubagent,
+  startsTurn,
+  relocateIdentity,
+  type RolloutRecord,
+} from './relocation-identity.ts';
 
 /** The Codex writers whose rollouts were exercised by `tests/realworld/relocate-resume.test.ts` (real binary, loopback model). */
 const RELOCATABLE_ROLLOUT_WRITERS: ReadonlySet<string> = new Set(['0.145.0', '0.166.0', '0.170.0']);
@@ -66,6 +72,8 @@ export function relocateRollout(
   const oldFolder = header.payload.cwd;
   if (typeof oldFolder !== 'string' || !oldFolder.startsWith('/'))
     return refused('the conversation does not name the folder it worked in, so it cannot be moved');
+  if (!records.some(startsTurn))
+    return refused('this conversation has no turn yet, so Codex would have nothing to resume; it was not moved');
   if (dependsOnSubagent(records))
     return refused(
       'this conversation uses a native subagent whose separate rollout cannot be moved safely, so it was not moved',

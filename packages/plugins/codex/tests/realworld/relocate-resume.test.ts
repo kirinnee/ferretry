@@ -7,7 +7,7 @@
  *   CODEX_RELOCATE_BINARY=/path/to/codex bun test tests/realworld/relocate-resume.test.ts
  */
 import { expect, test } from 'bun:test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { relocationWorld } from '../support/relocation-world.ts';
@@ -22,9 +22,12 @@ test.skipIf(binary === undefined)(
     const a = await relocationWorld();
     const b = await relocationWorld();
     const workA = join(a.parent, 'work-a');
-    const workB = join(b.parent, 'work-b');
+    // Machine B's folder is DEEP and reached through a symbolic link: the spelling Codex records must be the one a resume uses.
+    const realB = join(b.parent, 'real-b');
+    const workB = join(b.parent, 'link-b', 'a', 'b', 'c', 'd', 'e', 'work');
     await mkdir(workA);
-    await mkdir(workB);
+    await mkdir(join(realB, 'a', 'b', 'c', 'd', 'e', 'work'), { recursive: true });
+    await symlink(realB, join(b.parent, 'link-b'));
     const requests: Record<string, unknown>[] = [];
     const message = {
       type: 'message',

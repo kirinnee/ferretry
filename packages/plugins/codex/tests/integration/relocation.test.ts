@@ -117,6 +117,27 @@ describe('packing and unpacking a Codex conversation', () => {
     },
   );
 
+  test('a conversation with no turn yet is refused on both sides, with nothing written', async () => {
+    const w = await build();
+    const bare = (id: string, home: string) =>
+      syntheticRollout({ id, folder: SOURCE_FOLDER, home })
+        .split('\n')
+        .filter(row => !row.includes('SYNTHETIC_QUESTION'))
+        .join('\n');
+    await w.source(bare);
+    expect(await w.harness.packConversation?.('f1' as FerretId)).toMatchObject({
+      ok: false,
+      error: { reason: expect.stringContaining('no turn yet') },
+    });
+    const beforeHome = await allFiles(w.home);
+    const unpacked = await w.harness.unpackConversation?.(w.specOf('f2', TARGET_FOLDER), {
+      bytes: new TextEncoder().encode(bare(SOURCE_ID, w.agent('f1'))),
+      relPath: rolloutPath(SOURCE_ID),
+    });
+    expect(unpacked).toMatchObject({ ok: false, error: { reason: expect.stringContaining('no turn yet') } });
+    expect(await allFiles(w.home)).toEqual(beforeHome);
+  });
+
   test('a conversation that uses a subagent is refused with nothing written', async () => {
     const w = await build();
     const spawn = JSON.stringify({

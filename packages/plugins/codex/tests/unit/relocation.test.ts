@@ -112,10 +112,13 @@ describe('relocating a rollout', () => {
     expect(result.text).not.toContain('agent_mes"');
   });
 
-  test.each(['0.144.0', '0.167.0', '0.200.1'])('a rollout written by the untested Codex %s is refused', version => {
-    const result = relocateRollout(source([], version), { folder: TARGET_FOLDER, home: TARGET_HOME });
-    expect(result).toEqual({ kind: 'refused', reason: expect.stringContaining(`Codex ${version}`) });
-  });
+  test.each(['0.144.0', '0.167.0', '0.200.1', '0.170.0-alpha.1', '0.170.0+build', ' 0.170.0', '0.170', '0.17.0'])(
+    'a rollout written by the untested Codex %s is refused',
+    version => {
+      const result = relocateRollout(source([], version), { folder: TARGET_FOLDER, home: TARGET_HOME });
+      expect(result).toEqual({ kind: 'refused', reason: expect.stringContaining(`Codex ${version}`) });
+    },
+  );
 
   test('a rollout whose header names no version is refused', () => {
     const text = source().replace(/"cli_version":"[^"]*",/u, '');
@@ -155,6 +158,68 @@ describe('relocating a rollout', () => {
   test('a header that names no folder refuses', () => {
     const text = source().replace(`"cwd":"${SOURCE_FOLDER}","cli_version"`, '"cli_version"');
     expect(relocateRollout(text, { folder: TARGET_FOLDER, home: TARGET_HOME })).toMatchObject({ kind: 'refused' });
+  });
+});
+
+describe('what a move must not leave behind', () => {
+  const deep = `${SOURCE_FOLDER}/a/b/c/d/e/f/g`;
+
+  test('a deep folder under the work folder is moved, in values and in the names the world state keys by', () => {
+    const state = JSON.stringify({
+      type: 'world_state',
+      payload: { state: { agents_md: { [`${deep}/AGENTS.md`]: 'synthetic rules' }, roots: [deep] } },
+    });
+    const context = JSON.stringify({
+      type: 'turn_context',
+      session_id: SOURCE_ID,
+      payload: { cwd: deep, workspace_roots: [deep], sandbox_policy: { cwd: deep, writable_roots: [deep] } },
+    });
+    const result = moved(relocateRollout(source([state, context]), { folder: TARGET_FOLDER, home: TARGET_HOME }));
+    expect(result.text).not.toContain(SOURCE_FOLDER);
+    expect(result.text).toContain(`${TARGET_FOLDER}/a/b/c/d/e/f/g/AGENTS.md`);
+  });
+
+  test.each([
+    [
+      'an attachment record',
+      {
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_image', image_url: `${SOURCE_FOLDER}/shot.png` }],
+        },
+      },
+    ],
+    [
+      'a native worktree field',
+      {
+        type: 'turn_context',
+        session_id: SOURCE_ID,
+        payload: { cwd: SOURCE_FOLDER, worktree: { original_cwd: `${SOURCE_FOLDER}/../orig` } },
+      },
+    ],
+    [
+      'a path in a name outside the world state',
+      { type: 'event_msg', payload: { type: 'mystery', files: { [`${SOURCE_FOLDER}/x`]: 1 } } },
+    ],
+  ])('%s that keeps the source path refuses the whole move rather than leaking it', (_label, record) => {
+    const result = relocateRollout(source([JSON.stringify(record)]), { folder: TARGET_FOLDER, home: TARGET_HOME });
+    expect(result).toMatchObject({
+      kind: 'refused',
+      reason: expect.stringContaining('untested identity/worktree field'),
+    });
+  });
+
+  test('a conversation with no turn yet is refused: Codex would have nothing to resume', () => {
+    const text = source()
+      .split('\n')
+      .filter(row => !row.includes('SYNTHETIC_QUESTION'))
+      .join('\n');
+    expect(relocateRollout(text, { folder: TARGET_FOLDER, home: TARGET_HOME })).toMatchObject({
+      kind: 'refused',
+      reason: expect.stringContaining('no turn yet'),
+    });
   });
 });
 

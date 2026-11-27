@@ -109,6 +109,13 @@ export function relocateIdentity(record: RolloutRecord, move: Relocation): Rewri
   };
   const rehomed = (value: string): string =>
     move.oldHomes.reduce((text, old) => text.split(old).join(move.home), value);
+  /** A field NAME can carry a path too (the world state keys its instruction files by path). */
+  const named = (key: string, path: string): string => {
+    const text = record.type === 'world_state' ? rehomed(key) : key;
+    if (record.type === 'world_state' && under(text)) return relocated(text);
+    if ((oldFolder !== '' && text.includes(oldFolder)) || (changed && text.includes(from))) unknown(`${path}.${key}`);
+    return text;
+  };
   const walk = (value: unknown, path: string): unknown => {
     if (typeof value === 'string') {
       if (self.has(path)) return id;
@@ -128,7 +135,7 @@ export function relocateIdentity(record: RolloutRecord, move: Relocation): Rewri
       }
       const key = path.split('.').at(-1);
       // The world state is what Codex knew of the home it ran in (its skills and their files): the new home's now.
-      const text = record.type === 'world_state' ? rehomed(value) : value;
+      const text = record.type === 'world_state' ? relocated(rehomed(value)) : value;
       // A `cwd` field under the old folder is the folder the conversation worked in, wherever the writer put it.
       if (key === 'cwd' && under(text)) return relocated(text);
       if (
@@ -146,7 +153,10 @@ export function relocateIdentity(record: RolloutRecord, move: Relocation): Rewri
     return fields === undefined
       ? value
       : Object.fromEntries(
-          Object.entries(fields).map(([key, item]) => [key, walk(item, path === '' ? key : `${path}.${key}`)]),
+          Object.entries(fields).map(([key, item]) => [
+            named(key, path),
+            walk(item, path === '' ? key : `${path}.${key}`),
+          ]),
         );
   };
   const rewritten = walk(record, '') as RolloutRecord;
@@ -181,4 +191,22 @@ export function dependsOnSubagent(records: readonly RolloutRecord[]): boolean {
       ['spawn_agent', 'resume_agent', 'send_input', 'wait', 'wait_agent', 'close_agent'].includes(name)
     );
   });
+}
+
+/** Whether the record is a person's own turn: a user message that is not Codex's environment preamble. */
+export function startsTurn(record: RolloutRecord): boolean {
+  if (record.type === 'event_msg') return record.payload.type === 'user_message';
+  const payload = record.payload;
+  if (record.type !== 'response_item' || payload.type !== 'message' || payload.role !== 'user') return false;
+  const words = (Array.isArray(payload.content) ? payload.content : [payload.content])
+    .flatMap(block => {
+      const text = asObject(block)?.text;
+      return typeof text === 'string' ? [text] : [];
+    })
+    .join('\n')
+    .trimStart();
+  return (
+    words.trim() !== '' &&
+    !['<environment_context>', '<user_instructions>', '<user_environment>'].some(prefix => words.startsWith(prefix))
+  );
 }
