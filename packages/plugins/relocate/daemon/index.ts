@@ -1,3 +1,4 @@
+import { milliseconds } from '@ferretry/std';
 import {
   ApiError,
   bytesResponse,
@@ -33,10 +34,14 @@ export default implementDaemon(manifest, {
     const moved: MovedLedger = {
       get: async ferret => {
         const read = await kernel.state.read(MOVED_STATE);
-        return read.ok ? read.value?.moved[ferret] : undefined;
+        if (!read.ok) throw new Error('the moved ledger could not be read');
+        return read.value?.moved[ferret];
       },
       record: async (ferret, entry) => {
-        await kernel.state.update(MOVED_STATE, current => ({ moved: { ...(current?.moved ?? {}), [ferret]: entry } }));
+        const saved = await kernel.state.update(MOVED_STATE, current => ({
+          moved: { ...(current?.moved ?? {}), [ferret]: entry },
+        }));
+        if (!saved.ok) throw new Error('the move could not be durably recorded');
       },
     };
     const relocation = new Relocation({
@@ -48,6 +53,11 @@ export default implementDaemon(manifest, {
       moved,
       log: kernel.log.child('relocate'),
     });
+
+    const cancelExpiry = kernel.clock.every(milliseconds(1_000), () => {
+      void relocation.expire();
+    });
+    kernel.lifecycle.onStop(cancelExpiry);
 
     const refused = (error: unknown): never => {
       if (error instanceof RelocateRefused) throw new ApiError(error.status, error.message, error.code);
@@ -82,6 +92,7 @@ export default implementDaemon(manifest, {
         return jsonResponse(await relocation.export(param(call, 'ferretId'), body.data.offer).catch(refused));
       },
       'GET /v1/relocate/exports/:exportId/chunks/:index': async (call: CallContext) => {
+        mayReadTree(call);
         const index = Number(param(call, 'index'));
         if (!Number.isSafeInteger(index) || index < 0)
           throw new ApiError(400, 'a chunk index is a whole number', 'bad_request');
@@ -92,6 +103,7 @@ export default implementDaemon(manifest, {
         }
       },
       'POST /v1/relocate/exports/:exportId/complete': async (call: CallContext) => {
+        mayReadTree(call);
         const body = CompleteRequestSchema.safeParse(await readJson(call));
         if (!body.success) throw new ApiError(400, 'complete takes where the ferret went', 'bad_request');
         return jsonResponse(await relocation.complete(param(call, 'exportId'), body.data).catch(refused));

@@ -142,13 +142,15 @@ describe('the offer is checked before anything is read or stopped', () => {
     expect((await refusal(w.relocation.export(FERRET, made.offer)))?.code).toBe('offer_spent');
   });
 
-  test('a preflight refusal does not spend the offer: once the cause is gone the same offer works', async () => {
+  test('a preflight refusal spends the offer: after fixing the cause a fresh offer is needed', async () => {
     const busy = ['a background job is still running'];
     const w = await world({ busy });
     const made = await w.offer();
     expect((await refusal(w.relocation.export(FERRET, made.offer)))?.code).toBe('move_refused');
     busy.length = 0;
-    expect((await w.relocation.export(FERRET, made.offer)).header.offerId).toBe(made.offer.offerId);
+    expect((await refusal(w.relocation.export(FERRET, made.offer)))?.code).toBe('offer_spent');
+    const fresh = await w.offer();
+    expect((await w.relocation.export(FERRET, fresh.offer)).header.offerId).toBe(fresh.offer.offerId);
   });
 
   test('a failure while reading resumes the ferret and leaves it as it was, and the offer is spent', async () => {

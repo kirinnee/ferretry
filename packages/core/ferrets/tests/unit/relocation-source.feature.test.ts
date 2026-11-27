@@ -48,8 +48,7 @@ function sessionFolder(files: Readonly<Record<string, Node>>) {
     },
     readBytes: async (path: string, limit?: number) => {
       const bytes = files[path]?.bytes ?? new Uint8Array();
-      if (typeof limit === 'number' && bytes.length > limit) throw new Error('too large');
-      return bytes;
+      return bytes.slice(0, limit);
     },
   };
   return root;
@@ -70,13 +69,14 @@ const SESSION: Readonly<Record<string, Node>> = {
 };
 
 function build(options: {
+  readonly files?: Readonly<Record<string, Node>>;
   readonly state?: string;
   readonly jobs?: readonly { readonly state: string }[];
   readonly packConversation?: () => Promise<unknown>;
   readonly known?: boolean;
 }) {
   const harness = { packConversation: options.packConversation };
-  const folder = sessionFolder(SESSION);
+  const folder = sessionFolder(options.files ?? SESSION);
   const context = {
     hooks: {
       contributions: (token: unknown) =>
@@ -196,4 +196,20 @@ describe('only Relocate is handed the member', () => {
       expect(relocationPortFor(other, port as never)).not.toHaveProperty('relocationSource');
     expect(relocationPortFor('mcp', port as never)).toHaveProperty('get');
   });
+});
+
+test('MUST 4 session listing refuses depth overflow instead of dropping files', async () => {
+  const source = await build({ files: { 'attachments/a/b/c/d/e/f/g.txt': { kind: 'file', bytes: text('kept') } } })(ID);
+  await expect(source?.files()).rejects.toThrow('too deep');
+});
+test('MUST 4 session listing refuses count overflow instead of dropping files', async () => {
+  const files: Record<string, Node> = {};
+  for (let i = 0; i <= 20_000; i++) files[`turns/${String(i)}`] = { kind: 'file', bytes: text('x') };
+  const source = await build({ files })(ID);
+  await expect(source?.files()).rejects.toThrow('too many');
+});
+
+test('MUST 4 a session file over the read limit is refused, never truncated by the root', async () => {
+  const source = await build({})(ID);
+  await expect(source?.read({ area: 'session', path: 'turns/turn-001.md' }, 1)).rejects.toThrow();
 });

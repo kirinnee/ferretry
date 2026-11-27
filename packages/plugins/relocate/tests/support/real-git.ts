@@ -1,4 +1,13 @@
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  realpathSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KernelPorts } from '@ferretry/kernel/contract';
@@ -25,8 +34,9 @@ export function git(cwd: string, ...args: string[]): string {
  * The kernel's spawn and roots as far as the working tree uses them, over the real disk: real git, real files. The
  * folder handle refuses what the kernel's `imports` root refuses for this use (a `..`, a link, a second hard link).
  */
-export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn'> {
+export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
   return {
+    clock: { nowMs: () => performance.now() } as KernelPorts['clock'],
     spawn: {
       run: async () => {
         throw new Error('not used');
@@ -35,7 +45,12 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn'> {
         throw new Error('not used');
       },
       runBytes: async (program, args, options) => {
-        const child = Bun.spawn([program, ...args], { env: GIT_ENV, stdout: 'pipe', stderr: 'pipe' });
+        const child = Bun.spawn([program, ...args], {
+          env: { ...GIT_ENV, ...(options?.env as Readonly<Record<string, string>> | undefined) },
+          cwd: typeof options?.cwd === 'string' ? options.cwd : options?.cwd?.describe,
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
         const out = new Uint8Array(await new Response(child.stdout).arrayBuffer());
         const exitCode = await child.exited;
         const cap = options?.maxStdoutBytes ?? 1024 * 1024;
@@ -57,6 +72,11 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn'> {
             relative.startsWith('/') || relative.split('/').includes('..')
               ? { ok: false, error: 'outside' }
               : { ok: true, value: join(base, relative) },
+          pin: async (path: string) => ({
+            policyCwd: { describe: path, install: () => () => {} },
+            close: async () => {},
+          }),
+          realPath: async (path: string) => realpathSync(path),
           lstat: async (path: string) => {
             try {
               const s = lstatSync(path);
@@ -71,7 +91,8 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn'> {
               return undefined;
             }
           },
-          readBytes: async (path: string) => new Uint8Array(await Bun.file(path).arrayBuffer()),
+          readBytes: async (path: string, limit?: number) =>
+            new Uint8Array(await Bun.file(path).arrayBuffer()).slice(0, limit),
         };
       },
     } as unknown as KernelPorts['roots'],

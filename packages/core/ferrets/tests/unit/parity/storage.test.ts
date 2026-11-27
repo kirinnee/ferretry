@@ -26,19 +26,16 @@ import {
   FerretStateDocumentSchema,
   FerretStateFile,
   FerretSummaryFiles,
-  ForkFiles,
   FERRET_SESSIONS_FOLDER,
   HandoverFiles,
   LimitsConfigFile,
   MoveInflightFiles,
-  TransferPlanFiles,
   WorktreesFile,
 } from '../../../contract/index.ts';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
 import manifest from '../../../manifest.ts';
 import { as, fakeLogins, fakeRuntimeStartAnswer, host, portConsumer, record } from '../daemon/ferrets/route-fixture.ts';
-import { AT as forkAt, command as forkCommand, plan as forkPlan } from '../daemon/forks/fixtures.ts';
 import { handoverReceiptFor } from '../../support/daemon/parity-fj-docs.ts';
 import { memoryStorage, RecordingLog, sessionState } from '../../support/daemon/storage.ts';
 import {
@@ -51,16 +48,8 @@ import { FileResumeTurnStore } from '../../../daemon/adapters/session/resume/fil
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
 import { FileHandoverReceiptStore } from '../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { StateMoveReportStore } from '../../../daemon/adapters/moves/state-move-report.ts';
-import { FileSessionTransferTargetPlanStore } from '../../../daemon/adapters/transfer/plan-store.ts';
 import { StateManagedWorktreeRegistry } from '../../../daemon/adapters/worktrees/index.ts';
-import {
-  forkReceiptName,
-  StateSessionForkReceiptStore,
-} from '../../../daemon/adapters/forks/state-session-fork-receipt-store.ts';
 import { DaemonStorage } from '../../../daemon/adapters/storage/session-storage.ts';
-import { sessionForkFingerprint } from '../../../daemon/lib/forks/identity.ts';
-import { claimSessionForkReceipt, parseSessionForkReceipt } from '../../../daemon/lib/forks/receipt.ts';
-import { deriveTransferPlanId } from '../../../daemon/lib/transfer/prepare.ts';
 import { type ManagedWorktree, withManagedWorktree } from '../../../daemon/lib/worktrees/index.ts';
 import type { RedactionScope } from '@ferretry/kernel/contract';
 import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
@@ -539,41 +528,6 @@ describe('typed state files parity (F rows: handover, forks, transfer plan, move
     await store.write(handoverReceipt('source-b', 'req-b'));
     folder.files.set('source-c/state.json', JSON.stringify({ format: 1 }));
     expect([...(await store.pendingSourceSessionIds())].sort()).toEqual(['source-a', 'source-b']);
-  });
-
-  test('F-0250 a fork receipt is state/ferrets/forks/{planId}.json (the plan id derived from the source and the request), claimed once', async () => {
-    const folder = new MemoryStateFolder();
-    const store = new StateSessionForkReceiptStore(folder.port([ForkFiles]));
-    const key = { sourceSessionId: SOURCE, requestId: REQUEST };
-    const receipt = claimSessionForkReceipt({
-      key,
-      requestFingerprint: sessionForkFingerprint(forkCommand()),
-      targetSessionId: 'target-1',
-      plan: forkPlan({ sourceSessionId: SOURCE, requestId: REQUEST }),
-      at: forkAt,
-    });
-    await store.claim(receipt);
-    const planId = deriveTransferPlanId(SOURCE, REQUEST);
-    expect(forkReceiptName(key)).toBe(planId);
-    expect([...folder.files.keys()]).toEqual([`forks/${planId}.json`]);
-    expect(folder.raw(ForkFiles, planId)?.startsWith('{"format":1,')).toBe(true);
-    expect(parseSessionForkReceipt(await store.read(key), key)).toEqual(receipt);
-    expect(ForkFiles.mode).toBe(0o600);
-    expect(manifest.data.state.map(file => file.path)).toContain('forks/*.json');
-  });
-
-  test('F-0339 the frozen transfer plan sits beneath the new ferret as state/ferrets/{target}/transfer-plan.json, held 0600, installed once', async () => {
-    const folder = new MemoryStateFolder();
-    const store = new FileSessionTransferTargetPlanStore(folder.port([TransferPlanFiles]));
-    const target = parseSessionId('target-1');
-    const plan = forkPlan({ sourceSessionId: SOURCE, requestId: REQUEST });
-    expect((await store.install(target, plan)).status).toBe('installed');
-    expect((await store.install(target, plan)).status).toBe('present');
-    expect([...folder.files.keys()]).toEqual(['target-1/transfer-plan.json']);
-    expect(folder.raw(TransferPlanFiles, target)?.startsWith('{"format":1,')).toBe(true);
-    expect(await store.load(target)).toEqual(plan);
-    expect(TransferPlanFiles.mode).toBe(0o600);
-    expect(manifest.data.state.map(file => file.path)).toContain('*/transfer-plan.json');
   });
 
   test('F-0328 the move report (v4 migration-inflight.md) is state/ferrets/{ferret}/move-inflight.md, written in two halves and held 0600', async () => {

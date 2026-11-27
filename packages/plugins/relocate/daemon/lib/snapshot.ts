@@ -5,7 +5,7 @@ import {
   type RelocationFile,
   type RelocationSource,
 } from '@ferretry/core-ferrets/contract';
-import { isSecretFileName, isSecretFolderName } from '@ferretry/std';
+import { namesASecret } from './path-policy.ts';
 import type { CloneCrypto } from '@ferretry/std/sealing';
 import { toHex } from './hex.ts';
 import {
@@ -47,11 +47,6 @@ export interface Plan {
   readonly largest: readonly { readonly path: string; readonly size: number }[];
 }
 
-/** Whether any segment of a path names a secret (`.env`, `*.pem`, `id_*`, `auth.json`, `.ssh/`): the one list the file browser reads too. */
-function namesASecret(path: string): boolean {
-  return path.split('/').some(segment => isSecretFileName(segment) || isSecretFolderName(segment));
-}
-
 const refuse = (error: unknown): string =>
   error instanceof Error && error.message !== '' ? error.message : 'this ferret’s working tree could not be read';
 
@@ -65,6 +60,16 @@ const topLevel = (path: string): string => (path.split('/')[0] ?? path).replace(
  */
 export async function plan(inputs: SnapshotInputs): Promise<Plan> {
   const refusals: string[] = [...(await inputs.source.busy())];
+  const refusedPlan = (): Plan => ({
+    refusals,
+    files: [],
+    untracked: [],
+    withheld: [],
+    ignored: [],
+    bytes: 0,
+    largest: [],
+  });
+  if (refusals.length > 0) return refusedPlan();
   const conversation = await inputs.source.conversation().catch(() => undefined);
   let bytes = 0;
   if (conversation === undefined || !conversation.ok)
@@ -72,6 +77,11 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
       conversation?.ok === false ? conversation.error.reason : 'this ferret’s conversation could not be read',
     );
   else bytes += conversation.value.bytes.length;
+  if (refusals.length > 0) return refusedPlan();
+  if (bytes > RELOCATE_MAX_FILE_BYTES) {
+    refusals.push('the conversation is larger than one file of a move can be');
+    return refusedPlan();
+  }
 
   const listed = await inputs.source.files();
   // CLOSED SET, checked here as well as where Ferrets lists: a session file moves only below the three folders an agent
@@ -102,7 +112,8 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
             continue;
           }
           const content = await inputs.tree.read(path, RELOCATE_MAX_FILE_BYTES);
-          if (content === undefined) continue; // a link, a device, a hard-linked file or an oversize one: it stays
+          if (content === undefined)
+            throw new Error(`${path} is not a readable plain file within the move’s file limit`);
           untracked.push({ path, size: content.length });
         }
         const commits = await inputs.tree.commits(RELOCATE_MAX_BUNDLE_BYTES);
@@ -177,27 +188,38 @@ export async function gather(inputs: SnapshotInputs, found: Plan): Promise<reado
   const entries: GatheredEntry[] = [
     { kind: 'ferret-record', path: 'record.json', bytes: recordDocument(inputs.summary) },
   ];
+  let gatheredBytes = entries[0]?.bytes.length ?? 0;
+  const add = (entry: GatheredEntry): void => {
+    assertSnapshotSize([entry], gatheredBytes);
+    gatheredBytes += entry.bytes.length;
+    entries.push(entry);
+  };
   const limit = RELOCATE_MAX_FILE_BYTES;
   for (const file of found.files)
-    entries.push({
+    add({
       kind: file.area === 'history' ? 'journal' : 'session',
       path: file.path,
       bytes: await inputs.source.read({ area: file.area, path: file.path }, limit),
     });
   const conversation = await inputs.source.conversation();
   if (!conversation.ok) throw new Error(conversation.error.reason);
-  entries.push({ kind: 'conversation', path: conversation.value.relPath, bytes: conversation.value.bytes });
+  add({ kind: 'conversation', path: conversation.value.relPath, bytes: conversation.value.bytes });
   if (inputs.tree !== undefined && found.head !== undefined) {
+    const current = await inputs.tree.head();
+    if (current?.head !== found.head.head) throw new Error('the working tree changed during the move');
     const commits = await inputs.tree.commits(RELOCATE_MAX_BUNDLE_BYTES);
-    if (commits !== undefined) entries.push({ kind: 'worktree-commits', path: 'commits.bundle', bytes: commits });
+    if (commits !== undefined) add({ kind: 'worktree-commits', path: 'commits.bundle', bytes: commits });
     const changes = await inputs.tree.changes(RELOCATE_MAX_BUNDLE_BYTES);
-    if (changes.length > 0) entries.push({ kind: 'worktree-changes', path: 'changes.diff', bytes: changes });
+    if (changes.length > 0) add({ kind: 'worktree-changes', path: 'changes.diff', bytes: changes });
     for (const file of found.untracked) {
       const content = await inputs.tree.read(file.path, limit);
       if (content === undefined) throw new Error(`${file.path} changed while the move was being prepared`);
-      entries.push({ kind: 'worktree-file', path: file.path, bytes: content });
+      add({ kind: 'worktree-file', path: file.path, bytes: content });
     }
   }
+  if (inputs.tree !== undefined && found.head !== undefined && (await inputs.tree.head())?.head !== found.head.head)
+    throw new Error('the working tree changed during the move');
+  assertSnapshotSize(entries);
   return entries;
 }
 
@@ -229,4 +251,16 @@ export async function manifestOf(
         }),
     entries: listed,
   };
+}
+
+/** Recheck actual gathered bytes, then include the manifest and its framing before encryption starts. */
+export function assertSnapshotSize(entries: readonly GatheredEntry[], framingBytes = 0): void {
+  let bytes = framingBytes;
+  for (const entry of entries) {
+    if (entry.bytes.length > RELOCATE_MAX_FILE_BYTES)
+      throw new Error(`${entry.path} is larger than one file of a move can be`);
+    bytes += entry.bytes.length;
+  }
+  if (bytes > RELOCATE_MAX_BUNDLE_BYTES)
+    throw new Error('the final move exceeds 500 MB including its manifest and framing');
 }

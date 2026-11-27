@@ -163,6 +163,7 @@ async function loadFleet() {
   return runtimesConfigFiles({
     config: files.port('runtimes'),
     logins: fakeLogins(logins),
+    pins: { read: async () => ({ state: 'read', pins: new Map() }), record: async () => undefined },
     components: () => 'unavailable',
     within: work => work,
   }).load();
