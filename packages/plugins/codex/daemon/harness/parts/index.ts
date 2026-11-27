@@ -16,6 +16,7 @@ export * as identity from './identity.ts';
 export * as inject from './inject.ts';
 export * as launchSettings from './launch-settings.ts';
 export * as lifecycle from './lifecycle.ts';
+export * as relocate from './relocate.ts';
 export * as runtimeSwitch from './runtime-switch.ts';
 export * as startFailure from './start-failure.ts';
 export * as transcript from './transcript.ts';
