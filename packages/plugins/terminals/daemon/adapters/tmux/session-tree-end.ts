@@ -22,7 +22,11 @@ export interface TreeEndTimes {
 
 export const DEFAULT_TREE_END_TIMES: TreeEndTimes = Object.freeze({ stepMs: 2_000, pollMs: 50 });
 
-/** Every process in the trees of `roots`, the roots included, minus this daemon and its parents. */
+/**
+ * Every process in the trees of `roots`, the roots included, and every other process of the Linux scope a root sits in (a
+ * helper reparented to init is in no tree but still in the scope), minus this daemon and its parents AND everything that
+ * runs beneath them: a daemon started from inside a pane is a descendant of that pane, and so are its own children.
+ */
 export async function nameDoomed(host: PaneProcessHost, roots: readonly number[]): Promise<readonly DoomedProcess[]> {
   const protectedPids = new Set(await host.protectedPids().catch(() => []));
   const named = new Map<number, number>();
@@ -32,8 +36,22 @@ export async function nameDoomed(host: PaneProcessHost, roots: readonly number[]
     if (start === undefined) continue;
     named.set(root, start);
     const tree = await host.tree(root).catch(() => undefined);
-    if (tree === undefined || tree.kind !== 'read') continue;
-    for (const row of tree.rows) if (!protectedPids.has(row.pid) && row.pid > 1) named.set(row.pid, row.start);
+    if (tree !== undefined && tree.kind === 'read') {
+      // Rows are parents before children, so one pass prunes a whole subtree under a protected (or pruned) node.
+      const pruned = new Set(protectedPids);
+      for (const row of tree.rows) {
+        if (pruned.has(row.pid) || pruned.has(row.ppid)) pruned.add(row.pid);
+        else if (row.pid > 1) named.set(row.pid, row.start);
+      }
+    }
+    // The scope cannot tell this daemon's own children from a helper's, so a scope the daemon sits in is not swept.
+    const members = (await host.scopeMembers?.(root).catch(() => undefined)) ?? [];
+    if (members.some(pid => protectedPids.has(pid))) continue;
+    for (const pid of members) {
+      if (!Number.isSafeInteger(pid) || pid <= 1 || named.has(pid)) continue;
+      const memberStart = await host.startOf(pid).catch(() => undefined);
+      if (memberStart !== undefined) named.set(pid, memberStart);
+    }
   }
   return [...named].map(([pid, start]) => ({ pid, start }));
 }

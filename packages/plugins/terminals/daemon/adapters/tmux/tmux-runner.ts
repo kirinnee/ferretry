@@ -283,6 +283,11 @@ export interface PaneProcessHost {
   signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
   /** Pids that are never signalled whatever the tree says: this daemon and every parent of it. Read fresh per call. */
   protectedPids(): Promise<readonly number[]>;
+  /**
+   * Every pid in the product's own agent scope that `pid` sits in, reparented helpers included; none when it sits in no
+   * such scope. Absent where there are no scopes (macOS).
+   */
+  scopeMembers?(pid: number): Promise<readonly number[]>;
 }
 
 export interface TmuxRunnerOptions {
