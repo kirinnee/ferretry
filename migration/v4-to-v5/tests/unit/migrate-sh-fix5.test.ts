@@ -37,6 +37,7 @@ const REAL_TOOLS = [
   'rm',
   'sed',
   'sort',
+  'stat',
   'tail',
   'tr',
   'uname',

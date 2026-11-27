@@ -16,6 +16,8 @@ import { refuseLinkOnPath } from './v5/no-link.ts';
 import { v5Writer } from './v5/write.ts';
 
 export interface ConvertOptions {
+  /** Source home before the cutover rename, for absolute paths in v4 component documents. */
+  readonly originalV4Home?: string;
   readonly from: string;
   readonly to: string;
   readonly dryRun: boolean;
@@ -73,7 +75,7 @@ export const CONFIG_STEPS: ReadonlySet<string> = new Set([
 ]);
 
 /** What the plain passes share with the real run beyond the v4 and v5 paths. */
-type PlainExtra = Pick<StepContext, 'previewV4Home' | 'previewUserHome' | 'dropUncarried'>;
+type PlainExtra = Pick<StepContext, 'originalV4Home' | 'previewV4Home' | 'previewUserHome' | 'dropUncarried'>;
 
 /**
  * What the plain (non-preview) conversion of the v4 home at `from` would write under `config/`, from a dry run (the
@@ -145,6 +147,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     refuseLinkOnPath(checked.to.anchor, to, checked.to.pins);
   }
   const ctx = {
+    ...(options.originalV4Home === undefined ? {} : { originalV4Home: options.originalV4Home }),
     v4: { ...v4Paths(options.from), fenced: await fenceV4(options.from) },
     v5: v5Writer(to, { dryRun: options.dryRun, anchor: checked.to.anchor, pins: checked.to.pins }),
     dryRun: options.dryRun,
@@ -173,6 +176,7 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   // The plain passes resolve a component's real-home paths and drop layers exactly as this run does, so a file the
   // preview did not change is never mistaken for one it authored.
   const extra: PlainExtra = {
+    ...(options.originalV4Home === undefined ? {} : { originalV4Home: options.originalV4Home }),
     ...(options.previewV4Home === undefined ? {} : { previewV4Home: options.previewV4Home }),
     ...(options.previewUserHome === undefined ? {} : { previewUserHome: options.previewUserHome }),
     ...(options.dropUncarried === true ? { dropUncarried: true } : {}),
