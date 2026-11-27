@@ -16,3 +16,6 @@ export const PROJECT_FOLDER_CREATED_AUDIT = policyRef('audit', 'project.folder-c
 
 /** Audit kind for a change to which accounts a project uses (ids only, never a token or a key). */
 export const PROJECT_ACCOUNTS_AUDIT = policyRef('audit', 'project.accounts-changed');
+
+/** Audit kind for a repository cloned into an existing project (the project id and the folder name, never the address's credentials). */
+export const PROJECT_REPO_CLONED_AUDIT = policyRef('audit', 'project.repo-cloned');

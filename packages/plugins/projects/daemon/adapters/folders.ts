@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { gitEnvironment, HARDENED_GIT_ARGUMENTS } from '@ferretry/core-ferrets/contract';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import type { ProjectFolders } from '../lib/ports.ts';
+import { kernelCloneInto } from './clone-into.ts';
 
 /**
  * The transports a clone may use, handed to git itself. `ProjectCloneUrlSchema` already refuses every other one; this
@@ -61,6 +62,7 @@ export function kernelFolders(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 'pat
     },
     gitInit: async path => await gitOk(['init', path]),
     gitClone: async (url, path) => await gitOk(['clone', '--', url, path], { GIT_ALLOW_PROTOCOL: CLONE_PROTOCOLS }),
+    gitCloneInto: kernelCloneInto(kernel),
     gitCommonDirectory: async root => {
       const absolute = await git(['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir']);
       const out = absolute?.exitCode === 0 ? absolute.stdout.trim() : '';

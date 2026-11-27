@@ -71,6 +71,40 @@ export const ProjectCloneUrlSchema = z
   .string()
   .refine(isProjectCloneUrl, { message: ProjectCloneUrlUnsupportedMessage });
 
+/** The folder `git clone` makes for an address: its last segment without `.git` (`…/you/project.git` → `project`). */
+export const cloneFolderName = (url: string): string | null => {
+  const text = url.trim();
+  // The address's PATH names the repository: `https://github.com/` has none, and its host is not a folder name.
+  const path = URL.canParse(text) ? new URL(text).pathname : '';
+  const name = (path.split('/').filter(Boolean).pop() ?? '').replace(/\.git$/u, '');
+  // One folder name, never a way out of the project: `..` and `.` name no repository.
+  return name === '' || name === '.' || name === '..' ? null : name;
+};
+
+export const CloneRepoCredentialsMessage =
+  'Use Accounts and secrets for sign-in, then paste a repository address without credentials.';
+
+/**
+ * SSH usernames (for example `git`) select an account; ANY userinfo on an http(s) address (a token is often sent as the
+ * username) and any password embeds a credential. Judged on the parsed URL AND on the raw authority, because the parser
+ * skips extra slashes (`https:///tok@host`) and git receives the raw text.
+ */
+export const cloneAddressHasCredentials = (value: string): boolean => {
+  const text = value.trim();
+  if (/^https?:[/\\]*[^/\\?#]*@/iu.test(text)) return true;
+  if (!URL.canParse(text)) return false;
+  const url = new URL(text);
+  return url.password !== '' || (/^https?:$/u.test(url.protocol) && url.username !== '');
+};
+
+/** Existing-project clones accept remote sources only: local sources would bypass the folder reader's policy. */
+export const CloneRepoRequestSchema = z.strictObject({
+  url: ProjectCloneUrlSchema.refine(value => !URL.canParse(value) || new URL(value).protocol !== 'file:', {
+    message: 'Use an https:// or ssh:// remote repository address; local sources are not allowed here.',
+  }).refine(value => !cloneAddressHasCredentials(value), { message: CloneRepoCredentialsMessage }),
+});
+export type CloneRepoRequest = z.infer<typeof CloneRepoRequestSchema>;
+
 /** Every route is explicit: scanning a path is never a registration operation (today's `RegisterProjectRequestSchema`). */
 export const RegisterProjectRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({
