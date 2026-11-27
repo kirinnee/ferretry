@@ -21,7 +21,7 @@
  * - `fy-worker` makes the script URL of the app's own workers, and only three kinds exist: the signed service
  *   worker every registration names (`sw.verified.js`, with a machine label for a push registration),
  *   the on-device speech workers the build emits beside the app (`/assets/parakeet-worker-<hash>.js`,
- *   or its dev-server `/@fs` address), and Conversation's Durian worker (`/assets/durian-worker-<hash>.js`, which reads
+ *   or its dev-server `/@fs` address), and Conversation's Durian worker (`/assets/durian-worker-<hash>.js`, or its dev-server `/@fs` address, which reads
  *   a message off the main thread so a slow parse can be stopped). A registration and a `new Worker` are script sinks to the browser, so
  *   without a policy neither could start at all.
  * - `fy-fragment` exists for ONE caller, the `fy-render` html fragment sanitizer
@@ -98,12 +98,21 @@ export const isSpeechWorkerScriptUrl = (url: string): boolean =>
  */
 const DURIAN_WORKER_SCRIPT = /^\/assets\/durian-worker-[A-Za-z0-9_-]+\.js$/u;
 
-/** Whether a URL is the Durian worker's script. */
-export const isDurianWorkerScriptUrl = (url: string): boolean => DURIAN_WORKER_SCRIPT.test(url);
+/**
+ * The address Vite's DEV server serves the Durian worker at: the same `/@fs` shape as the speech workers' (the plugin's folder
+ * is outside the app's root), with plain path segments only and exactly that one file. Read behind `import.meta.env.DEV`
+ * like {@link DEV_SPEECH_WORKER_SCRIPT}, so a release carries neither the pattern nor accepts such a URL.
+ */
+const DEV_DURIAN_WORKER_SCRIPT =
+  /^\/@fs(?:\/(?!\.{1,2}(?:\/|$))(?:[A-Za-z0-9._ -]|%20)+)+\/packages\/plugins\/conversation\/app\/hypermedia\/durian-worker\.ts\?worker_file&type=module$/u;
+
+/** Whether a URL is the Durian worker's script: the chunk the build emits, or (in development only) the dev server's address. */
+export const isDurianWorkerScriptUrl = (url: string): boolean =>
+  DURIAN_WORKER_SCRIPT.test(url) || (!!import.meta.env.DEV && DEV_DURIAN_WORKER_SCRIPT.test(url));
 
 /** Whether a URL is one of the app's own worker scripts: the service worker, a speech worker or the Durian worker. */
 export const isWorkerScriptUrl = (url: string): boolean =>
-  WORKER_SCRIPT.test(url) || isSpeechWorkerScriptUrl(url) || DURIAN_WORKER_SCRIPT.test(url);
+  WORKER_SCRIPT.test(url) || isSpeechWorkerScriptUrl(url) || isDurianWorkerScriptUrl(url);
 
 export interface TrustedTypes {
   /** Highlighter output as a value `innerHTML` accepts; anything not highlighter-shaped is escaped first. */

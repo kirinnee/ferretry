@@ -14,6 +14,8 @@ const out = mkdtempSync(join(tmpdir(), 'fy-tt-release-'));
 afterAll(() => rmSync(out, { recursive: true, force: true }));
 
 const DEV_URL = '/@fs/home/dev/ferretry/packages/plugins/voice/app/worker/parakeet-worker.ts?worker_file&type=module';
+const DEV_DURIAN_URL =
+  '/@fs/home/dev/ferretry/packages/plugins/conversation/app/hypermedia/durian-worker.ts?worker_file&type=module';
 const RELEASE_URL = '/assets/parakeet-worker-abc123.js';
 
 /** `trusted-types.ts` through `vite build` for one mode, as the file the build wrote. */
@@ -48,6 +50,8 @@ describe('a Vite production build of the trusted-types policy', () => {
     const mod = (await import(pathToFileURL(file).href)) as typeof import('../../../src/security/trusted-types.ts');
     expect(mod.isWorkerScriptUrl(DEV_URL)).toBe(false);
     expect(() => mod.trustedWorkerUrl(DEV_URL)).toThrow(TypeError);
+    expect(mod.isWorkerScriptUrl(DEV_DURIAN_URL)).toBe(false);
+    expect(() => mod.trustedWorkerUrl(DEV_DURIAN_URL)).toThrow(TypeError);
     expect(mod.isWorkerScriptUrl(RELEASE_URL)).toBe(true);
   }, 60_000);
 
@@ -55,5 +59,6 @@ describe('a Vite production build of the trusted-types policy', () => {
     const file = await built('development');
     const mod = (await import(pathToFileURL(file).href)) as typeof import('../../../src/security/trusted-types.ts');
     expect(mod.isWorkerScriptUrl(DEV_URL)).toBe(true);
+    expect(mod.isWorkerScriptUrl(DEV_DURIAN_URL)).toBe(true);
   }, 60_000);
 });

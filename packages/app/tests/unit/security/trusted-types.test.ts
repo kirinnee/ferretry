@@ -24,6 +24,10 @@ import {
 const DEV = (engine: string, checkout = '/home/dev/ferretry'): string =>
   `/@fs${checkout}/packages/plugins/voice/app/worker/${engine}-worker.ts?worker_file&type=module`;
 
+/** Where `vite` serves Conversation's Durian worker in local development: the same `/@fs` shape, its own folder and file. */
+const DEV_DURIAN = (checkout = '/home/dev/ferretry'): string =>
+  `/@fs${checkout}/packages/plugins/conversation/app/hypermedia/durian-worker.ts?worker_file&type=module`;
+
 /** A factory that wraps each made value, so a test can tell a policy's value from a plain string. */
 const factory = () => {
   const created: string[] = [];
@@ -157,6 +161,33 @@ describe('isWorkerScriptUrl', () => {
     ]) {
       expect(isWorkerScriptUrl(url)).toBe(false);
     }
+  });
+
+  it("accepts the Durian worker's dev-server address under the dev flag, and nothing near it", () => {
+    expect(isWorkerScriptUrl(DEV_DURIAN())).toBe(true);
+    expect(isDurianWorkerScriptUrl(DEV_DURIAN())).toBe(true);
+    expect(isWorkerScriptUrl(DEV_DURIAN('/home/dev/Workspace/ferretry/.worktrees/vb16'))).toBe(true);
+    expect(trustedWorkerUrl(DEV_DURIAN())).toBe(DEV_DURIAN());
+    for (const url of [
+      DEV_DURIAN('/home/dev/../../etc'),
+      DEV_DURIAN('/home/dev//x'),
+      DEV_DURIAN('/home/dev/%2e%2e'),
+      DEV_DURIAN().replace('/@fs', '/@fsx'),
+      DEV_DURIAN().replace('/plugins/conversation/', '/plugins/other/'),
+      DEV_DURIAN().replace('/app/hypermedia/', '/app/lib/'),
+      DEV_DURIAN().replace('durian-worker.ts', 'other-worker.ts'),
+      `https://evil.test${DEV_DURIAN()}`,
+      `${DEV_DURIAN()}&x=1`,
+      DEV_DURIAN().replace('?worker_file&type=module', ''),
+    ]) {
+      expect(isWorkerScriptUrl(url)).toBe(false);
+    }
+  });
+
+  it('refuses the Durian worker dev address when the dev flag is off', () => {
+    delete process.env.DEV;
+    expect(isWorkerScriptUrl(DEV_DURIAN())).toBe(false);
+    expect(() => trustedWorkerUrl(DEV_DURIAN())).toThrow(TypeError);
   });
 
   it('accepts the Google transcriber worker the build emits, and its dev-server address', () => {
