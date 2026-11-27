@@ -28,13 +28,12 @@ import {
   FerretStateDocumentSchema,
   FerretTitleSchema,
   StartOptionsSchema,
-  type TranscriptProvenance,
 } from '@ferretry/core-ferrets/contract';
 import { isAbsolute, join, sep } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem } from '../report.ts';
 import { historyPoolRoot, inside, previewFolder } from '../v5/harness-paths.ts';
-import { info, json, type V4Config } from '../v4/ferrets.ts';
+import { info, json, type TranscriptProvenance, type V4Config } from '../v4/ferrets.ts';
 import { MAX_AGENT_PINS, V4AgentPinFile, V4PinSnapshot } from '../v4/pins.ts';
 import { rebaseV4Path } from '../v4/rebase.ts';
 import type { StepContext } from './index.ts';
