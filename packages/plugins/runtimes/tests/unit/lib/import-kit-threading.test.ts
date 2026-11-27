@@ -62,13 +62,13 @@ describe('host import kit threading', () => {
     expect(withKits.imported).toEqual(['claude', 'codex']);
     calls.length = 0;
     expect(() => planImport(scans, { kits: undefined, digest: text => text })).toThrow('claude is not supported here');
-    expect(calls).toEqual([{ group: 'harvest', harness: 'claude', kit: undefined }]);
+    expect(calls).toEqual([]);
   });
 
   it('never substitutes another harness kit for a missing entry', () => {
     const codexOnly = new Map<HarnessKind, RuntimesHarnessKit>([['codex', codexRuntimesKit]]);
     expect(() => planImport(scans, { digest: text => text, kits: codexOnly })).toThrow('claude is not supported here');
-    expect(calls).toEqual([{ group: 'harvest', harness: 'claude', kit: undefined }]);
+    expect(calls).toEqual([]);
   });
 
   it('never substitutes another harness kit for a missing Codex entry', () => {
@@ -135,7 +135,7 @@ describe('host import kit threading', () => {
     online = true;
     await service.scan();
     expectKits(kits);
-    expect(requested).toEqual(['claude', 'codex', 'claude', 'codex', 'claude', 'codex']);
+    expect(requested).toEqual(['claude', 'codex', 'claude', 'codex']);
   });
 });
 
