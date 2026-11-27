@@ -126,7 +126,15 @@ describe('ProjectDetailPage', () => {
     const sections = [...mounted.container.querySelectorAll('section[aria-label]')].map(node =>
       node.getAttribute('aria-label'),
     );
-    expect(sections).toEqual(['Provenance', 'Repositories', 'GitHub accounts', 'Board', 'Active ferrets', 'Files']);
+    expect(sections).toEqual([
+      'Provenance',
+      'Repositories',
+      'GitHub accounts',
+      'Board',
+      'Active ferrets',
+      'Branches & worktrees',
+      'Files',
+    ]);
     expect(must(mounted.container.querySelector('h1'), 'the title').textContent).toBe('ferretry');
     expect(mounted.container.querySelector('[data-project-provenance="/work/ferretry"]')).not.toBeNull();
     expect(must(mounted.container.querySelector('[data-project-agents="ready"]'), 'the ferrets').textContent).toContain(
