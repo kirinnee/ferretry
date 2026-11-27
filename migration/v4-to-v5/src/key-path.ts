@@ -5,7 +5,9 @@
  * a segment is said only when it reads as a NAME; a segment that looks like a key is said as `<key>`.
  */
 
-/** Provider key prefixes that are never a name: OpenAI/Anthropic, GitHub, Slack, AWS. */
+import { KNOWN_SHAPES } from './provider-shapes.ts';
+
+/** Also mask incomplete familiar prefixes; full provider shapes have one owner. */
 const KEY_PREFIX = /^(?:sk-|sk-ant-|ghp_|gho_|github_pat_|xox|AKIA)/u;
 
 /** Characters a token may use (the same alphabet as the credential rules in `v4/config.ts`). */
@@ -13,6 +15,7 @@ const TOKEN_ALPHABET = /^[A-Za-z0-9._~+/=-]+$/u;
 
 /** A segment that looks like a key: a known provider prefix, or 20+ token-alphabet characters with a letter and a digit. */
 export const looksLikeKey = (segment: string): boolean =>
+  KNOWN_SHAPES.some(shape => shape.test(segment)) ||
   KEY_PREFIX.test(segment) ||
   (segment.length >= 20 && TOKEN_ALPHABET.test(segment) && /[A-Za-z]/u.test(segment) && /\d/u.test(segment));
 

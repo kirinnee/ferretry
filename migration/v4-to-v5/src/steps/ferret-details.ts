@@ -150,10 +150,10 @@ export function sessionConfigDocument(
   return { format: 1, ...listedOnly(body, CONFIG_KEYS, dropped) };
 }
 
-/** An attached ferret's state without v4's last turn, and with a status v5's turn watch describes. */
+/** An attached ferret's state without v4's last turn, and EVERY status carried as running (a pane read that fails must never read idle). */
 function attachedState(state: Json): Json {
   const { turnState: _turn, turnStateAt: _turnAt, ...rest } = state;
-  return rest.status === 'created' || rest.status === 'starting' ? { ...rest, status: 'running' } : rest;
+  return rest.status === undefined ? rest : { ...rest, status: 'running' };
 }
 
 /** `state.json`: `format` first, the old `attention` key and cleared (`null`) values left out, then v5's list only. */

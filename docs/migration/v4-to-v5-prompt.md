@@ -51,7 +51,8 @@ converter's summary print the same list from one file, `migration/v4-to-v5/left-
 - some security history (Gate kept-bucket and grant audit history)
 
 **Nothing is deleted.** v4's home is kept untouched at `<home>-before-<stamp>` (the backup; `preflight` prints the exact
-path), so the owner can look back at any of it. To look: open that folder, or copy it and run v4's `fy` against the copy
+path), with a separate verified copy at `<home>-before-<stamp>.recovery` (mode 700) made before any move. Both stay until
+the owner deletes them. Rollback restores the original home's mode. To look: open that folder, or copy it and run v4's `fy` against the copy
 (`FY_HOME=<copy>`). Do not start v4 on the original; it must stay as it is for a rollback.
 
 ## Decisions the owner makes
@@ -67,8 +68,8 @@ Ask these first, one at a time, and wait.
    its own harness, and nobody will type into a pane until the end. You pass `--owner-confirmed` only after hearing this.
 4. **The agenda count.** The owner opens the app's Agenda and tells you how many asks are open, and the title of one
    that has an answer. You pass both to **`baseline`** (`--asks-open N --answered-ask "<title>"`); no other phase takes them.
-5. **The backup (owner's yes).** Say: "I will move the Ferretry home aside; that folder is the backup and stays untouched
-   until you delete it." With their yes you pass `--owner-yes`.
+5. **The backup (owner's yes).** Say: "I will first make and verify a separate recovery copy, then move the Ferretry home
+   aside. Both copies stay untouched until you delete them." With their yes you pass `--owner-yes`.
 6. **If the install kind is not Homebrew, a nix profile or a standalone binary** (nix-module, deb/rpm), `preflight --kind
 manual` has the owner install v5 by hand; ask how this machine installs Ferretry.
 
@@ -93,8 +94,8 @@ the owner:
 | `preflight`                                       | tools present, bun is at least the version in `migration/v4-to-v5/bun-version` (the converter's lockfile needs it; refused before anything changes), v4 is 4.291.10 or later, this checkout is a released v5 tag the install kind can get, disk space; records the original `PATH`, whether `FY_URL` (a plain loopback address only) and `FY_PORT` were set, and where v4's `fy`/`fyd` are (never a secret). `MIGRATE_REHEARSAL=1` on the default home is refused here, before anything changes                                                         | stop on any exit                                                            |
 | `baseline --asks-open N --answered-ask "<title>"` | saves what v4 holds now into a folder beside the notes: every ferret (id, **callsign and title kept apart**, parent, state), pane map, board ids and lanes of every state (stops at the 500-card limit), login names, secret **names**. An empty fleet (no live ferret) is a defined path                                                                                                                                                                                                                                                               | the owner's agenda count                                                    |
 | `quiet --owner-confirmed`                         | no pane writes for a minute, stops the v4 daemon, proves it again, checks nothing is half-done (an unfinished agenda commit, the fleet apply lock, a share migration journal). Queued agenda changes are not half-done: it names their ferrets and `convert` carries them into v5. Panes and tmux keep running                                                                                                                                                                                                                                          | exit `1`: see **If `quiet` exits 1** below                                  |
-| `backup --owner-yes`                              | `mv` the home to `<home>-before-<stamp>` (mode 700)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | the owner's yes                                                             |
-| `convert`                                         | converter dry run (own report), then the real run, exit codes checked. Writes the new home with `home.json` last                                                                                                                                                                                                                                                                                                                                                                                                                                        | show the printed summary; exit `3` → rollback or wait for a fixed converter |
+| `backup --owner-yes`                              | holds v4's actual daemon lock through conversion; dry-runs the stopped home and **writes its report**; makes an independent recovery copy verified by file counts, sizes and SHA-256 hashes; then moves the home to `<home>-before-<stamp>` (mode 700) with an atomic no-replace rename. A failure before the rename moves nothing.                                                                                                                                                                                                                     | the owner's yes                                                             |
+| `convert`                                         | the converter real run (the dry run already passed in `backup`), exit codes checked. If it says "the converter checkout moved off the recorded commit": run `rollback --owner-yes`, then `preflight` again from a fresh checkout. Writes the new home with `home.json` last                                                                                                                                                                                                                                                                             | show the printed summary; exit `3` → rollback or wait for a fixed converter |
 | `install`                                         | puts the released v5 programs in place for the recorded install kind (cask, nix profile element, standalone), proves `fy --version` is the tag. **Never starts the daemon**                                                                                                                                                                                                                                                                                                                                                                             | stop on any exit                                                            |
 | `start`                                           | `fyd --check` (offline: nothing can start a daemon), the home holds only what v5 makes (plus the asset files under `fleet/assets`: skills, hook files; regular files and folders only), then **the one deliberate daemon start**, proved by asking it, then `fy config check` against that running daemon                                                                                                                                                                                                                                               | show every `!` line                                                         |
 | `verify`                                          | compares v5 with the baseline and prints a table: ferret ids, parents, callsigns (v4 callsign = v5 name), titles, panes (each baseline pane still there, or its ferret restarted by v5 in a new pane of the same session with `session.restarted` in its history; a `session.restart_gave_up` is a FAIL; a `session.restart_blocked` with the old pane still there is a REVIEW: "still on v4 until <login> is signed in", with the `fy login signin <login>` to run), board ids (lanes are shown to the owner), logins, secret names, asks, `fy doctor` | a `FAIL` row is a stop; a `REVIEW` row is for the owner to decide           |
@@ -109,16 +110,28 @@ run the check again.
 `rollback` needs no `fy` check: it runs no `fy` itself and chooses v4 or v5 from the notes. After a rollback, `fy --version`
 must print 4.291.x (v4 is back), and any `fy` after that is the v4 one.
 
+The cutover lock stays held between `backup` and `convert`. The lock-owning process stages beside the original home
+(even if the notes are on another filesystem) and atomically exchanges it with a regular file saying where the backup is,
+so the home path is never absent and v4 cannot bootstrap an empty home there. If the filesystem cannot exchange entries,
+the move refuses: stop v4's service manager first and inspect before retrying. `convert`
+atomically exchanges that file for an already locked target and holds both SQLite locks through conversion. Rollback
+removes the placeholder only if its identity and contents still match. Every exchange checks the displaced entry too;
+an unexpected entry is kept at the reported path and the operation stops. Lease release never recursively deletes entries,
+and keeps the placeholder identity record so rollback still works if the lease was released before conversion.
+If the lease is lost, stop and roll back before trying again.
+The dry run and real conversion both resolve absolute v4 asset paths against the original home. A disk-space shortfall
+or failed copy verification refuses the move; partial recovery copies stay available for inspection.
+
 ### If `quiet` exits 1
 
-**v4 is now stopped** (`quiet` stops its daemon before it checks): the owner has no working Ferretry until you act. The
-panes and tmux keep running and nothing has been moved, so nothing is lost. Read the output and tell the owner which case it is:
+`quiet` checks the panes first and stops the v4 daemon only after that check passes. **After the first pane-write refusal v4 is STILL RUNNING** (nothing was stopped). After a stop or retry failure its state is unknown: read the error and prove it stopped before backup. The **FOUND** line is printed only after the retry has confirmed v4 stopped again.
+The panes and tmux keep running and nothing has been moved, so nothing is lost. Read the output and tell the owner which case it is:
 
 - **A pane kept writing** ("a pane kept writing …"): a ferret is still taking a turn, or someone typed into a pane. Wait
   for it, bring v4 back if the owner wants to use it meanwhile (below), ask the owner to confirm the four quiet points again, then
   rerun `quiet` (the whole phase, not `preflight` or `baseline`: the baseline is still valid).
 - **Files listed under "FOUND: something is pending"**: an unfinished agenda commit (`agenda-versions.pending.json`,
-  `agenda-history.jsonl.pending`), the fleet apply lock, or a share migration journal. The script already started v4 for a
+  `agenda-history.jsonl.pending`; `quiet` lists either), the fleet apply lock, or a share migration journal. The script already started v4 for a
   minute so it could finish them, and stopped it again. Rerun `quiet` **once**. If the **same files** are listed again, stop:
   do not rerun a third time. Tell the owner the file names (never their content) and that the move cannot go on until they are
   cleared; offer to stay on v4 (below). Nothing has been backed up or converted, so there is nothing to roll back.
@@ -285,7 +298,7 @@ not proof), and the baseline decides what each one was:
 - **Running at the baseline** (a live pane then, a status other than stopped/completed/failed): v5 left it on a **v5-launched harness**
   that v4's `fy restart` refuses ("can't see what it is running"; it has no `--force`). With `--restart` (the owner's yes: it
   **stops the ferret, interrupting what it is doing and closing its own web-terminal panes**) the script runs v4's `fy stop orphan <id> --yes`
-  then `fy resume <id>`: it comes back as a v4 launch with its conversation. (This pair was proven on real rollbacks of 15 ferrets.)
+  then `fy resume <id>`: it comes back as a v4 launch with its v4 conversation (what v5 wrote since is not in it). (This pair was proven on real rollbacks of 15 ferrets.)
 - **Stopped, completed, failed, stalled or interrupted at the baseline**, and the owner resumed it in v5: it is **never resumed by v4**. Its v5
   session is closed (the script closes the tmux session only v5 had: a live pane that is not the pane the backup's own record names) and it
   stays stopped, exactly as at the backup. The script **never stops it on v4's word**: if v4 shows it running afterwards, that is a v4 launch

@@ -13,6 +13,7 @@ import { lstat, open, readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { type Document, isMap, isScalar, LineCounter, parseDocument, type YAMLMap } from 'yaml';
 import { looksLikeKey, pathSegment } from '../key-path.ts';
+import { KNOWN_SHAPES } from '../provider-shapes.ts';
 import { V4InputError } from './documents.ts';
 import type { V4ConfigOverrides, V4Paths } from './layout.ts';
 
@@ -282,19 +283,6 @@ export function parseV4Yaml(label: string, text: string): Document {
  * be imported through a contract). v4 refused a raw secret in a config file, so none should be here; if one is, the
  * step fails naming the file and the key, and v5 would refuse the file anyway. `${secret:NAME}` is a reference, kept.
  */
-const KNOWN_SHAPES: readonly RegExp[] = [
-  /\bsk-ant-[A-Za-z0-9_-]{8,}/u,
-  /\bsk-or-[A-Za-z0-9_-]{8,}/u,
-  /\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}/u,
-  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/u,
-  /\bgh[pousr]_[A-Za-z0-9]{20,}/u,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/u,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/u,
-  /\bgsk_[A-Za-z0-9]{20,}/u,
-  /\bcsk-[A-Za-z0-9]{20,}/u,
-  /\bAIza[0-9A-Za-z_-]{30,}/u,
-  /\bglpat-[A-Za-z0-9_-]{16,}/u,
-];
 const CREDENTIAL_KEY = /(?:(?:key|token|secret|password|passwd)s?|credentials?)$/iu;
 const REFERENCE = /^\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)$/u;
 
@@ -599,7 +587,11 @@ function spelledTextLooksLikeCredential(source: string): boolean {
     [match[1] as string]: match[2] as string,
   }));
   // Leaf rules only here: the document rule above reads a whole text, so reading its words again would never end.
-  return walkStrings({ words, assigned }, (path, word) => leafLooksSecret(nameOf(path), word)).length > 0;
+  // A NAME (isKey) is judged as itself, never as the value of a credential-named key: `ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}` carries.
+  return (
+    walkStrings({ words, assigned }, (path, word, isKey) => leafLooksSecret(isKey ? undefined : nameOf(path), word))
+      .length > 0
+  );
 }
 
 // ── the modeline ─────────────────────────────────────────────────────────────────────────────────────────────────
