@@ -336,6 +336,14 @@ describe('the offers this machine opens', () => {
     expect(target.offers.open()).rejects.toMatchObject({ code: 'offer_busy' });
   });
 
+  test('two offers opened at the same moment: one is admitted, the other is told to wait', async () => {
+    const { target } = await fixtureWorld();
+    const both = await Promise.allSettled([target.offers.open(), target.offers.open()]);
+    expect(both.filter(each => each.status === 'fulfilled')).toHaveLength(1);
+    const lost = both.find(each => each.status === 'rejected');
+    expect(lost).toMatchObject({ reason: { code: 'offer_busy' } });
+  });
+
   test('an empty chunk is refused', async () => {
     const { target } = await fixtureWorld();
     const offer = await target.offers.open();
