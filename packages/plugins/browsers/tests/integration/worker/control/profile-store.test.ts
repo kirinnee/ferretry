@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -506,6 +506,41 @@ describe('BrowserProfileStore', () => {
 });
 
 describe('BrowserProfileStore identities', () => {
+  for (const component of ['.', 'data', 'data/work', 'data/work/Default']) {
+    it(`should refuse a symlinked profile component ${component} before writing outside the profile`, async () => {
+      const subject = await profile(pid => pid === 1001);
+      const outside = await mkdtemp(path.join(os.tmpdir(), 'ferretry-browser-profile-outside-'));
+      roots.push(outside);
+      const linked = path.join(subject.browserDirectory, component);
+      await mkdir(path.dirname(linked), { recursive: true });
+      await symlink(outside, linked);
+      const before = await lstat(outside);
+
+      await should(subject.acquire('work', { sessionId: 'linked', chromeVersion: 'Chrome 150.0.0.0' })).be.rejectedWith(
+        BrowserControlError,
+      );
+
+      should(await readdir(outside)).eql([]);
+      should((await lstat(outside)).mode).equal(before.mode);
+      await should(lstat(subject.paths('work').leaseFile)).be.rejectedWith({ code: 'ENOENT' });
+      await should(lstat(subject.paths('work').metadataFile)).be.rejectedWith({ code: 'ENOENT' });
+    });
+  }
+
+  it('should refuse a second identity linked to a profile that already has a live lease', async () => {
+    const subject = await profile(pid => pid === 1001);
+    const held = await subject.acquire('agent', { sessionId: 'held' });
+    const preferences = path.join(held.profile, 'Default', 'Preferences');
+    const before = await readFile(preferences, 'utf8');
+    await symlink(held.profile, subject.paths('work').profile);
+
+    await should(subject.acquire('work', { sessionId: 'alias' })).be.rejectedWith(BrowserControlError);
+
+    should(await readFile(preferences, 'utf8')).equal(before);
+    await should(lstat(subject.paths('work').leaseFile)).be.rejectedWith({ code: 'ENOENT' });
+    should(await held.release()).be.true();
+  });
+
   it('should let two identities hold leases at the same time while one identity stays exclusive', async () => {
     // Arrange
     const subject = await profile(pid => pid === 1001);
@@ -576,7 +611,7 @@ describe('BrowserProfileStore identities', () => {
       await should(subject.acquire(key, { sessionId: 'first' })).be.rejectedWith(BrowserControlError);
     }
     should(() => subject.paths('../x')).throw(BrowserControlError);
-    await should(readFile(path.join(subject.browserDirectory, 'data'), 'utf8')).be.rejected();
+    await should(lstat(subject.browserDirectory)).be.rejectedWith({ code: 'ENOENT' });
   });
 
   it('should reclaim a stale lease from a dead pid per identity, leaving a live one on another identity alone', async () => {

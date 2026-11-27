@@ -363,6 +363,25 @@ export class BrowserProfileStore implements BrowserProfilePort {
   }
 
   private async ensureProfile(paths: IdentityPaths, chromeVersion?: string): Promise<void> {
+    // The key grammar cannot prevent filesystem aliases. Check every directory we write through before creating
+    // folders, changing permissions or publishing metadata/a lease, including Chrome's own preferences directory.
+    for (const directory of [
+      this.browserDirectory,
+      path.dirname(paths.profile),
+      paths.profile,
+      path.join(paths.profile, 'Default'),
+    ]) {
+      const info = await lstat(directory).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+        return undefined;
+      });
+      if (info?.isSymbolicLink()) {
+        throw new BrowserControlError(
+          'launch_failed',
+          `browser profile "${paths.identity}" contains a symlinked directory`,
+        );
+      }
+    }
     await mkdir(paths.profile, { recursive: true, mode: 0o700 });
     await chmod(this.browserDirectory, 0o700);
     await chmod(paths.profile, 0o700);
