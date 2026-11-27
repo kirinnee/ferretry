@@ -3,7 +3,7 @@
  * Close, the settings nav links, a terminal's Replay, a Button (both sizes) and an icon-only Button, at a phone (390, coarse
  * pointer) and a desktop (1440), in light and dark. Every one of them must be at least 44 x 44 under Accessible: a style that
  * only sets its own control heights leaves the controls that read `--target-floor` (or a fixed padding) below the promise.
- * Each case runs in the default look and with every radius at the 22px cap. Set `FY_ACCESSIBLE_TARGETS_SHOTS_DIR` to keep `<rounding>-<viewport>-<scheme>.png`.
+ * Each case runs in the default look and with every radius at the 22px cap. Set `FY_ACCESSIBLE_TARGETS_SHOTS_DIR` to keep `<rounding>-<viewport>-<scheme>-<dialog|page>.png`.
  */
 import { afterAll, beforeAll, expect, it, setDefaultTimeout } from 'bun:test';
 import { createRequire } from 'node:module';
@@ -119,11 +119,20 @@ for (const rounding of ROUNDINGS)
           await tab.waitForSelector('.fy-dialog__close');
           await tab.waitForSelector('.dh-doc .term .ctl button, .dh-doc .term .ctl [role="button"]');
           await tab.evaluate(async () => await document.fonts.ready);
-          if (shotsDir !== '')
-            await tab.screenshot({
-              path: join(shotsDir, `${rounding.name}-${viewport.name}-${scheme}.png`),
-              fullPage: true,
+          if (shotsDir !== '') {
+            const name = `${rounding.name}-${viewport.name}-${scheme}`;
+            await tab.screenshot({ path: join(shotsDir, `${name}-dialog.png`), fullPage: true });
+            // The page without the dialog's scrim over it, so the controls under it are seen as they are drawn.
+            await tab.evaluate(() => {
+              for (const child of document.body.children)
+                if (child.id !== 'root') (child as HTMLElement).style.display = 'none';
             });
+            await tab.screenshot({ path: join(shotsDir, `${name}-page.png`), fullPage: true });
+            await tab.evaluate(() => {
+              for (const child of document.body.children)
+                if (child.id !== 'root') (child as HTMLElement).style.display = '';
+            });
+          }
           const boxes = await tab.evaluate((): Box[] => {
             const read = (name: string, element: Element): Box => {
               const rect = element.getBoundingClientRect();
