@@ -16,7 +16,6 @@ import bedrockMantle from '../../data/endpoints/bedrock-mantle.yaml' with { type
 import customGateway from '../../data/endpoints/custom-gateway.yaml' with { type: 'text' };
 import deepseek from '../../data/endpoints/deepseek.yaml' with { type: 'text' };
 import googleVertex from '../../data/endpoints/google-vertex.yaml' with { type: 'text' };
-import groq from '../../data/endpoints/groq.yaml' with { type: 'text' };
 import kimi from '../../data/endpoints/kimi.yaml' with { type: 'text' };
 import litellm from '../../data/endpoints/litellm.yaml' with { type: 'text' };
 import microsoftFoundryApiKey from '../../data/endpoints/microsoft-foundry-api-key.yaml' with { type: 'text' };
@@ -56,7 +55,6 @@ const BUILT_IN_PRESET_TEXTS: Readonly<Record<string, string>> = Object.freeze({
   'custom-gateway': customGateway,
   'openai-api-key': openaiApiKey,
   'azure-openai': azureOpenai,
-  groq,
   mistral,
   'ollama-codex': ollamaCodex,
 });

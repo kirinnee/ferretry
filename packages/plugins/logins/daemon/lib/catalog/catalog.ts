@@ -24,7 +24,6 @@ import gateway from '../../data/models/gateway.yaml' with { type: 'text' };
 import githubCopilot from '../../data/models/github-copilot.yaml' with { type: 'text' };
 import googleGemini from '../../data/models/google-gemini.yaml' with { type: 'text' };
 import googleVertex from '../../data/models/google-vertex.yaml' with { type: 'text' };
-import groq from '../../data/models/groq.yaml' with { type: 'text' };
 import kimi from '../../data/models/kimi.yaml' with { type: 'text' };
 import microsoftFoundry from '../../data/models/microsoft-foundry.yaml' with { type: 'text' };
 import minimax from '../../data/models/minimax.yaml' with { type: 'text' };
@@ -63,7 +62,6 @@ export const BUILT_IN_MODEL_CATALOG_TEXTS: Readonly<Record<string, string>> = Ob
   gateway,
   'azure-openai': azureOpenai,
   ollama,
-  groq,
   'mistral-codex': mistralCodex,
   'google-gemini': googleGemini,
   'github-copilot': githubCopilot,

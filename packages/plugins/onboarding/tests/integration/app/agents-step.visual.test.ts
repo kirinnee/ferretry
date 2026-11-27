@@ -150,7 +150,6 @@ for (const variant of VARIANTS)
           'provider-custom-gateway',
           'provider-openai-api-key',
           'provider-azure-openai',
-          'provider-groq',
           'provider-mistral',
           'provider-ollama-codex',
         ]);
@@ -164,7 +163,7 @@ for (const variant of VARIANTS)
           await tab.locator(`[data-agent-row="provider-${provider}"] > label`).click();
           expect(await choices(provider), `${provider} offers Claude Code and Codex`).toEqual(['claude-code', 'codex']);
         }
-        for (const provider of ['groq', 'mistral']) {
+        for (const provider of ['mistral']) {
           await tab.locator(`[data-agent-row="provider-${provider}"] > label`).click();
           expect(await choices(provider), `${provider} offers Codex alone`).toEqual(['codex']);
         }

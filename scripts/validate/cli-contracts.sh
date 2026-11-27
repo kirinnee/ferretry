@@ -82,8 +82,6 @@ arch)
     # descendants by default, so a committed src/lib/.probe.ts would bypass this gate.
     lib_files=()
     while IFS= read -r -d '' lib_file; do
-      # Data (the generated built-ins.json holds provider docs URLs such as console.groq.com) cannot call console or process.
-      case "${lib_file}" in *.json) continue ;; esac
       [ -f "${lib_file}" ] && lib_files+=("${lib_file}")
     done < <(git ls-files -z -co --exclude-standard -- "${lib_dir}")
     [ "${#lib_files[@]}" -eq 0 ] && continue

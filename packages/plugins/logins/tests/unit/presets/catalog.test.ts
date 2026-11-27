@@ -61,10 +61,7 @@ describe('the built-in preset catalogue', () => {
     );
   });
 
-  it.each([
-    ['groq', 'https://api.groq.com/openai/v1', 'GROQ_API_KEY'],
-    ['mistral', 'https://api.mistral.ai/v1', 'MISTRAL_API_KEY'],
-  ])(
+  it.each([['mistral', 'https://api.mistral.ai/v1', 'MISTRAL_API_KEY']])(
     'should ship %s as a Codex-only preset that points Codex at its Responses endpoint with one secret key',
     (id, baseUrl, key) => {
       const found = PRESETS.find(entry => entry.id === id);

@@ -26,8 +26,6 @@
   "DASHSCOPE_*",
   "DEEPSEEK_*",
   "DEEPSEEK_API_KEY",
-  "GROQ_*",
-  "GROQ_API_KEY",
   "KIMI_*",
   "KIMI_API_KEY",
   "LITELLM_*",
