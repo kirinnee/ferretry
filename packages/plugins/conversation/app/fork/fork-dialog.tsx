@@ -27,12 +27,12 @@ export function useForkControl(): { readonly shown: boolean; readonly enabled: b
 
 export function ForkDialog({
   ferret,
-  initial,
+  at,
   onClose,
 }: {
   readonly ferret: string;
-  /** The text of the message the form opens on; absent, the latest. */
-  readonly initial?: string | undefined;
+  /** The byte offsets of the chat row the form opens on; absent, the latest message. */
+  readonly at?: readonly number[] | undefined;
   readonly onClose: () => void;
 }) {
   const client = useConversationClient();
@@ -48,7 +48,7 @@ export function ForkDialog({
 
   useEffect(() => {
     let live = true;
-    readForkChoices(client, ferret).then(
+    readForkChoices(client, ferret, at).then(
       choices => live && setRead(choices),
       (reason: unknown) =>
         live &&
@@ -61,7 +61,7 @@ export function ForkDialog({
     return () => {
       live = false;
     };
-  }, [client, ferret]);
+  }, [client, ferret, at]);
 
   const open = (): void => {
     if (made === null || daemon === undefined) return;
@@ -69,10 +69,6 @@ export function ForkDialog({
     if (to !== undefined) router?.navigate(to);
     onClose();
   };
-  const initialPoint =
-    typeof read === 'object' && initial !== undefined
-      ? [...read.choices].reverse().find(choice => choice.text.trim() === initial.trim())?.point
-      : undefined;
 
   return (
     <div
@@ -136,7 +132,7 @@ export function ForkDialog({
           <ForkForm
             choices={read.choices}
             host={{ close: onClose, forked: setMade }}
-            initial={initialPoint}
+            initial={read.initial}
             older={read.older}
             submit={async request => {
               const run = place?.press ?? (<T,>(act: () => Promise<T>) => act());

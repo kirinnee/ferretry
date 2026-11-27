@@ -426,7 +426,12 @@ function OwnMessageRow({
         receipt={receipt}
         record={record}
         side="own"
-        trailing={actions?.trigger ?? (sendRow === 'travelling' ? undefined : <ForkFromHere text={entry.text} />)}
+        trailing={
+          actions?.trigger ??
+          (sendRow === 'travelling' ? undefined : (
+            <ForkFromHere offsets={entry.offset === undefined ? [] : [entry.offset, ...(entry.alsoAt ?? [])]} />
+          ))
+        }
       />
       {actions?.panels}
     </article>

@@ -34,6 +34,8 @@ const SELECTION: Readonly<Partial<Record<TranscriptReadFailure, number>>> = {
 const FORK_REFUSALS: Readonly<Record<ForkFailure['code'], { readonly status: number; readonly code: string }>> = {
   no_ferret: { status: 404, code: 'not-found' },
   forbidden: { status: 403, code: 'forbidden' },
+  // The source is writing its conversation right now: nothing was cut, and it can be forked when it is idle or stopped.
+  running: { status: 409, code: 'fork_running' },
   // The harness cannot fork a conversation (or not this one): its sentence says why, and nothing was written.
   unsupported: { status: 409, code: 'fork_unsupported' },
   worktree: { status: 409, code: 'fork_worktree' },

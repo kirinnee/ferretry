@@ -27,6 +27,7 @@ const source = (overrides: Partial<ForkSource> = {}): ForkSource => ({
   runtime: 'work',
   login: 'main',
   folder: '/work/repo/pkg',
+  running: false,
   ...overrides,
 });
 
@@ -83,6 +84,7 @@ function world(
               worktree: { path: '/managed/repo-1/fork-quick-otter', branch: request.branch },
             };
           },
+          discard: async () => undefined,
         });
   const ports: ForkPorts = {
     source: ferret => (ferret === SOURCE ? ('source' in options ? options.source : source()) : undefined),
@@ -185,6 +187,24 @@ describe('the fork service', () => {
     // Assert
     expect(forked).toEqual(err({ code: 'no_ferret', reason: `there is no ferret ${OTHER} to fork` }));
     expect(calls.cuts).toEqual([]);
+  });
+
+  test('should refuse a ferret that is working or starting before the harness or any checkout is touched', async () => {
+    // Arrange
+    const working = world({ source: source({ running: true }) });
+
+    // Act
+    const forked = await working.service.fork(SOURCE, AT, { worktree: 'new' }, PERSON);
+
+    // Assert
+    expect(forked.ok).toBe(false);
+    if (!forked.ok) {
+      expect(forked.error.code).toBe('running');
+      expect(forked.error.reason).toContain('working right now');
+    }
+    expect(working.calls.checkouts).toEqual([]);
+    expect(working.calls.cuts).toEqual([]);
+    expect(working.calls.starts).toEqual([]);
   });
 
   test('should let a ferret fork only itself and its helpers, and an agent with no ferret nothing', async () => {
@@ -329,6 +349,7 @@ describe('the fork service', () => {
         create: async () => {
           throw new Error('unreachable');
         },
+        discard: async () => undefined,
       },
     });
     const failing = world({
@@ -337,6 +358,7 @@ describe('the fork service', () => {
         create: async () => {
           throw new Error('branch is in use');
         },
+        discard: async () => undefined,
       },
     });
 

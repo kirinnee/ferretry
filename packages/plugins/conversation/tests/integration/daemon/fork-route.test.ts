@@ -416,6 +416,16 @@ describe('POST /v1/ferrets/:ferretId/fork', () => {
       'fork_refused',
     ],
     [
+      'a ferret that is working right now',
+      {
+        code: 'running',
+        reason:
+          'Quick Otter is working right now, so its conversation is still being written. Fork it when it is idle or stopped',
+      },
+      409,
+      'fork_running',
+    ],
+    [
       'a harness that cannot fork',
       {
         code: 'unsupported',

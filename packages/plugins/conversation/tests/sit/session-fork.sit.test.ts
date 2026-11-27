@@ -21,6 +21,7 @@ setDefaultTimeout(120_000);
 const ROOT = path.resolve(import.meta.dir, '../../../../..');
 const STAMP = '2026-11-16T00:00:00.000Z';
 const SOURCE_CONVERSATION = '0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21';
+const WORKING_CONVERSATION = '5d1c8e2b-3a4f-4b6c-8d7e-9f0a1b2c3d4e';
 const spelled = (folder: string) => folder.replaceAll(/[^a-zA-Z0-9]/gu, '-');
 
 let child: ReturnType<typeof Bun.spawn> | undefined;
@@ -32,23 +33,55 @@ let admin = '';
 let logs = '';
 
 const stamp = (n: number) => `2026-11-01T10:${String(n).padStart(2, '0')}:00.000Z`;
-const prompt = (n: number) => ({
+const prompt = (n: number, conversation = SOURCE_CONVERSATION) => ({
   type: 'user',
   uuid: `p${String(n)}`,
-  sessionId: SOURCE_CONVERSATION,
+  sessionId: conversation,
   timestamp: stamp(n * 2),
   message: { role: 'user', content: `question ${String(n)}` },
 });
-const answer = (n: number) => ({
+const answer = (n: number, conversation = SOURCE_CONVERSATION) => ({
   type: 'assistant',
   uuid: `a${String(n)}`,
-  sessionId: SOURCE_CONVERSATION,
+  sessionId: conversation,
   timestamp: stamp(n * 2 + 1),
   message: { role: 'assistant', content: [{ type: 'text', text: `answer ${String(n)}` }] },
 });
 
 const pool = (...parts: string[]) => path.join(home, 'state/claude-code/history-pool', ...parts);
-const sourceFile = () => pool('projects', spelled(project), `${SOURCE_CONVERSATION}.jsonl`);
+const sourceFile = (conversation = SOURCE_CONVERSATION) => pool('projects', spelled(project), `${conversation}.jsonl`);
+
+const seedFerret = async (id: string, name: string, state: string, conversation: string) => {
+  await mkdir(path.join(home, 'state/ferrets', id), { recursive: true });
+  await writeFile(
+    path.join(home, 'state/ferrets', id, 'ferret.json'),
+    JSON.stringify({
+      format: 1,
+      id,
+      name,
+      role: 'lead',
+      mode: 'interactive',
+      harness: 'claude-code',
+      runner: 'tmux',
+      folder: project,
+      state,
+      birth: 'person',
+      createdAt: STAMP,
+      stateAt: STAMP,
+    }),
+  );
+  const agentHome = path.join(home, 'state/claude-code/agent-homes', id);
+  await mkdir(agentHome, { recursive: true });
+  await writeFile(
+    path.join(agentHome, 'conversation.json'),
+    JSON.stringify({ format: 1, id: conversation, cwd: project }),
+  );
+  // A pooled home reads its transcripts through its `projects` link to the shared pool, as a prepared home does.
+  await symlink(pool('projects'), path.join(agentHome, 'projects'));
+  await mkdir(path.dirname(sourceFile(conversation)), { recursive: true });
+  const records = [1, 2, 3].flatMap(n => [prompt(n, conversation), answer(n, conversation)]);
+  await writeFile(sourceFile(conversation), `${records.map(r => JSON.stringify(r)).join('\n')}\n`);
+};
 
 beforeAll(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'fork-sit-'));
@@ -59,36 +92,9 @@ beforeAll(async () => {
   await mkdir(path.join(home, 'config'), { recursive: true });
   await writeFile(path.join(home, 'home.json'), JSON.stringify({ format: 1, createdBy: 'fork-sit', createdAt: STAMP }));
   await writeFile(path.join(home, 'config/limits.yaml'), 'enabled: false\n');
-  // A stopped Claude Code ferret with a three-turn conversation in the harness's pool.
-  await mkdir(path.join(home, 'state/ferrets/F1'), { recursive: true });
-  await writeFile(
-    path.join(home, 'state/ferrets/F1/ferret.json'),
-    JSON.stringify({
-      format: 1,
-      id: 'F1',
-      name: 'fork-source',
-      role: 'lead',
-      mode: 'interactive',
-      harness: 'claude-code',
-      runner: 'tmux',
-      folder: project,
-      state: 'stopped',
-      birth: 'person',
-      createdAt: STAMP,
-      stateAt: STAMP,
-    }),
-  );
-  const agentHome = path.join(home, 'state/claude-code/agent-homes/F1');
-  await mkdir(agentHome, { recursive: true });
-  await writeFile(
-    path.join(agentHome, 'conversation.json'),
-    JSON.stringify({ format: 1, id: SOURCE_CONVERSATION, cwd: project }),
-  );
-  // A pooled home reads its transcripts through its `projects` link to the shared pool, as a prepared home does.
-  await symlink(pool('projects'), path.join(agentHome, 'projects'));
-  await mkdir(path.dirname(sourceFile()), { recursive: true });
-  const records = [1, 2, 3].flatMap(n => [prompt(n), answer(n)]);
-  await writeFile(sourceFile(), `${records.map(r => JSON.stringify(r)).join('\n')}\n`);
+  // A stopped Claude Code ferret, and one that is working right now, each with a three-turn conversation in the harness's pool.
+  await seedFerret('F1', 'fork-source', 'stopped', SOURCE_CONVERSATION);
+  await seedFerret('F2', 'fork-working', 'working', WORKING_CONVERSATION);
   for (const folder of [
     '',
     'state',
@@ -200,6 +206,13 @@ describe('session fork over a real daemon (SIT)', () => {
     ]);
     const latest = messages.find(message => message.text === 'question 3');
     if (latest === undefined) throw new Error('the fixture has the third question');
+    // The chat names a row by the byte its record begins at (the log page's offsets); the picker finds the same message by the
+    // byte its point begins at, so a clicked row is forked even when other rows say the same words.
+    const log = await call('GET', '/v1/ferrets/F1/log-page');
+    expect(log.status, log.text).toBe(200);
+    const offsets = log.json().offsets as number[];
+    for (const message of messages.filter(each => each.role === 'user'))
+      expect(offsets, `the log has a row at ${message.point}`).toContain(Number(message.point.split('.')[0]));
     const before = await readFile(sourceFile());
     const files = await poolFiles();
 
@@ -232,5 +245,26 @@ describe('session fork over a real daemon (SIT)', () => {
     expect(forked.status, forked.text).toBe(409);
     expect(forked.json().code).toBe('fork_start_failed');
     expect(String(forked.json().error)).toContain(`The forked conversation ${path.basename(fresh, '.jsonl')} was kept`);
+  });
+
+  it('refuses a ferret that is working right now before anything is cut', async () => {
+    const page = await call('GET', '/v1/ferrets/F2/messages?tail=1');
+    expect(page.status, `${page.text}\n${logs.slice(-1500)}`).toBe(200);
+    const messages = page.json().messages as { point: string; text: string; selectionBinding: string }[];
+    const latest = messages.find(message => message.text === 'question 3');
+    if (latest === undefined) throw new Error('the fixture has the third question');
+    const before = await readFile(sourceFile(WORKING_CONVERSATION));
+    const files = await poolFiles();
+
+    const forked = await call('POST', '/v1/ferrets/F2/fork', {
+      point: latest.point,
+      selectionBinding: latest.selectionBinding,
+    });
+
+    expect(forked.status, `${forked.text}\n${logs.slice(-1500)}`).toBe(409);
+    expect(forked.json().code).toBe('fork_running');
+    expect(String(forked.json().error)).toContain('working');
+    expect(await poolFiles()).toEqual(files);
+    expect(await readFile(sourceFile(WORKING_CONVERSATION))).toEqual(before);
   });
 });
