@@ -18,11 +18,12 @@ import type { AnalyticsUsageRefusal } from './turn-fold.ts';
  * version it does not recognise and rebuilds it. A migration here would be a second, hand-maintained
  * definition of a shape that one re-ingestion pass reproduces exactly.
  *
- * It is `4` because the row gained ACTIVE time (`active_duration_ms`), folded from transcript record
- * timestamps. Every stored row must be re-folded to answer it, which is exactly what the version-driven
- * drop-and-rebuild does; the version is also in every ingest signature, so no stale row survives.
+ * It is `5` because the row gained the ferret's PURPOSE (`purpose`, read from its start options); `4` added ACTIVE
+ * time (`active_duration_ms`), folded from transcript record timestamps. Every stored row must be re-folded to
+ * answer it, which is exactly what the version-driven drop-and-rebuild does; the version is also in every ingest
+ * signature, so no stale row survives.
  */
-export const ANALYTICS_INDEX_SCHEMA_VERSION = 4;
+export const ANALYTICS_INDEX_SCHEMA_VERSION = 5;
 
 /**
  * One session as the analytics index holds it.
@@ -199,6 +200,7 @@ export interface AnalyticsSignedEvidence {
   readonly label?: string | null;
   readonly cwd?: string | null;
   readonly parent?: string | null;
+  readonly purpose?: string | null;
   readonly startedAt?: string | null;
   readonly turns?: number | null;
   readonly contextEndPercent?: number | null;
@@ -234,6 +236,7 @@ export function analyticsIngestSignature(evidence: AnalyticsSignedEvidence, pric
     evidence.label,
     evidence.cwd,
     evidence.parent,
+    evidence.purpose,
     evidence.startedAt,
     evidence.turns,
     evidence.contextEndPercent,

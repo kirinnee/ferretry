@@ -45,6 +45,7 @@ const ANALYTICS_STORED_RATE_UNIT_SCHEMA = z.literal('million_tokens');
 interface SessionRow {
   readonly id: string;
   readonly agent: string | null;
+  readonly purpose: string | null;
   readonly model: string | null;
   readonly context_window: number | null;
   readonly harness: string | null;
@@ -263,6 +264,7 @@ function storedFromRow(row: SessionRow): AnalyticsStoredSession {
       cwd: row.cwd,
       parent: row.parent,
       tree: row.tree,
+      purpose: row.purpose,
       day: row.day,
       week: row.week,
       createdAt: row.created_at,
@@ -396,6 +398,7 @@ function configure(database: SqliteHandle): void {
         cwd TEXT,
         parent TEXT,
         tree TEXT,
+        purpose TEXT,
         day TEXT,
         week TEXT,
         created_at TEXT,

@@ -58,6 +58,10 @@ export default fragment({
         },
         { flag: '--label <label>', help: 'ownership label; filter later with `ps --label`' },
         {
+          flag: '--purpose <purpose>',
+          help: 'what it is for: comms, review, planning, implementation or other; Usage groups spend by it',
+        },
+        {
           flag: '--task <id>',
           help: 'an existing task it takes over (assigned to it; no second task is made); needs a prompt',
         },
@@ -137,6 +141,10 @@ export default fragment({
           help: 'start it as a helper under this ferret (defaults to the ferret that runs this)',
         },
         { flag: '--label <label>', help: 'ownership label; filter later with `ps --label`' },
+        {
+          flag: '--purpose <purpose>',
+          help: 'what it is for: comms, review, planning, implementation or other; Usage groups spend by it',
+        },
         {
           flag: '--task <id>',
           help: 'an existing task it takes over (assigned to it; no second task is made); needs a prompt',
