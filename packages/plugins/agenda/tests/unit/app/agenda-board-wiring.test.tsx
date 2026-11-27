@@ -19,6 +19,7 @@ import {
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ComponentType, Suspense } from 'react';
 import app from '../../../app/index.ts';
+import { answerReceipts } from '../../../app/lib/answer-receipts.ts';
 import manifest from '../../../manifest.ts';
 import {
   AGENDA_TASK_ANSWER_HOOK,
@@ -74,6 +75,7 @@ let view: Mounted | null = null;
 afterEach(async () => {
   await view?.unmount();
   view = null;
+  answerReceipts.update(() => ({ pending: [], sending: [], failed: [] }));
   window.innerWidth = WIDTH;
   window.history.replaceState({}, '', '/');
 });
@@ -86,6 +88,8 @@ const drawn = async (
   provided: Provided,
   ready: (root: HTMLElement) => boolean,
 ): Promise<HTMLElement> => {
+  // Each scripted client is a fresh device; route changes within ONE device are covered by pending-answer-routes.
+  answerReceipts.update(() => ({ pending: [], sending: [], failed: [] }));
   // A phone: the opened ask is the deck's task, with its answer row.
   window.innerWidth = 400;
   const half = app.build?.({ manifest, client: daemon(items) });
@@ -138,7 +142,12 @@ const doneCalls = (calls: readonly string[]) => calls.filter(call => call.starts
 for (const surface of ['screen', 'ask'] as const) {
   describe(`the ${surface === 'ask' ? 'agenda-ask' : 'agenda'} screen`, () => {
     const ask = (items: readonly AgendaItem[], provided: Provided, ready: (root: HTMLElement) => boolean) =>
-      drawn(surface, items, provided, node => node.querySelector('[data-agenda-row]') !== null).then(async root => {
+      drawn(
+        surface,
+        items,
+        provided,
+        node => node.querySelector('[data-agenda-row], [data-agenda-view]') !== null,
+      ).then(async root => {
         await opened(root, ready);
         return root;
       });

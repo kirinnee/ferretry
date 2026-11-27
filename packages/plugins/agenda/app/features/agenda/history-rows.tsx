@@ -120,7 +120,10 @@ function MessageFoot({
       </div>
     );
   }
-  const sent = clock === undefined ? undefined : `sent ${clock.full}`;
+  const sent =
+    clock === undefined
+      ? undefined
+      : `${receipt.kind === 'saved' || receipt.kind === 'failed' ? 'written' : 'sent'} ${clock.full}`;
   return (
     <>
       <div className="fy-receipt-line" data-message-footer="" data-side={side}>
