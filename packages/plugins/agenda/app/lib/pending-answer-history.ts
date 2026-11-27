@@ -79,7 +79,11 @@ export const pendingAnswerEvents = (
     refused: boolean,
   ): readonly HistoryEvent[] => {
     // A snooze is no answer; and an answer the item already records is the echo of this one.
-    if (entry.action.kind === 'snooze' || entry.action.kind === 'unsnooze' || itemHoldsAnswer(item, entry.action))
+    if (
+      entry.action.kind === 'snooze' ||
+      entry.action.kind === 'unsnooze' ||
+      (!refused && itemHoldsAnswer(item, entry.action))
+    )
       return [];
     const form = formOf(entry.action);
     const note = noteOf(entry.action);

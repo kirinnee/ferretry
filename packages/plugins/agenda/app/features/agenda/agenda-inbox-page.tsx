@@ -79,6 +79,7 @@ import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory, withDeviceEvents } from '../../lib/agenda-history.ts';
 import { pendingAnswerEvents } from '../../lib/pending-answer-history.ts';
+import { inboxOpenCard } from '../../lib/inbox-open-card.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -1537,8 +1538,11 @@ export function AgendaInboxPage({
   const repliedShown = filterInboxCards(replied, listFilter);
   const parkedCounts = { snoozed: snoozedShown.length, replied: repliedShown.length };
 
-  // The deck deals what waits on the owner, in the order the page lists it: the agenda items and their task asks.
-  const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
+  // A link opens its item even after answering removed it from the queue.
+  const openCard = inboxOpenCard(inbox, open);
+  const queue = groupCards([...sections.stopped, ...sections.needsYou]);
+  const deckCards =
+    openCard === undefined || queue.some(card => card.key === openCard.key) ? queue : [openCard, ...queue];
   const order = deckCards.map(card => card.key);
   const runOrder = order;
   // j/k walk the rows that are showing: the owner's sections, and With ferrets only once it is open.
@@ -1651,12 +1655,6 @@ export function AgendaInboxPage({
   const openedFor = useRef<string | null>(null);
   const wantedKey = open === null ? null : `${open.daemonId}\u0000${open.sessionId}\u0000${open.id}`;
   const openSettled = open?.settled === true;
-  const openCard =
-    open === null
-      ? undefined
-      : inbox.cards.find(
-          card => card.daemonId === open.daemonId && card.view.config.id === open.sessionId && card.item.id === open.id,
-        );
   const openCardKey = openCard?.key;
   const openRecord =
     open === null || !isMachineAgendaId(open.sessionId)

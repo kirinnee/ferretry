@@ -17,6 +17,7 @@ import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.t
 import { useItemOpened } from '../hooks/use-item-opened.tsx';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
+import { inboxTargetFromSearch } from '../lib/agenda-inbox.ts';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
 import type { AgendaFleet } from '../lib/agenda-fleet.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
@@ -62,7 +63,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
                   ? null
                   : {
                       daemonId: daemon,
-                      sessionId: MACHINE_AGENDA_ID,
+                      sessionId: inboxTargetFromSearch(window.location.search)?.sessionId ?? MACHINE_AGENDA_ID,
                       id: asked.target,
                       settled: inbox.settled === true,
                     }

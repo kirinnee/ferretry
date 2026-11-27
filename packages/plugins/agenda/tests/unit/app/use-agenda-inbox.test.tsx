@@ -1,4 +1,4 @@
-import { type SessionAgendaSummary } from '../../../contract/wire.ts';
+import type { SessionAgendaSummary } from '../../../contract/wire.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaItem, AgendaSnapshot } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../../../app/shell.ts';
@@ -10,7 +10,7 @@ import {
 } from '../../../app/hooks/use-agenda-inbox.ts';
 import type { DaemonAgendaClient } from '../../../app/lib/agenda-client.ts';
 import { type DeferredTimers, DISMISS_ACTION } from '../../../app/lib/agenda-inbox.ts';
-import { AnswerReceipts } from '../../../app/lib/answer-receipts.ts';
+import { AnswerReceipts, answerReceipts } from '../../../app/lib/answer-receipts.ts';
 import { pendingAnswerEvents } from '../../../app/lib/pending-answer-history.ts';
 import { DaemonAgendaStore } from '../../../app/lib/agenda-store.ts';
 import { AgendaRollupStore } from '../../../app/lib/agenda-rollup.ts';
@@ -150,6 +150,8 @@ let view: Mounted | null = null;
 afterEach(async () => {
   await view?.unmount();
   view = null;
+  // Navigation keeps held receipts; each synthetic device starts with its own empty outbox.
+  answerReceipts.update(() => ({ pending: [], sending: [], failed: [] }));
 });
 
 function Probe({

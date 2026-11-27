@@ -14,7 +14,7 @@
  * key is `(daemonId, sessionId, itemId)`: two machines' `A3` in two same-named sessions are unrelated.
  */
 
-import { type SessionAgendaSummary } from '../../contract/wire.ts';
+import type { SessionAgendaSummary } from '../../contract/wire.ts';
 import { agendaAskPath } from '../../contract/wire.ts';
 import {
   type AgendaBrief,
@@ -720,12 +720,12 @@ export class DeferredAgendaActions {
     );
   }
 
-  /** One send is over: ITS receipt goes, and only its. A refusal replaces the task's earlier refusal. */
+  /** One send is over: ITS receipt goes, and only its. Every refusal keeps its own send identity. */
   #settle(id: string, failure: FailedAgendaAction | null): void {
     this.receipts.update(state => ({
       ...state,
       sending: state.sending.filter(sending => sending.id !== id),
-      failed: failure === null ? state.failed : [...state.failed.filter(f => f.key !== failure.key), failure],
+      failed: failure === null ? state.failed : [...state.failed.filter(f => f.id !== id), failure],
     }));
   }
 

@@ -194,6 +194,20 @@ describe('the machine’s echo is told by WHAT it says and to WHICH ask, never b
     expect(conversation(deferred, echoed)).toEqual([]);
   });
 
+  test('a recorded Ship never hides a separately refused Ship to the same ask', async () => {
+    const { timers, advance } = fakeTimers();
+    const deferred = new DeferredAgendaActions(async () => {
+      throw new Error('Offline');
+    }, timers);
+    deferred.schedule(card(), SHIP);
+    advance(UNDO_WINDOW_MS);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(conversation(deferred, item(asOwnerAnswer(SHIP, new Date(999).toISOString())))).toEqual([
+      { text: 'Ship', via: 'device', refused: true },
+    ]);
+  });
+
   test('the matching echo, stamped long before this device’s clock, is still the echo', () => {
     const deferred = sending();
     expect(conversation(deferred, item(asOwnerAnswer(SHIP, '2020-01-01T00:00:00.000Z')))).toEqual([]);
@@ -265,6 +279,22 @@ describe('a receipt is per SEND, so settling one never takes another’s', () =>
     commits[1]?.resolve();
     await settled();
     expect(sent(deferred)).toEqual(['Ship']);
+  });
+
+  test('rejecting Hold then the older Ship keeps both independent failures and reasons', async () => {
+    const { deferred, commits } = twoSends();
+    commits[1]?.reject(new Error('Hold refused'));
+    await settled();
+    commits[0]?.reject(new Error('Ship offline'));
+    await settled();
+    expect(deferred.getSnapshot().failed.map(entry => [entry.action.label, entry.message])).toEqual([
+      ['Hold', 'Hold refused'],
+      ['Ship', 'Ship offline'],
+    ]);
+    expect(conversation(deferred)).toEqual([
+      { text: 'Ship', via: 'device', refused: true },
+      { text: 'Hold', via: 'device', refused: true },
+    ]);
   });
 
   test('a refusal of the first keeps its Not sent while the second is still on its way', async () => {

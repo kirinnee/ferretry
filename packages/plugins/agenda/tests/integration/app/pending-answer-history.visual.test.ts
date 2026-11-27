@@ -1,7 +1,7 @@
 /**
  * AN ANSWER GIVEN IN THE REAL INBOX IS SAID IN THE ITEM'S CONVERSATION, in a real browser, at 390 and 1440, light and dark, at
- * the default and the highest rounding: the real Inbox page answers and Undoes; the real chat item view (no Inbox above it)
- * says the answer while it is sent and "Not sent" when the machine refuses it, and the Inbox opens on it again. Fake data only.
+ * the default and the highest rounding: the built Inbox and chat-line ask route reopen the item DURING the undo hold.
+ * Undo removes the line; waiting out the actual hold and accepting the send leaves exactly one line. Fake daemon only.
  *
  * Set `FY_PENDING_ANSWER_SHOTS_DIR` to keep `<viewport>-<scheme>-<rounding>-<step>.png`.
  */
@@ -74,13 +74,14 @@ beforeAll(async () => {
   const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style><style>${SCENE_CSS}${FONT_CSS}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
   server = Bun.serve({
     hostname: '127.0.0.1',
-    port: 0,
+    port: 7488,
     fetch: request => {
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
       if (path === '/shot-font.ttf' && fontFile !== '')
         return new Response(Bun.file(fontFile), { headers: { 'content-type': 'font/ttf' } });
-      if (path === '/') return new Response(page, { headers: { 'content-type': 'text/html' } });
+      if (path === '/' || path.startsWith('/d/'))
+        return new Response(page, { headers: { 'content-type': 'text/html' } });
       return new Response('not here', { status: 404 });
     },
   });
@@ -109,7 +110,7 @@ describe('an answer given in the real Inbox, in the item conversation', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)
       for (const rounding of ['default', 'highest'] as const)
-        it(`is said at once, leaves with Undo, stays while sent and says Not sent (${viewport.name}, ${scheme}, ${rounding})`, async () => {
+        it(`is held in both real routes, leaves with Undo and echoes once after send (${viewport.name}, ${scheme}, ${rounding})`, async () => {
           const context = await browser.newContext({
             viewport: { width: viewport.width, height: viewport.height },
             colorScheme: scheme,
@@ -123,11 +124,13 @@ describe('an answer given in the real Inbox, in the item conversation', () => {
             new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
           );
           const tab = await context.newPage();
+          await tab.clock.install();
           const settle = (): Promise<void> =>
             tab.evaluate(
               () => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))),
             );
-          const shoot = async (step: string): Promise<void> => {
+          const shoot = async (step: string, refused = false): Promise<void> => {
+            if (!refused) expect(await tab.textContent('body'), 'clean reads').not.toContain('Not sent:');
             await tab.evaluate(() =>
               document.querySelector('[data-agenda-history]')?.scrollIntoView({ block: 'center' }),
             );
@@ -135,15 +138,8 @@ describe('an answer given in the real Inbox, in the item conversation', () => {
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${rounding}-${step}.png`) });
           };
-          const go = async (where: 'inbox' | 'chat'): Promise<void> => {
-            await tab.evaluate(name => {
-              window.location.hash = name;
-            }, where);
-            await tab.waitForSelector(
-              where === 'chat'
-                ? '[data-scene-chat] [data-agenda-view]'
-                : '[data-agenda-inbox], [data-agenda-view]:not([data-scene-chat] *)',
-            );
+          const go = async (where: string): Promise<void> => {
+            await tab.evaluate(path => window.scene.go(path), where);
             await settle();
           };
           const openConversation = async (): Promise<void> => {
@@ -151,8 +147,9 @@ describe('an answer given in the real Inbox, in the item conversation', () => {
             if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click();
           };
           try {
-            await tab.goto(`${origin}/?theme=studio-${scheme}#inbox`);
-            await tab.waitForSelector('[data-agenda-option="Ship"]');
+            await tab.goto(`${origin}/d/this/agenda?theme=studio-${scheme}`);
+            await tab.waitForSelector('[data-agenda-row*="A2"]');
+            await tab.click('[data-agenda-row*="A2"]');
             if (rounding === 'highest')
               await tab.evaluate(names => {
                 for (const name of names)
@@ -160,34 +157,95 @@ describe('an answer given in the real Inbox, in the item conversation', () => {
               }, RADII);
             await tab.evaluate(async () => document.fonts.ready);
 
-            // The owner answers on the Inbox's own chip, then takes it back with the toast's own Undo.
-            await tab.click('[data-agenda-option="Ship"]');
+            // Answer, then REOPEN through the real Inbox while still held. No flush, substitute view or fake action.
+            await tab.click('.fy-attn-deck__top [data-agenda-option="Ship"]');
             await tab.waitForSelector('[data-agenda-undo-button]');
-            await tab.click('[data-agenda-undo-button]');
-            await go('chat');
-            expect(await tab.$('[data-agenda-history]'), 'Undo left nothing to say in the chat').toBeNull();
-            await go('inbox');
-
-            // Answers again, and leaves the Inbox: the answer is on its way, and the chat says it.
-            await tab.click('[data-agenda-option="Ship"]');
-            await go('chat');
+            await go('/d/this/agenda?ask=A2&session=sess-1');
+            await tab.waitForTimeout(450);
+            expect(await tab.evaluate(() => window.scene.state().pending.length)).toBe(1);
+            expect(await tab.evaluate(() => window.scene.commitCount())).toBe(0);
+            expect(await tab.getAttribute('.fy-attn-deck__top [data-agenda-view]', 'data-agenda-view')).toBe('A2');
             await openConversation();
-            expect(await owned(tab), 'the chat says the answer while it is sent').toEqual(['Ship|saved']);
+            expect(await owned(tab)).toEqual(['Ship|saved']);
+            await shoot('inbox-held');
+
+            // The REAL chat line's row goes through its ask screen, then normalizes to Inbox with the SAME item.
+            await go('/d/this/session/sess-1');
+            await tab.click('[data-agenda-line-toggle]');
+            await tab.click('[data-agenda-row="A2"]');
+            await tab.waitForURL('**/agenda?ask=A2&session=sess-1');
+            await tab.waitForTimeout(450);
+            expect(await tab.evaluate(() => window.scene.state().pending.length)).toBe(1);
+            expect(await tab.evaluate(() => window.scene.commitCount())).toBe(0);
+            await openConversation();
+            expect(await owned(tab)).toEqual(['Ship|saved']);
+            await shoot('chat-route-held');
+            await tab.click('[data-agenda-undo-button]');
+            expect(await owned(tab), 'Undo left nothing said').toEqual([]);
+            expect(await tab.evaluate(() => window.scene.commitCount())).toBe(0);
+
+            // Answer again and let the REAL timer send; the line remains through send and the matching echo.
+            await tab.click('.fy-attn-deck__top [data-agenda-option="Ship"]');
+            await openConversation();
+            expect(await owned(tab)).toEqual(['Ship|saved']);
+            await tab.clock.fastForward(5_001);
+            await tab.waitForFunction(() => window.scene.state().sending.length === 1);
+            expect(await owned(tab)).toEqual(['Ship|saved']);
             const overflow = await tab.evaluate(
               () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
             );
             expect(overflow, 'nothing scrolls sideways').toBeLessThanOrEqual(0);
-            await shoot('chat-sending');
+            await tab.evaluate(() => window.scene.accept());
+            await tab.waitForFunction(() => window.scene.state().sending.length === 0);
+            expect(
+              (await owned(tab)).map(row => row.split('|')[0]),
+              'the echo draws exactly once',
+            ).toEqual(['Ship']);
+            await shoot('inbox-sent');
 
-            // The machine refuses it: the chat says so, and the Inbox opens on it, not on nothing.
-            await tab.evaluate(() => window.scene.refuse('The ask was replaced.'));
-            await tab.waitForSelector('[data-history="owner"] [data-send-receipt="failed"]');
-            expect(await owned(tab)).toEqual(['Ship|failed']);
-            await shoot('chat-not-sent');
-            await go('inbox');
+            // R2: the recorded Ship belongs to a DIFFERENT send. A refused Ship must still be visible.
+            await tab.click('.fy-attn-deck__top [data-agenda-option="Ship"]');
+            await tab.clock.fastForward(5_001);
+            await tab.waitForFunction(() => window.scene.state().sending.length === 1);
+            await tab.evaluate(() => window.scene.refuse('Offline'));
+            await tab.waitForFunction(() => window.scene.state().failed.length === 1);
+            await go('/d/this/agenda?ask=A2&session=sess-1');
             await openConversation();
-            expect(await owned(tab), 'the Inbox says Not sent too').toEqual(['Ship|failed']);
-            await shoot('inbox-not-sent');
+            expect((await owned(tab)).filter(row => row === 'Ship|failed')).toHaveLength(1);
+            await go('/d/this/session/sess-1');
+            await tab.click('[data-agenda-line-toggle]');
+            await tab.click('[data-agenda-row="A2"]');
+            await tab.waitForURL('**/agenda?ask=A2&session=sess-1');
+            await openConversation();
+            expect((await owned(tab)).filter(row => row === 'Ship|failed')).toHaveLength(1);
+            await shoot('inbox-refused-echo', true);
+
+            // R3: independent promises, newer Hold refuses first, then the older Ship. BOTH receipts survive.
+            await tab.click('.fy-attn-deck__top [data-agenda-option="Ship"]');
+            await tab.clock.fastForward(5_001);
+            await tab.waitForFunction(() => window.scene.state().sending.length === 1);
+            await tab.click('.fy-attn-deck__top [data-agenda-option="Hold"]');
+            await tab.clock.fastForward(5_001);
+            await tab.waitForFunction(() => window.scene.state().sending.length === 2);
+            await tab.evaluate(() => window.scene.refuseAt(1, 'Hold refused'));
+            await tab.waitForFunction(() => window.scene.state().failed.length === 1);
+            await tab.evaluate(() => window.scene.refuseAt(0, 'Ship offline'));
+            await tab.waitForFunction(() => window.scene.state().failed.length === 2);
+            const refusals = async (): Promise<string[]> =>
+              (await owned(tab)).filter(row => row.endsWith('|failed')).sort();
+            await go('/d/this/agenda?ask=A2&session=sess-1');
+            await openConversation();
+            expect(await refusals()).toEqual(['Hold|failed', 'Ship|failed']);
+            await go('/d/this/session/sess-1');
+            await tab.click('[data-agenda-line-toggle]');
+            await tab.click('[data-agenda-row="A2"]');
+            await tab.waitForURL('**/agenda?ask=A2&session=sess-1');
+            await openConversation();
+            expect(await refusals()).toEqual(['Hold|failed', 'Ship|failed']);
+            const history = await tab.textContent('[data-agenda-history]');
+            expect(history).toContain('Hold refused');
+            expect(history).toContain('Ship offline');
+            await shoot('inbox-independent-refusals', true);
           } finally {
             await context.close();
           }

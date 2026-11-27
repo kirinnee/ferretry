@@ -53,6 +53,7 @@ import {
   withRepliedParked,
 } from '../lib/agenda-replied.ts';
 import { type AnswerReceipts, answerReceipts } from '../lib/answer-receipts.ts';
+import { watchAnswerPage } from '../lib/answer-page-lifecycle.ts';
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import { answeredSuggestions } from '../lib/answered-suggestions.ts';
 import { ruleClientOf } from '../lib/rule-client.ts';
@@ -248,20 +249,7 @@ export function useAgendaInboxModel(
   // An answer the reader gave is sent, not dropped, when the page goes away. A phone does not always fire
   // `pagehide` when the reader swipes to another app — it hides the page and may kill it later — so the page
   // going hidden flushes too: otherwise an answer still inside its undo window dies with the process.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const flush = (): void => deferred.flush();
-    const flushWhenHidden = (): void => {
-      if (document.visibilityState === 'hidden') deferred.flush();
-    };
-    window.addEventListener('pagehide', flush);
-    document.addEventListener('visibilitychange', flushWhenHidden);
-    return () => {
-      window.removeEventListener('pagehide', flush);
-      document.removeEventListener('visibilitychange', flushWhenHidden);
-      deferred.flush();
-    };
-  }, [deferred]);
+  useEffect(() => watchAnswerPage(deferred), [deferred]);
   const deferredState = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot, deferred.getSnapshot);
   const withdrawRef = useRef(withdraw);
   withdrawRef.current = withdraw;
