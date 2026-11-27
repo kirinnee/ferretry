@@ -24,13 +24,15 @@
  */
 
 import { type ApiRequest, type ApiResponse, jsonResponse } from '../../contract/http.ts';
+import { SessionEnding } from './ending.ts';
+import { askHolder, instant, transcriptKey } from './credentials.ts';
+export { transcriptKey } from './credentials.ts';
 import type { CarrierKey, SessionId } from '../../contract/ids.ts';
 import type { Clock, Log } from '../../contract/ports.ts';
 import type {
   CarrierLink,
   CarrierPeer,
   HolderWatch,
-  ModeHolder,
   ModeProof,
   ModeRedeemed,
   SealedFrame,
@@ -46,7 +48,7 @@ import {
   type SocketHandler,
   type SocketUpgradeDecision,
 } from '../../contract/socket.ts';
-import { instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { milliseconds } from '@ferretry/std';
 import {
   answerClientHandshake,
   answerRecords,
@@ -378,9 +380,7 @@ class SealedSession implements CarrierLink {
   #credentialDeadline: (() => void) | undefined;
   /** The session has an outcome and ends once that outcome has actually been handed over. */
   #owesConclusion = false;
-  #end: SessionEnd | undefined;
-  #endPending = false;
-  #endFrame: SealedFrame | undefined;
+  #end: SessionEnding | undefined;
   /** The peer went away: nothing more is pulled or delivered. */
   #gone = false;
   /** Serialises inbound frames: frame `n+1` is never opened before frame `n` is handled. */
@@ -415,7 +415,7 @@ class SealedSession implements CarrierLink {
     refusal.atOpen(this.deps.log, this.carrier, code, reason);
     this.layer.lastRefusal = `session ${code}: ${reason}`;
     this.#phase = 'concluding';
-    this.#end = { code, reason };
+    this.#end = new SessionEnding({ code, reason }, undefined, this.deps.crypto);
   }
 
   /**
@@ -450,7 +450,11 @@ class SealedSession implements CarrierLink {
     if (this.#gone) return;
     this.#gone = true;
     this.#forget();
-    this.#end ??= { code: SESSION_CLOSE_CODES.protocolError, reason: 'the peer went away' };
+    this.#end ??= new SessionEnding(
+      { code: SESSION_CLOSE_CODES.protocolError, reason: 'the peer went away' },
+      undefined,
+      this.deps.crypto,
+    );
     this.layer.sessions.delete(this);
   }
 
@@ -464,13 +468,8 @@ class SealedSession implements CarrierLink {
    * never spent (the channel's send counter advances only here), and the session ends.
    */
   #next(): SealedFrame | SessionEnd | undefined {
-    if (this.#gone) return this.#end;
-    if (this.#end !== undefined) {
-      if (this.#endPending) return undefined;
-      const frame = this.#endFrame;
-      this.#endFrame = undefined;
-      return frame ?? this.#end;
-    }
+    if (this.#gone) return this.#end?.carrier;
+    if (this.#end !== undefined) return this.#end.next();
     const plain = this.#plain.shift();
     if (plain !== undefined) return plain;
     const sealed = this.#sealed;
@@ -1368,34 +1367,14 @@ class SealedSession implements CarrierLink {
   #finish(end: SessionEnd): void {
     const channel = this.#channel;
     this.#forget();
-    this.#end =
-      channel === undefined
-        ? end
-        : {
-            code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
-            reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON,
-          };
+    this.#end = new SessionEnding(end, channel, this.deps.crypto);
     this.layer.sessions.delete(this);
-    if (channel !== undefined && maySend(this.#send)) {
-      this.#endPending = true;
-      this.connection.outbox = this.connection.outbox
-        .then(async () => {
-          try {
-            if (this.#gone) return;
-            const sealed = await sealRecord(
-              this.deps.crypto,
-              channel,
-              encodeDaemonRecord({ t: 'session-end', protocol: SESSION_PROTOCOL_ID, ...end }),
-            );
-            if (sealed.ok && !this.#gone)
-              this.#endFrame = { sequence: sealed.frame.sequence, bytes: encodeFrame(sealed.frame) };
-          } finally {
-            this.#endPending = false;
-            this.#ready();
-          }
-        })
-        .catch(() => undefined);
-    }
+    this.connection.outbox = this.#end.sealAfter(
+      this.connection.outbox,
+      maySend(this.#send),
+      () => this.#gone,
+      () => this.#ready(),
+    );
     this.#ready();
   }
 
@@ -1518,25 +1497,4 @@ class SealedSession implements CarrierLink {
       this.#settle();
     });
   }
-}
-
-async function askHolder(mode: SessionMode | undefined, proof: ModeProof): Promise<ModeHolder | undefined> {
-  if (mode?.holder === undefined) return undefined;
-  try {
-    return await mode.holder(proof);
-  } catch {
-    return undefined;
-  }
-}
-
-function instant(ms: number): SessionPrincipal['leaseUntil'] {
-  return instantFromEpochMs(ms);
-}
-
-/**
- * A session's name: its transcript hash, hex. Unique per session and public to both ends, so it names one
- * without being a secret. It is the {@link SessionId} a principal carries.
- */
-export function transcriptKey(transcript: Uint8Array): string {
-  return [...transcript].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
