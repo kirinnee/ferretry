@@ -966,7 +966,15 @@ describe('materialiseFleet', () => {
       );
       should(autoBlockOf(wrapper)).containEql('exit 1').and.not.containEql('exec claude');
       should(interactivePart(wrapper)).containEql('exec claude').and.not.containEql('cannot start');
-      should(result.manifest.accounts[0]).match({ available: false, mode: 'auto' });
+      // E-245: the runtime stays available for every other mode; only the auto launch carries the refusal.
+      should(result.manifest.accounts[0]).match({
+        available: true,
+        unavailableReason: null,
+      });
+      should(result.manifest.accounts[0]?.autoRefusal).startWith(
+        'Claude Code on this machine does not accept Auto mode',
+      );
+      should(result.manifest.accounts[1]?.autoRefusal).be.undefined();
       // Codex is unaffected by what Claude accepts.
       should(wrapperOf(result, 'codex-agent')).containEql('exec codex');
     });

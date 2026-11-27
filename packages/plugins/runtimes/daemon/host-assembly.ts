@@ -215,6 +215,7 @@ export function launchFactsSource(
           return {
             kind: account.kind,
             ...(typeof account.compactAt === 'number' ? { compactAt: account.compactAt } : {}),
+            ...(account.autoRefusal === undefined ? {} : { autoRefusal: account.autoRefusal }),
             windows: {
               ...(account.defaultModel === null ? {} : { defaultModel: account.defaultModel }),
               models: account.models.map(model => ({
