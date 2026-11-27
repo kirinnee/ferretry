@@ -137,10 +137,10 @@ export function sourceFolders(records: readonly Json[], primary: string | undefi
     }
   };
   for (const record of records) walk(record);
-  return [...found]
+  const folders = [...found]
     .map(folder => folder.replace(/\/+$/u, ''))
-    .filter(folder => folder.startsWith('/') && folder.length > 1)
-    .sort((a, b) => b.length - a.length);
+    .filter(folder => folder.startsWith('/') && folder.length > 1);
+  return [...new Set(folders)].sort((a, b) => b.length - a.length);
 }
 
 /**
