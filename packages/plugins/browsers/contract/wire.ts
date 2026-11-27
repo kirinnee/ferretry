@@ -237,11 +237,24 @@ export type BrowserIdentityKey = z.infer<typeof BrowserIdentityKeySchema>;
 /** The built-in identity. Its profile folder is the one the machine's single agent browser has always used. */
 export const DEFAULT_BROWSER_IDENTITY: BrowserIdentityKey = 'agent';
 
+/** Which browser engine runs an identity. `chromium` is the only one; the field exists so a second is an addition, not a rewrite. */
+export const BrowserEngineSchema = z.literal('chromium');
+export type BrowserEngine = z.infer<typeof BrowserEngineSchema>;
+export const DEFAULT_BROWSER_ENGINE: BrowserEngine = 'chromium';
+/** Most identities whose Chrome may run at the same time, unless `maxRunning` says otherwise: a headful Chrome is heavy. */
+export const DEFAULT_MAX_RUNNING_IDENTITIES = 4;
+export const MAX_RUNNING_IDENTITIES_CEILING = 16;
+
 /**
- * An identity's own stealth entry. The only thing it can say is `stealth: false`, the opt-out: turning stealth ON is the
- * one machine-wide switch, so no identity can opt itself in on its own.
+ * An identity's own entry. `stealth: false` is the opt-out: turning stealth ON is the one machine-wide switch, so no
+ * identity can opt itself in on its own. `proxy` is the identity's own egress (the machine's proxy when absent), and
+ * `engine` its browser.
  */
-export const BrowserIdentitySettingSchema = z.strictObject({ stealth: z.literal(false).optional() });
+export const BrowserIdentitySettingSchema = z.strictObject({
+  stealth: z.literal(false).optional(),
+  engine: BrowserEngineSchema.optional(),
+  proxy: BrowserProxySettingSchema.optional(),
+});
 
 /** Whether stealth is in effect for one identity (`undefined`: the machine-wide answer, with no identity named). */
 export function stealthOn(config: Pick<BrowsersConfig, 'stealth' | 'identities'>, identity?: string): boolean {
@@ -278,6 +291,10 @@ export const CAPTCHA_SPEND_FILE = defineState({
 export const BrowsersConfigSchema = z.strictObject({
   mode: BrowserModeSchema.default('headless'),
   proxy: BrowserProxySettingSchema.optional(),
+  /** The engine every identity runs unless its own entry says otherwise (`chromium` when absent). */
+  engine: BrowserEngineSchema.optional(),
+  /** How many identities may have a Chrome running at once (4 when absent); one more is refused with a sentence naming the running ones. */
+  maxRunning: z.number().int().min(1).max(MAX_RUNNING_IDENTITIES_CEILING).optional(),
   /** The captcha solver, used only where stealth is in effect. Naming its key is held for the owner (it spends money). */
   captcha: BrowserCaptchaSettingSchema.optional(),
   /** The ONE stealth switch: `on` opts in every identity on this machine (except one that opted out). Off → on is held for the owner. */
