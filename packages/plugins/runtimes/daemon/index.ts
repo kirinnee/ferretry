@@ -57,6 +57,7 @@ import {
 import { organizationTypeOfAccountDocument } from './lib/account-organization-type.ts';
 import { loginOrganizationType } from './lib/login-organization-type.ts';
 import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
+import { supportedKindOfKey } from './lib/harness-kind.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
 import type { FleetCatalogService } from './lib/service/catalog-service.ts';
@@ -660,7 +661,13 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
                 logins: ctx.needs.logins,
                 // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.
                 catalog: facts.catalog,
-                autoRefusal: async runtime => (await launchFacts.facts(runtime))?.autoRefusal,
+                autoRefusal: async (runtime, harness) => {
+                  // Generic native harnesses publish no legacy wrapper account; their owner answers via Harness.
+                  if (supportedKindOfKey(harness) === undefined) return undefined;
+                  const found = await launchFacts.facts(runtime);
+                  if (found === undefined) throw new Error('the published runtime could not be checked');
+                  return found.autoRefusal;
+                },
               }),
             ),
           },

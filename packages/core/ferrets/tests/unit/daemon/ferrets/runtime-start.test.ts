@@ -130,6 +130,24 @@ function fixture(
 }
 
 describe('a start by runtime launches with the runtime’s login', () => {
+  test('E-245: an unreadable harness Auto capability refuses auto and leaves interactive admission unaffected', async () => {
+    const f = fixture(rt);
+    Object.assign(f.harness, {
+      autoLaunchRefusal: async () => {
+        throw new Error('capability unreadable');
+      },
+    });
+    const auto = await f.service.start({ folder: '/work', by: 'owner', runtime: 'rt' }, PERSON_ORIGIN);
+    expect(auto.ok).toBe(false);
+    expect(f.harness.launched).toEqual([]);
+    expect(f.registry.list()).toEqual([]);
+    startedId(
+      await f.service.start(
+        { folder: '/work', by: 'owner', runtime: 'rt', options: { mode: 'interactive' } },
+        PERSON_ORIGIN,
+      ),
+    );
+  });
   test('E-245: the launch’s own mode reaches the runtime answer, on a start and on the restart check (absent is auto)', async () => {
     const modes: (string | undefined)[] = [];
     const f = fixture(async (runtime, _harness, mode) => {

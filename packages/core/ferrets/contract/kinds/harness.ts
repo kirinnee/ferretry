@@ -334,6 +334,8 @@ export interface Harness {
   readonly runtime?: HarnessRuntimeDescriptor;
   /** Binary and version; never reads its sign-in files. */
   discover(): Promise<HarnessInstall | HarnessMissing>;
+  /** Why this host cannot honour an AUTO launch. Absent: no known refusal; rejection refuses AUTO only. */
+  autoLaunchRefusal?(): Promise<string | undefined>;
   update?(): Promise<UpdateResult>;
   /** Which login kinds it can spend. */
   readonly accepts: readonly LoginKindKey[];

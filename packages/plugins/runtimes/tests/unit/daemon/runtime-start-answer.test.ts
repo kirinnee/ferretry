@@ -54,7 +54,7 @@ describe('runtimeStartAnswer', () => {
       'cannot start an auto ferret: Claude Code does not accept Auto mode',
     );
   });
-  test('E-245: a refusal that cannot be read never refuses a launch (the wrapper still does)', async () => {
+  test('E-245: a refusal that cannot be read refuses auto only', async () => {
     const answer = runtimeStartAnswer({
       ...resolving(READY),
       logins: listing(OK),
@@ -63,7 +63,25 @@ describe('runtimeStartAnswer', () => {
       },
     });
 
-    expect(await answer.resolve('rt', undefined, 'auto')).toMatchObject({ ok: true });
+    expect(await answer.resolve('rt', undefined, 'auto')).toMatchObject({ ok: false });
+    expect(await answer.resolve('rt', undefined, 'interactive')).toMatchObject({ ok: true });
+    expect(await answer.resolve('rt')).toMatchObject({ ok: true });
+  });
+  test('E-245: the canonical resolved runtime is checked after a rename', async () => {
+    const asked: string[] = [];
+    const answer = runtimeStartAnswer({
+      ...resolving({
+        ...READY,
+        runtime: { ...(READY as Extract<ResolveResult, { ok: true }>).runtime, id: 'renamed' },
+      } as ResolveResult),
+      logins: listing(OK),
+      autoRefusal: async runtime => {
+        asked.push(runtime);
+        return runtime === 'renamed' ? 'wrapper refuses Auto' : undefined;
+      },
+    });
+    expect(await answer.resolve('rt', undefined, 'auto')).toMatchObject({ ok: false });
+    expect(asked).toEqual(['renamed']);
   });
   test('C-62: a default-runtime lookup that fails rejects, so Ferrets refuses instead of reading "no default"', async () => {
     const failing = runtimeStartAnswer({

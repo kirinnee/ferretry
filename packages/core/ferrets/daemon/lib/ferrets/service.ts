@@ -2838,6 +2838,17 @@ export class FerretsService implements FerretsApi {
         'refused',
         `runtime ${runtime} signs in with its own login, not ${asked.login}, so the ferret was not started`,
       );
+    if (mode === 'auto') {
+      try {
+        const refusal = await this.withinDeadline(
+          this.ports.harness(answer.harness)?.autoLaunchRefusal?.() ?? Promise.resolve(undefined),
+          'the harness auto launch could not be checked in time',
+        );
+        if (refusal !== undefined) return failed('refused', refusal);
+      } catch {
+        return failed('refused', 'the harness auto launch could not be checked, so the ferret was not started');
+      }
+    }
     return accountOf(answer, stored, reason => failed('refused', reason));
   }
 

@@ -35,9 +35,9 @@ export interface RuntimeStartAnswerDeps {
   readonly catalog?: RuntimesApi['catalog'];
   /**
    * Why an AUTO launch of the runtime NAMED is refused while every other mode is not (the published account's
-   * `autoRefusal`); `undefined` when none is or it cannot be read (the wrapper itself still refuses that launch).
+   * `autoRefusal`); `undefined` verifies no refusal. A failed lookup rejects and refuses AUTO only.
    */
-  readonly autoRefusal?: (runtime: string) => Promise<string | undefined>;
+  readonly autoRefusal?: (runtime: string, harness: string) => Promise<string | undefined>;
 }
 
 const REMEDY = 'run `fy runtimes` to see what can start, or fix it in Runtimes';
@@ -85,7 +85,16 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
     if (!spendable.ok)
       return { ok: false, sentence: `runtime ${id.data} was not started: ${spendable.sentence}; ${REMEDY}` };
     // Admission is per launch mode: a refusal that stops only an auto ferret never stops the others.
-    const autoRefusal = mode === 'auto' ? await deps.autoRefusal?.(id.data).catch(() => undefined) : undefined;
+    let autoRefusal: string | undefined;
+    try {
+      autoRefusal =
+        mode === 'auto' ? await deps.autoRefusal?.(resolved.runtime.id, resolved.runtime.harness) : undefined;
+    } catch {
+      return {
+        ok: false,
+        sentence: `runtime ${id.data} was not started: its auto launch could not be checked; ${REMEDY}`,
+      };
+    }
     if (autoRefusal !== undefined)
       return { ok: false, sentence: `runtime ${id.data} cannot start an auto ferret: ${autoRefusal}; ${REMEDY}` };
     return {
