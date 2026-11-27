@@ -108,6 +108,16 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
     const deadline = kernel.clock.nowMs() + 10_000;
     if ((await ok(['for-each-ref', '--format=%(refname)', 'refs/replace/'], 4096, deadline)).length > 0)
       throw new WorkingTreeError('replacement history cannot be verified safely for a move');
+    // Git applies clean/process filters while hashing working files, even with textconv/external diff off.
+    // No wildcard disables these repository-defined programs: refuse the repository before asking for a diff.
+    const filters = await git(['config', '--get-regexp', '^filter\\.'], 4096, deadline);
+    if (
+      filters.exitCode !== 1 ||
+      filters.stdout.length !== 0 ||
+      filters.stdoutTruncated ||
+      filters.stderr.trim() !== ''
+    )
+      throw new WorkingTreeError('repository content filters cannot be run safely for a move');
     const revisions = decoder
       .decode(await ok(['rev-list', '--max-count=513', head], 64 * 1024, deadline))
       .trim()

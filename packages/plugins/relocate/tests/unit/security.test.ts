@@ -255,3 +255,15 @@ test('MUST 1 tracked files with a second name outside the tree cannot enter a di
   await expect(w.relocation.export(FERRET, (await w.offer()).offer)).rejects.toThrow();
   expect(w.ferrets.calls).toEqual([]);
 });
+
+test('MUST 2 repository clean filters cannot execute while reading a tracked diff', async () => {
+  const w = await world();
+  const marker = join(w.fixture.folder, '.git', 'filter-ran');
+  const filter = join(w.fixture.folder, '.git', 'fixture-filter');
+  writeFileSync(filter, `#!/bin/sh\ntouch "${marker}"\ncat\n`, { mode: 0o700 });
+  writeFileSync(join(w.fixture.folder, '.gitattributes'), '*.txt filter=fixture\n');
+  git(w.fixture.folder, 'config', 'filter.fixture.clean', filter);
+  const view = await w.relocation.preflight(FERRET, w.targetIdentity.daemonId);
+  expect(existsSync(marker)).toBe(false);
+  expect(view.ok).toBe(false);
+});
