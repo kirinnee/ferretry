@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { HostHarnessScanner } from '../../../daemon/adapters/host-harness-scan.ts';
 import type { HostEntry, HostFiles } from '../../../daemon/adapters/ports.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 const CLAUDE_JSON = JSON.stringify({
   projects: { '/work/served': {}, '/work/served-without': {}, '/work/unserved': {}, '/work/odd-kind': {} },
@@ -35,7 +41,7 @@ const scanWith = async () => {
     list: async () => undefined,
   };
   const scanner = new HostHarnessScanner({
-    kits: () => new Map([['claude', claudeRuntimesKit]]),
+    kits: () => IMPORT_KITS,
     userHome: '/home',
     files,
     commands: { resolve: () => undefined },
@@ -91,7 +97,7 @@ describe('MCP commands the scan may not look at', () => {
       list: async () => undefined,
     };
     return await new HostHarnessScanner({
-      kits: () => new Map([['claude', claudeRuntimesKit]]),
+      kits: () => IMPORT_KITS,
       userHome: '/home',
       files,
       commands: { resolve: () => undefined },

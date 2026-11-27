@@ -38,7 +38,7 @@ async function put(file: string, content: string): Promise<void> {
 
 const scanner = (userHome: string, patch: Partial<HostHarnessScanDeps> = {}): HostHarnessScanner =>
   new HostHarnessScanner({
-    kits: () => new Map([['claude', claudeRuntimesKit]]),
+    kits: () => IMPORT_KITS,
     files: nodeHostFiles,
     userHome,
     commands: { resolve: name => (['claude', 'codex', 'npx'].includes(name) ? `/bin/${name}` : undefined) },
