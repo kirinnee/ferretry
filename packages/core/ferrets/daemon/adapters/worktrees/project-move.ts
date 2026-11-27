@@ -54,19 +54,24 @@ export class ProjectWorktreeMoves {
     private readonly projectHost: (project: string, commonDirectory?: string) => Promise<ProjectWorktreeHost>,
   ) {}
 
-  /** Settle only an already-authorized rename. This never asks Git to move, delete, copy or overwrite anything. */
-  async reconcile(host: WorktreeHostIo, commonDirectory: string): Promise<void> {
+  /** Settle an authorized rename, repairing its Git back-pointer if necessary; checkout files are never moved again. */
+  async reconcile(commonDirectory: string): Promise<void> {
     const records = (await this.registry.read()).worktrees;
     for (const record of records) {
       if (record.commonDir !== commonDirectory || record.pendingMove === undefined) continue;
       const pending = record.pendingMove;
-      if ((await host.fileSystem.type(pending.destination)) === 'missing') {
-        await this.#read(host, record, async (_reader, held) => {
-          if (!sameIdentity(identityOf(held), pending.identity))
-            refuse('the interrupted move changed identity; all files are kept');
-          await this.#clearPending(record);
-        });
-      } else await this.#recover(host, record);
+      try {
+        const host = this.#writeHost();
+        if ((await host.fileSystem.type(pending.destination)) === 'missing') {
+          await this.#read(host, record, async (_reader, held) => {
+            if (!sameIdentity(identityOf(held), pending.identity))
+              refuse('the interrupted move changed identity; all files are kept');
+            await this.#clearPending(record);
+          });
+        } else await this.#recover(host, record);
+      } catch {
+        // An interrupted row must never hide the other checkouts. Its durable intent supplies the repair instruction.
+      }
     }
   }
 
@@ -79,7 +84,10 @@ export class ProjectWorktreeMoves {
       await reader.rows(recorded.commonDirectory);
       const worktrees: RepoWorktreeRow[] = [];
       for (const row of list.worktrees) {
-        const record = records.find(entry => entry.path === row.path && entry.removedAt === undefined);
+        const record = records.find(
+          entry =>
+            (entry.path === row.path || entry.pendingMove?.destination === row.path) && entry.removedAt === undefined,
+        );
         const blocked = this.#rowReason(row, record, recorded, host.managedRoot, terminals);
         let move: WorktreeMoveOffer = {
           worktreeId: record === undefined ? hash(row.path) : idOf(record),
@@ -87,6 +95,7 @@ export class ProjectWorktreeMoves {
         };
         if (blocked === undefined && record !== undefined) {
           try {
+            await this.#authority(this.#writeHost(), record);
             const held = await reader.holdCheckout(record.path);
             try {
               const destination = this.#destination(host, recorded, record);
@@ -128,9 +137,12 @@ export class ProjectWorktreeMoves {
       entry => idOf(entry) === request.worktreeId && entry.removedAt === undefined,
     );
     if (record === undefined) refuse('that tracked worktree does not belong to this project');
-    const { host, recorded } = await this.projectHost(request.project, record.commonDir);
+    const { recorded } = await this.projectHost(request.project, record.commonDir);
+    // Imports authorize reads only. Mutations use exactly the managed create/remove host's existing work/worktrees roots.
+    const host = this.#writeHost();
     if (record.commonDir !== recorded.commonDirectory) refuse('that tracked worktree does not belong to this project');
     const apply = async () => {
+      await this.#authority(host, record);
       if (record.pendingMove !== undefined) return await this.#recover(host, record);
       return await this.#read(host, record, async (reader, held) => {
         const destination = this.#destination(host, recorded, record);
@@ -183,9 +195,13 @@ export class ProjectWorktreeMoves {
         return await this.#recover(host, { ...record, pendingMove: pending });
       });
     };
-    return this.needs.withTerminalRemoval === undefined
-      ? await apply()
-      : await this.needs.withTerminalRemoval(record.path, apply);
+    const guarded = async () =>
+      this.needs.withTerminalRemoval === undefined
+        ? await apply()
+        : await this.needs.withTerminalRemoval(record.path, apply);
+    return this.needs.withFerretMove === undefined
+      ? await guarded()
+      : await this.needs.withFerretMove(record.path, guarded);
   }
 
   #rowReason(
@@ -198,13 +214,14 @@ export class ProjectWorktreeMoves {
     if (row.main || row.bare) return 'The main checkout cannot move.';
     if (isWithinDirectory(row.path, project.folder))
       return 'This is the registered project folder; move another linked checkout.';
+    if (record?.pendingMove !== undefined)
+      return `This move needs repair; all files are kept. Retry the confirmation, or run git worktree repair -- '${record.pendingMove.destination.replaceAll("'", "'\\''")}' from the repository.`;
     if (row.live.prunable !== undefined) return 'Its folder is missing on disk.';
     if (record === undefined || row.tracked === 'none') return 'Adopt it first to move it.';
     if (project.worktreeGroup === undefined) return 'This project has no common worktree root.';
     if (isWithinDirectory(path.join(managedRoot, project.worktreeGroup), row.path))
       return 'It is already in the project’s worktree root.';
-    if (record.pendingMove !== undefined || record.removalStartedAt !== undefined)
-      return 'Another worktree operation needs verification.';
+    if (record.removalStartedAt !== undefined) return 'Another worktree operation needs verification.';
     if (row.live.locked !== undefined) return 'This worktree is locked.';
     if (row.live.detached || row.live.head === undefined || row.live.branch !== record.branch)
       return 'The recorded branch or HEAD changed.';
@@ -218,6 +235,21 @@ export class ProjectWorktreeMoves {
     if (terminals.some(folder => isWithinDirectory(row.path, folder)))
       return 'A live terminal is inside this checkout.';
     return undefined;
+  }
+
+  #writeHost(): WorktreeHostIo {
+    return this.needs.io ?? refuse('the existing worktree write authority is unavailable');
+  }
+
+  async #authority(host: WorktreeHostIo, record: ManagedWorktree): Promise<void> {
+    try {
+      for (const folder of [record.pendingMove?.destination ?? record.path, record.gitDir, record.commonDir]) {
+        const held = await host.pinner.pin(folder);
+        await held.close();
+      }
+    } catch {
+      refuse('the existing worktree write authority does not cover this checkout and its Git metadata');
+    }
   }
 
   #destination(host: WorktreeHostIo, project: ProjectRepository, record: ManagedWorktree): string {
@@ -356,6 +388,37 @@ export class ProjectWorktreeMoves {
     const pending = record.pendingMove;
     if (pending === undefined) refuse('there is no recorded move to verify');
     const moved = { ...record, path: pending.destination };
+    await this.#authority(host, record);
+    const repository = await host.repoAccess.repository(record.commonDir);
+    try {
+      // The checkout's .git and admin commondir still prove membership even when Git's back-pointer is stale.
+      const held = await host.repoAccess.checkout(pending.destination, repository);
+      try {
+        if (!sameIdentity(identityOf(held), pending.identity) || held.gitDirectory !== record.gitDir)
+          refuse('the moved checkout identity cannot be proved; all files are kept');
+        if ((await host.fileSystem.readText(path.join(record.gitDir, 'worktree-owner'))) !== record.ownershipToken)
+          refuse('the moved ownership marker cannot be proved');
+        if ((await host.fileSystem.type(record.path)) !== 'missing')
+          refuse('the original path is occupied; all files are kept');
+        const listed = await host.fileSystem.readText(path.join(record.gitDir, 'gitdir'));
+        if (listed?.trim() !== path.join(pending.destination, '.git')) {
+          await held.verify();
+          const result = await new KernelGitRunner(host.git).run({
+            cwd: repository.cwd,
+            args: ['--git-dir=.', 'worktree', 'repair', '--', pending.destination],
+          });
+          if (result.exitCode !== 0 || result.timedOut)
+            refuse(
+              `the move needs repair; all files are kept. Run git worktree repair -- '${pending.destination.replaceAll("'", "'\\''")}' from the repository`,
+            );
+          await held.verify();
+        }
+      } finally {
+        await held.close();
+      }
+    } finally {
+      await repository.close();
+    }
     await this.#read(host, moved, async (_reader, held) => {
       if (!sameIdentity(identityOf(held), pending.identity))
         refuse('the moved checkout identity cannot be proved; all files are kept');

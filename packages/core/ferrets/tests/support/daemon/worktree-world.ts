@@ -100,6 +100,7 @@ export async function worktreeRouteWorld(
     /** The daemon's project registry, by id (the real one is Projects'). */
     readonly projects?: ReadonlyMap<string, ProjectRepository>;
     readonly sessions?: () => Promise<readonly WorktreeSessionFact[] | undefined>;
+    readonly withFerretMove?: <T>(path: string, move: () => Promise<T>) => Promise<T>;
   } = {},
 ) {
   const world = await composeWorktreeWorld(label, options);
@@ -121,6 +122,7 @@ export async function worktreeRouteWorld(
     projectRepository: async project => options.projects?.get(project),
     sessions: options.sessions ?? (async () => []),
     terminalRoots,
+    withFerretMove: options.withFerretMove,
     ...(withTerminalRemoval === undefined ? {} : { withTerminalRemoval }),
     newId: () => `ownership-token-${++nextId}`,
   });

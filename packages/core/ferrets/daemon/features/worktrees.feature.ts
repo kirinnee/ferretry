@@ -52,6 +52,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       }));
     },
     terminalRoots: async () => await liveTerminalRoots(hooks.contributions(TerminalRoots).map(entry => entry.item)),
+    withFerretMove: async (path, move) => await f.service.withWorktreeMove(path, move),
     withTerminalRemoval: async (path, remove) =>
       await withTerminalRemoval(
         hooks.contributions(TerminalRoots).map(entry => entry.item),

@@ -74,6 +74,7 @@ export interface WorktreesNeeds {
    */
   readonly terminalRoots: () => Promise<readonly string[] | undefined>;
   readonly withTerminalRemoval?: <T>(path: string, remove: () => Promise<T>) => Promise<T>;
+  readonly withFerretMove?: <T>(path: string, move: () => Promise<T>) => Promise<T>;
   /** Opaque ids for ownership tokens (today: `crypto.randomUUID`). */
   readonly newId: () => string;
 }
@@ -234,7 +235,7 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
   const moves = new ProjectWorktreeMoves(needs, registry, projectHost);
   const listProjectRepo = async (project: string, commonDirectory?: string): Promise<RepoWorktreeListResponse> => {
     const { host, recorded } = await projectHost(project, commonDirectory);
-    await service.runExclusive(async () => await moves.reconcile(host, recorded.commonDirectory));
+    await service.runExclusive(async () => await moves.reconcile(recorded.commonDirectory));
     return await moves.offers(project, await listFrom(host, recorded.commonDirectory));
   };
   const subsystem: WorktreeSubsystem = {
