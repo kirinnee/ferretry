@@ -74,6 +74,30 @@ describe('the navigation ledger', () => {
     expect(evidence.origins.find(entry => entry.origin === 'https://app.example.test')?.lastSeq).toBe(seeded + 2);
   });
 
+  test('V-B20 says when the oldest document the target shows now began: a real commit moves it, an in-document move does not', async () => {
+    const clock = { at: 100 };
+    const ledger = new NavigationLedger(() => clock.at);
+    const { session, emit } = source({ frame: frame('main', 'https://app.example.test/pair') });
+    await ledger.attach(session);
+    expect(ledger.evidence().documentAt).toBe(100);
+
+    clock.at = 200;
+    emit('Page.navigatedWithinDocument', { frameId: 'main', url: 'https://app.example.test/d/m1' });
+    expect(ledger.evidence().documentAt).toBe(100);
+
+    clock.at = 300;
+    emit('Page.frameNavigated', { frame: frame('main', 'https://app.example.test/d/m1') });
+    expect(ledger.evidence().documentAt).toBe(300);
+
+    // a frame that came later is the younger document; the target's answer stays the OLDEST one it shows
+    clock.at = 400;
+    emit('Page.frameAttached', { frameId: 'kid' });
+    emit('Page.frameNavigated', { frame: frame('kid', 'https://app.example.test/x', { parentId: 'main' }) });
+    expect(ledger.evidence().documentAt).toBe(300);
+    emit('Page.frameDetached', { frameId: 'main' });
+    expect(ledger.evidence().documentAt).toBe(400);
+  });
+
   test('a committed address carrying the pairing grammar taints the target for life, even after it is replaced', async () => {
     const ledger = new NavigationLedger(() => 5);
     const { session, emit } = source({ frame: frame('main', 'https://docs.example.test/') });
@@ -227,6 +251,7 @@ describe('the daemon’s belief in the worker’s navigation evidence', () => {
     taintSeq: 0,
     linked: false,
     watchedSince: 5,
+    documentAt: 6,
     totals: { links: {}, lost: 0 },
   };
 
@@ -249,6 +274,8 @@ describe('the daemon’s belief in the worker’s navigation evidence', () => {
       { ...good, linked: 'yes' },
       { ...good, linked: undefined },
       { ...good, watchedSince: Number.POSITIVE_INFINITY },
+      { ...good, documentAt: -1 },
+      { ...good, documentAt: undefined },
       { ...good, frames: 'x' },
       { ...good, frames: [1] },
       { ...good, frames: [''] },

@@ -84,7 +84,7 @@ beforeAll(async () => {
           headers: { 'content-type': 'text/html' },
         });
       if (url.pathname === '/pair') return html(MARKED_HEAD, CODE_BODY);
-      if (url.pathname === '/plain') return html('', '<p id="o">hello</p>');
+      if (url.pathname === '/plain' || url.pathname === '/d/m1') return html('', '<p id="o">hello</p>');
       if (url.pathname === '/cross-linked')
         return html(
           '',
@@ -481,6 +481,44 @@ describe('the agent browser, in a real Chrome, on a page showing a live pairing 
     should(script.error).equal(APP_EVAL_REFUSAL);
     should(script.text).be.undefined();
     await call({ tool: 'browser.close', name: 'fresh' });
+  }, 60_000);
+
+  it('V-B20 should refuse the document a pairing link opened, and read the app’s own page a real navigation brought in once the pairing was over', async () => {
+    // Arrange — a link's document on the app's origin, opened while the daemon's ledger says the code is live
+    pairing.open('vb20-1', Date.now() + 2 * MINUTE);
+    await call({ tool: 'browser.open', name: 'paired', url: `${base}/plain#v1;code=FAKE-LINK-0001` });
+
+    // Act — the code is redeemed; the link's document is still what the target shows
+    pairing.close('vb20-1');
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const onLink = await call({ tool: 'browser.read', name: 'paired' });
+    // the app moves on to the machine's page with a real document load, after the code's interval ended
+    await call({ tool: 'browser.navigate', name: 'paired', url: `${base}/d/m1` });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const onHome = await call({ tool: 'browser.read', name: 'paired' });
+
+    // Assert
+    should(onLink.error).equal(PAIRING_SCREEN_REFUSAL);
+    should(onHome.error).be.undefined();
+    await call({ tool: 'browser.close', name: 'paired' });
+  }, 60_000);
+
+  it('V-B20 should still refuse the app’s own page when a code was live after its document began', async () => {
+    // Arrange — the target was tainted by a link, then a new document began, and only then a code came and went
+    await call({ tool: 'browser.open', name: 'again', url: `${base}/plain#v1;code=FAKE-LINK-0001` });
+    await call({ tool: 'browser.navigate', name: 'again', url: `${base}/d/m1` });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    pairing.open('vb20-2', Date.now() + 2 * MINUTE);
+    await new Promise(resolve => setTimeout(resolve, 30));
+    pairing.close('vb20-2');
+    await new Promise(resolve => setTimeout(resolve, 30));
+
+    // Act
+    const read = await call({ tool: 'browser.read', name: 'again' });
+
+    // Assert
+    should(read.error).equal(PAIRING_SCREEN_REFUSAL);
+    await call({ tool: 'browser.close', name: 'again' });
   }, 60_000);
 
   it('should have handed an agent the fake code in no answer, no refusal and no network body', () => {

@@ -453,7 +453,11 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   Playwright's mirror of them for frames in other processes), including frames that are gone by the time anyone asks, and the
   daemon compares two answers (the strictly parsed `NavigationEvidence`): a navigation or a swapped frame during a call that
   touched an app origin is treated as the call having read it. A committed address carrying the pairing-fragment grammar
-  **taints the target for life** (the app screen it arrived on is refused outright, and `eval` on it, wherever it goes after).
+  **taints the target for life** (`eval` on it is refused wherever it goes after, and so is a read of an app page it sits on **while a
+  credential was live at any instant that page's documents have existed**: `NavigationEvidence.documentAt`, when the oldest
+  document a frame shows now began, against the daemon's own ledger). So a target a link once tainted reads the app's own page again
+  once a REAL document load brought it in after the pairing was over: that is why the `/pair` page leaves by a document load
+  (`location.assign`) rather than a router move, which would keep the link's own document.
   **A document a pairing link opened is refused on ANY origin, while it is the page’s current document** (`NavigationEvidence.linked`, v4
   #1598): the daemon cannot know every deployment’s app origin (another daemon’s app, a self-hosted one), and a link-entered page
   is a pairing screen wherever it is served. It falls when a new document replaces that one (an in-document change of its
