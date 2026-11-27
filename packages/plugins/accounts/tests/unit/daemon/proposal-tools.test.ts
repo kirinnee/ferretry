@@ -3,6 +3,7 @@ import type { ToolHandler } from '@ferretry/kernel/manifest';
 import should from 'should';
 import { type TaskPlan, TaskPlanSchema } from '../../../contract/routes/index.ts';
 import { LoginEntryError } from '../../../daemon/lib/accounts.ts';
+import { IdentityLinkError } from '../../../daemon/lib/identity-links.ts';
 import { type ProposalToolDeps, proposalTools } from '../../../daemon/lib/proposal-tools.ts';
 import { RecipeValueError } from '../../../daemon/lib/secrets/login-recipes.ts';
 import { SecureCopyError } from '../../../daemon/lib/secure-copy/errors.ts';
@@ -43,11 +44,19 @@ interface Options {
   readonly recipeError?: unknown;
   readonly suggestError?: unknown;
   readonly planError?: unknown;
+  readonly linksError?: unknown;
+  readonly linkFiled?: 'pending' | 'known';
+  readonly noLinks?: boolean;
   readonly redact?: (text: string) => Promise<string>;
 }
 
 function world(options: Options = {}) {
-  const seen = { recipes: [] as unknown[][], suggestions: [] as unknown[][], plans: [] as unknown[][] };
+  const seen = {
+    recipes: [] as unknown[][],
+    suggestions: [] as unknown[][],
+    plans: [] as unknown[][],
+    links: [] as unknown[],
+  };
   const deps: ProposalToolDeps = {
     recipes: {
       propose: async (...args) => {
@@ -69,6 +78,17 @@ function world(options: Options = {}) {
         return { signIn: SIGN_IN, host: 'github.com', agenda: 'A8' } as never;
       },
     },
+    ...(options.noLinks === true
+      ? {}
+      : {
+          links: {
+            propose: async ask => {
+              seen.links.push(ask);
+              if (options.linksError !== undefined) throw options.linksError;
+              return options.linkFiled ?? 'pending';
+            },
+          },
+        }),
     plans: {
       propose: async (...args) => {
         seen.plans.push(args);
@@ -142,6 +162,63 @@ describe('account_propose', () => {
     should(answer.isError).equal(true);
     should(answer.text).containEql('recipe: suggest a recipe, a standing rule');
     should(seen.recipes).eql([]);
+  });
+
+  it('should hold "S lives in I" for the owner when only an identity is named, filing no recipe and no rule', async () => {
+    const { tools, seen, run } = world();
+
+    const answer = await run(tools.account_propose, {
+      signIn: SIGN_IN,
+      identity: 'work',
+      why: 'the login lives there',
+    });
+
+    should(answer.isError).not.equal(true);
+    should(seen.links).eql([{ signIn: SIGN_IN, identity: 'work', why: 'the login lives there' }]);
+    should(seen.recipes).eql([]);
+    should(seen.suggestions).eql([]);
+    should(answer.text)
+      .containEql(`[${SIGN_IN}] lives in browser identity 'work'`)
+      .and.containEql('saved for the owner to decide later')
+      .and.not.containEql('the owner decides');
+  });
+
+  it('should say an edge the graph already holds is known, and say both when a recipe comes with it', async () => {
+    const known = world({ linkFiled: 'known' });
+    should(
+      (await known.run(known.tools.account_propose, { signIn: SIGN_IN, identity: 'work', why: 'x' })).text,
+    ).containEql('already known to live in browser identity');
+
+    const both = world();
+    const answer = await both.run(both.tools.account_propose, { ...PROPOSE, identity: 'work' });
+    should(answer.text).containEql('Proposed a recipe').and.containEql('lives in browser identity');
+    should(both.seen.links).have.length(1);
+  });
+
+  it('should refuse an identity key that could leave the profile folder, naming the field, and touch nothing', async () => {
+    const { tools, seen, run } = world();
+    const answer = await run(tools.account_propose, { signIn: SIGN_IN, identity: '../agent', why: 'x' });
+    should(answer.isError).equal(true);
+    should(answer.text).startWith('identity:');
+    should(seen.links).eql([]);
+  });
+
+  it('should tell a refusal of the identity proposal as its own sentence, and a failure it does not own as the fixed one', async () => {
+    const refused = world({
+      linksError: new IdentityLinkError('not_found', 'Name a sign-in that account_hint lists.'),
+    });
+    const said = await refused.run(refused.tools.account_propose, { signIn: SIGN_IN, identity: 'work', why: 'x' });
+    should(said).match({ isError: true, text: 'Name a sign-in that account_hint lists.' });
+
+    const broken = world({ linksError: new Error('ENOENT /home/someone/secret-path') });
+    const fixed = await broken.run(broken.tools.account_propose, { signIn: SIGN_IN, identity: 'work', why: 'x' });
+    should(fixed.isError).equal(true);
+    should(fixed.text).not.containEql('ENOENT');
+
+    const none = world({ noLinks: true });
+    should((await none.run(none.tools.account_propose, { signIn: SIGN_IN, identity: 'work', why: 'x' })).isError).equal(
+      true,
+    );
   });
 
   it('should refuse a call that is not an object the schema takes, as a sentence', async () => {
