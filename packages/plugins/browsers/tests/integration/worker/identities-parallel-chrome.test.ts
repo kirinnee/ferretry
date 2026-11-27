@@ -110,6 +110,8 @@ let maxRunning = 4;
 let mode: 'headless' | 'window' = 'headless';
 const proxies = new Map<string, ResolvedBrowserProxy>();
 const windowDisplays: { readonly identity: string; readonly display: XvfbDisplay }[] = [];
+/** The pid of every Xvfb an identity's display spawned, taken from the display's own child handle. */
+const xvfbChildren: { readonly identity: string; readonly pid: number }[] = [];
 let pages: IdentityBrowsers;
 let launcher: NodeSessionBrowserLauncher;
 
@@ -205,10 +207,21 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
         proxy: async identity => proxies.get(identity),
         // A window identity draws on an X server of its own, taken with it and closed with its Chrome.
         identityDisplay: identity => {
+          const processes = loginProcesses();
           const display = new XvfbDisplay({
             executable: () => xvfb ?? undefined,
             authorityDirectory: join(root, 'display'),
-            processes: loginProcesses(),
+            processes: {
+              ...processes,
+              spawn: {
+                run: processes.spawn.run,
+                start: (program, args) => {
+                  const child = processes.spawn.start(program, args);
+                  xvfbChildren.push({ identity, pid: child.pid });
+                  return child;
+                },
+              },
+            },
           });
           windowDisplays.push({ identity, display });
           return display;
@@ -487,6 +500,7 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
     async failSnapshot => {
       await pages.closeAll();
       mode = 'window';
+      const spawnedBefore = xvfbChildren.length;
       const started = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
       let launchedBrowser: BrowserAutomation | undefined;
@@ -522,7 +536,11 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
       );
       await started.promise;
       const pid = await chromePid('shutdown');
-      const displays = await xvfbPids();
+      const mine = xvfbChildren
+        .slice(spawnedBefore)
+        .filter(each => each.identity === 'shutdown')
+        .map(each => each.pid);
+      should(mine.length).be.above(0);
       let settled = false;
       const closing = local.closeAll().then(() => {
         settled = true;
@@ -535,7 +553,8 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
         should(early).be.false();
         if (failSnapshot) should(error).match({ code: 'launch_failed', message: 'injected initial snapshot failure' });
         should(await readFile(`/proc/${String(pid)}/cmdline`, 'utf8').catch(() => '')).equal('');
-        should((await xvfbPids()).filter(pid => displays.includes(pid))).deepEqual([]);
+        // Read from the display's own child handle the instant closeAll resolved — no later scan of the host.
+        should(mine.filter(pid => pidAlive(pid))).deepEqual([]);
       } finally {
         await local.closeAll();
         // The red regression still owns a live Chrome: explicitly close that test's driver, too.
@@ -571,6 +590,15 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
     }
   }, 90_000);
 });
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** The Xvfb processes of this host whose Xauthority lives in this test's own directory. */
 async function xvfbPids(): Promise<readonly number[]> {
