@@ -1,4 +1,4 @@
-import type { FerretId } from '@ferretry/core-ferrets/contract';
+import type { ConversationSource, FerretId, StagedConversation } from '@ferretry/core-ferrets/contract';
 import type { Instant, Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
 import type { z } from 'zod';
@@ -64,6 +64,8 @@ export interface LinkLedger {
 export interface LinkServiceNeeds {
   /** Every listing, preview and keep reads the index: no transcript is opened to list. */
   readonly index: Pick<ConversationIndex, 'ready' | 'query' | 'get'>;
+  /** The live registry, including stopped continuations whose owners are not in links.json. */
+  readonly owners: () => Promise<ReadonlyMap<string, FerretId>>;
   readonly previewer: LinkPreviewer;
   readonly ledger: LinkLedger;
   readonly keeper: LinkKeeper;
@@ -120,6 +122,7 @@ const kindsOf = (source: LinkQuery['source']): readonly HarnessHistoryKind[] | u
  */
 export class LinkService {
   #serial: Promise<unknown> = Promise.resolve();
+  readonly #staging = new Set<string>();
 
   constructor(private readonly needs: LinkServiceNeeds) {}
 
@@ -164,13 +167,15 @@ export class LinkService {
    * never written). It starts no ferret and writes no link: the start that asked for it does. A conversation this machine's
    * index does not hold is `not_found`, one that cannot be copied is `failed`, each with a plain sentence.
    *
-   * It runs in the keep queue and asks the keep ledger first, so one conversation is never copied for two ferrets: one a
-   * ferret already keeps is refused with that ferret named. It copies the owner's COMPUTER row when there is one, so a newer
-   * ferret-home row that shares the id is never staged in its place (the start names no source, and only the computer's
-   * history is staged for it).
+   * The keep queue checks registry and ledger ownership and reserves the history through the whole start. A selected row
+   * is re-resolved by its opaque index binding; a stale selection never falls back to another copy.
    */
-  async stage(harness: string, id: string): Promise<Result<void, { code: 'not_found' | 'failed'; reason: string }>> {
-    const run = this.#serial.then(async () => await this.#stageNow(harness, id));
+  async stage(
+    harness: string,
+    id: string,
+    selected?: ConversationSource,
+  ): Promise<Result<StagedConversation, { code: 'not_found' | 'failed'; reason: string }>> {
+    const run = this.#serial.then(async () => await this.#stageNow(harness, id, selected));
     this.#serial = run.catch(() => undefined);
     return await run;
   }
@@ -178,19 +183,32 @@ export class LinkService {
   async #stageNow(
     harness: string,
     id: string,
-  ): Promise<Result<void, { code: 'not_found' | 'failed'; reason: string }>> {
+    selected?: ConversationSource,
+  ): Promise<Result<StagedConversation, { code: 'not_found' | 'failed'; reason: string }>> {
     await this.needs.index.ready();
-    const found = this.needs.index.get(harness, id, ['computer']) ?? this.needs.index.get(harness, id);
-    if (found === undefined)
-      return err({ code: 'not_found', reason: `No ${harness} conversation ${id} is on this machine.` });
     const owner = (await this.#kept()).get(`${harness}:${id}`);
     if (owner !== undefined) return err({ code: 'failed', reason: `Ferret ${owner} already keeps it.` });
+    // Resolve after the last asynchronous ownership read, immediately before reserving and starting the copy.
+    const found = this.needs.index.get(harness, id, selected === undefined ? undefined : [selected.kind], selected);
+    if (found === undefined)
+      return err({ code: 'not_found', reason: `No ${harness} conversation ${id} is on this machine.` });
+    const key = `${harness}:${id}`;
+    if (this.#staging.has(key)) return err({ code: 'failed', reason: 'That conversation is already being continued.' });
+    this.#staging.add(key);
     const copied = await this.needs.copier
       .copy({ harness, id, location: { kind: found.kind, label: found.label, path: found.path } })
       .catch((error: unknown) =>
         err({ reason: error instanceof Error && error.message !== '' ? error.message : 'It could not be copied.' }),
       );
-    return copied.ok ? ok(undefined) : err({ code: 'failed', reason: copied.error.reason });
+    if (!copied.ok) {
+      this.#staging.delete(key);
+      return err({ code: 'failed', reason: copied.error.reason });
+    }
+    return ok({
+      release: () => {
+        this.#staging.delete(key);
+      },
+    });
   }
 
   /** The read-only foreign history (the harness conversations that predate Ferretry): the same index, never resumable. */
@@ -217,7 +235,10 @@ export class LinkService {
   }
 
   async #kept(): Promise<ReadonlyMap<string, FerretId>> {
-    return new Map((await this.needs.ledger.read()).links.map(link => [`${link.harness}:${link.id}`, link.ferret]));
+    return new Map([
+      ...(await this.needs.ledger.read()).links.map(link => [`${link.harness}:${link.id}`, link.ferret] as const),
+      ...(await this.needs.owners()),
+    ]);
   }
 
   /** One keep at a time, so two pickers can never both keep one conversation. */
@@ -245,6 +266,14 @@ export class LinkService {
       const owner = taken.get(`${request.harness}:${item.id}`);
       if (owner !== undefined) {
         result.refused.push({ id: item.id, code: 'already_kept', reason: `Ferret ${owner} already keeps it.` });
+        continue;
+      }
+      if (this.#staging.has(`${request.harness}:${item.id}`)) {
+        result.refused.push({
+          id: item.id,
+          code: 'already_kept',
+          reason: 'That conversation is already being continued.',
+        });
         continue;
       }
       // A conversation of the owner's computer is ALWAYS copied into the harness's pool first and the ferret resumes the

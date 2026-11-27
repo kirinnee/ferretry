@@ -28,7 +28,7 @@ const stagingInto = (harness: FakeHarness, asked: string[]): ConversationStageSo
       id: conversation,
       source: `projects/-work-a/${conversation}.jsonl`,
     });
-    return copied.ok ? ok(undefined) : err({ code: 'failed', reason: copied.error.reason });
+    return copied.ok ? ok({ release: () => undefined }) : err({ code: 'failed', reason: copied.error.reason });
   },
 });
 
@@ -39,7 +39,7 @@ describe('E-253 the origin of the start decides who stages', () => {
     const source: ConversationStageSource = {
       stage: async ({ conversation }) => {
         asked.push(conversation);
-        return ok(undefined);
+        return ok({ release: () => undefined });
       },
     };
     f.ports.conversationStage = () => source;
@@ -124,8 +124,9 @@ describe('E-255 copying computer history from a governed device needs a step-up 
       () => ({
         ...deviceStanding('phone'),
         governance: { governed: true, decide: () => ({ allowed: true, refusal: 'granted' }) },
-        spendStepUp: () => {
+        claimStepUp: () => {
           spent.n += 1;
+          return true;
         },
       }),
       asked,

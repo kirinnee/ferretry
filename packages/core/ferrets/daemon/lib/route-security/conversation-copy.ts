@@ -19,15 +19,14 @@ export function conversationCopyRefusal(call: CallContext, request: { readonly h
   if (call.governance === undefined)
     throw new ApiError(503, 'this daemon cannot decide fleet.configure for the copy', 'launch_gate_unavailable');
   const decision = call.governance.decide(COPY_DEMAND);
-  if (decision.allowed) {
-    call.spendStepUp?.();
-    return;
-  }
+  if (decision.allowed && call.claimStepUp?.() === true) return;
   throw new ApiError(
     403,
     "continuing a conversation copies it in from the owner's computer, which needs a passkey confirmation for the copy",
-    decision.refusal === 'step-up-required' ? STEP_UP_REQUIRED_CODE : grantRefusalCode(decision.refusal),
+    decision.allowed || decision.refusal === 'step-up-required'
+      ? STEP_UP_REQUIRED_CODE
+      : grantRefusalCode(decision.refusal),
     undefined,
-    decision.refusal === 'step-up-required' ? { demand: COPY_DEMAND } : undefined,
+    decision.allowed || decision.refusal === 'step-up-required' ? { demand: COPY_DEMAND } : undefined,
   );
 }

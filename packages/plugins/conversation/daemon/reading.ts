@@ -373,7 +373,7 @@ export function buildReading(deps: {
     },
     tools: search.tools,
     api,
-    stage: async ({ harness, conversation }) => await links.service.stage(harness, conversation),
+    stage: async ({ harness, conversation, source }) => await links.service.stage(harness, conversation, source),
     download: async (ferret, id) => await attachments.scoped.download(ferret, id),
     forkTurn: async (ferret, point, binding) => await reader.reads.forkTurn(ferret, point, binding),
     copyAttachments: async (from, to) => await attachments.scoped.copy(from, to),

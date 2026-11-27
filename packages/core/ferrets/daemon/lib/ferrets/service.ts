@@ -108,6 +108,7 @@ import { effectiveMode, type FerretRegistry, type FerretFilter } from '../regist
 import { launchMode } from '../session/peers/fleet.ts';
 import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
 import { defaultHarnessKey } from './default-harness.ts';
+import { stageConversation } from './stage-conversation.ts';
 import { runnerRefusal } from './runner-refusal.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
@@ -1105,32 +1106,6 @@ export class FerretsService implements FerretsApi {
     return ok({ prompt: `${prompt}\n${planned.value.section}`, files });
   }
 
-  /**
-   * "Continue a past conversation": the transcript a start names is put where the harness finds it (the one
-   * `conversation.stage` provider: the existing indexed copy-on-link); a refusal refuses the start with its reason. With NO
-   * provider nothing is copied: a pooled transcript is resumed, and the launch refuses one the harness proves absent (E17).
-   * ONLY A PERSON'S owner start stages (the admitted origin, never the attribution: the daemon's own helpers say `owner`
-   * too): the transcript is the owner's own, and a ferret, pack, board or warden must never pull a host conversation into
-   * the pool by naming it. Any other asker resumes one the pool already holds, and the launch refuses one it does not.
-   */
-  private async stageConversation(
-    harness: HarnessKey,
-    conversation: string | undefined,
-    person: boolean,
-  ): Promise<Result<void, StartFailure>> {
-    const source = conversation === undefined || !person ? undefined : this.ports.conversationStage?.();
-    if (conversation === undefined || source === undefined) return ok(undefined);
-    const staged = await source
-      .stage({ harness, conversation })
-      .catch(
-        (): Awaited<ReturnType<ConversationStageSource['stage']>> =>
-          err({ code: 'failed', reason: 'the conversation could not be staged' }),
-      );
-    return staged.ok
-      ? ok(undefined)
-      : failed('refused', `${staged.error.reason} The ferret was not started, so nothing was resumed.`);
-  }
-
   /** An agent may start nothing in the state home; a fence that cannot be built refuses too (never a lexical guess). */
   private async stateHomeRefusal(folder: string): Promise<Result<never, StartFailure> | undefined> {
     if (this.ports.stateHomeHolding === undefined) return failed('state_home_unresolved', STATE_HOME_UNRESOLVED);
@@ -1213,83 +1188,93 @@ export class FerretsService implements FerretsApi {
     request = decided.request;
     // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
     const named = admission.conversationInPool === true ? undefined : request.harnessConversation;
-    const staged = await this.stageConversation(harnessKey, named, request.by === 'owner' && origin.kind === 'person');
+    const staged = await stageConversation(
+      this.ports.conversationStage?.(),
+      harnessKey,
+      named,
+      request.conversationSource,
+      request.by === 'owner' && origin.kind === 'person',
+    );
     if (!staged.ok) return staged;
-    // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
-    const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);
-    if (!opening.ok) return opening;
-    if (request.options !== undefined) {
-      // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
-      const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
-      await this.saveDetails(id, {
-        ...(decided.notice === undefined ? {} : { notice: decided.notice }),
-        ...(Object.keys(options).length === 0 ? {} : { options }),
-        ...(title === undefined ? {} : { title, titleSource: 'owner' as const }),
-      });
-    }
-    const at = this.ports.now();
-    const record: FerretRecord = {
-      format: 1,
-      id,
-      name,
-      ...(request.parent === undefined ? {} : { parent: request.parent }),
-      ...(request.pack === undefined ? {} : { pack: request.pack }),
-      role,
-      harness: harnessKey,
-      mode: launchMode(request.options?.mode),
-      birth: birthOf(origin),
-      runner: 'tmux',
-      ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
-      ...(login === undefined ? {} : { login }),
-      folder: folder.value,
-      state: 'starting',
-      ...(request.harnessConversation === undefined ? {} : { harnessConversation: request.harnessConversation }),
-      createdAt: at,
-      stateAt: at,
-    };
-    // `--detach` answers when the ferret is recorded, not when it has launched: `recorded` settles at that point.
-    let recordedOk: () => void = () => undefined;
-    let recordedFailed: (error: unknown) => void = () => undefined;
-    const recorded = new Promise<void>((resolve, reject) => {
-      recordedOk = resolve;
-      recordedFailed = reject;
-    });
-    recorded.catch(() => undefined); // read below only when detached; otherwise the start's own result carries the failure
-    const launched = this.serial.run(id, async () => {
-      try {
-        await this.write(record, undefined, 'started');
-        this.ports.started?.({
-          ferret: id,
-          name,
-          role,
-          ...(request.parent === undefined ? {} : { parent: request.parent }),
-          ...(request.pack === undefined ? {} : { pack: request.pack }),
-          folder: folder.value,
-          by: request.by,
-          ...(request.prompt === undefined || request.prompt === '' ? {} : { brief: request.prompt }),
-          ...(request.options?.label === undefined ? {} : { label: request.options.label }),
-          ...(request.options?.card === undefined ? {} : { card: request.options.card }),
+    try {
+      // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
+      const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);
+      if (!opening.ok) return opening;
+      if (request.options !== undefined) {
+        // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
+        const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
+        await this.saveDetails(id, {
+          ...(decided.notice === undefined ? {} : { notice: decided.notice }),
+          ...(Object.keys(options).length === 0 ? {} : { options }),
+          ...(title === undefined ? {} : { title, titleSource: 'owner' as const }),
         });
-      } catch (error) {
-        recordedFailed(error);
-        throw error;
       }
-      recordedOk();
-      return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
-        attached: opening.value.files,
-        bound: bound.value,
-        ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
+      const at = this.ports.now();
+      const record: FerretRecord = {
+        format: 1,
+        id,
+        name,
+        ...(request.parent === undefined ? {} : { parent: request.parent }),
+        ...(request.pack === undefined ? {} : { pack: request.pack }),
+        role,
+        harness: harnessKey,
+        mode: launchMode(request.options?.mode),
+        birth: birthOf(origin),
+        runner: 'tmux',
+        ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
+        ...(login === undefined ? {} : { login }),
+        folder: folder.value,
+        state: 'starting',
+        ...(request.harnessConversation === undefined ? {} : { harnessConversation: request.harnessConversation }),
+        createdAt: at,
+        stateAt: at,
+      };
+      // `--detach` answers when the ferret is recorded, not when it has launched: `recorded` settles at that point.
+      let recordedOk: () => void = () => undefined;
+      let recordedFailed: (error: unknown) => void = () => undefined;
+      const recorded = new Promise<void>((resolve, reject) => {
+        recordedOk = resolve;
+        recordedFailed = reject;
       });
-    });
-    if (request.detach !== true) return await launched;
-    // The ferret is recorded and acknowledged; the launch is no caller's to await any more, so its END is handled here:
-    // a failed Result and a rejection alike are settled and said (a plain start hands both to its caller).
-    // Observed BEFORE any await: when the record cannot be saved, `launched` rejects with the error `recorded` hands the
-    // caller below, and a rejection nobody had attached to yet would be unhandled (it can end the daemon).
-    launched.catch(() => undefined);
-    await recorded;
-    void this.finishDetached(id, launched);
-    return ok(id);
+      recorded.catch(() => undefined); // read below only when detached; otherwise the start's own result carries the failure
+      const launched = this.serial.run(id, async () => {
+        try {
+          await this.write(record, undefined, 'started');
+          this.ports.started?.({
+            ferret: id,
+            name,
+            role,
+            ...(request.parent === undefined ? {} : { parent: request.parent }),
+            ...(request.pack === undefined ? {} : { pack: request.pack }),
+            folder: folder.value,
+            by: request.by,
+            ...(request.prompt === undefined || request.prompt === '' ? {} : { brief: request.prompt }),
+            ...(request.options?.label === undefined ? {} : { label: request.options.label }),
+            ...(request.options?.card === undefined ? {} : { card: request.options.card }),
+          });
+        } catch (error) {
+          recordedFailed(error);
+          throw error;
+        }
+        recordedOk();
+        return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
+          attached: opening.value.files,
+          bound: bound.value,
+          ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
+        });
+      });
+      if (request.detach !== true) return await launched;
+      // The ferret is recorded and acknowledged; the launch is no caller's to await any more, so its END is handled here:
+      // a failed Result and a rejection alike are settled and said (a plain start hands both to its caller).
+      // Observed BEFORE any await: when the record cannot be saved, `launched` rejects with the error `recorded` hands the
+      // caller below, and a rejection nobody had attached to yet would be unhandled (it can end the daemon).
+      launched.catch(() => undefined);
+      await recorded;
+      void this.finishDetached(id, launched);
+      return ok(id);
+    } finally {
+      staged.value?.release();
+    }
   }
 
   /**
