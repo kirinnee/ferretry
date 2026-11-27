@@ -28,7 +28,7 @@ import {
 } from '../../src/theme/render-contract.ts';
 import { THEME_TOKENS } from '../../src/fy-render/palette.ts';
 import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
-import { readStyleFile } from '../../src/testing/theme-css.ts';
+import { readPaletteCss, readStyleFile } from '../../src/testing/theme-css.ts';
 import {
   MAX_HOPS,
   ratioOf,
@@ -47,7 +47,7 @@ const basePalette = readStyleFile('tokens/base-palette.css');
 const sourcesOf = (style: string, palette: string): ThemeSources => ({
   baseStyle,
   basePalette,
-  palette: readStyleFile(`palette/${palette}.css`),
+  palette: readPaletteCss(palette),
   style: readStyleFile(`style/${style}.css`),
 });
 
@@ -55,7 +55,7 @@ const sourcesOf = (style: string, palette: string): ThemeSources => ({
 function problems(sources: ThemeSources, style: string, palette: string, mode: ThemeMode): readonly string[] {
   const out: string[] = [];
   const map = tokenMap(sources, { mode, palette, style });
-  const at = `styles/style/${style}.css × styles/palette/${palette}.css × ${mode}`;
+  const at = `styles/style/${style}.css × theme/packs/palette/${palette}/palette.ts × ${mode}`;
   for (const token of [...RENDER_PALETTE_TOKENS, ...RENDER_STYLE_TOKENS]) {
     const resolved = resolveToken(map, token);
     if (!resolved.ok) out.push(`${at} | ${token} | ${resolved.reason}`);
@@ -73,7 +73,7 @@ function problems(sources: ThemeSources, style: string, palette: string, mode: T
 function contrastMisses(sources: ThemeSources, palette: string, mode: ThemeMode): readonly string[] {
   const out: string[] = [];
   const map = tokenMap(sources, { mode, palette, style: 'studio' });
-  const at = `styles/palette/${palette}.css × ${mode}`;
+  const at = `theme/packs/palette/${palette}/palette.ts × ${mode}`;
   const page = resolveColour(map, 'bg');
   if (!page.ok) out.push(`${at} | bg | cannot be measured: ${page.reason}`);
   for (const pair of renderContrastPairs(palette === HIGH_CONTRAST)) {
@@ -106,7 +106,7 @@ const KNOWN: Readonly<Record<string, string>> = Object.fromEntries(
   INHERIT_STYLES.flatMap(style =>
     PALETTES.flatMap(palette =>
       MODES.map(mode => [
-        `styles/style/${style}.css × styles/palette/${palette.id}.css × ${mode} | md-link-weight | ${INHERIT_WHY}`,
+        `styles/style/${style}.css × theme/packs/palette/${palette.id}/palette.ts × ${mode} | md-link-weight | ${INHERIT_WHY}`,
         'a CSS-wide keyword computes to nothing; the style owns the fix',
       ]),
     ),
@@ -235,7 +235,9 @@ describe('a removed token fails, naming the pack file and the token', () => {
     const without = (css: string): string => css.replace(/^\s*--accent:[^;]*;$/gmu, '');
     const broken = { ...sources, basePalette: without(sources.basePalette), palette: without(sources.palette) };
     const found = problems(broken, 'studio', 'geist', 'light');
-    expect(found.some(line => line.includes('styles/palette/geist.css') && line.includes('| accent |'))).toBe(true);
+    expect(
+      found.some(line => line.includes('theme/packs/palette/geist/palette.ts') && line.includes('| accent |')),
+    ).toBe(true);
     expect(unpinned(problems(sources, 'studio', 'geist', 'light'))).toEqual([]);
   });
 

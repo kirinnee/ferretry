@@ -1,5 +1,5 @@
 {
-  "entry": ["src/main.tsx"],
+  "entry": ["src/main.tsx", "src/theme/packs/*/*/*.ts"],
   "project": ["src/**/*.{ts,tsx,css}"],
   "ignore": [
     "src/worker/service-worker.ts",
@@ -16,6 +16,7 @@
     "ignore:src/release/keeper.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
     "ignore:src/worker/filter-document.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
     "ignore:src/release/storage.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
-    "ignore:src/theme/pack-contract.ts": "read today only by scripts/gen/lib/theme-packs.ts (the theme-pack generator); the app reaches it from the generated theme-packs.ts in the next G2 units, and this line goes then."
+    "ignore:src/theme/pack-contract.ts": "read today only by scripts/gen/lib/theme-packs.ts (the theme-pack generator); the app reaches it from the generated theme-packs.ts in the next G2 units, and this line goes then.",
+    "entry:src/theme/packs/*/*/*.ts": "a theme pack (a palette, style or font folder) is listed by the generator into the git-ignored src/generated/theme-packs.ts (scripts/gen/registries.ts), which knip does not read, so each pack file is an entry by its folder: a new pack adds a folder and edits no list (docs/standards/architecture). Not a pending-port gap."
   }
 }
