@@ -11,6 +11,7 @@
  * NO COLOUR IS WRITTEN HERE. Every value comes from `styles/themes.css`; a family that restates a token
  * restates the chart and the diagram with it.
  */
+import type { RenderPaletteToken } from '../theme/render-contract.ts';
 
 /** The theme roles a series may ask for by name. */
 export const CHART_TONES = ['accent', 'good', 'warn', 'bad', 'muted'] as const;
@@ -24,7 +25,11 @@ export type ChartTone = (typeof CHART_TONES)[number] | number;
  */
 export const CHART_PALETTE_SLOTS = 8;
 
-/** Every token an illustration reads, without its leading `--`. */
+/**
+ * Every token an illustration reads, without its leading `--`. Each is one of the renderer contract's
+ * (`theme/render-contract.ts`): an illustration reads nothing a theme is not required to resolve, and the
+ * `satisfies` below fails the build if it ever does.
+ */
 export const THEME_TOKENS = [
   'viz-1',
   'viz-2',
@@ -53,7 +58,7 @@ export const THEME_TOKENS = [
   'border',
   'border-strong',
   'border-soft',
-] as const;
+] as const satisfies readonly RenderPaletteToken[];
 export type FyRenderThemeToken = (typeof THEME_TOKENS)[number];
 
 /**
