@@ -171,6 +171,8 @@ export function buildLinks(needs: LinkNeeds) {
   });
   const service = new LinkService({
     index,
+    owners: async () =>
+      new Map([...(await needs.ferretNames())].map(([key, owner]) => [key, owner.ferret as FerretId])),
     previewer: previewer(index, parsers),
     ledger: ledger(needs.state),
     keeper: needs.keeper,
