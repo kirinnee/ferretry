@@ -120,6 +120,16 @@ describe('the summary carries what the ferret was launched with', () => {
   });
 });
 
+describe('the summary carries what the ferret was started for', () => {
+  test('W-09 the purpose comes from its details; a ferret that named none shows none, never a guess', () => {
+    const registry = new FerretRegistry([record('a'), record('b')]);
+    registry.putDetails('a' as FerretId, { options: { purpose: 'planning' } });
+    expect(registry.summary('a' as FerretId)?.purpose).toBe('planning');
+    registry.putDetails('b' as FerretId, { options: { model: 'opus' } });
+    expect(registry.summary('b' as FerretId)?.purpose).toBeUndefined();
+  });
+});
+
 describe('the summary names how interactive the ferret is (the Agents filter and Clear all from agent ferrets read it)', () => {
   test('a converted ferret, whose record has no mode, shows the mode its details were started with', () => {
     const registry = new FerretRegistry([record('a'), record('b'), record('c')]);

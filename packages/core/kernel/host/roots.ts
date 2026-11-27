@@ -1097,8 +1097,12 @@ const quarantineChecked = rootQuarantine<Scope>({ openCheckedFolder, heldMember,
 async function entriesChecked(
   scope: Scope,
   full: string,
+  strict = false,
 ): Promise<readonly { readonly name: string; readonly identity: FileIdentity | undefined }[]> {
-  const resolved = await scope.fs.realpath(full).catch(() => undefined);
+  const resolved = await scope.fs.realpath(full).catch(error => {
+    if (strict) throw error;
+    return undefined;
+  });
   if (resolved === undefined) return [];
   const real = literalReal(scope, full, resolved);
   const folder = await openCheckedFolder(scope, real);
@@ -2749,12 +2753,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const { full, scope } = await real(path);
       return await listChecked(scope, full);
     },
-    entries: async path => {
+    entries: async (path, options) => {
       gate(path, 'folder');
       const { full, scope } = await real(path);
       const out: RootEntry[] = [];
       // A private place's size, mode and times are facts about it too (`stat` refuses them): its entry is left out.
-      for (const found of await entriesChecked(scope, full))
+      for (const found of await entriesChecked(scope, full, options?.strict))
         if (found.identity !== undefined && !(await heldMember(scope, found.identity)))
           out.push({ name: found.name, ...leafOf(found.identity) });
       return out;

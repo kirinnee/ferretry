@@ -11,9 +11,9 @@ import {
   type SecretCloneRefusal,
   type SecretImportOffer,
 } from '../../../../contract/index.ts';
-import { WebCryptoCloneCrypto } from '../../../../daemon/adapters/secrets/webcrypto-clone-crypto.ts';
-import { fromBase64Url, toBase64Url } from '../../../../daemon/lib/secrets/clone-binary.ts';
-import type { CloneCrypto as RelayCrypto, DaemonIdentity } from '../../../../daemon/lib/secrets/clone-crypto.ts';
+import { WebCryptoCloneCrypto } from '@ferretry/std/sealing';
+import { fromBase64Url, toBase64Url } from '@ferretry/std/sealing';
+import type { CloneCrypto as RelayCrypto, DaemonIdentity } from '@ferretry/std/sealing';
 import should from 'should';
 import {
   MAX_OPEN_SECRET_IMPORTS,

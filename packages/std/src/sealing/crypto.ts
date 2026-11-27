@@ -1,4 +1,4 @@
-import { toBase64Url } from './clone-binary.ts';
+import { toBase64Url } from './binary.ts';
 
 /**
  * The cryptographic port the session protocol is written against.

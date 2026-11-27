@@ -11,14 +11,9 @@
  * the public half; that is noted where it happens.
  */
 
-import type {
-  CloneCrypto,
-  DaemonIdentity,
-  EphemeralKeyPair,
-  PrivateKeyHandle,
-} from '../../lib/secrets/clone-crypto.ts';
-import { concatBytes, isAllZero } from '../../lib/secrets/clone-binary.ts';
-import { AEAD_TAG_BYTES, daemonIdFromPublicKey, SHARED_SECRET_BYTES } from '../../lib/secrets/clone-crypto.ts';
+import type { CloneCrypto, DaemonIdentity, EphemeralKeyPair, PrivateKeyHandle } from './crypto.ts';
+import { concatBytes, isAllZero } from './binary.ts';
+import { AEAD_TAG_BYTES, daemonIdFromPublicKey, SHARED_SECRET_BYTES } from './crypto.ts';
 
 /** The fixed prefix of an Ed25519 SubjectPublicKeyInfo. The remaining 32 bytes are the key. */
 const ED25519_SPKI_PREFIX = new Uint8Array([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]);

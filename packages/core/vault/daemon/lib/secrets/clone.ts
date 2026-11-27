@@ -36,7 +36,7 @@ import {
   toBase64Url,
   utf8Bytes,
   utf8Text,
-} from './clone-binary.ts';
+} from '@ferretry/std/sealing';
 import {
   AEAD_KEY_BYTES,
   AEAD_NONCE_BYTES,
@@ -46,7 +46,7 @@ import {
   type PrivateKeyHandle,
   publicKeyMatchesDaemonId,
   X25519_PUBLIC_KEY_BYTES,
-} from './clone-crypto.ts';
+} from '@ferretry/std/sealing';
 import { UnknownSecretError } from './types.ts';
 import type { SecretDirectory, SecretVault } from './vault.ts';
 import {

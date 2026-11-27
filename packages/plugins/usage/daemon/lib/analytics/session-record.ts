@@ -24,6 +24,8 @@ export interface FinishedAnalyticsSession {
   readonly label?: string | null;
   readonly cwd?: string | null;
   readonly parent?: string | null;
+  /** What the ferret was started for, as it said so; absent for a ferret that named none. */
+  readonly purpose?: string | null;
   readonly createdAt: string;
   readonly startedAt?: string | null;
   readonly finishedAt: string;
@@ -178,6 +180,7 @@ export function deriveAnalyticsSessionRecord(
       label: session.label ?? null,
       cwd: session.cwd ?? null,
       parent: session.parent ?? null,
+      purpose: session.purpose ?? null,
       day: utcDay(session.createdAt),
       week: utcWeek(session.createdAt),
       createdAt,

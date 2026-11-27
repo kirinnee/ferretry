@@ -197,22 +197,23 @@ mean of per-session ratios, which would weigh a one-turn session the same as a h
 Labels group and filter. A label whose value is null groups as its own row (sorted last) and never
 matches a matcher.
 
-| Label            | Value                                                                                    |
-| ---------------- | ---------------------------------------------------------------------------------------- |
-| `runtime`        | the session's runtime (its configured `agent`); alias of `agent`                         |
-| `model`          | the selected model, normalised to its catalog identity                                   |
-| `pricing_model`  | the model the transcript was priced against (may differ from `model`)                    |
-| `harness`        | `claude` or `codex`                                                                      |
-| `machine`        | the answering daemon's name: the one pairing gave it, which is what the app shows        |
-| `project`        | the session's working directory; alias of `repo` (and of `cwd`)                          |
-| `session`        | the session id; alias of `id`                                                            |
-| `day`            | creation day, `YYYY-MM-DD`; UTC unless the request names a `tz` (see Time zone)          |
-| `week`           | the Monday starting the creation week, `YYYY-MM-DD`; UTC unless the request names a `tz` |
-| `status`         | terminal status: `completed`, `failed`, `stalled`, `stopped`                             |
-| `mode`, `label`  | the session's mode and its label                                                         |
-| `parent`, `tree` | the parent session id; the root session id of the session's tree (`tree` is exact-only)  |
-| `context_window` | the context window, in tokens                                                            |
-| `token_data`     | `known` when the session has a proven token total, else `unknown`                        |
+| Label            | Value                                                                                                                                                                                                                                                            |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime`        | the session's runtime (its configured `agent`); alias of `agent`                                                                                                                                                                                                 |
+| `model`          | the selected model, normalised to its catalog identity                                                                                                                                                                                                           |
+| `pricing_model`  | the model the transcript was priced against (may differ from `model`)                                                                                                                                                                                            |
+| `harness`        | `claude` or `codex`                                                                                                                                                                                                                                              |
+| `machine`        | the answering daemon's name: the one pairing gave it, which is what the app shows                                                                                                                                                                                |
+| `project`        | the session's working directory; alias of `repo` (and of `cwd`)                                                                                                                                                                                                  |
+| `session`        | the session id; alias of `id`                                                                                                                                                                                                                                    |
+| `day`            | creation day, `YYYY-MM-DD`; UTC unless the request names a `tz` (see Time zone)                                                                                                                                                                                  |
+| `week`           | the Monday starting the creation week, `YYYY-MM-DD`; UTC unless the request names a `tz`                                                                                                                                                                         |
+| `status`         | terminal status: `completed`, `failed`, `stalled`, `stopped`                                                                                                                                                                                                     |
+| `mode`, `label`  | the session's mode and its label                                                                                                                                                                                                                                 |
+| `parent`, `tree` | the parent session id; the root session id of the session's tree (`tree` is exact-only)                                                                                                                                                                          |
+| `context_window` | the context window, in tokens                                                                                                                                                                                                                                    |
+| `token_data`     | `known` when the session has a proven token total, else `unknown`                                                                                                                                                                                                |
+| `purpose`        | what the ferret was started for (`fy new --purpose`): `comms`, `review`, `planning`, `implementation`, `other`. A ferret that named none has no purpose: it matches no matcher and groups as `null` (the app says Unlabelled), never a guess from its transcript |
 
 `machine` is stamped when the query runs, not stored. The index belongs to one daemon, and a renamed
 machine's history follows the new name. A daemon that names no machine answers `machine: null`. The

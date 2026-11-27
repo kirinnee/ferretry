@@ -1,7 +1,7 @@
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import type { FerretState, FerretSummary, HarnessKey, PackId } from '../ids.ts';
-import type { ConversationImport, HarnessFacts, SitrepLine } from '../kinds.ts';
+import type { ConversationImport, HarnessFacts, PackedConversation, SitrepLine } from '../kinds.ts';
 import type { HarnessRuntimeDescriptor } from '../kinds/runtime-descriptor.ts';
 import type { HarnessHistorySource } from '../history.ts';
 import type { RepoWorktreeListResponse } from '../worktrees.ts';
@@ -168,4 +168,35 @@ export interface ReadsApi {
    * persisted (`system-callsigns.json`) and skips every id the running fleet still holds.
    */
   systemCallsign?(prefix: 'warden' | 'learning' | 'pack'): Promise<string>;
+  /**
+   * Additive (C-45, the move to another machine): what a ferret holds that MAY leave this machine in a move, read only.
+   * Relocate's alone (any other consumer's port has no such member): it reads the ferret's session files, which only
+   * Ferrets can reach. `undefined` for a ferret this daemon does not know. See {@link RelocationSource}.
+   */
+  relocationSource?(ferret: FerretId): Promise<RelocationSource | undefined>;
+}
+
+/** One file of a ferret that may travel: where it is (`area`), its path below that area, and its size in bytes. */
+export interface RelocationFile {
+  /** `session`: its own session folder (`turns/`, `channel/`, `attachments/` only); `history`: its `history.jsonl`. */
+  readonly area: 'session' | 'history';
+  readonly path: string;
+  readonly size: number;
+}
+
+/**
+ * What {@link ReadsApi.relocationSource} answers, bound to one ferret. It lists and reads ONLY the files the move names:
+ * the turn documents, the queued-message files and the attachments of the ferret's session folder, and its journal. The
+ * session credential file (`environment.json`), the effect ledger, the completion markers and the harness's secret-bearing
+ * leftovers are not listed and cannot be read through it, whatever path a caller asks for. A link is never followed.
+ */
+export interface RelocationSource {
+  /** Every file that may travel, in a stable order, each with its size: the caller weighs the whole before it reads any. */
+  files(): Promise<readonly RelocationFile[]>;
+  /** One listed file's bytes, at most `limitBytes` of them (a longer file rejects); rejects for a name `files()` did not list. */
+  read(file: Pick<RelocationFile, 'area' | 'path'>, limitBytes: number): Promise<Uint8Array>;
+  /** Sentences saying why this ferret cannot be moved right now (not at its prompt, a job attached); empty when it can. */
+  busy(): Promise<readonly string[]>;
+  /** The conversation through its harness (`Harness.packConversation`), or why it cannot be packed. */
+  conversation(): Promise<Result<PackedConversation, { readonly reason: string }>>;
 }

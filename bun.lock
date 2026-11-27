@@ -688,6 +688,18 @@
         "react-dom": "^19.0.0",
       },
     },
+    "packages/plugins/relocate": {
+      "name": "@ferretry/plugin-relocate",
+      "version": "5.0.0",
+      "dependencies": {
+        "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
+        "@ferretry/kernel": "workspace:*",
+        "@ferretry/std": "workspace:*",
+        "zod": "4.4.3",
+      },
+    },
+
     "packages/plugins/runtimes": {
       "name": "@ferretry/plugin-runtimes",
       "version": "5.0.0",
@@ -1059,6 +1071,8 @@
     "@ferretry/plugin-projects": ["@ferretry/plugin-projects@workspace:packages/plugins/projects"],
 
     "@ferretry/plugin-pulls": ["@ferretry/plugin-pulls@workspace:packages/plugins/pulls"],
+
+    "@ferretry/plugin-relocate": ["@ferretry/plugin-relocate@workspace:packages/plugins/relocate"],
 
     "@ferretry/plugin-runtimes": ["@ferretry/plugin-runtimes@workspace:packages/plugins/runtimes"],
 
