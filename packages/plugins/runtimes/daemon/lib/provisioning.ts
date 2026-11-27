@@ -198,6 +198,8 @@ export interface MaterialisedRecord {
   readonly links?: Readonly<Record<string, string>>;
   /** The entries written as a folder. */
   readonly dirs?: readonly string[];
+  /** A fingerprint of what is INSIDE each folder entry, so a folder the person added to is not taken for Ferretry's own. */
+  readonly trees?: Readonly<Record<string, string>>;
   /** The hash of each `replaceKeys` member the plan wrote, as `<key>.<member>`. */
   readonly members?: Readonly<Record<string, string>>;
 }

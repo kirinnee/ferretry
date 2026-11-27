@@ -52,6 +52,7 @@ const pageIdentity = (page: BrowserPageSummary): string =>
     page.title,
     page.url,
     page.incognito === true ? 'i' : '',
+    page.identity ?? '',
     page.ownerSessionId ?? '',
     page.ownerName ?? '',
   ].join('\u0002');
