@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { CallContext } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
-import { accountsRoute, reposRoute } from '../../../daemon/features/repos/routes.ts';
+import { accountsRoute, cloneRoute, reposRoute } from '../../../daemon/features/repos/routes.ts';
 import type { FolderBrowser } from '../../../daemon/features/folders/port.ts';
-import { fakeMachine, registryOver } from './support.ts';
+import { fakeMachine, listingBrowser, registryOver } from './support.ts';
 
 type Decision = { allowed: boolean; refusal: string; steppedUp?: boolean };
 /** What Gate's `governance` answers for `filesystem.configure` (the route's own `filesystem.use` is already admitted). */
@@ -365,5 +365,70 @@ describe('PUT /v1/projects/:id/accounts', () => {
       ).status,
     ).toBe(404);
     expect((await failure(() => accountsRoute(registry)(callWith({ accounts: 'a' }, { id })))).status).toBe(400);
+  });
+});
+
+describe('POST /v1/projects/:id/repos (clone into an existing project)', () => {
+  const ROOT = '/home/me/work/alpha';
+  const URL = 'https://github.com/you/cloned.git';
+  const clone = async (fenced: readonly string[] = [], repositories: Record<string, string> = {}) => {
+    const machine = fakeMachine([ROOT], repositories, fenced);
+    const world = registryOver(machine);
+    const made = await world.registry.register({ kind: 'existing-folder', path: ROOT });
+    if (!made.ok) throw new Error('not registered');
+    const names = () =>
+      [...machine.repositories.keys()]
+        .filter(path => path.startsWith(`${ROOT}/`))
+        .map(path => path.slice(ROOT.length + 1));
+    const scan = { browser: listingBrowser(ROOT, names) };
+    const run = async (url: string) =>
+      await cloneRoute(world.registry, machine, scan)(callWith({ url }, { id: made.value.id }));
+    return { ...world, machine, run };
+  };
+  const clones = (calls: readonly string[]) => calls.filter(call => call.startsWith('git clone'));
+
+  test('clones as a folder named after the repository and answers the repositories the project now holds', async () => {
+    const { run, machine, store } = await clone();
+    const got = answer(await run(URL));
+    expect(got.status).toBe(200);
+    expect(got.json).toEqual({
+      repos: [{ path: 'cloned', remote: 'https://github.com/o/cloned', provider: 'github' }],
+      truncated: false,
+    });
+    expect(clones(machine.calls)).toEqual([`git clone ${URL} ${ROOT}/cloned`]);
+    expect(store.file.projects[0]?.repos?.map(repo => repo.path)).toEqual(['cloned']);
+  });
+  test('refuses a folder that already exists in the project, cloning nothing', async () => {
+    const { run, machine } = await clone();
+    machine.directories.add(`${ROOT}/cloned`);
+    const refused = await failure(() => run(URL));
+    expect(refused).toMatchObject({ status: 422, code: 'project_clone_failed' });
+    expect(clones(machine.calls)).toEqual([]);
+  });
+  test('refuses a project that is itself a repository, where a clone would never be listed', async () => {
+    const { run, machine } = await clone([], { [ROOT]: `${ROOT}/.git` });
+    expect(await failure(() => run(URL))).toMatchObject({ status: 422, code: 'project_clone_failed' });
+    expect(clones(machine.calls)).toEqual([]);
+  });
+  test('refuses a folder Ferretry keeps for itself, an address that names no repository, and says why git failed', async () => {
+    const fenced = await clone([`${ROOT}/cloned`]);
+    expect(await failure(() => fenced.run(URL))).toMatchObject({ status: 422, code: 'project_clone_failed' });
+    const nameless = await clone();
+    expect(await failure(() => nameless.run('https://github.com/'))).toMatchObject({ status: 422 });
+    const broken = await clone();
+    broken.machine.gitClone = async () => {
+      throw new Error('git clone failed');
+    };
+    expect(await failure(() => broken.run(URL))).toMatchObject({ status: 422, message: 'git clone failed' });
+  });
+  test('refuses an address git must not be handed, and an unknown project', async () => {
+    const { run, registry, machine } = await clone();
+    expect(await failure(() => run('ext::sh -c touch /tmp/x'))).toMatchObject({ status: 400 });
+    const stray = '00000000-0000-4000-8000-0000000000ff';
+    const scan = { browser };
+    expect(
+      (await failure(() => cloneRoute(registry, machine, scan)(callWith({ url: URL }, { id: stray })))).status,
+    ).toBe(404);
+    expect(clones(machine.calls)).toEqual([]);
   });
 });

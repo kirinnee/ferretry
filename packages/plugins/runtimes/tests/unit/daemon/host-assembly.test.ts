@@ -223,6 +223,20 @@ describe('launchFactsSource', () => {
     should(await facts.facts('work')).deepEqual(EXPECTED_FACTS);
   });
 
+  it('E-245: should carry the account’s auto-only refusal, and none for an account without one', async () => {
+    const refused = JSON.stringify({
+      ...claudeManifest,
+      accounts: claudeManifest.accounts.map(account => ({ ...account, autoRefusal: 'does not accept Auto mode' })),
+    });
+
+    const facts = await source({ 'manifest.json': refused });
+
+    should((await facts.facts('work'))?.autoRefusal).equal('does not accept Auto mode');
+    should(
+      (await (await source({ 'manifest.json': JSON.stringify(claudeManifest) })).facts('work'))?.autoRefusal,
+    ).be.undefined();
+  });
+
   it('should say nothing of an unpublished runtime or a fleet nobody published', async () => {
     const facts = await source({ 'manifest.json': JSON.stringify(claudeManifest) });
     const empty = await source({});

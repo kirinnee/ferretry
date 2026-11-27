@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { device, ferret, owner, testHost } from '@ferretry/kernel/testing';
 import { PROJECTS_STATE, ProjectsPort, type ProjectInfo } from '../../contract/index.ts';
 import { implementProjects } from '../../daemon/index.ts';
-import { fakeMachine } from '../unit/daemon/support.ts';
+import { fakeMachine, listingBrowser } from '../unit/daemon/support.ts';
 
 const start = async (machine = fakeMachine(['/work/alpha', '/work/beta'])) =>
   await testHost({ plugins: [implementProjects(machine)] });
@@ -106,5 +106,65 @@ describe('projects daemon half', () => {
     const response = await host.request('GET', '/v1/projects', { as: owner() });
 
     expect(response.status).toBeGreaterThanOrEqual(500);
+  });
+});
+
+describe('cloning another repository into a registered project (F-101)', () => {
+  const ROOT = '/home/me/work/alpha';
+  const URL_ONE = 'https://github.com/you/cloned.git';
+  const world = async () => {
+    const machine = fakeMachine([ROOT]);
+    const names = () =>
+      [...machine.repositories.keys()]
+        .filter(path => path.startsWith(`${ROOT}/`))
+        .map(path => path.slice(ROOT.length + 1));
+    const host = await testHost({ plugins: [implementProjects(machine, { browser: listingBrowser(ROOT, names) })] });
+    const made = (
+      await host.request('POST', '/v1/projects', { body: { kind: 'existing-folder', path: ROOT }, as: owner() })
+    ).json<ProjectInfo>();
+    return { machine, host, id: made.id };
+  };
+
+  test('clones into the project, lists the repository on the record and keeps what was there', async () => {
+    const { machine, host, id } = await world();
+    const response = await host.request('POST', `/v1/projects/${id}/repos`, { body: { url: URL_ONE }, as: owner() });
+
+    expect(response.status).toBe(200);
+    expect(response.json<{ repos: { path: string }[] }>().repos.map(repo => repo.path)).toEqual(['cloned']);
+    expect(machine.calls).toContain(`git clone ${URL_ONE} ${ROOT}/cloned`);
+    const listed = (await host.request('GET', '/v1/projects', { as: owner() })).json<ProjectInfo[]>();
+    expect(listed[0]?.repos?.map(repo => repo.path)).toEqual(['cloned']);
+  });
+
+  test('a second repository is added beside the first; the same one again is refused and not cloned twice', async () => {
+    const { machine, host, id } = await world();
+    await host.request('POST', `/v1/projects/${id}/repos`, { body: { url: URL_ONE }, as: owner() });
+    const second = await host.request('POST', `/v1/projects/${id}/repos`, {
+      body: { url: 'https://github.com/you/other.git' },
+      as: owner(),
+    });
+    const again = await host.request('POST', `/v1/projects/${id}/repos`, { body: { url: URL_ONE }, as: owner() });
+
+    expect(second.json<{ repos: { path: string }[] }>().repos.map(repo => repo.path)).toEqual(['cloned', 'other']);
+    expect(again.status).toBe(422);
+    expect(machine.calls.filter(call => call.startsWith('git clone'))).toHaveLength(2);
+  });
+
+  test('refuses an address that is not a clone address, an unknown project and a ferret caller, cloning nothing', async () => {
+    const { machine, host, id } = await world();
+    const bad = await host.request('POST', `/v1/projects/${id}/repos`, { body: { url: 'ext::sh -c x' }, as: owner() });
+    const unknown = await host.request('POST', '/v1/projects/00000000-0000-4000-8000-0000000000ff/repos', {
+      body: { url: URL_ONE },
+      as: owner(),
+    });
+    const byFerret = await host.request('POST', `/v1/projects/${id}/repos`, {
+      body: { url: URL_ONE },
+      as: ferret('f1'),
+    });
+
+    expect(bad.status).toBe(400);
+    expect(unknown.status).toBe(404);
+    expect(byFerret.status).toBe(403);
+    expect(machine.calls.filter(call => call.startsWith('git clone'))).toHaveLength(0);
   });
 });

@@ -133,6 +133,11 @@ const accountShape = {
   /** Required when `available` is false, `null` otherwise. */
   unavailableReason: NonEmptyString.nullable(),
   /**
+   * Why a launch in AUTO mode alone is refused (the harness cannot honour its fixed layer). The account is still
+   * `available` for every other mode: a start asks per launch mode (`runtime.start`), never reads this as unavailable.
+   */
+  autoRefusal: NonEmptyString.optional(),
+  /**
    * The environment variables a profile binds to Ferretry's secret store, as `${secret:NAME}`
    * templates. REFERENCES, NEVER VALUES — the store holds the values and the daemon puts them into
    * the launch environment; see `docs/secrets.md`.
