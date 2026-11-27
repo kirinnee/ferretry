@@ -5,6 +5,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { ferret, type TestHost, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
+import { BrowserIdentitiesViewSchema } from '../../contract/index.ts';
 import daemon, { buildBrowsers } from '../../daemon/index.ts';
 import { Tabs } from '../support/tabs.ts';
 
@@ -28,6 +29,7 @@ const CONFIG = {
 interface Row {
   readonly identity: string;
   readonly running: boolean;
+  readonly starting?: boolean;
   readonly startedAt?: string;
   readonly proxy?: unknown;
   readonly liveProxy?: unknown;
@@ -36,7 +38,7 @@ interface Row {
 const rowsOf = (answered: { body: unknown }): readonly Row[] =>
   (JSON.parse(answered.body as string) as { identities: Row[] }).identities;
 
-async function built(config: unknown = CONFIG) {
+async function built(config: unknown = CONFIG, hold?: { readonly until: Promise<void>; readonly entered: () => void }) {
   const chromes = new Map<string, Tabs>();
   const closed: string[] = [];
   const chromeOf = (identity: string): Tabs => {
@@ -56,7 +58,15 @@ async function built(config: unknown = CONFIG) {
   const half = implementDaemon(daemon.manifest, {
     build: ctx =>
       buildBrowsers(ctx, {
-        launcher: { launch: async (_viewport, identity) => chromeOf(identity ?? 'agent').automation },
+        launcher: {
+          launch: async (_viewport, identity) => {
+            if (hold !== undefined) {
+              hold.entered();
+              await hold.until;
+            }
+            return chromeOf(identity ?? 'agent').automation;
+          },
+        },
       }),
   });
   const gate = new StandInAdmission(request =>
@@ -173,5 +183,42 @@ describe('GET /v1/browser/identities and the stop of one identity', () => {
     should(docs?.running).be.true();
     should(docs?.liveProxy).equal(null);
     should(docs?.proxy).deepEqual({ name: 'next-proxy.example.test:8080', own: true });
+  });
+
+  it('should report a launch in progress as starting, never running, with no live proxy while its egress is unknown', async () => {
+    // Arrange: a direct launch that is paused, then a config change that adds a proxy.
+    let release: () => void = () => undefined;
+    let entered: () => void = () => undefined;
+    const until = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const launching = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    const world = await built({ identities: { docs: {} } }, { until, entered });
+    host = world.host;
+    const opening = host.tool('browser_open', { name: 'direct', identity: 'docs' }, { as: ferret('f1') });
+    await launching;
+    host.setConfig('browsers.yaml', {
+      ...CONFIG,
+      identities: { ...CONFIG.identities, docs: { proxy: { url: 'http://next-proxy.example.test:8080' } } },
+    });
+
+    // Act
+    const duringAnswer = await host.request('GET', '/v1/browser/identities');
+    const during = rowsOf(duringAnswer).find(row => row.identity === 'docs');
+    release();
+    await opening;
+    const after = rowsOf(await host.request('GET', '/v1/browser/identities')).find(row => row.identity === 'docs');
+
+    // Assert
+    should(BrowserIdentitiesViewSchema.safeParse(JSON.parse(duringAnswer.body as string)).success).be.true();
+    should(during?.starting).be.true();
+    should(during?.running).be.false();
+    should(during?.liveProxy).be.undefined();
+    should(during?.startedAt).be.undefined();
+    should(after?.running).be.true();
+    should(after?.starting).be.undefined();
+    should(after?.liveProxy).equal(null);
   });
 });

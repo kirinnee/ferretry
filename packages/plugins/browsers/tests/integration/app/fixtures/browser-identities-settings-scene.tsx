@@ -1,6 +1,6 @@
 /**
  * Settings › Browser › Identities: the REAL Browser tab over a scripted client — no daemon, no network. Every identity name,
- * address and secret name is synthetic. The daemon lists `agent`, `work` (running, a proxy of its own) and `docs`; the file also
+ * address and secret name is synthetic. The daemon lists `agent`, `work` (running, a proxy of its own) and `docs` (starting, with a saved proxy for its next launch); the file also
  * holds `partner`, an identity with a proxy of its own that waits for the owner.
  *
  *   ?theme=<family>-<mode>
@@ -46,7 +46,14 @@ const IDENTITIES = {
       proxy: { name: 'work-proxy.example.test:8080', own: true },
       liveProxy: null,
     },
-    { identity: 'docs', builtIn: false, engine: 'chromium', running: false },
+    {
+      identity: 'docs',
+      builtIn: false,
+      engine: 'chromium',
+      running: false,
+      starting: true,
+      proxy: { name: 'next-proxy.example.test:8080', own: true },
+    },
   ],
 };
 

@@ -20,8 +20,10 @@ export const BrowserIdentityRowSchema = z.strictObject({
   /** The built-in identity (`agent`): it needs no entry in the file and cannot be removed. */
   builtIn: z.boolean(),
   engine: BrowserEngineSchema,
-  /** Whether this identity's Chrome runs (or is being started) right now. */
+  /** Whether this identity's Chrome runs right now: a launch still in progress is `starting`, never this. */
   running: z.boolean(),
+  /** Present (`true`) only while a launch is in progress: where its traffic goes is not known yet. */
+  starting: z.literal(true).optional(),
   startedAt: InstantSchema.optional(),
   /** When its profile folder last changed, `undefined` for an identity that has never opened a browser. */
   lastUsedAt: InstantSchema.optional(),

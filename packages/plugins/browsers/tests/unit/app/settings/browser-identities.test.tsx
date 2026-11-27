@@ -214,6 +214,40 @@ describe('Settings › Browser › Identities', () => {
     await view.unmount();
   });
 
+  it('says Starting with no proxy claim while a launch is in progress, and the proxy only for the next launch', async () => {
+    const { view } = await tab({
+      identities: {
+        maxRunning: 4,
+        identities: [{ ...REAL.identities[1], running: false, starting: true, startedAt: undefined }],
+      },
+    });
+    const work = view.container.querySelector('[data-browser-identity="work"]');
+    const said = work?.textContent ?? '';
+    expect(said).toContain('Starting…');
+    expect(said).toContain('Next launch: work-proxy.example.test:8080');
+    expect(said).not.toContain('Running');
+    expect(said).not.toContain('Via');
+    expect(said).not.toContain('Now:');
+    expect(said).not.toContain('Direct, no proxy');
+    expect(work?.querySelector('[data-browser-identity-running]')?.getAttribute('data-browser-identity-running')).toBe(
+      'false',
+    );
+    await view.unmount();
+  });
+
+  it('says nothing about a proxy while a launch with no saved proxy is in progress', async () => {
+    const { view } = await tab({
+      identities: {
+        maxRunning: 4,
+        identities: [{ identity: 'docs', builtIn: false, engine: 'chromium', running: false, starting: true }],
+      },
+    });
+    const said = view.container.querySelector('[data-browser-identity="docs"]')?.textContent ?? '';
+    expect(said).toContain('Starting…');
+    expect(said).not.toMatch(/Via|Now:|direct|Direct|proxy/u);
+    await view.unmount();
+  });
+
   it('a per-identity proxy that loosens shows as waiting for the owner, and the held identity is listed as such', async () => {
     const { calls, view } = await tab({
       put: { path: 'browsers.yaml', etag: 'etag-2', outcome: 'pending' },

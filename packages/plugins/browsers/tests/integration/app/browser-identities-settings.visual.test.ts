@@ -1,7 +1,7 @@
 /**
  * SETTINGS › BROWSER › IDENTITIES in a real browser. The real Browser tab (`fixtures/browser-identities-settings-scene.tsx`, a
  * scripted client, synthetic identities and proxy names, no network): the daemon's identities (one running with a proxy of its
- * own, one stopped, one never opened), the one the owner has yet to confirm, and the add form — with a bad name typed, so the
+ * own, one stopped, one still starting), the one the owner has yet to confirm, and the add form — with a bad name typed, so the
  * problem line and the disabled button are drawn too. At a phone (390) and a desktop (1440), light and dark, in the default look
  * (Studio), Studio with every radius at its highest, and Gen Z: nothing scrolls sideways and no content leaves the inner rounded
  * rectangle of the box it sits in (`round-safe.ts`).
@@ -97,6 +97,10 @@ for (const look of LOOKS)
             expect(await page.locator('[data-browser-identity="work"]').textContent()).toContain(
               'Now: direct · Next launch: work-proxy.example.test:8080',
             );
+            const starting = (await page.locator('[data-browser-identity="docs"]').textContent()) ?? '';
+            expect(starting).toContain('Starting…');
+            expect(starting).toContain('Next launch: next-proxy.example.test:8080');
+            expect(starting).not.toMatch(/Via|Now:|Running/u);
             // A bad name: the problem is said under the field and Add stays off.
             await page.locator('[data-browser-identity-key]').fill('Bad Name');
             await page.waitForSelector('[data-browser-identity-problem]');

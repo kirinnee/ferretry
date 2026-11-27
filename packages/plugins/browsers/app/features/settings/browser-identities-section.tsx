@@ -21,7 +21,9 @@ type Reading =
   | { readonly kind: 'unavailable'; readonly sentence: string };
 
 /** Where an identity's traffic goes, by the proxy's name: never how it signs in. */
-const identityProxyWords = (row: BrowserIdentityRow): string => {
+const identityProxyWords = (row: BrowserIdentityRow): string | undefined => {
+  // A launch in progress has no live egress yet: claim none, and name only a saved proxy as the next launch's.
+  if (row.starting === true) return row.proxy === undefined ? undefined : `Next launch: ${row.proxy.name}`;
   if (row.liveProxy !== undefined) {
     const live = row.liveProxy?.name;
     return `Now: ${live ?? 'direct'}${live === row.proxy?.name ? '' : ` · Next launch: ${row.proxy?.name ?? 'direct'}`}`;
@@ -31,8 +33,18 @@ const identityProxyWords = (row: BrowserIdentityRow): string => {
     : `Via ${row.proxy.name}${row.proxy.own ? '' : ' (the machine’s proxy)'}`;
 };
 
+/** The proxy fact as parts of the detail line: none when a starting identity has nothing to say yet. */
+const proxyParts = (row: BrowserIdentityRow): readonly string[] => {
+  const words = identityProxyWords(row);
+  return words === undefined ? [] : [words];
+};
+
 const stateWords = (row: BrowserIdentityRow): string =>
-  row.running ? `Running${row.startedAt === undefined ? '' : ` since ${relativeTime(row.startedAt)}`}` : 'Stopped';
+  row.starting === true
+    ? 'Starting…'
+    : row.running
+      ? `Running${row.startedAt === undefined ? '' : ` since ${relativeTime(row.startedAt)}`}`
+      : 'Stopped';
 
 /** Said only for an identity that is stopped: a running one says since when it runs. */
 const lastUsedWords = (row: BrowserIdentityRow): string =>
@@ -158,7 +170,7 @@ export function BrowserIdentitiesSection({
                 >
                   {stateWords(row)}
                 </span>
-                {row.running ? (
+                {row.running || row.starting === true ? (
                   <Button
                     type="button"
                     size="sm"
@@ -171,7 +183,13 @@ export function BrowserIdentitiesSection({
                   </Button>
                 ) : null}
               </div>
-              <DetailLine parts={['Chromium', identityProxyWords(row), ...(row.running ? [] : [lastUsedWords(row)])]} />
+              <DetailLine
+                parts={[
+                  'Chromium',
+                  ...proxyParts(row),
+                  ...(row.running || row.starting === true ? [] : [lastUsedWords(row)]),
+                ]}
+              />
             </li>
           ))}
           {waiting.map(waits => (
