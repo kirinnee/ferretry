@@ -120,6 +120,15 @@ const SCREENS: readonly Screen[] = [
     keys: ['Up', 'Up', 'Enter'],
   },
   {
+    rule: 'claude-chrome-notice',
+    dialog: words({ kind: 'other', title: 'Claude in Chrome', escape: 'close' }),
+    header: ['  Claude in Chrome', '  Claude can use Chrome through its extension.'],
+    glyph: '❯',
+    footer: '  Enter to continue · Esc to close',
+    start: 1,
+    keys: ['Escape'],
+  },
+  {
     rule: 'codex-hooks-review',
     dialog: words({
       harness: 'codex',

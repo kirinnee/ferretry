@@ -105,6 +105,60 @@ const EXPECTED: Readonly<Record<string, Shape>> = {
     escape: 'cancel',
     selected: 1,
   },
+  'claude-2.1.327-directory-trust': {
+    harness: 'claude-code',
+    kind: 'directory-trust',
+    title: 'Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open',
+    body: [
+      "source project, or work from your team). If not, take a moment to review what's in this folder first.",
+      "Claude Code'll be able to read, edit, and execute files here.",
+      'Security guide',
+    ].join('\n'),
+    options: [opt(1, 'No, exit'), opt(2, 'Yes, I trust this folder', true)],
+    escape: 'cancel',
+    selected: 1,
+  },
+  'claude-2.1.327-api-key': {
+    harness: 'claude-code',
+    kind: 'other',
+    title: 'Detected a custom API key in your environment',
+    body: 'ANTHROPIC_API_KEY: sk-ant-...FAKEFAKEFAKEFAKEFAKE\nDo you want to use this API key?',
+    options: [opt(1, 'Yes'), opt(2, 'No (recommended)')],
+    escape: 'cancel',
+    selected: 2,
+  },
+  'claude-2.1.327-bypass-warning': {
+    harness: 'claude-code',
+    kind: 'other',
+    title: 'WARNING: Claude Code running in Bypass Permissions mode',
+    body: [
+      'In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially',
+      'dangerous commands.',
+      'This mode should only be used in a sandboxed container/VM that has restricted internet access and can',
+      'easily be restored if damaged.',
+      'By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.',
+      'https://code.claude.com/docs/en/security',
+    ].join('\n'),
+    options: [opt(1, 'No, exit'), opt(2, 'Yes, I accept')],
+    escape: 'cancel',
+    selected: 1,
+  },
+  // A notice with no rows (drawn by `--chrome`): nothing to select, answered by Esc alone.
+  'claude-2.1.327-chrome-notice': {
+    harness: 'claude-code',
+    kind: 'other',
+    title: 'Claude in Chrome',
+    body: [
+      'Claude can use Chrome through its extension: open sites, fill forms, take screenshots, record GIFs, and',
+      'read console logs and network requests.',
+      'Requires the Chrome extension. Get started at https://claude.ai/chrome',
+      'Site-level permissions are inherited from the Chrome extension. Manage permissions in the Chrome extension',
+      'settings to control which sites Claude can browse, click, and type on.',
+      'For more info, use /chrome or visit https://code.claude.com/docs/en/chrome',
+    ].join('\n'),
+    options: [],
+    escape: 'close',
+  },
 };
 
 const parsed = (name: string): HarnessDialog => parseHarnessDialog(fixture(name)) as HarnessDialog;
@@ -474,6 +528,9 @@ describe('readHarnessDialogFrame — every shipped dialog fixture, cursor remove
   it('names every fixture that draws a cursor row under the same id, with no selected row', () => {
     const checked: string[] = [];
     for (const path of shipped) {
+      // An UNNAMED list drawn with no digits and no cursor is not a dialog by design (the markerless case below): these
+      // two screens are `other`, and the home keys / startup answers clear them before a person could see a redraw.
+      if (/claude-2\.1\.327-(?:api-key|bypass-warning)/u.test(path)) continue;
       const frame = readFileSync(path, 'utf8');
       const read = readHarnessDialogFrame(frame);
       if (read === undefined || !read.cursorRead || read.dialog.options.length === 0) continue;
@@ -512,5 +569,40 @@ describe('readHarnessDialogFrame — every shipped dialog fixture, cursor remove
     const frame = [RULE, '  Pick one', '', '    A', '    B', '', '  Enter to confirm · Esc to cancel'].join('\n');
 
     should(readHarnessDialogFrame(frame)).be.undefined();
+  });
+});
+
+describe('a notice with no rows to choose (Claude in Chrome, 2.1.327)', () => {
+  const NOTICE = fixture('claude-2.1.327-chrome-notice');
+
+  it('is a dialog with no options and no selected row, and Esc is its only answer', () => {
+    const read = readHarnessDialogFrame(NOTICE);
+
+    should(read?.cursorRead).be.true();
+    should(read?.dialog.options).eql([]);
+    should(read?.dialog.selected).be.undefined();
+    should(read?.dialog.escape).equal('close');
+    should(paneBlockingDialog(NOTICE)).equal('Harness dialog — Claude in Chrome');
+  });
+
+  it('keeps one id however the frame is drawn around it', () => {
+    const lower = parseHarnessDialog(`${NOTICE}\n`.replaceAll('\n', '\r\n'));
+
+    should(lower?.id).equal(parsed('claude-2.1.327-chrome-notice').id);
+  });
+
+  it('reads nothing from the idle composer, whatever line ends the frame', () => {
+    const idle = ['● Done.', '', RULE, '❯ ', RULE, '  Enter to continue · Esc to close'].join('\n');
+
+    should(readHarnessDialogFrame(idle)).be.undefined();
+  });
+
+  it('reads nothing from a title with no paragraph under it, or a footer that is not Enter to continue', () => {
+    const bare = [RULE, '  Claude in Chrome', '', '  Enter to continue · Esc to close'].join('\n');
+    const confirm = [RULE, '  Claude in Chrome', '', '  Some prose.', '', '  Enter to confirm · Esc to cancel'].join(
+      '\n',
+    );
+
+    should([readHarnessDialogFrame(bare), readHarnessDialogFrame(confirm)]).deepEqual([undefined, undefined]);
   });
 });

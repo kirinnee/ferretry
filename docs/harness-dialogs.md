@@ -41,8 +41,10 @@ the dialog is shown to them as a box instead. Not used, on purpose:
 
 ## What is recognised
 
-Read off real panes captured from Codex 0.145.0, 0.156.1, 0.163.0 and 0.164.0 and Claude Code 2.1.220 and 2.1.281 in throwaway
-homes with no network. The captures are the fixtures in `packages/daemon/tests/fixtures/harness-dialogs/`.
+Read off real panes captured from Codex 0.145.0, 0.156.1, 0.163.0, 0.164.0 and 0.170.0 and Claude Code 2.1.220, 2.1.281 and
+2.1.327 in throwaway homes with no network (a synthetic home, a fake key, nothing signed in). The captures are the fixtures in
+`packages/plugins/claude-code/tests/fixtures/harness-dialogs/` and `codex-harness-dialogs/` (the runner's reader, Terminals, keeps the
+same frames in `packages/plugins/terminals/tests/fixtures/harness-dialogs/`).
 
 | Harness | Dialog                               | `kind`            | Options that grant trust                                                                |
 | ------- | ------------------------------------ | ----------------- | --------------------------------------------------------------------------------------- |
@@ -54,10 +56,17 @@ homes with no network. The captures are the fixtures in `packages/daemon/tests/f
 | Claude  | Settings Error                       | `settings-error`  | —                                                                                       |
 | Claude  | What do you want to do? (limit hit)  | `usage-limit`     | — (the session is recorded `rate_limited`; no row is ever picked for you)               |
 | Codex   | Usage limit reached                  | `usage-limit`     | — (the session is recorded `rate_limited`; the "Increase limits" rows are never picked) |
-| Either  | Do you trust this folder?            | `directory-trust` | the "Yes" rows                                                                          |
+| Either  | Do you trust this folder?            | `directory-trust` | the "Yes" rows (2.1.327 draws it with no digits and the cursor on "No, exit")           |
+| Claude  | Detected a custom API key            | `other`           | — ("Yes" uses the key; no rule picks either row)                                        |
+| Claude  | WARNING: Bypass Permissions mode     | `other`           | — (a home key skips it; "Yes, I accept" is never pressed)                               |
+| Claude  | Claude in Chrome (`--chrome`)        | `other`           | — (no rows: Enter continues, Esc closes; see the rules below)                           |
 | Codex   | Folder access: Trust this folder?    | `directory-trust` | Trust and continue                                                                      |
 | Codex   | Folder access: Open restricted       | `directory-trust` | — (opening changes no saved trust)                                                      |
 | Codex   | Model migration ("Meet GPT-6 Sol")   | `other`           | — (0.164 asks it when the model has a successor; the generic reading carries it)        |
+
+A Claude notice with **no rows** — a title and paragraphs under the full-width rule, and the footer "Enter to continue · Esc
+to close" — is read as `other` with no options and no selected row; Esc is its only answer. It needs the rule, that exact
+footer and no cursor or numbered row, so a list, the idle composer or a bare footer is never one.
 
 Any other screen of the same shape — a header, a list with a cursor on one row, and a key-hint footer that
 names Enter or Esc ("enter confirm · esc skip", "Press enter to continue", "Enter to confirm · Esc to
@@ -186,6 +195,7 @@ or **the row whose label is exactly this**. Free pane text never picks a rule.
 | Claude  | New MCP server found (`mcp-servers`)             | `claude-mcp-servers`        | ↓/↑ to "Continue without using this MCP server", Enter      |
 | Claude  | Settings Error (`settings-error`)                | `claude-settings-error`     | ↓/↑ to "Continue without these settings", Enter             |
 | Claude  | LSP plugin recommendation (`other`)              | `claude-lsp-recommendation` | ↓/↑ to "No, not now", Enter                                 |
+| Claude  | Claude in Chrome notice (`other`)                | `claude-chrome-notice`      | Esc (closes it; nothing is turned on)                       |
 | Codex   | Hooks need review (`hooks-review`)               | `codex-hooks-review`        | ↓/↑ to "Continue without trusting (hooks won't run)", Enter |
 | Codex   | The hook list (`hooks-list`)                     | `codex-hooks-list`          | Esc                                                         |
 | Codex   | Update available (`update`)                      | `codex-update`              | ↓/↑ to "Skip", Enter                                        |
@@ -233,6 +243,17 @@ capability and keeps every ask version. So the notice says only fixed words: "<f
 terminal), and names no row. What the screen says is read in the terminal.
 
 ## Declared gaps
+
+- **Survey and feedback (Claude).** "How is Claude doing this session? (optional)" with `1: Bad  2: Fine  3: Good  0: Dismiss`, and its
+  follow-up "Can Anthropic look at your session transcript…", are strips under the composer, not modal dialogs: the composer stays
+  live and there is no list to read. They need a live API session, so no pane could be captured offline; the text is from the
+  2.1.327 binary's strings. `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` in the launch environment (pinned by the fixed-layer test)
+  keeps them away, which is the only answer Ferretry gives. Codex 0.170 shows no survey.
+- **Launch screens that could not be captured offline.** Claude 2.1.327 checks api.anthropic.com before it draws its first-run
+  theme picker, login-method screen and security notes, so none could be read; they remain covered by the home keys above and the
+  startup answers. The "Resume session" picker (`claude --resume` with no id, which Ferretry never passes — it always names the
+  session) has a list footer this reader does not name, so it is not read. Codex 0.170 draws its update as a banner above the
+  composer, not a dialog, when it cannot self-update.
 
 - **Which hooks.** The hook review says how many hooks are new, not which; the box shows what the pane
   shows. "Review hooks" opens Codex's own list, which the box can only close (Esc).

@@ -249,6 +249,34 @@ function hooksList(lines: readonly string[], footer: string): HarnessDialog | un
 }
 
 /**
+ * A Claude notice with no rows to choose: a title and a few paragraphs under the full-width rule, then a footer naming
+ * "Enter to continue" and Esc ("Claude in Chrome": "Enter to continue · Esc to close", Claude Code 2.1.327). Nothing is
+ * selected, so it is answered by its Esc alone. It needs the rule, that footer and no cursor or numbered row
+ * under the rule, so a list, a composer line (`❯`) or a bare footer is never one.
+ */
+function noticeDialog(lines: readonly string[], footerAt: number, footer: string): HarnessDialog | undefined {
+  const closer = ESCAPE_WORD.exec(footer)?.[1]?.toLowerCase();
+  if (closer === undefined || !/\benter to continue\b/iu.test(footer)) return undefined;
+  let rule = -1;
+  for (let index = footerAt - 1; rule < 0 && index >= Math.max(0, footerAt - HEADER_REACH_LINES); index -= 1)
+    if (RULE.test(lines[index] as string)) rule = index;
+  if (rule < 0) return undefined;
+  const under = lines.slice(rule + 1, footerAt);
+  const header = under.filter(line => !blank(line)).map(line => line.trim());
+  if (header.length < 2 || (header[0] as string).length > 80) return undefined;
+  if (under.some(line => rowOf(line)?.cursor === true || rowOf(line)?.digit === true)) return undefined;
+  const dialog = {
+    harness: 'claude' as const,
+    kind: 'other' as const,
+    title: clip(header[0] as string, LIMITS.title),
+    body: clip(header.slice(1).join('\n'), LIMITS.body),
+    options: [],
+    escape: closer,
+  };
+  return { id: promptDigest(JSON.stringify(dialog)), ...dialog };
+}
+
+/**
  * The harness dialog this frame is parked on, or `undefined` when it shows none.
  *
  * Everything a person decides on is in the result; `id` is a digest of exactly that — not of where
@@ -264,6 +292,8 @@ export function parseHarnessDialog(pane: string): HarnessDialog | undefined {
   if (parsePermissionPrompt(pane) !== undefined) return undefined;
   const list = hooksList(lines, footer);
   if (list !== undefined) return list;
+  const info = noticeDialog(lines, footerAt, footer);
+  if (info !== undefined) return info;
 
   const found = dialogRows(lines, 0, footerAt);
   if (found === undefined) return undefined;
