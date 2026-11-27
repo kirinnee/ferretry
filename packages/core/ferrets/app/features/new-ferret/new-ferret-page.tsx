@@ -243,7 +243,7 @@ export function NewFerretPage({
     setError(null);
     // The pick is in the form: the list gives way to a one-line "Continuing" so the form is what the page shows.
     setDraft(current => {
-      const { harnessConversation: _before, harness: _harness, ...rest } = current;
+      const { harnessConversation: _before, conversationSource: _source, harness: _harness, ...rest } = current;
       if (next === null) return { ...rest, folder: '', folderExact: undefined };
       // The conversation brings its folder; a runtime of another harness cannot resume it, so that one is cleared.
       return {
@@ -252,6 +252,7 @@ export function NewFerretPage({
         folderExact: next.folder,
         runtime: next.harness === picked?.harness ? current.runtime : '',
         harnessConversation: next.conversation,
+        ...(next.source === undefined ? {} : { conversationSource: next.source }),
         harness: next.harness,
       };
     });

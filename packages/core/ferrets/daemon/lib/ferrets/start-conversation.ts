@@ -1,6 +1,5 @@
 import { err, ok, type Result } from '@ferretry/std';
 import type {
-  ConversationStageSource,
   Harness,
   HarnessKey,
   LaunchSpec,
@@ -10,33 +9,6 @@ import type {
 } from '../../../contract/index.ts';
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> => err({ code, reason });
-
-/**
- * "Continue a past conversation": the transcript a start names is put where the harness finds it (the one
- * `conversation.stage` provider: the existing indexed copy-on-link); a refusal refuses the start with its reason. With NO
- * provider nothing is copied: a pooled transcript is resumed, and the launch refuses one the harness proves absent (E17).
- * ONLY THE OWNER'S start stages: the transcript comes from the owner's own computer, and a ferret (or a pack, board or
- * warden) must never be able to pull a host conversation into the pool by naming it. Any other asker resumes a
- * conversation the pool already holds, and the launch refuses one it does not.
- */
-export async function stageConversation(
-  provider: ConversationStageSource | undefined,
-  harness: HarnessKey,
-  conversation: string | undefined,
-  by: StartRequest['by'],
-): Promise<Result<void, StartFailure>> {
-  const source = conversation === undefined || by !== 'owner' ? undefined : provider;
-  if (conversation === undefined || source === undefined) return ok(undefined);
-  const staged = await source
-    .stage({ harness, conversation })
-    .catch(
-      (): Awaited<ReturnType<ConversationStageSource['stage']>> =>
-        err({ code: 'failed', reason: 'the conversation could not be staged' }),
-    );
-  return staged.ok
-    ? ok(undefined)
-    : failed('refused', `${staged.error.reason} The ferret was not started, so nothing was resumed.`);
-}
 
 /**
  * A conversation that came from another machine (`StartRequest.relocated`, C-45) is the owner's alone, never beside another
@@ -79,4 +51,29 @@ export async function unpackRelocated(
     spec: { ...spec, harnessConversation: unpacked.value.conversation },
     conversation: unpacked.value.conversation,
   });
+}
+
+/** The existing resume probe/refusal, kept beside moved-conversation admission to keep the lifecycle class bounded. */
+export async function conversationForLaunch(
+  harness: Pick<Harness, 'hasConversation'>,
+  spec: LaunchSpec,
+  original: string | undefined,
+  named: string | undefined,
+  required: boolean,
+): Promise<Result<{ readonly conversation: string | undefined; readonly missing?: string }, StartFailure>> {
+  const conversation =
+    named === undefined || harness.hasConversation === undefined
+      ? original
+      : (await harness.hasConversation(spec, named).catch(() => undefined)) === false
+        ? undefined
+        : named;
+  if (named !== undefined && conversation === undefined) {
+    if (required)
+      return failed(
+        'refused',
+        `the ${spec.harness} conversation ${named} was not found, so the ferret was not started (only the owner's start copies one in from this computer, and only while the Conversations plugin is on)`,
+      );
+    return ok({ conversation, missing: named });
+  }
+  return ok({ conversation });
 }

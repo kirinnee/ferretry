@@ -2,6 +2,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import { z } from 'zod';
 import type { LaunchOrigin } from '../launch-origin.ts';
+import type { ConversationSource } from '../kinds/conversation-stage.ts';
 import { CompactAtSchema } from '../view/compact-at.ts';
 import {
   FerretCardIdSchema,
@@ -156,6 +157,7 @@ export interface StartRequest {
    * refused before the first write. A pack that the harness then refuses fails the launch like any other start failure.
    */
   readonly relocated?: PackedConversation;
+  readonly conversationSource?: ConversationSource;
   readonly by: 'owner' | 'ferret' | 'pack' | 'board' | 'warden';
   /**
    * `fy start --detach` (v4's meaning): answer as soon as the ferret is recorded (`starting`); the launch carries on in the

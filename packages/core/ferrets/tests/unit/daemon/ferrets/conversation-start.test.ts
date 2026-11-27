@@ -32,7 +32,7 @@ const stageOwner = (
       id: conversation,
       source: `projects/-work-a/${conversation}.jsonl`,
     });
-    return copied.ok ? ok(undefined) : err({ code: 'failed', reason: copied.error.reason });
+    return copied.ok ? ok({ release: () => undefined }) : err({ code: 'failed', reason: copied.error.reason });
   },
 });
 
@@ -211,4 +211,66 @@ test('a start that names no conversation never asks the stage owner', async () =
   expect(started.status).toBe(201);
   expect(asked).toEqual([]);
   expect(harness.resumed).toEqual([]);
+});
+
+test('the indexed source reaches staging and its reservation stays held through launch, then releases', async () => {
+  const source = { kind: 'pool' as const, row: 'a'.repeat(64) };
+  const harness = new FakeHarness().honestHistory();
+  harness.pool.add(ORIGINAL);
+  let reserved = false;
+  let released = 0;
+  const resume = harness.resume.bind(harness);
+  harness.resume = async (...args) => {
+    expect(reserved).toBe(true);
+    return await resume(...args);
+  };
+  const h = await host([], {
+    harness,
+    runner: new FakeRunner(),
+    plugins: [
+      fakeStageOwner({
+        stage: async input => {
+          expect(input.source).toEqual(source);
+          reserved = true;
+          return ok({
+            release: () => {
+              reserved = false;
+              released += 1;
+            },
+          });
+        },
+      }),
+    ],
+  });
+  const started = await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': 'bound-source' },
+    body: { folder: '/work/a', harnessConversation: ORIGINAL, conversationSource: source },
+  });
+  expect(started.status).toBe(201);
+  expect(released).toBe(1);
+  expect(reserved).toBe(false);
+});
+
+test('a launch refusal releases the staged reservation', async () => {
+  let released = 0;
+  const h = await host([], {
+    harness: new FakeHarness().honestHistory(),
+    runner: new FakeRunner(),
+    plugins: [
+      fakeStageOwner({
+        stage: async () =>
+          ok({
+            release: () => {
+              released += 1;
+            },
+          }),
+      }),
+    ],
+  });
+  const refused = await h.request('POST', '/v1/ferrets', {
+    headers: { 'x-fy-request-id': 'failed-reservation' },
+    body: { folder: '/work/a', harnessConversation: ORIGINAL },
+  });
+  expect(refused.status).toBe(409);
+  expect(released).toBe(1);
 });
