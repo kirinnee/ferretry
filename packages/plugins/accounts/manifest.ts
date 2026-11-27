@@ -1068,7 +1068,7 @@ export default definePlugin({
 
   /** Never reached by a ferret, through any root: the sealed login secrets and the account records (`PrivacyDecl`). */
   privacy: {
-    private: ['login-secrets.json', 'accounts.json'],
+    private: ['login-secrets.json', 'accounts.json', 'identity-links.json'],
   },
   data: {
     state: [
@@ -1076,6 +1076,8 @@ export default definePlugin({
       defineState({ name: 'accounts', path: 'accounts.json', store: 'json', format: 1, mode: 0o600 }),
       /** The values themselves, sealed by the Vault (`LOGIN_SECRETS`). */
       LOGIN_SECRETS.state,
+      /** The account → browser-identity graph (W-124): keys, ids and times, never a value. */
+      defineState({ name: 'identity-links', path: 'identity-links.json', store: 'json', format: 1, mode: 0o600 }),
       defineState({ name: 'sign-in-rules', path: 'sign-in-rules.json', store: 'json', format: 1 }),
       defineState({ name: 'copy-rules', path: 'copy-rules.json', store: 'json', format: 1 }),
       defineState({ name: 'copy-plans', path: 'copy-plans/*.json', store: 'json', format: 1 }),
