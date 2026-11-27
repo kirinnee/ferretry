@@ -24,7 +24,12 @@ export interface TargetOptions {
   readonly secrets?: readonly string[];
   readonly harnesses?: readonly string[];
   readonly runtimeOk?: boolean;
-  readonly start?: 'ok' | 'refuse';
+  readonly start?: 'ok' | 'refuse' | 'throw';
+  /** Projects, or Runtimes, is off on this machine (its plugin is not loaded). */
+  readonly projectsOff?: boolean;
+  readonly runtimesOff?: boolean;
+  /** Projects answers the preflight and is gone by the time the import writes. */
+  readonly projectsGoneAfterLook?: boolean;
   /** The ledger that says where a ferret came from cannot be written. */
   readonly recordFails?: boolean;
   /** Wraps the real checkout, so a test can make one step fail. */
@@ -83,6 +88,7 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
     git(machine, 'clone', '-q', bare, repo);
     git(repo, 'remote', 'set-url', 'origin', REMOTE_URL);
   }
+  const looks = { count: 0 };
   const self = { now: options.nowMs ?? Date.parse('2026-11-27T12:00:00.000Z') } as { now: number };
   const clock = {
     now: () => new Date(self.now).toISOString() as Instant,
@@ -120,6 +126,7 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
       harnesses: () => (options.harnesses ?? ['claude-code']) as readonly HarnessKey[],
       start: async request => {
         started.push(request);
+        if (options.start === 'throw') throw new Error('the harness fell over');
         return options.start === 'refuse'
           ? err({ code: 'refused', reason: 'the moved conversation was refused by the harness' })
           : ok(NEW_FERRET);
@@ -129,52 +136,56 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
       },
     },
     projects: () =>
-      ({
-        list: async () =>
-          havingProject
-            ? [
-                {
-                  id: 'p1',
-                  name: 'project',
-                  path: repo,
-                  source: 'clone',
-                  createdAt: '2026-11-01T00:00:00.000Z',
-                  repos: [{ path: '.', remote: NORMAL_REMOTE }],
-                },
-              ]
-            : [],
-        register: async (request: { readonly kind: string; readonly path: string }) => {
-          if (request.kind !== 'clone') return err({ code: 'registration_failed', message: 'only clones here' });
-          registered.push(request.path);
-          git(machine, 'clone', '-q', bare, request.path);
-          return ok({ id: 'p-cloned', name: 'cloned', path: request.path });
-        },
-        remove: async (id: string) => {
-          removedProjects.push(String(id));
-          return ok({ id, name: 'cloned', path: '' });
-        },
-      }) as never,
+      options.projectsOff === true || (options.projectsGoneAfterLook === true && looks.count++ > 0)
+        ? undefined
+        : ({
+            list: async () =>
+              havingProject
+                ? [
+                    {
+                      id: 'p1',
+                      name: 'project',
+                      path: repo,
+                      source: 'clone',
+                      createdAt: '2026-11-01T00:00:00.000Z',
+                      repos: [{ path: '.', remote: NORMAL_REMOTE }],
+                    },
+                  ]
+                : [],
+            register: async (request: { readonly kind: string; readonly path: string }) => {
+              if (request.kind !== 'clone') return err({ code: 'registration_failed', message: 'only clones here' });
+              registered.push(request.path);
+              git(machine, 'clone', '-q', bare, request.path);
+              return ok({ id: 'p-cloned', name: 'cloned', path: request.path });
+            },
+            remove: async (id: string) => {
+              removedProjects.push(String(id));
+              return ok({ id, name: 'cloned', path: '' });
+            },
+          } as never),
     gitAccounts: () =>
       ({
         list: async () => Array.from({ length: options.accounts ?? 1 }, (_, n) => ({ id: `a${String(n)}` })),
       }) as never,
     runtimes: () =>
-      ({
-        default: async () => 'claude-default',
-        resolve: async () =>
-          options.runtimeOk === false
-            ? { ok: false, refusal: 'no_login', sentence: 'no login is signed in' }
-            : {
-                ok: true,
-                runtime: {
-                  id: 'claude-default',
-                  harness: 'claude-code',
-                  login: 'l',
-                  profile: 'p',
-                  launch: { available: true },
-                },
-              },
-      }) as never,
+      options.runtimesOff === true
+        ? undefined
+        : ({
+            default: async () => 'claude-default',
+            resolve: async () =>
+              options.runtimeOk === false
+                ? { ok: false, refusal: 'no_login', sentence: 'no login is signed in' }
+                : {
+                    ok: true,
+                    runtime: {
+                      id: 'claude-default',
+                      harness: 'claude-code',
+                      login: 'l',
+                      profile: 'p',
+                      launch: { available: true },
+                    },
+                  },
+          } as never),
     vault: () => ({ has: async (name: string) => (options.secrets ?? []).includes(name) }) as never,
     checkout: options.wrapCheckout === undefined ? realCheckout : options.wrapCheckout(realCheckout),
     received: {

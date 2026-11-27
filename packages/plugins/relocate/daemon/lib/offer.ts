@@ -22,6 +22,10 @@ export class OfferError extends Error {
   }
 }
 
+/**
+ * What one offer can hold in memory is bounded by these two caps together (about the bundle cap, plus the per-chunk
+ * framing): a chunk is at most one chunk's worth and an index is below the chunk count. Nothing else is counted.
+ */
 /** The most chunks one bundle can have: the cap's worth of chunks, plus one for the manifest's framing. */
 const MAX_CHUNKS = Math.ceil(RELOCATE_MAX_BUNDLE_BYTES / RELOCATE_CHUNK_BYTES) + 1;
 /** Each sealed chunk is its plaintext plus a nonce and a tag. */
@@ -34,7 +38,6 @@ interface OpenOffer {
   readonly privateKey: PrivateKeyHandle;
   readonly expiresAtMs: number;
   readonly chunks: Map<number, Uint8Array>;
-  bytes: number;
 }
 
 /** What `take` hands the importer: the one-time private key and the chunks that were uploaded, once, ever. */
@@ -84,7 +87,7 @@ export class OfferBook {
       expiresAt,
       signature: signed.signature,
     };
-    this.#open.set(offerId, { offer, privateKey: keys.privateKey, expiresAtMs, chunks: new Map(), bytes: 0 });
+    this.#open.set(offerId, { offer, privateKey: keys.privateKey, expiresAtMs, chunks: new Map() });
     return offer;
   }
 
@@ -99,11 +102,7 @@ export class OfferBook {
     if (index >= MAX_CHUNKS) throw new OfferError(400, 'that is more chunks than a move can have', 'chunk_index');
     if (chunk.length > MAX_CHUNK_BYTES || chunk.length === 0)
       throw new OfferError(400, 'a chunk is not larger than the move’s chunk size', 'chunk_size');
-    const total = open.bytes - (open.chunks.get(index)?.length ?? 0) + chunk.length;
-    if (total > RELOCATE_MAX_BUNDLE_BYTES + MAX_CHUNKS * 64)
-      throw new OfferError(400, 'the uploaded chunks are larger than a move can be', 'too_large');
     open.chunks.set(index, chunk);
-    open.bytes = total;
   }
 
   /**

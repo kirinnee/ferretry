@@ -98,6 +98,21 @@ describe('starting on a conversation that was moved here', () => {
     expect(harness.resumed).toEqual([]);
   });
 
+  test('a harness whose unpack falls over fails the start in one sentence, and no pane is opened', async () => {
+    const harness = unpacking([]);
+    harness.unpackConversation = async () => {
+      throw new Error('disk full');
+    };
+    const { service } = fixture(harness);
+    const started = await service.start(
+      { folder: '/work', harness: 'claude-code', by: 'owner', relocated: PACKED },
+      PERSON_ORIGIN,
+    );
+    expect(started).toMatchObject({ ok: false, error: { code: 'refused' } });
+    expect(JSON.stringify(started)).toContain('could not be written into this ferret');
+    expect(harness.launched).toEqual([]);
+  });
+
   test('only the owner may start one, and never beside another conversation: refused before any write', async () => {
     const harness = unpacking([]);
     const { service, saved } = fixture(harness);

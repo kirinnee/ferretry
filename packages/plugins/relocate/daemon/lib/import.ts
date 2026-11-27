@@ -62,7 +62,7 @@ export interface ImporterDeps {
 /** Where the ferret's repository is, found or to be made. */
 type Resolved =
   | { readonly kind: 'found'; readonly repo: string }
-  | { readonly kind: 'clone'; readonly url: string; readonly parent: string; readonly destination: string };
+  | { readonly kind: 'clone'; readonly url: string; readonly destination: string };
 
 interface Evaluation {
   readonly refusals: string[];
@@ -122,7 +122,7 @@ export class Importer {
       // From here the offer is spent, whatever happens next: one offer opens one bundle.
       const spent = this.#guarded(() => this.deps.offers.take(offerId));
       const bundle = await this.#open(spent, request);
-      return await this.#receive(bundle, spent.offer, request);
+      return await this.#receive(bundle, request);
     } finally {
       this.#busy = false;
     }
@@ -146,12 +146,11 @@ export class Importer {
         ownDaemonId: this.deps.ownDaemonId,
       });
     } catch (error) {
-      if (error instanceof BundleRefused) throw new RelocateRefused(400, error.message, 'bundle_refused');
-      throw error;
+      throw error instanceof BundleRefused ? new RelocateRefused(400, error.message, 'bundle_refused') : error;
     }
   }
 
-  async #receive(bundle: OpenedBundle, offer: RelocateOffer, request: ImportRequest): Promise<ImportResponse> {
+  async #receive(bundle: OpenedBundle, request: ImportRequest): Promise<ImportResponse> {
     const { manifest } = bundle;
     const entry = (kind: string) => bundle.entries.find(candidate => candidate.kind === kind);
     const recorded = RecordSchema.safeParse(
@@ -190,8 +189,6 @@ export class Importer {
         'this project does not have the commit the ferret was on; update the project here, then move again',
         'commit_missing',
       );
-    const parent =
-      resolved.kind === 'found' ? resolved.repo.slice(0, Math.max(1, resolved.repo.lastIndexOf('/'))) : resolved.parent;
     const base = resolved.kind === 'found' ? resolved.repo : resolved.destination;
     const folder = `${base}-${slug(manifest.worktree.branch ?? 'detached')}-${tag}`;
     if (!(await this.deps.checkout.isFree(folder)))
@@ -200,7 +197,6 @@ export class Importer {
         'the folder for the moved working tree is already taken; try again',
         'folder_taken',
       );
-    void parent;
 
     const undo: (() => Promise<void>)[] = [];
     // Once a start has made the ferret nothing under it is taken back: it exists and runs on these files.
@@ -267,10 +263,7 @@ export class Importer {
       );
       if (!started.ok) throw new RelocateRefused(409, started.error.reason, 'start_refused');
       ferretExists = true;
-      const movedFrom = {
-        daemonId: offer.offerId === '' ? '' : request.header.sourceDaemonId,
-        ferretId: manifest.ferret.id,
-      };
+      const movedFrom = { daemonId: request.header.sourceDaemonId, ferretId: manifest.ferret.id };
       try {
         await this.deps.received.record(started.value, { ...movedFrom, at: this.deps.clock.now() });
       } catch {
@@ -329,8 +322,7 @@ export class Importer {
     try {
       return work();
     } catch (error) {
-      if (error instanceof OfferError) throw new RelocateRefused(error.status, error.message, error.code);
-      throw error;
+      throw error instanceof OfferError ? new RelocateRefused(error.status, error.message, error.code) : error;
     }
   }
 
@@ -368,7 +360,7 @@ export class Importer {
             refusals.push(`${joinPath(cloneInto, name)} already exists, so the project cannot be cloned there`);
           else {
             project = 'clone';
-            resolved = { kind: 'clone', url: needs.remote, parent: cloneInto, destination: joinPath(cloneInto, name) };
+            resolved = { kind: 'clone', url: needs.remote, destination: joinPath(cloneInto, name) };
           }
         }
       }

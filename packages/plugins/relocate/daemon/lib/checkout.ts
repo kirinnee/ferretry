@@ -83,7 +83,6 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
     if (done.exitCode !== 0 || done.stdoutTruncated) throw new CheckoutError(failure);
     return done.stdout;
   };
-  const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes).trim();
 
   return {
     hasCommit: async (repo, sha) => (await git(repo, ['cat-file', '-e', `${sha}^{commit}`])).exitCode === 0,
@@ -99,10 +98,7 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
         { stdin: bundle },
       );
       await must(repo, ['update-ref', ref, head], 'the moved commits could not be named here');
-      if (
-        text(await must(repo, ['rev-parse', '--verify', `${ref}^{commit}`], 'the moved commits are not here')) !== head
-      )
-        throw new CheckoutError('the moved commits are not the ones the other machine had');
+      await must(repo, ['rev-parse', '--verify', `${ref}^{commit}`], 'the moved commits are not here');
     },
 
     addWorktree: async (repo, path, at) => {
