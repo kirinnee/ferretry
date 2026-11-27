@@ -24,3 +24,15 @@ export const readThemeCss = (): string => readCssWithImports(join(stylesRoot, 't
 
 /** One file under `src/styles` (`style/neo.css`, `tokens/base-palette.css`, …). */
 export const readStyleFile = (relative: string): string => readFileSync(join(stylesRoot, relative), 'utf8');
+
+/**
+ * One palette's blocks of the generated stylesheet (`generated/theme-packs.css`, written from `theme/packs/palette/<id>/palette.ts`):
+ * every top-level block whose selector names the palette. A palette is data now, so this is the CSS the browser gets for it.
+ */
+export function readPaletteCss(id: string): string {
+  const generated = readFileSync(join(stylesRoot, '../generated/theme-packs.css'), 'utf8');
+  return generated
+    .split(/\n\n+/u)
+    .filter(block => block.includes(`[data-palette='${id}']`))
+    .join('\n\n');
+}

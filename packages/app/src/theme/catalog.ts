@@ -19,7 +19,7 @@ import {
   THEME_FAMILY_IDS,
   type StyleId,
 } from '@ferretry/plugin-layouts/contract';
-import { PALETTE_NAMES } from './palette-names.ts';
+import { PALETTE_PACKS } from '../generated/theme-packs.ts';
 
 export { PALETTE_IDS, type PaletteId, STYLE_IDS, type StyleId };
 /** A single-pick look is a palette (with the style that comes with it): the family ids ARE the palette ids now. */
@@ -152,31 +152,17 @@ export const STYLES: readonly StyleEntry[] = Object.freeze([
 ] as const);
 
 /**
- * Order is the order shown. A palette's display name lives in `palette-names.ts` (the one map; never a style's name); the
- * ids stay what they were so nothing a device stored has to migrate, except the removed ones (`REMOVED_PALETTE_IDS`).
- * High contrast is a palette: it must pass on every style. Mesh, Aurora, Afterglow and Briefing paint a gradient mesh behind the page (`--surface-mesh`).
+ * Order is the order shown: each palette pack's own `order`. A palette's name and blurb live on its pack
+ * (`theme/packs/palette/<id>/palette.ts`), so there is no second map of names. High contrast is a palette: it must pass on
+ * every style. Mesh, Aurora, Afterglow and Briefing paint a gradient mesh behind the page (`--surface-mesh`).
  */
-export const PALETTES: readonly PaletteEntry[] = Object.freeze([
-  { id: 'studio', label: PALETTE_NAMES.studio, blurb: 'Indigo on cool zinc.' },
-  { id: 'geist', label: PALETTE_NAMES.geist, blurb: 'Near-absolute black and white, one blue accent.' },
-  { id: 'mission', label: PALETTE_NAMES.mission, blurb: 'Cyan signal on near-black, deep teal on white.' },
-  { id: 'neo', label: PALETTE_NAMES.neo, blurb: 'Cream paper, black ink, one electric blue.' },
-  { id: 'hacker', label: PALETTE_NAMES.hacker, blurb: 'Matrix green on pure graphite.' },
-  { id: 'vintage', label: PALETTE_NAMES.vintage, blurb: 'Sepia paper, rust and mustard.' },
-  { id: 'vaporwave', label: PALETTE_NAMES.vaporwave, blurb: 'Lilac haze, magenta and teal neon, night purple.' },
-  { id: 'mesh', label: PALETTE_NAMES.mesh, blurb: 'Violet, rose and sky glows blended behind the page.' },
-  { id: 'aurora', label: PALETTE_NAMES.aurora, blurb: 'Teal, green and blue glows, like northern lights.' },
-  { id: 'afterglow', label: PALETTE_NAMES.afterglow, blurb: 'Dusk orange, rose and gold glows behind the page.' },
-  {
-    id: 'briefing',
-    label: PALETTE_NAMES.briefing,
-    blurb: 'Navy and lavender-grey, a bright blue accent, hot pink glows.',
-  },
-  { id: 'contrast', label: PALETTE_NAMES.contrast, blurb: 'Pure black and white, AAA-targeted.' },
-] as const);
+export const PALETTES: readonly PaletteEntry[] = Object.freeze(
+  PALETTE_PACKS.map(({ id, label, blurb }): PaletteEntry => ({ id, label, blurb })),
+);
 
 export const DEFAULT_STYLE: StyleId = 'studio';
-export const DEFAULT_PALETTE: PaletteId = 'studio';
+/** The palette pack flagged `default: true` (the generator pins that there is exactly one). */
+export const DEFAULT_PALETTE: PaletteId = PALETTE_PACKS.find(pack => 'default' in pack)?.id ?? PALETTE_PACKS[0].id;
 
 export const isPaletteId = (value: unknown): value is PaletteId =>
   typeof value === 'string' && (PALETTE_IDS as readonly string[]).includes(value);

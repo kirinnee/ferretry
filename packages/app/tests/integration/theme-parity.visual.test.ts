@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page } from 'playwright-core';
 import { sharedChromium } from '../support/browser/index.ts';
-import { readStyleFile, readThemeCss } from '../../src/testing/theme-css.ts';
+import { readPaletteCss, readStyleFile, readThemeCss } from '../../src/testing/theme-css.ts';
 import { STYLE_IDS } from '../../src/theme/catalog.ts';
 
 setDefaultTimeout(60_000);
@@ -182,9 +182,7 @@ describe('the ruled page field is the Mission style’s geometry and a palette�
     );
 
   it('keeps no geometry in the palette file', () => {
-    expect(readStyleFile('palette/mission.css').replace(/\/\*[\s\S]*?\*\//gu, '')).not.toMatch(
-      /gradient|\b(?:32|96)px\b/u,
-    );
+    expect(readPaletteCss('mission').replace(/\/\*[\s\S]*?\*\//gu, '')).not.toMatch(/gradient|\b(?:32|96)px\b/u);
   });
 
   it('Mission style on another palette draws the grid tile at 32px, in that palette’s inks', async () => {
