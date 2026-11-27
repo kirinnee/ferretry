@@ -1,0 +1,194 @@
+{
+  "claude/compactionBare": {
+    "harness": "claude",
+    "kind": "compaction",
+    "role": "system"
+  },
+  "claude/compactionFull": {
+    "harness": "claude",
+    "kind": "compaction",
+    "role": "system",
+    "timestamp": "2026-11-08T10:00:00.000Z",
+    "tokensAfter": 100,
+    "tokensBefore": 900,
+    "trigger": "auto"
+  },
+  "claude/errorBare": {
+    "error": {
+      "message": "",
+      "recoverable": false
+    },
+    "harness": "claude",
+    "kind": "error",
+    "role": "system"
+  },
+  "claude/errorLimit": {
+    "error": {
+      "code": "usage_limit_exceeded",
+      "message": "You hit your usage limit.",
+      "recoverable": false
+    },
+    "harness": "claude",
+    "kind": "error",
+    "role": "system",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "claude/messageBare": {
+    "harness": "claude",
+    "kind": "message",
+    "role": "user",
+    "text": ""
+  },
+  "claude/messageFull": {
+    "harness": "claude",
+    "inputSource": "harness",
+    "kind": "message",
+    "role": "assistant",
+    "text": "",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "claude/turnCompleted": {
+    "harness": "claude",
+    "kind": "turn",
+    "role": "system",
+    "state": "completed"
+  },
+  "claude/turnStarted": {
+    "harness": "claude",
+    "kind": "turn",
+    "role": "system",
+    "state": "started",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "claude/usageBare": {
+    "harness": "claude",
+    "kind": "usage",
+    "role": "system",
+    "usage": {}
+  },
+  "claude/usageFull": {
+    "harness": "claude",
+    "kind": "usage",
+    "messageId": "call-1",
+    "role": "system",
+    "timestamp": "2026-11-08T10:00:00.000Z",
+    "usage": {
+      "cacheCreationInputTokens": 4,
+      "cachedInputTokens": 3,
+      "contextTokens": 50,
+      "inputTokens": 10,
+      "outputTokens": 20
+    }
+  },
+  "claude/workAt": {
+    "format": "thinking",
+    "harness": "claude",
+    "kind": "reasoning",
+    "role": "assistant",
+    "text": "",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "claude/workBare": {
+    "format": "thinking",
+    "harness": "claude",
+    "kind": "reasoning",
+    "role": "assistant",
+    "text": ""
+  },
+  "codex/compactionBare": {
+    "harness": "codex",
+    "kind": "compaction",
+    "role": "system"
+  },
+  "codex/compactionFull": {
+    "harness": "codex",
+    "kind": "compaction",
+    "role": "system",
+    "timestamp": "2026-11-08T10:00:00.000Z",
+    "tokensAfter": 100,
+    "tokensBefore": 900,
+    "trigger": "auto"
+  },
+  "codex/errorBare": {
+    "error": {
+      "message": "",
+      "recoverable": false
+    },
+    "harness": "codex",
+    "kind": "error",
+    "role": "system"
+  },
+  "codex/errorLimit": {
+    "error": {
+      "code": "usage_limit_exceeded",
+      "message": "You hit your usage limit.",
+      "recoverable": false
+    },
+    "harness": "codex",
+    "kind": "error",
+    "role": "system",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "codex/messageBare": {
+    "harness": "codex",
+    "kind": "message",
+    "role": "user",
+    "text": ""
+  },
+  "codex/messageFull": {
+    "harness": "codex",
+    "inputSource": "harness",
+    "kind": "message",
+    "role": "assistant",
+    "text": "",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "codex/turnCompleted": {
+    "harness": "codex",
+    "kind": "turn",
+    "role": "system",
+    "state": "completed"
+  },
+  "codex/turnStarted": {
+    "harness": "codex",
+    "kind": "turn",
+    "role": "system",
+    "state": "started",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "codex/usageBare": {
+    "harness": "codex",
+    "kind": "usage",
+    "role": "system",
+    "usage": {}
+  },
+  "codex/usageFull": {
+    "harness": "codex",
+    "kind": "usage",
+    "messageId": "call-1",
+    "role": "system",
+    "timestamp": "2026-11-08T10:00:00.000Z",
+    "usage": {
+      "cacheCreationInputTokens": 4,
+      "cachedInputTokens": 3,
+      "contextTokens": 50,
+      "inputTokens": 10,
+      "outputTokens": 20
+    }
+  },
+  "codex/workAt": {
+    "format": "thinking",
+    "harness": "codex",
+    "kind": "reasoning",
+    "role": "assistant",
+    "text": "",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "codex/workBare": {
+    "format": "thinking",
+    "harness": "codex",
+    "kind": "reasoning",
+    "role": "assistant",
+    "text": ""
+  }
+}
