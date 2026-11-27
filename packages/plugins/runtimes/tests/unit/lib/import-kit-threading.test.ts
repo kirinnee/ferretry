@@ -82,7 +82,10 @@ describe('host import kit threading', () => {
         claimFor: () => ({}),
       },
       catalog: {
-        kits: current,
+        kits(this: unknown) {
+          expect(this).toBe(deps.catalog);
+          return current();
+        },
         layout: {
           userHome: '/fixture/home',
           manifestPath: '/fixture/fleet/manifest.json',
