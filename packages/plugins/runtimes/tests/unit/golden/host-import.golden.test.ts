@@ -57,6 +57,20 @@ const SCENARIOS = [
     logins: 'signed-in',
     options: { skip: ['claude-code:mcp:files'] },
   },
+  {
+    name: 'both-ticked-codex-token',
+    host: 'both',
+    installed: true,
+    logins: 'signed-in',
+    options: { tickedEnv: ['GITHUB_TOKEN'] },
+  },
+  {
+    name: 'both-skipping-codex-env',
+    host: 'both',
+    installed: true,
+    logins: 'signed-in',
+    options: { skip: ['codex:env'] },
+  },
   { name: 'both-codex-only', host: 'both', installed: true, logins: 'signed-in', options: { include: ['codex'] } },
   {
     name: 'both-duplicates',

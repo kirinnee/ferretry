@@ -2,6 +2,13 @@
  * The one synthetic world every E-276 golden is captured in: absolute paths that exist nowhere, ids from a fixed queue,
  * a fixed `generatedAt`, a fixed `fy` command. Nothing here reads the host (no clock, no environment, no disk).
  */
+import {
+  AUTONOMOUS_INSTRUCTIONS,
+  BUILTIN_COMPONENTS,
+  builtinProfileLayers,
+  COMFORT_SETTINGS,
+  starterModelSet,
+} from '../../../../daemon/lib/account/builtin-autonomous.ts';
 import { EMPTY_RUNTIME_IDS } from '../../../../daemon/lib/account/ids.ts';
 import { type MaterialiseInput, materialiseFleet } from '../../../../daemon/lib/account/materialise.ts';
 import { type AccountModel, type Credential, parseAccountModel } from '../../../../daemon/lib/account/schema.ts';
@@ -28,7 +35,17 @@ export interface WorldOptions {
   readonly defaultModel?: boolean;
   /** Hand the machine the synthetic model catalogs, and make an environment login read the `golden-gateway` preset's. */
   readonly catalogs?: boolean;
+  /** Only these MCP servers are in the profile (the default: all four, so every transport at once). */
+  readonly mcp?: readonly McpName[];
+  /** Declare an MCP server no profile layer names: Claude's `priorMembers.mcpServers` is then non-empty. */
+  readonly inactiveMcp?: boolean;
+  /** Add the person's own settings: for Claude a `statusLine` command (so Ferretry's chains onto it), for Codex a shell policy. */
+  readonly settings?: boolean;
+  /** The profile is the built-in one (`ferretry-<harness>`: starter model set, work-alone instructions, Claude's comfort settings). */
+  readonly builtin?: boolean;
 }
+
+export type McpName = 'files' | 'docs' | 'feed' | 'notes';
 
 export type GoldenHarness = 'claude' | 'codex';
 export type GoldenStore = 'host' | 'ferretry' | 'environment' | 'environment-provider';
@@ -70,8 +87,15 @@ const credentialOf = (harness: GoldenHarness, store: GoldenStore, preset: boolea
   };
 };
 
+/** The person's own settings document: for Claude a `statusLine` command (Ferretry's chains onto it), for Codex a shell policy. */
+const ownSettings = (harness: GoldenHarness): Record<string, unknown> =>
+  harness === 'claude'
+    ? { statusLine: { type: 'command', command: 'echo golden-status' }, verbose: true }
+    : { shell_environment_policy: { inherit: 'core' }, model_reasoning_effort: 'high' };
+
 /** The three MCP server kinds every profile carries: a started command, a reached URL, a server signed in to from Ferretry. */
 const MCP = {
+  // (declared in every world, named by the profile only as the world's `mcp` option says)
   files: {
     command: 'npx',
     args: ['server-files', '--root', '/srv/files'],
@@ -81,6 +105,10 @@ const MCP = {
   feed: { url: 'https://feed.example.test/sse' },
   notes: { url: 'https://notes.example.test/mcp', auth: 'oauth' as const },
 };
+const MCP_NAMES: readonly McpName[] = ['files', 'docs', 'feed', 'notes'];
+
+/** A declared server no profile layer names. */
+const INACTIVE_MCP = { archive: { command: 'npx', args: ['server-archive'], env: { ARCHIVE_MODE: 'read' } } };
 
 /**
  * One machine with ONE runtime on the chosen harness, login store and Agent permissions, its profile carrying
@@ -95,13 +123,31 @@ function worldModel(
   const withoutModel = options.defaultModel === false;
   const models = harness === 'claude' ? ['claude-opus-5-5', 'claude-sonnet-5-5'] : ['gpt-6', 'gpt-6-mini'];
   const credentialId = `${harness}-${store}`;
+  const named = options.mcp ?? MCP_NAMES;
+  const own = { harness, document: ownSettings(harness) };
+  const starter = starterModelSet(harness, { [harness]: models[0] as string });
+  if (options.builtin === true) {
+    return parseAccountModel({
+      version: 1,
+      machine: { agentPermissions: permissions === 'skip' ? 'skip' : 'auto' },
+      credentials: { [credentialId]: credentialOf(harness, store, options.catalogs === true) },
+      components: {
+        instructions: BUILTIN_COMPONENTS.instructions,
+        settings: BUILTIN_COMPONENTS.settings,
+        modelSets: { [`ferretry-${harness}`]: starter },
+      },
+      profiles: { default: { layers: builtinProfileLayers(harness, { [harness]: models[0] as string }) } },
+      runtimes: { [`${harness}-golden`]: { credential: credentialId, profile: 'default' } },
+    });
+  }
   return parseAccountModel({
     version: 1,
     machine: { agentPermissions: permissions === 'skip' ? 'skip' : 'auto' },
     credentials: { [credentialId]: credentialOf(harness, store, options.catalogs === true) },
     components: {
       instructions: { main: { file: 'components/instructions/main.md' } },
-      mcp: MCP,
+      mcp: { ...MCP, ...(options.inactiveMcp === true ? INACTIVE_MCP : {}) },
+      ...(options.settings === true ? { settings: { mine: own } } : {}),
       skills: { mine: { items: ['review'] } },
       modelSets: { golden: { models, default: models[0] as string } },
     },
@@ -109,10 +155,8 @@ function worldModel(
       default: {
         layers: [
           'instructions/main',
-          'mcp/files',
-          'mcp/docs',
-          'mcp/feed',
-          'mcp/notes',
+          ...named.map(server => `mcp/${server}`),
+          ...(options.settings === true ? ['settings/mine'] : []),
           'skills/mine',
           ...(withoutModel ? [] : ['modelSets/golden']),
         ],
@@ -154,7 +198,8 @@ export function planOf(
     loginStores: loginStoresFor(harness, `${harness}-${store}`),
     ...(options.catalogs === true ? { modelCatalogs: GOLDEN_CATALOGS } : {}),
     bodies: {
-      instructions: { main: 'Be kind.\n' },
+      instructions: { main: 'Be kind.\n', 'ferretry-work-alone': AUTONOMOUS_INSTRUCTIONS },
+      settings: { mine: ownSettings(harness), 'ferretry-claude-comfort': COMFORT_SETTINGS.document },
       skillFrontmatter: { review: ['name', 'description'] },
     },
   });

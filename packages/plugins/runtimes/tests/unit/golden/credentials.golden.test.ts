@@ -14,7 +14,9 @@ import {
   isSignInName,
   resolveCredentialStore,
 } from '../../../daemon/lib/account/credentials.ts';
-import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
+import { organizationTypeOfAccountDocument } from '../../../daemon/lib/account-organization-type.ts';
+import { loginOrganizationType } from '../../../daemon/lib/login-organization-type.ts';
+import type { LoginLaunchStore, LoginsApi } from '@ferretry/plugin-logins/contract';
 import type { Credential } from '../../../daemon/lib/account/schema.ts';
 import { expectGolden } from './support/golden.ts';
 import { outcome, THIRD_KEY } from './support/thrown.ts';
@@ -123,6 +125,51 @@ describe('credential store goldens', () => {
           name => [name, isSignInName(name)],
         ),
       ),
+    });
+  });
+
+  it('should read the organisation type of the login a launch spends exactly as the base does: Claude reads it, Codex never does', async () => {
+    // A fake Logins port (no real Logins, no host file): what it names for a kept login, and the stored view of each login id.
+    const stores: readonly LoginLaunchStore[] = [
+      { id: 'claude-kept-typed', variables: {}, organizationType: 'claude_enterprise' },
+      { id: 'claude-kept-untyped', variables: {} },
+    ];
+    const views: Readonly<Record<string, { store: string; harness: string }>> = {
+      'claude-kept-typed': { store: 'ferretry', harness: 'claude-code' },
+      'claude-kept-untyped': { store: 'ferretry', harness: 'claude-code' },
+      'claude-host': { store: 'host', harness: 'claude-code' },
+      'claude-env': { store: 'environment', harness: 'claude-code' },
+      'codex-host': { store: 'host', harness: 'codex' },
+    };
+    const logins = { launchStores: async () => stores, get: async (id: string) => views[id] } as unknown as Pick<
+      LoginsApi,
+      'launchStores' | 'get'
+    >;
+    const answers: Record<string, unknown> = {};
+    for (const login of [...Object.keys(views), 'unknown-login']) {
+      for (const hostFile of ['claude_max', undefined] as const) {
+        let hostFileReads = 0;
+        const type = await loginOrganizationType(
+          logins,
+          async () => {
+            hostFileReads++;
+            return hostFile;
+          },
+          login,
+        );
+        answers[`${login} (host file says ${hostFile ?? 'nothing'})`] = { type: type ?? null, hostFileReads };
+      }
+    }
+    expectGolden('credentials/organization-type', {
+      answers,
+      accountDocument: {
+        typed: organizationTypeOfAccountDocument('{"oauthAccount":{"organizationType":"claude_max"}}') ?? null,
+        emptyType: organizationTypeOfAccountDocument('{"oauthAccount":{"organizationType":""}}') ?? null,
+        notAString: organizationTypeOfAccountDocument('{"oauthAccount":{"organizationType":3}}') ?? null,
+        noAccount: organizationTypeOfAccountDocument('{}') ?? null,
+        notJson: organizationTypeOfAccountDocument('not json') ?? null,
+        absent: organizationTypeOfAccountDocument(undefined) ?? null,
+      },
     });
   });
 

@@ -1,0 +1,236 @@
+"does nothing for a Claude runtime":
+  "calls": []
+  "decision": "kind": "not-a-codex-runtime"
+"does nothing for a Codex home nested below a runtime home":
+  "calls": []
+  "decision": "kind": "not-a-codex-runtime"
+"does nothing for a Codex home that climbs out of the fleet homes":
+  "calls": []
+  "decision": "kind": "not-a-codex-runtime"
+"does nothing for a Codex home with a dot segment":
+  "calls": []
+  "decision": "kind": "not-a-codex-runtime"
+"does nothing for a Codex runtime whose home is outside the fleet homes":
+  "calls": []
+  "decision": "kind": "not-a-codex-runtime"
+"does nothing for a wrapper nothing published":
+  "calls": []
+  "decision": "kind": "not-a-codex-runtime"
+"finds nothing running when a pid file is not a pid":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "not-running"
+"finds nothing running when no pid file exists":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "not-running"
+"finds nothing running when no recorded process runs from the package":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "runsFrom 101 /fleet/homes/codex-a/packages/app-server-daemon"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "not-running"
+"ignores a pid the kernel does not find running from the package (a reused pid)":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "runsFrom 101 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "terminate 101 /fleet/homes/codex-a/packages/app-server-daemon"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "stopped"
+    "pids":
+      [
+        101
+      ]
+"is undecided when the fleet root cannot be reached":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+    ]
+  "decision":
+    "kind": "undecided"
+    "reason": "packages/app-server-daemon is not reachable in the runtime's home (outside_root)"
+"is undecided when the inventory cannot be read":
+  "calls": []
+  "decision":
+    "kind": "undecided"
+    "reason": "the manifest could not be read"
+"is undecided when the kernel signals none of them":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "runsFrom 101 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "terminate 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "terminate 101 /fleet/homes/codex-a/packages/app-server-daemon"
+    ]
+  "decision":
+    "kind": "undecided"
+    "reason": "the kernel signalled none of the recorded processes of /fleet/homes/codex-a"
+"leaves it running when the users of the home cannot be listed":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "runsFrom 101 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+    ]
+  "decision":
+    "kind": "undecided"
+    "reason": "who is using /fleet/homes/codex-a could not be listed"
+"leaves it running while another process uses the home":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "runsFrom 101 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "sleep 50"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "sleep 50"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "in-use"
+"stops a pid that runs from the package even when only one pid file exists":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "resolve homes/codex-a"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "terminate 100 /fleet/homes/codex-a/packages/app-server-daemon"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "stopped"
+    "pids":
+      [
+        100
+      ]
+"stops only the pids the kernel signals":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "runsFrom 101 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "terminate 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "terminate 101 /fleet/homes/codex-a/packages/app-server-daemon"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "stopped"
+    "pids":
+      [
+        100
+      ]
+"stops the pair when only the daemon pair uses the home":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "runsFrom 101 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "terminate 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "terminate 101 /fleet/homes/codex-a/packages/app-server-daemon"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "stopped"
+    "pids":
+      [
+        100
+        101
+      ]
+"stops the pair when the own harness of the session is still exiting on the first looks":
+  "calls":
+    [
+      "resolve homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon.pid"
+      "runsFrom 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "readText /fleet/homes/codex-a/app-server-daemon/daemon-updater.pid"
+      "runsFrom 101 /fleet/homes/codex-a/packages/app-server-daemon"
+      "resolve homes/codex-a"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "sleep 50"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "sleep 50"
+      "usersOf CODEX_HOME /fleet/homes/codex-a"
+      "terminate 100 /fleet/homes/codex-a/packages/app-server-daemon"
+      "terminate 101 /fleet/homes/codex-a/packages/app-server-daemon"
+    ]
+  "decision":
+    "home": "/fleet/homes/codex-a"
+    "kind": "stopped"
+    "pids":
+      [
+        100
+        101
+      ]

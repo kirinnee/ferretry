@@ -90,6 +90,7 @@
         "kind": "settings"
         "name": "codex-settings"
         "value":
+          "env": "PAGER": "less"
           "file": "components/settings/codex-settings.toml"
           "harness": "codex"
       }
@@ -147,6 +148,9 @@
             model = "gpt-6"
             approval_policy = "on-request"
 
+            [shell_environment_policy]
+            inherit = "core"
+
             [profiles.fast]
             model = "gpt-6-mini"
 
@@ -171,6 +175,18 @@
             {
               "name": "EDITOR"
               "value": "vim"
+            }
+          ]
+      }
+      {
+        "harness": "codex"
+        "login": "codex-you"
+        "minted": []
+        "plain":
+          [
+            {
+              "name": "PAGER"
+              "value": "less"
             }
           ]
       }
@@ -271,14 +287,18 @@
               "docs"
             ]
           "missingCommands": []
-          "problems": []
+          "problems":
+            [
+              "Left out of your config.toml: shell_environment_policy.set.GITHUB_TOKEN (a GitHub token: not imported unless you tick it)."
+            ]
           "projectInstructions": []
           "secretKeys":
             [
               "mcp.files.env.FILES_TOKEN"
+              "shell_environment_policy.set.GITHUB_TOKEN"
             ]
           "settings":
-            "count": 3
+            "count": 5
             "hooks": 1
             "source": "/host/home/.codex/config.toml"
           "skills":
@@ -365,7 +385,7 @@
             "/host/home/.claude/settings.json"
           ]
       "settings/codex-settings":
-        "digest": "7259ee0292de95e80823f79d1a421b6754666f03f1ed8d488fc3a8b9b6a5ade2"
+        "digest": "c8e4514111bd9f896262951eefe13fdb9f8291a1d6cb92bbaabe0d6267145cb6"
         "sources":
           [
             "/host/home/.codex/config.toml"
@@ -536,7 +556,7 @@
       "missingCommands": []
       "problems": []
       "settings":
-        "bytes": 268
+        "bytes": 482
         "kind": "text"
         "source": "/host/home/.codex/config.toml"
         "text":
@@ -553,6 +573,18 @@
 
             [mcp_servers.docs]
             url = "https://docs.example.test/mcp"
+
+            [mcp_servers.archive]
+            command = "npx"
+            args = ["server-archive"]
+            enabled = false
+
+            [shell_environment_policy]
+            inherit = "core"
+
+            [shell_environment_policy.set]
+            GITHUB_TOKEN = "FAKE_CODEX_GITHUB_VALUE"
+            PAGER = "less"
 
             [profiles.fast]
             model = "gpt-6-mini"

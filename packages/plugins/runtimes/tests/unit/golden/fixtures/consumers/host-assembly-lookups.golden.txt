@@ -1,0 +1,40 @@
+"on this machine: claude":
+  "asked":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+      "codex (install folders)"
+    ]
+  "installed":
+    [
+      "claude"
+    ]
+"on this machine: claude, codex":
+  "asked":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+    ]
+  "installed":
+    [
+      "claude"
+      "codex"
+    ]
+"on this machine: nothing":
+  "asked":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+      "claude (install folders)"
+      "codex (install folders)"
+    ]
+  "installed": []
