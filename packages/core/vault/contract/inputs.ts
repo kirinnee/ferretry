@@ -15,6 +15,8 @@ export const INPUT_MAX_EXPIRY_SECONDS = 3_600;
 export const INPUT_DEFAULT_REDACTION_SECONDS = 600;
 export const INPUT_MAX_REDACTION_SECONDS = 3_600;
 export const INPUT_QUARANTINE_SECONDS = 120;
+/** Submitted browser grant-field cleanup deadline; terminal/unsubmitted windows stay independent. */
+export const INPUT_BROWSER_HOLD_SECONDS = 5;
 export const INPUT_SHORT_LOCK_SECONDS = 10;
 export const INPUT_MAX_PENDING_PER_FERRET = 3;
 export const INPUT_MAX_RAISES_PER_HOUR = 20;

@@ -21,6 +21,7 @@ import {
 import { type AgendaId, MAX_AGENDA_TITLE_LENGTH } from './wire.ts';
 import {
   codeTargetProblem,
+  INPUT_BROWSER_HOLD_SECONDS,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_MAX_CHECK_FAILURES,
   INPUT_MAX_PENDING_PER_FERRET,
@@ -74,8 +75,8 @@ import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
 import { barredFromLoginPassword, FIELD_LABELS, pickedOnPage } from './field-kinds.ts';
-import { lockFor, lookAlike, matchable, passwordTarget, spellsPassword } from './lock.ts';
-import { type LoginDelivery, type LoginObserver } from './login-observer.ts';
+import { lookAlike, matchable, passwordTarget, spellsPassword } from './lock.ts';
+import type { LoginDelivery, LoginObserver } from './login-observer.ts';
 import type {
   InputAgendaPort,
   InputAgentNotifier,
@@ -104,7 +105,6 @@ import {
   type SavedListing,
   savedForFields,
   signInOfAt,
-  signInsAt,
   someoneElse,
   targetMatchKey,
 } from './saved-logins.ts';
@@ -996,7 +996,7 @@ export class InputRequestService {
 
   /**
    * A password a grant fill typed must not stay in its field. Shortly before the cleanup deadline `holdMs`
-   * ({@link CLEAR_LEAD_MS}; {@link clearWindowMs}: 10 s proven, 120 s otherwise), the browser empties any typed field that still holds a value. This takes NO hold on the
+   * ({@link CLEAR_LEAD_MS}; submitted 5 s, unsubmitted 120 s), the browser empties any typed field that still holds a value. This takes NO hold on the
    * page (no lock after an answer): it is the field's own cleanup, apart from anyone's access. `cleared` and `unknown`
    * stop the line (`did-not-move-on`): the page didn't move on as the owner approved.
    */
@@ -1017,26 +1017,6 @@ export class InputRequestService {
         if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
       })
       .catch(() => undefined);
-  }
-
-  /**
-   * How long a grant fill's typed password may stay in its field before it is cleared, and before the grant is judged
-   * (`did-not-move-on`): `INPUT_SHORT_LOCK_SECONDS` for a form the daemon has PROVEN hides the value (a saved login's
-   * observed facts for that very field), the full `INPUT_QUARANTINE_SECONDS` otherwise. Only a deadline for the
-   * field's own cleanup: nothing is held from the ferret's reads. A saved login that cannot be read is not proof.
-   */
-  private async clearWindowMs(
-    facts: InputTargetFacts,
-    fields: readonly InputRequestField[],
-    submitted: boolean,
-  ): Promise<number> {
-    const listing = await this.deps.logins?.listing().catch(() => undefined);
-    const observed =
-      listing === undefined
-        ? []
-        : signInsAt(targetMatchKey(facts, this.deps.hostName ?? ''), listing).flatMap(signIn => signIn.observed ?? []);
-    const unread = listing === undefined && this.deps.logins !== undefined;
-    return lockFor(facts, fields, { observed, ...(unread ? { unread } : {}), probed: false, submitted }).seconds * 1000;
   }
 
   /**
@@ -1972,8 +1952,8 @@ export class InputRequestService {
               fields.filter(field => field.sensitivity === 'secret').map(field => field.id),
             );
       // How long the typed password may stay in its field before the clear (and the grant's did-not-move-on check): the
-      // old adaptive window, decided from facts the daemon saw. It holds nothing from the ferret (no lock after an answer).
-      const clearMs = clear === undefined ? QUARANTINE_MS : await this.clearWindowMs(seen.facts, fields, submitted);
+      // browser-only window. It holds nothing from the ferret (no lock after an answer).
+      const clearMs = clear === undefined || !submitted ? QUARANTINE_MS : INPUT_BROWSER_HOLD_SECONDS * 1000;
       // Every value that is masked is held before it is typed, so a read racing the write already hides it.
       for (const [index, field] of fields.entries())
         if (maskedFromReads(field, typed))
