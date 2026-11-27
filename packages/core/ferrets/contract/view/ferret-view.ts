@@ -21,7 +21,6 @@ import { HarnessDialogSchema } from './session-dialog.ts';
 import { PermissionRequestSchema } from './session-permission.ts';
 
 export const InteractionModeSchema = z.enum(['auto', 'interactive']);
-export type InteractionMode = z.infer<typeof InteractionModeSchema>;
 
 /**
  * WHOSE TURN IT IS in a live session — the one fact the spinner, the status dots and the

@@ -3,7 +3,8 @@ import { subtreeHost } from '../support/round-two.ts';
 
 /** Each declared route, a body that reaches its handler, and the answer THAT handler gives a ferret the session store does not hold. */
 const ROUTES: readonly (readonly [method: string, path: string, body: unknown, status: number, code?: string])[] = [
-  ['POST', '/v1/ferrets/lead/fork', {}, 400],
+  // Conversation's route (a later unit); until it lands the declared one says so, whoever asks.
+  ['POST', '/v1/ferrets/lead/fork', {}, 503, 'plugin_unavailable'],
   ['POST', '/v1/ferrets/lead/handover', {}, 400],
   ['GET', '/v1/ferrets/lead/handover', undefined, 404],
   ['POST', '/v1/ferrets/lead/handover/cancel', {}, 400, 'missing_request_id'],

@@ -529,11 +529,12 @@ interface LaunchExtras {
 
 /**
  * What the port that admitted a start tells the service about it (internal, not a contract; the route passes none):
- * `notInWardenTree` is set for a start the port let through as outside the Warden's tree, so the spawn stamp can refuse
- * when lineage resolves true after all (the port's parent check and the stamp read the ancestry separately).
+ * `notInWardenTree`: outside the Warden's tree, so the spawn stamp can refuse if lineage resolves true after all (the port's
+ * parent check and the stamp read it separately). `conversationInPool`: a fork's, already cut into the harness's own history.
  */
 export interface StartAdmission {
   readonly notInWardenTree?: true;
+  readonly conversationInPool?: true;
 }
 
 /** What a revive's turn is made from: the message (none: the mode's default), the ferret's mode and who asked. */
@@ -1106,10 +1107,8 @@ export class FerretsService implements FerretsApi {
 
   /**
    * "Continue a past conversation": the transcript a start names is put where the harness finds it (the one
-   * `conversation.stage` provider: the existing indexed copy-on-link). Nothing to stage when no conversation is named; a
-   * refusal refuses the start with its reason. With NO provider (Conversation is off) nothing is copied and nothing is
-   * refused here: a transcript the pool already holds is resumed, and the launch refuses one the harness proves absent
-   * (`requireConversation`), so a continue is never quietly a fresh conversation either way (E17).
+   * `conversation.stage` provider: the existing indexed copy-on-link); a refusal refuses the start with its reason. With NO
+   * provider nothing is copied: a pooled transcript is resumed, and the launch refuses one the harness proves absent (E17).
    * ONLY THE OWNER'S start stages: the transcript comes from the owner's own computer, and a ferret (or a pack, board or
    * warden) must never be able to pull a host conversation into the pool by naming it. Any other asker resumes a
    * conversation the pool already holds, and the launch refuses one it does not.
@@ -1208,7 +1207,8 @@ export class FerretsService implements FerretsApi {
     if (!decided.decision.allow) return refusedBy(decided.decision);
     request = decided.request;
     // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
-    const staged = await this.stageConversation(harnessKey, request.harnessConversation, request.by);
+    const named = admission.conversationInPool === true ? undefined : request.harnessConversation;
+    const staged = await this.stageConversation(harnessKey, named, request.by);
     if (!staged.ok) return staged;
     // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
     const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);

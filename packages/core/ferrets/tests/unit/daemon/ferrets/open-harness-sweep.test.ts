@@ -26,10 +26,6 @@ import {
   THIRD_HARNESS_KEY,
 } from '../../../../contract/testing/index.ts';
 import { FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
-import {
-  handoffReadArguments,
-  transcriptLaunchArguments,
-} from '../../../../daemon/lib/session/peers/transcript-launch.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 
@@ -113,8 +109,6 @@ describe('a ferret on a harness the contract never named', () => {
     expect(() => byRecordedHarness(THIRD_HARNESS_KEY, { claude: () => 'c', codex: () => 'x' })).toThrow(
       refusal.message,
     );
-    expect(() => transcriptLaunchArguments(THIRD_HARNESS_KEY as never, undefined)).toThrow(refusal.message);
-    expect(() => handoffReadArguments(THIRD_HARNESS_KEY as never, ['a'])).toThrow(refusal.message);
     expect(() => conversationFromArguments(THIRD_HARNESS_KEY as never, ['resume', 'abc'])).toThrow(refusal.message);
   });
 });

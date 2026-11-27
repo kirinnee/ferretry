@@ -37,6 +37,16 @@ export interface ForkPlan {
   readonly from: FerretId;
   readonly at?: TurnRef;
   readonly harnessConversation: string;
+  /**
+   * Removes the conversation this fork wrote, and only that one, when the ferret that was to continue it never started.
+   * Absent: the unused conversation stays in the history, where nothing refers to it.
+   */
+  readonly discard?: () => Promise<void>;
+}
+
+/** Where a forked conversation will be worked on: the folder its new ferret starts in (a harness may key transcripts by it). */
+export interface ForkTarget {
+  readonly folder: string;
 }
 
 /** A message to a ferret. Idempotent by `id`: delivering one id twice delivers it once. */
@@ -378,7 +388,12 @@ export interface Harness {
   provedConversation?(
     ferret: FerretId,
   ): Promise<{ readonly id: string; readonly file: string; readonly home: string } | undefined>;
-  fork?(from: FerretId, at?: TurnRef): Promise<ForkPlan>;
+  /**
+   * Additive (c58-37, Fork): cuts `from`'s conversation at `at` (absent: whole) into a NEW conversation in this harness's own
+   * history, keyed for `into.folder`, and answers its id. It reads the source's home and writes only the new conversation:
+   * the source is never changed. Absent: the harness cannot be forked, and a fork on it refuses with that sentence.
+   */
+  fork?(from: FerretId, at: TurnRef | undefined, into: ForkTarget): Promise<ForkPlan>;
   /**
    * Additive (c58-37, the cross-harness move, SOURCE side): this ferret's conversation in the harness-neutral form
    * ({@link PortableConversation}), at most `budgetTokens` of it (the oldest turns are left out and counted), or one
