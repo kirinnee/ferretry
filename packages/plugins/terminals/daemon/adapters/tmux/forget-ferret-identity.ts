@@ -1,5 +1,13 @@
-/** The variables a ferret's own pane carries (its token, board capability and id): never left on the server. */
-const FERRET_IDENTITY_VARIABLES = ['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_ID'] as const;
+/**
+ * The variables a ferret's own pane carries (its token, board capability and id) and its launch mode: never left
+ * on the server, so a terminal or session opened later cannot inherit another ferret's identity or mode.
+ */
+const FERRET_IDENTITY_VARIABLES = [
+  'FY_SESSION_TOKEN',
+  'FY_SESSION_BOARD_CAPABILITY',
+  'FY_SESSION_ID',
+  'FY_SESSION_MODE',
+] as const;
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 import { TIMED_OUT, within } from './bounded.ts';
 import type { ControlTimer } from './control-tmux-process.ts';

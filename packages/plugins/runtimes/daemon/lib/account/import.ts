@@ -38,9 +38,7 @@ import { GITHUB_TOKEN_NAMES, maskedVariableName, nameLooksLikeKey } from '@ferre
 import {
   importItemId,
   importNamedItemId,
-  type KitHarvestParts,
   type KitImportedEnvironment as EnvImport,
-  type KitImportSetup,
   type RuntimesHarnessKit,
 } from '../../../contract/index.ts';
 import { harnessNamed } from './import-scope.ts';
@@ -686,9 +684,6 @@ export interface HarnessHarvest {
   readonly found: boolean;
 }
 
-/** Codex keys a runtime's plumbing sets itself (§8.3), dropped from an imported settings file. */
-const CODEX_PLUMBING_KEYS = ['cli_auth_credentials_store', 'sqlite_home'] as const;
-
 /** How many hook handlers a hooks block carries, for "6 settings, 1 hook". */
 const countHooks = (block: Readonly<Record<string, unknown>>): number =>
   Object.values(block).reduce<number>(
@@ -733,17 +728,8 @@ export function harvest(
     skip.has(importItemId(key, kind));
   const problems: string[] = [...scan.problems];
   const secretKeys: string[] = [];
-  const {
-    settingsFormat: format,
-    settingsFile,
-    instructionsName,
-  } = byHarness<KitImportSetup>(harness, {
-    claude: () => {
-      if (kit?.importSetup === undefined) throw new UnsupportedHarnessError(harness);
-      return kit.importSetup;
-    },
-    codex: () => ({ settingsFormat: 'toml', settingsFile: 'config.toml', instructionsName: 'AGENTS.md' }),
-  });
+  if (kit?.importSetup === undefined) throw new UnsupportedHarnessError(harness);
+  const { settingsFormat: format, settingsFile, instructionsName } = kit.importSetup;
 
   // Instructions.
   const instructionsProblem = unreadableReason(scan.instructions, instructionsName);
@@ -756,43 +742,20 @@ export function harvest(
   // Settings, with the parts that become their own components taken out.
   const parsed = parsedDocument(scan.settings, format, settingsFile, problems);
   const rest: Record<string, unknown> = { ...(parsed ?? {}) };
-  const taken = byHarness<KitHarvestParts>(harness, {
-    claude: () => {
-      if (kit?.harvest === undefined) throw new UnsupportedHarnessError(harness);
-      return kit.harvest({
-        rest,
-        source: scan.settings.source,
-        mcpSource: scan.mcp?.source,
-        parsedEnv: parsed?.env,
-        skippedEnv: skipped('env'),
-        skippedModelSet: skipped('model-set'),
-        countHooks,
-        importEnvironment: (value, prefix, source) => importEnv(value, prefix, source, names, secrets, ticked),
-      });
-    },
-    codex: () => {
-      delete rest.mcp_servers;
-      for (const key of CODEX_PLUMBING_KEYS) delete rest[key];
-      let codexEnv: EnvImport | undefined;
-      const policy = rest.shell_environment_policy;
-      if (isRecord(policy) && isRecord(policy.set)) {
-        codexEnv = skipped('env')
-          ? undefined
-          : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets, ticked);
-        const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
-        if (Object.keys(kept).length === 0) delete rest.shell_environment_policy;
-        else rest.shell_environment_policy = kept;
-      }
-      const hooksDocument = parsedDocument(scan.hooks, 'json', 'hooks.json', problems);
-      const counted =
-        hooksDocument !== undefined && Object.keys(hooksDocument).length > 0 && scan.hooks !== undefined
-          ? {
-              source: scan.hooks.source,
-              count: countHooks(isRecord(hooksDocument.hooks) ? hooksDocument.hooks : hooksDocument),
-            }
-          : undefined;
-      return { hooks: counted, envImport: codexEnv, mcpSource: scan.settings.source };
-    },
+  if (kit.harvest === undefined) throw new UnsupportedHarnessError(harness);
+  const hooksDocument = parsedDocument(scan.hooks, 'json', 'hooks.json', problems);
+  const taken = kit.harvest({
+    rest,
+    source: scan.settings.source,
+    mcpSource: scan.mcp?.source,
+    parsedEnv: parsed?.env,
+    ...(hooksDocument === undefined || scan.hooks === undefined
+      ? {}
+      : { hooks: { source: scan.hooks.source, document: hooksDocument } }),
+    skippedEnv: skipped('env'),
+    skippedModelSet: skipped('model-set'),
+    countHooks,
+    importEnvironment: (value, prefix, source) => importEnv(value, prefix, source, names, secrets, ticked),
   });
   const { hooks, envImport } = taken;
   if (envImport !== undefined) {
@@ -1129,28 +1092,6 @@ export function credentialOf(harness: HarnessKind, login: HostLogin): Credential
 }
 
 export function loginNote(harness: HarnessKind, login: HostLogin, kit?: RuntimesHarnessKit): string {
-  return byHarness(harness, {
-    claude: () => {
-      if (kit?.loginNote === undefined) throw new UnsupportedHarnessError(harness);
-      return kit.loginNote(login);
-    },
-    codex: () => {
-      const label = HARNESS_DISPLAY_NAMES[harness];
-      const who = login.email === undefined ? 'your login' : login.email;
-      switch (login.state) {
-        case 'signed-in':
-          return `Login · ${who}. Ferretry and your own \`codex\` share this login: signing out in one signs out both.`;
-        case 'refresh-due':
-          return `Login · ${who} · Refresh due. Ferretry renews it the first time you launch.`;
-        case 'not-signed-in':
-          return `${label} isn't signed in on this machine. Your setup was still imported; sign in later and every runtime on this login can launch.`;
-        case 'unknown':
-          return `${label} sign-in is unknown (${login.reason ?? 'Logins has no host discovery fact'}). Your login stays shared in place.`;
-        case 'unreadable':
-          return `Ferretry couldn't read your ${label} login (${login.reason ?? 'no reason given'}). It is still shared in place; check it on the Sign-ins tab.`;
-        default:
-          return `Your ${label} login can't be shared in place (${login.reason ?? 'it is not kept in a file'}), so this login needs its own sign-in.`;
-      }
-    },
-  });
+  if (kit?.loginNote === undefined) throw new UnsupportedHarnessError(harness);
+  return kit.loginNote(login);
 }

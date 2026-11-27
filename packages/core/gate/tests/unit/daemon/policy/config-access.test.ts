@@ -66,6 +66,37 @@ describe('R-0072 reading a file asks the FILE’s capability on `use`', () => {
 });
 
 describe('R-0419 writing a file asks `configure`, then the fleet’s `use`, and says whether this call may loosen', () => {
+  test('browsers.yaml additionally requires Browser configure for writes and confirms from carried devices', () => {
+    const w = world();
+    w.enrol('phone', { ...FULL_DEVICE_GRANTS, browser: { use: false, configure: false } });
+    for (const act of ['write', 'confirm'] as const) {
+      const verdict = judgeConfigAccess(ask(act, 'owner-viewer', standingOf(w, { device: 'phone' }), 'browsers.yaml'));
+      expect(refusedWith(verdict).status).toBe(403);
+    }
+  });
+
+  test('Browser configure never replaces the existing Fleet grant, and loopback stays ungoverned', () => {
+    const w = world();
+    w.enrol('phone', { ...FULL_DEVICE_GRANTS, fleet: { use: true, configure: false } });
+    expect(
+      refusedWith(judgeConfigAccess(ask('write', 'owner-viewer', standingOf(w, { device: 'phone' }), 'browsers.yaml')))
+        .status,
+    ).toBe(403);
+    expect(judgeConfigAccess(ask('write', 'owner-tools', standingOf(w, atMachine), 'browsers.yaml'))).toEqual({
+      allowed: true,
+      mayLoosen: true,
+    });
+  });
+
+  test('Browser configure permits the proposal but a loosening still needs the owner’s fresh proof', () => {
+    const w = world();
+    w.enrol('phone');
+    const verdict = judgeConfigAccess(
+      ask('write', 'owner-viewer', standingOf(w, { device: 'phone' }), 'browsers.yaml'),
+    );
+    expect(verdict.allowed && verdict.mayLoosen).toBe(false);
+    expect(claimOf(verdict)()).toBe(false);
+  });
   test('the owner at the machine may loosen in this same act, with no proof to spend', () => {
     const w = world();
     const verdict = judgeConfigAccess(ask('write', 'owner-tools', standingOf(w, atMachine)));

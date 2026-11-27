@@ -1,5 +1,20 @@
 import { isAbsolute, join } from 'node:path';
-import type { KitHostScanInput, KitHostSetup, RuntimesHarnessKit } from '@ferretry/plugin-runtimes/contract';
+import type {
+  KitHarvestInput,
+  KitHarvestParts,
+  KitHostLogin,
+  KitHostScanInput,
+  KitHostSetup,
+  RuntimesHarnessKit,
+} from '@ferretry/plugin-runtimes/contract';
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const importSetup = { settingsFormat: 'toml', settingsFile: 'config.toml', instructionsName: 'AGENTS.md' } as const;
+
+/** Keys a runtime's plumbing sets itself (§8.3), dropped from an imported settings file. */
+const PLUMBING_KEYS = ['cli_auth_credentials_store', 'sqlite_home'] as const;
 
 async function scanHost(input: KitHostScanInput): Promise<KitHostSetup> {
   const named = input.configuredHome?.trim() ?? '';
@@ -27,5 +42,51 @@ async function scanHost(input: KitHostScanInput): Promise<KitHostSetup> {
   return { login, instructions, settings, hooks, skills: skills.found, problems: skills.problems };
 }
 
-/** Codex's host scan; host reads and secret handling remain guarded by Runtimes. Harvest and login notes follow in PR 11b. */
-export const codexImportKit: RuntimesHarnessKit = { scanHost };
+function harvest(input: KitHarvestInput): KitHarvestParts {
+  const { rest } = input;
+  delete rest.mcp_servers;
+  for (const key of PLUMBING_KEYS) delete rest[key];
+  let envImport: KitHarvestParts['envImport'];
+  const policy = rest.shell_environment_policy;
+  if (isRecord(policy) && isRecord(policy.set)) {
+    envImport = input.skippedEnv
+      ? undefined
+      : input.importEnvironment(policy.set, 'shell_environment_policy.set.', importSetup.settingsFile);
+    const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
+    if (Object.keys(kept).length === 0) delete rest.shell_environment_policy;
+    else rest.shell_environment_policy = kept;
+  }
+  const { hooks } = input;
+  // Hooks are counted so the screen can say "found N, not imported", and dropped: Ferretry runs none of the host's.
+  const counted =
+    hooks !== undefined && Object.keys(hooks.document).length > 0
+      ? {
+          source: hooks.source,
+          count: input.countHooks(isRecord(hooks.document.hooks) ? hooks.document.hooks : hooks.document),
+        }
+      : undefined;
+  return { hooks: counted, envImport, mcpSource: input.source };
+}
+
+function loginNote(login: KitHostLogin): string {
+  const label = 'Codex';
+  const own = 'codex';
+  const who = login.email === undefined ? 'your login' : login.email;
+  switch (login.state) {
+    case 'signed-in':
+      return `Login · ${who}. Ferretry and your own \`${own}\` share this login: signing out in one signs out both.`;
+    case 'refresh-due':
+      return `Login · ${who} · Refresh due. Ferretry renews it the first time you launch.`;
+    case 'not-signed-in':
+      return `${label} isn't signed in on this machine. Your setup was still imported; sign in later and every runtime on this login can launch.`;
+    case 'unknown':
+      return `${label} sign-in is unknown (${login.reason ?? 'Logins has no host discovery fact'}). Your login stays shared in place.`;
+    case 'unreadable':
+      return `Ferretry couldn't read your ${label} login (${login.reason ?? 'no reason given'}). It is still shared in place; check it on the Sign-ins tab.`;
+    default:
+      return `Your ${label} login can't be shared in place (${login.reason ?? 'it is not kept in a file'}), so this login needs its own sign-in.`;
+  }
+}
+
+/** Codex's host scan, import decisions and login notes; host reads and secret handling remain guarded by Runtimes. */
+export const codexImportKit: RuntimesHarnessKit = { scanHost, importSetup, harvest, loginNote };

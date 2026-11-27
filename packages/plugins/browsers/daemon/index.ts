@@ -20,6 +20,7 @@ import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
 import { BrowserProxyTester, proxyEndpoint, resolveBrowserProxy } from './proxy/index.ts';
 import { TunnelProxyProbe } from './proxy/adapters/probe.ts';
 import { proxyRoutes } from './proxy/routes.ts';
+import { identityRoutes } from './pages/identity-routes.ts';
 import { KernelFrameClock } from './stream/frame-clock.ts';
 import { allOf, scopeDelivery, sealedDelivery } from './stream/delivery.ts';
 import { heldViewerHost } from './stream/held-host.ts';
@@ -426,6 +427,12 @@ export function buildBrowsers(
     routes: {
       ...pageRoutes(kernel, login, pages, ferretGuard, protection, gate),
       ...proxyRoutes({ tester, state: () => pages.overview() }),
+      ...identityRoutes({
+        config,
+        state: identity => pages.identityState(identity),
+        stop: async identity => await pages.closeIdentity(identity),
+        lastUsedAt: async identity => await profile.lastUsedAt(identity),
+      }),
       ...controlRoutes(tools),
       ...systemOpenRoutes(openUrl),
     },

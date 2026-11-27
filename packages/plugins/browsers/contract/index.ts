@@ -5,6 +5,7 @@ export * from './wire.ts';
 export * from './words.ts';
 export * from './wire/browser.ts';
 export * from './wire/control.ts';
+export * from './wire/identities.ts';
 export * from './wire/limits.ts';
 export * from './wire/login.ts';
 export * from './wire/page-lifecycle.ts';

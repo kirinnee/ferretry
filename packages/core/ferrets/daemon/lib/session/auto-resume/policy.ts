@@ -92,3 +92,16 @@ export function bootNotice(status: string, mode: 'auto' | 'interactive'): string
         'resumed as it was; there is nothing to re-run.'
     : undefined;
 }
+
+/**
+ * What the availability port throws when Runtimes' answer did not come (a hang past the kernel's bound, a throw, garbage):
+ * at boot Runtimes may still be waking, so that is "not yet", not "no". The pass asks again after each of
+ * {@link LOST_ANSWER_RETRY_MS}, off its worker slots, then skips the ferret with this message as it always did. Runtimes'
+ * OWN no is never this.
+ */
+export class AnswerLost extends Error {
+  override readonly name = 'AnswerLost';
+}
+
+/** How long the pass waits before each further ask after a lost answer: two more asks, then it gives up (fail closed). */
+export const LOST_ANSWER_RETRY_MS: readonly number[] = [3_000, 9_000];

@@ -184,6 +184,8 @@ export interface KitHarvestInput {
   readonly source: string;
   readonly mcpSource?: string;
   readonly parsedEnv?: unknown;
+  /** A separate hooks document the host keeps, already parsed; present only when the host read one and it parsed. */
+  readonly hooks?: { readonly source: string; readonly document: KitSettingsObject };
   readonly skippedEnv: boolean;
   readonly skippedModelSet: boolean;
   countHooks(block: KitSettingsObject): number;

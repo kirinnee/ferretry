@@ -16,15 +16,23 @@ import {
 import { autoResumeVerdict } from '../lib/ferrets/auto-resume.ts';
 import type { AutoResumeSummary } from '../lib/protocol/auto-resume.ts';
 import {
+  AnswerLost,
   type AutoResumeCandidate,
   AutoResumeService,
   type AutoResumeSettings,
   defaultAutoResumeSettings,
+  LOST_ANSWER_RETRY_MS,
 } from '../lib/session/auto-resume/index.ts';
 import type { BootPassGate } from '../lib/session/auto-resume/boot-gate.ts';
 
 /** The job that records how each ferret's terminal fared across the restart and works the owed resumes off (W2-a). */
 export const AUTO_RESUME_JOB = 'ferrets.auto-resume';
+
+/**
+ * Whether the walk ended on a taker that gave no answer of its own (not a no it said): the only case worth asking again. */
+function lostAnswer(answer: DecideAnswer): boolean {
+  return answer.decision.allow === false && answer.answers.at(-1)?.outcome === 'unanswered';
+}
 
 /** What the auto-resume stands on, each through its one owner. */
 export interface AutoResumeDeps extends Omit<BootExitFerrets, 'list'> {
@@ -57,7 +65,8 @@ export interface AutoResumeDeps extends Omit<BootExitFerrets, 'list'> {
   /** The ferret's journal (history.jsonl), on its one append chain. */
   readonly history: (ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>) => Promise<void>;
   readonly clock: { now(): string; nowMs(): number };
-  readonly sleep: (milliseconds: number) => Promise<void>;
+  /** Rejects when `signal` aborts. */
+  readonly sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
   readonly log: Pick<Log, 'warn'>;
   readonly settings?: AutoResumeSettings;
   /** Released the moment the pass has closed its recorder: the turn watch's observers settle nothing before it. */
@@ -65,8 +74,11 @@ export interface AutoResumeDeps extends Omit<BootExitFerrets, 'list'> {
 }
 
 export interface AutoResume {
-  /** One pass: settle and record the boot exits, then work the ledger off. Answers what it did, if anything. */
-  readonly run: () => Promise<AutoResumeSummary | undefined>;
+  /**
+   * One pass: settle and record the boot exits, then work the ledger off. Answers what it did, if anything. `signal` is
+   * the job's: once it aborts nothing more is asked or launched and every wait ends (what is left stays owed).
+   */
+  readonly run: (signal?: AbortSignal) => Promise<AutoResumeSummary | undefined>;
   readonly summary: StateAutoResumeSummaryStore;
 }
 
@@ -80,46 +92,93 @@ class NotResumable extends Error {}
  * the history writer. Today recorded the boot exits before serving and ran the pass after; 5.0 does both in one job
  * after the daemon serves, in the same order, so a pass never starts before what it is owed is durable.
  */
-export function buildAutoResume(deps: AutoResumeDeps): AutoResume {
+export function buildAutoResume(rawDeps: AutoResumeDeps): AutoResume {
+  const deps = rawDeps;
   const summary = new StateAutoResumeSummaryStore(deps.state);
-  const service = new AutoResumeService(
-    {
-      ledger: new StateAutoResumeLedger(deps.state),
-      roster: new RegistryAutoResumeRoster(deps.record),
-      // Today's availability rule (a record that names no runtime is not resumed), asking Runtimes about THIS ferret.
-      availability: {
-        unavailable: async id => {
-          const record = deps.record(id as FerretId);
-          return await new AccountAutoResumeAvailability(
-            async () => record?.runtime,
-            async runtime => {
-              if (record === undefined) throw new NotResumable('its record is gone');
-              const verdict = autoResumeVerdict(
-                await deps.decide({ ask: 'runtime', ferret: record.id, harness: record.harness, runtime }),
-              );
-              if (!verdict.allow) throw new NotResumable(verdict.reason);
-            },
-          ).unavailable(id);
+  const serviceFor = (signal: AbortSignal | undefined): AutoResumeService =>
+    new AutoResumeService(
+      {
+        ledger: new StateAutoResumeLedger(deps.state),
+        roster: new RegistryAutoResumeRoster(deps.record),
+        // Today's availability rule (a record that names no runtime is not resumed), asking Runtimes about THIS ferret.
+        availability: {
+          unavailable: async id => {
+            const record = deps.record(id as FerretId);
+            // The adapter says every refusal as a reason; whether it was a LOST answer is kept here, for this ask alone.
+            let lostHere = false;
+            const reason = await new AccountAutoResumeAvailability(
+              async () => record?.runtime,
+              async runtime => {
+                if (record === undefined) throw new NotResumable('its record is gone');
+                const answer = await untilAborted(
+                  deps.decide({ ask: 'runtime', ferret: record.id, harness: record.harness, runtime }),
+                  signal,
+                );
+                const verdict = autoResumeVerdict(answer);
+                if (!verdict.allow) {
+                  lostHere = lostAnswer(answer);
+                  throw new NotResumable(verdict.reason);
+                }
+              },
+            ).unavailable(id);
+            // A lost answer is the service's to ask again, off its worker slots; Runtimes' own no is final.
+            if (reason !== undefined && lostHere) throw new AnswerLost(reason);
+            return reason;
+          },
         },
+        resumer: {
+          resume: async (id, message) => await deps.resume(id as FerretId, message, owedAutoResume),
+        },
+        journal: new StorageAutoResumeJournal({
+          append: async (id, type, data) => await deps.history(id as unknown as FerretId, type, data),
+        }),
+        summary,
+        // The machine's switch is Runtimes' (today's `machine.autoResume`): only its own yes turns the pass on.
+        setting: { enabled: async () => await switchOn(deps, signal) },
+        clock: deps.clock,
+        sleep: deps.sleep,
       },
-      resumer: {
-        resume: async (id, message) => await deps.resume(id as FerretId, message, owedAutoResume),
-      },
-      journal: new StorageAutoResumeJournal({
-        append: async (id, type, data) => await deps.history(id as unknown as FerretId, type, data),
-      }),
-      summary,
-      // The machine's switch is Runtimes' (today's `machine.autoResume`): only its own yes turns the pass on.
-      setting: { enabled: async () => autoResumeVerdict(await deps.decide({ ask: 'switch' })).allow },
-      clock: deps.clock,
-      sleep: deps.sleep,
-    },
-    deps.settings ?? defaultAutoResumeSettings,
-  );
-  return { run: async () => await runOnce(deps, service), summary };
+      deps.settings ?? defaultAutoResumeSettings,
+    );
+  return { run: async signal => await runOnce(deps, serviceFor(signal), signal), summary };
 }
 
-async function runOnce(deps: AutoResumeDeps, service: AutoResumeService): Promise<AutoResumeSummary | undefined> {
+/**
+ * The machine's switch, asked once before anything is spent. Its lost answer is asked again after each of
+ * {@link LOST_ANSWER_RETRY_MS} (no worker slot is held yet: nothing has started), then it is a no as it always was.
+ * Rejects when `signal` aborts: a stop is not a "no", which would clear the ledger.
+ */
+async function switchOn(deps: AutoResumeDeps, signal: AbortSignal | undefined): Promise<boolean> {
+  let answer = await untilAborted(deps.decide({ ask: 'switch' }), signal);
+  for (const delay of LOST_ANSWER_RETRY_MS) {
+    if (!lostAnswer(answer)) break;
+    await deps.sleep(delay, signal);
+    answer = await untilAborted(deps.decide({ ask: 'switch' }), signal);
+  }
+  return autoResumeVerdict(answer).allow;
+}
+
+/** The promise, or its rejection with the abort reason the moment `signal` aborts: a stop does not wait on an answer. */
+async function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (signal === undefined) return await promise;
+  if (signal.aborted) throw signal.reason;
+  let onAbort: () => void = () => undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([promise, aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+async function runOnce(
+  deps: AutoResumeDeps,
+  service: AutoResumeService,
+  signal: AbortSignal | undefined,
+): Promise<AutoResumeSummary | undefined> {
   // The first look after boot: only a settle that LANDED in this pass is recorded, so a second boot finds the ferrets
   // this one resumed live (or still stopped, never `working`) and owes them nothing again.
   const exits = new BootExitRecorder(
@@ -137,7 +196,7 @@ async function runOnce(deps: AutoResumeDeps, service: AutoResumeService): Promis
     .catch((error: unknown) =>
       deps.log.warn('the ferrets owed an auto-resume could not be recorded', { error: reasonOf(error) }),
     );
-  return await service.run();
+  return await service.run(signal);
 }
 
 /**
