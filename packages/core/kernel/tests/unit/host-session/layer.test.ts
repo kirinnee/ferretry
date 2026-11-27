@@ -45,6 +45,9 @@ test('a carrier signer enforces SIGNER_USERS: claims and tunnels only, never cat
   await expect(
     signer.signSecretOffer({ v: 1, importId: 'offer', publicKey: 'public', expiresAt: '2026-11-07T10:00:00Z' }),
   ).rejects.toThrow('connections may not ask');
+  await expect(
+    signer.signRelocateOffer({ v: 1, offerId: 'offer', publicKey: 'public', expiresAt: '2026-11-07T10:00:00Z' }),
+  ).rejects.toThrow('connections may not ask');
   expect(Object.isFrozen(signer)).toBe(true);
   layer.close();
 });
@@ -1261,6 +1264,7 @@ describe('the session layer: the identity signer it offers carriers', () => {
       'sign',
       'signCatalog',
       'signLinkStoreRequest',
+      'signRelocateOffer',
       'signSecretOffer',
       'signTunnel',
     ]);

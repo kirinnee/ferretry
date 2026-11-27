@@ -106,6 +106,7 @@ test('an oversize conversation refuses before listing or reading any more of the
 test('HEAD changing after the working files were gathered refuses the snapshot', async () => {
   let heads = 0;
   const tree: WorkingTree = {
+    remote: async () => undefined,
     head: async () => ({ head: (++heads < 3 ? 'a' : 'b').repeat(40) }),
     commits: async () => undefined,
     changes: async () => new Uint8Array(),

@@ -62,6 +62,7 @@ export class Preparation {
           ? undefined
           : {
               head: () => this.wait(() => tree.head()),
+              remote: () => this.wait(() => tree.remote()),
               ignoredTopLevel: () => this.wait(() => tree.ignoredTopLevel()),
               untracked: () => this.wait(() => tree.untracked()),
               size: path => this.wait(() => tree.size(path)),

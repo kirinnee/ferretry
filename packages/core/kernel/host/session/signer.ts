@@ -14,6 +14,8 @@ import type {
   LinkStoreSignRequest,
   SignedLinkStoreSignature,
   SecretOfferSignRequest,
+  RelocateOfferSignRequest,
+  SignedRelocateOffer,
   SignedSecretOffer,
   RelayClaimRequest,
   SignedCatalogSignature,
@@ -27,6 +29,7 @@ import { encodeClaim, signRendezvousClaim } from './wire/claim.ts';
 import { NONCE_BYTES } from './wire/constants.ts';
 import type { DaemonSigningKey } from './wire/crypto.ts';
 import { linkStoreTranscript, parseLinkStoreRequestBody } from './wire/link-store.ts';
+import { relocateOfferSignedBytes } from './wire/relocate-offer.ts';
 import { secretOfferSignedBytes } from './wire/secret-offer.ts';
 import { tunnelTranscript } from './wire/tunnel-request.ts';
 
@@ -118,6 +121,23 @@ export function createIdentitySigner(
       const signature = await key.sign(secretOfferSignedBytes(fields));
       return { daemonId: key.daemonId, identityKey, signature: toBase64Url(signature) };
     },
+    signRelocateOffer: async (request: RelocateOfferSignRequest): Promise<SignedRelocateOffer> => {
+      for (const field of [request.offerId, request.publicKey, request.expiresAt])
+        if (typeof field !== 'string' || field === '') throw new TypeError('every offer field must be named');
+      if (!Number.isInteger(request.v)) throw new TypeError('the offer version must be a whole number');
+      const identityKey = toBase64Url(key.publicKeySpki);
+      const signature = await key.sign(
+        relocateOfferSignedBytes({
+          v: request.v,
+          offerId: request.offerId,
+          daemonId: key.daemonId,
+          identityKey,
+          publicKey: request.publicKey,
+          expiresAt: request.expiresAt,
+        }),
+      );
+      return { daemonId: key.daemonId, identityKey, signature: toBase64Url(signature) };
+    },
   });
 }
 
@@ -132,6 +152,7 @@ export const SIGNER_USERS = Object.freeze({
   signCatalog: ['catalogs'],
   signLinkStoreRequest: ['catalogs'],
   signSecretOffer: ['vault'],
+  signRelocateOffer: ['relocate'],
 } as const satisfies Record<keyof IdentitySigner, readonly string[]>);
 
 /** The signer as one plugin receives it: each method refuses (`TypeError`) unless {@link SIGNER_USERS} names it. */
@@ -148,5 +169,6 @@ export function signerFor(plugin: string, signer: IdentitySigner): IdentitySigne
       allowed('signLinkStoreRequest'), await signer.signLinkStoreRequest(request)
     ),
     signSecretOffer: async request => (allowed('signSecretOffer'), await signer.signSecretOffer(request)),
+    signRelocateOffer: async request => (allowed('signRelocateOffer'), await signer.signRelocateOffer(request)),
   });
 }

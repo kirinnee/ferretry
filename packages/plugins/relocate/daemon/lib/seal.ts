@@ -16,13 +16,14 @@ import {
   chunkAssociatedData,
   offerSignedBytes,
   RELOCATE_FORMAT,
+  RELOCATE_OFFER_TTL_MS,
   type RelocateOffer,
 } from '../../contract/index.ts';
 
 /** How far apart two machines' clocks may be before an offer reads as expired or overlong. */
 const CLOCK_SKEW_MS = 60_000;
 /** The longest an offer may claim to stay open: the target's own bound, plus skew. */
-const OFFER_TTL_MS = 5 * 60_000;
+const OFFER_TTL_MS = RELOCATE_OFFER_TTL_MS;
 
 /** A refusal with one sentence a person can read, and a closed code the app words. */
 export class OfferRefused extends Error {

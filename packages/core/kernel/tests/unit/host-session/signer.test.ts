@@ -85,6 +85,7 @@ describe('identity signer: the rendezvous claim', () => {
       'sign',
       'signCatalog',
       'signLinkStoreRequest',
+      'signRelocateOffer',
       'signSecretOffer',
       'signTunnel',
     ]);
@@ -228,6 +229,7 @@ describe('kernel.signer: each signature is offered only to the plugin that needs
       'sign',
       'signCatalog',
       'signLinkStoreRequest',
+      'signRelocateOffer',
       'signSecretOffer',
       'signTunnel',
     ]);
@@ -293,6 +295,45 @@ describe('identity signer: secret-import offers (Vault)', () => {
     await expect(signerFor('connections', signer).signSecretOffer(request)).rejects.toThrow(TypeError);
     expect((await signerFor('vault', signer).signSecretOffer(request)).signature).toBe(signed.signature);
     await expect(signer.signSecretOffer({ ...request, importId: '' })).rejects.toThrow(TypeError);
+  });
+});
+
+describe('identity signer: move offers (Relocate)', () => {
+  const request = {
+    v: 1,
+    offerId: 'fy_relocate_offer_abc',
+    publicKey: toBase64Url(new Uint8Array(32).fill(9)),
+    expiresAt: '2026-11-07T10:00:00.000Z',
+  };
+
+  it('signs the move label, every field length-prefixed, and is no secrets offer', async () => {
+    const identity = await newDaemonIdentity();
+    const signer = createIdentitySigner(identity);
+    const signed = await signer.signRelocateOffer(request);
+    expect(signed.daemonId).toBe(identity.daemonId);
+    const expected = concatBytes(
+      [
+        'ferretry-relocate-offer-v1',
+        '1',
+        request.offerId,
+        identity.daemonId,
+        signed.identityKey,
+        request.publicKey,
+        request.expiresAt,
+      ].map(field => lengthPrefixed(utf8Bytes(field))),
+    );
+    const signature = fromBase64UrlFixed(signed.signature, 64) as Uint8Array;
+    expect(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, expected)).toBe(true);
+    expect(await verifySecretOfferSignature(relayCrypto, { ...request, importId: request.offerId, ...signed })).toBe(
+      false,
+    );
+  });
+
+  it('only Relocate may ask, and a blank field is refused', async () => {
+    const signer = createIdentitySigner(await newDaemonIdentity());
+    await expect(signerFor('vault', signer).signRelocateOffer(request)).rejects.toThrow(TypeError);
+    expect((await signerFor('relocate', signer).signRelocateOffer(request)).signature).not.toBe('');
+    await expect(signer.signRelocateOffer({ ...request, offerId: '' })).rejects.toThrow(TypeError);
   });
 });
 

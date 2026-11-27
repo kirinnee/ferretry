@@ -1,12 +1,15 @@
 import { HARDENED_GIT_ARGUMENTS, gitEnvironment, establishGlobalConfig } from '@ferretry/core-ferrets/contract';
 import { milliseconds } from '@ferretry/std';
 import { namesASecret } from './path-policy.ts';
+import { normalizeRemote } from './remote.ts';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 
 /** What the snapshot asks of one working tree. Git runs only to list, diff and bundle; it never writes the tree. */
 export interface WorkingTree {
   /** `HEAD`'s commit and the branch it is on (absent on a detached `HEAD`), or `undefined` for a folder that is no work tree. */
   head(): Promise<{ readonly head: string; readonly branch?: string } | undefined>;
+  /** `origin`'s address in the one spelling two machines compare (`normalizeRemote`), or `undefined` when it has none or it is no network address. */
+  remote(): Promise<string | undefined>;
   /**
    * The commits of `HEAD` that no remote-tracking ref holds, as a git bundle; `undefined` when there are none (the target
    * already has them from the project's remote). An error names no path.
@@ -175,6 +178,12 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
         throw new WorkingTreeError('git could not read this ferret’s branch');
       const branch = named.exitCode === 0 ? decoder.decode(named.stdout).trim() : '';
       return { head, ...(branch === '' ? {} : { branch }) };
+    },
+    remote: async () => {
+      const done = await git(['config', '--get', 'remote.origin.url'], 4096);
+      if (done.exitCode === 1) return undefined;
+      if (done.exitCode !== 0) throw new WorkingTreeError("git could not read this ferret's remote");
+      return normalizeRemote(decoder.decode(done.stdout));
     },
     commits: async maxBytes => {
       const head = await verifiedHead();

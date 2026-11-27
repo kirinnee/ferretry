@@ -54,6 +54,7 @@ export class RecordingSessionLayer implements SessionLayer {
       signCatalog: async request => await (await signer).signCatalog(request),
       signLinkStoreRequest: async request => await (await signer).signLinkStoreRequest(request),
       signSecretOffer: async request => await (await signer).signSecretOffer(request),
+      signRelocateOffer: async request => await (await signer).signRelocateOffer(request),
     };
   }
 

@@ -72,6 +72,7 @@ import type {
   LaunchPart,
   LaunchPartSource,
   OpeningAttachmentsSource,
+  PackedConversation,
   ConversationStageSource,
   LaunchSpec,
   LoginCredentialAnswer,
@@ -525,6 +526,7 @@ interface LaunchExtras {
   readonly carried?: ResumeOptions['onCarried'] | undefined;
   readonly notInWardenTree?: true | undefined;
   readonly fast?: DecidedFast | undefined;
+  readonly relocated?: PackedConversation | undefined;
 }
 
 /**
@@ -1179,6 +1181,19 @@ export class FerretsService implements FerretsApi {
     if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');
     if (this.ports.harness(harnessKey) === undefined)
       return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);
+    // A moved conversation is the owner's alone and needs a harness that can unpack it: refused here, before any write.
+    if (request.relocated !== undefined) {
+      if (request.by !== 'owner' || request.harnessConversation !== undefined)
+        return failed(
+          'refused',
+          'a moved conversation is started by the owner alone, and never beside another conversation',
+        );
+      if (this.ports.harness(harnessKey)?.unpackConversation === undefined)
+        return failed(
+          'refused',
+          `the ${harnessKey} harness cannot take a conversation moved from another machine, so nothing was started`,
+        );
+    }
     // The folder's identity is captured HERE, before any taker is asked, and re-verified as the last step before the
     // harness starts: a swap in between (a link into the state home put where the project was) cannot be launched in.
     const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
@@ -1277,6 +1292,7 @@ export class FerretsService implements FerretsApi {
       recordedOk();
       return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
         attached: opening.value.files,
+        ...(request.relocated === undefined ? {} : { relocated: request.relocated }),
         bound: bound.value,
         ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
       });
@@ -2169,7 +2185,7 @@ export class FerretsService implements FerretsApi {
     revive?: ReviveTurnRequest,
     extras: LaunchExtras = {},
   ): Promise<Result<FerretId, StartFailure>> {
-    const { attached = [], carried, notInWardenTree, bound, fast, prepared } = extras;
+    const { attached = [], carried, notInWardenTree, bound, fast, prepared, relocated } = extras;
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
@@ -2194,7 +2210,17 @@ export class FerretsService implements FerretsApi {
           return typeof value === 'function' ? value.bind(target) : value;
         },
       });
-      const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said, fast, prepared);
+      const result = await this.launchAttempt(
+        record,
+        prompt,
+        conversation,
+        tracked,
+        bound,
+        said,
+        fast,
+        prepared,
+        relocated,
+      );
       // A RESUME with no conversation to resume starts a new one just as a missing one does, and is said the same way: a
       // ferret that silently forgot everything (proof run 8, a converted Codex ferret) is the defect this names.
       if (kind === 'resume' && conversation === undefined) said.conversationUnknown = true;
@@ -2379,11 +2405,13 @@ export class FerretsService implements FerretsApi {
     said: LaunchSaid = {},
     decidedFast?: DecidedFast,
     prepared?: PreparedLaunch,
+    relocated?: PackedConversation,
   ): Promise<Result<FerretId, StartFailure>> {
     const ready =
       prepared === undefined ? await this.prepareLaunch(record, prompt, conversation, decidedFast) : ok(prepared);
     if (!ready.ok) return ready;
-    const { harness, spec, env, issued } = ready.value;
+    const { harness, env, issued } = ready.value;
+    let spec = ready.value.spec;
     if (prepared !== undefined) {
       if (await this.isCutOff(record.id))
         return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
@@ -2392,24 +2420,36 @@ export class FerretsService implements FerretsApi {
       const home = await prepareLaunchHome(harness, spec);
       if (!home.ok) return home;
     }
+    // A conversation that came from another machine is written into THIS ferret's own home now that the home exists, and the
+    // launch resumes it. The harness refuses with one sentence and writes nothing when it cannot (an untested version, a pack
+    // that is not a whole conversation); the launch then fails as any other does.
+    let named = conversation;
+    if (relocated !== undefined) {
+      const unpacked = await harness.unpackConversation?.(spec, relocated).catch((): undefined => undefined);
+      if (unpacked === undefined)
+        return failed('refused', "the moved conversation could not be written into this ferret's home");
+      if (!unpacked.ok) return failed('refused', unpacked.error.reason);
+      named = unpacked.value.conversation;
+      spec = { ...spec, harnessConversation: named };
+    }
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
     // A conversation the harness PROVES it does not have is not resumed: a real harness asked to would fail the launch
     // ("No conversation found…"). A ferret converted from v4 names one whose transcript was left behind (!A516). It
     // starts a new conversation instead, and the caller says so; any doubt resumes as asked.
     const resumable =
-      conversation === undefined || harness.hasConversation === undefined
-        ? conversation
-        : (await harness.hasConversation(spec, conversation).catch(() => undefined)) === false
+      named === undefined || harness.hasConversation === undefined
+        ? named
+        : (await harness.hasConversation(spec, named).catch(() => undefined)) === false
           ? undefined
-          : conversation;
-    if (conversation !== undefined && resumable === undefined) {
+          : named;
+    if (named !== undefined && resumable === undefined) {
       if (said.requireConversation === true)
         return failed(
           'refused',
-          `the ${record.harness} conversation ${conversation} was not found, so the ferret was not started (only the owner's start copies one in from this computer, and only while the Conversations plugin is on)`,
+          `the ${record.harness} conversation ${named} was not found, so the ferret was not started (only the owner's start copies one in from this computer, and only while the Conversations plugin is on)`,
         );
-      said.conversationNotFound = conversation;
+      said.conversationNotFound = named;
     }
     if (bound !== undefined) {
       const held = await bound.verify().catch(() => err('the launch folder could not be checked again'));

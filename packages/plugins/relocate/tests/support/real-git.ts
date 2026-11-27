@@ -1,10 +1,11 @@
 import {
-  realpathSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -50,6 +51,10 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
           cwd: typeof options?.cwd === 'string' ? options.cwd : options?.cwd?.describe,
           stdout: 'pipe',
           stderr: 'pipe',
+          stdin:
+            options?.stdin === undefined
+              ? 'ignore'
+              : new Blob([typeof options.stdin === 'string' ? options.stdin : new Uint8Array(options.stdin)]),
         });
         const out = new Uint8Array(await new Response(child.stdout).arrayBuffer());
         const exitCode = await child.exited;
@@ -93,14 +98,30 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
           },
           readBytes: async (path: string, limit?: number) =>
             new Uint8Array(await Bun.file(path).arrayBuffer()).slice(0, limit),
+          makeDirectory: async (path: string) => {
+            mkdirSync(path, { recursive: true });
+          },
+          writeBytes: async (path: string, bytes: Uint8Array, options?: { readonly exclusive?: boolean }) => {
+            if (options?.exclusive === true && lstatSync(path, { throwIfNoEntry: false }) !== undefined)
+              throw new Error('exists');
+            writeFileSync(path, bytes);
+          },
+          remove: async (path: string) => {
+            rmSync(path, { recursive: true, force: true });
+          },
         };
       },
     } as unknown as KernelPorts['roots'],
   };
 }
 
+/** The address a fixture's project is known by on both machines: never contacted. */
+export const REMOTE_URL = 'https://example.invalid/acme/project.git';
+
 export interface Fixture {
   readonly folder: string;
+  /** The bare repository the fixture pushed to: a target's own clone of the project comes from here. */
+  readonly remote: string;
   /** Every planted value a move must never carry, by the file it was planted in. */
   readonly secrets: Readonly<Record<string, string>>;
 }
@@ -123,6 +144,8 @@ export function makeRepository(): Fixture {
   git(folder, 'add', '.');
   git(folder, 'commit', '-q', '-m', 'first');
   git(folder, 'push', '-q', 'origin', 'main');
+  // A network-shaped address, so a move can match the project by it; the bare repository above is where the commits are.
+  git(folder, 'remote', 'set-url', 'origin', REMOTE_URL);
   writeFileSync(join(folder, 'second.txt'), 'two\n');
   git(folder, 'add', '.');
   git(folder, 'commit', '-q', '-m', 'second (not pushed)');
@@ -138,7 +161,7 @@ export function makeRepository(): Fixture {
   writeFileSync(join(folder, 'deploy.pem'), `${secrets['deploy.pem']}\n`);
   mkdirSync(join(folder, 'node_modules/pkg'), { recursive: true });
   writeFileSync(join(folder, 'node_modules/pkg/index.js'), 'module.exports = 1;\n');
-  return { folder, secrets };
+  return { folder, remote, secrets };
 }
 
 /** Every file below a folder, as `relative path → bytes`, for a byte-for-byte comparison before and after. */

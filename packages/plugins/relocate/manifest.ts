@@ -1,7 +1,11 @@
 import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { cap } from '@ferretry/core-gate/contract';
 import { definePlugin, route } from '@ferretry/kernel/manifest';
-import { MOVED_STATE, RELOCATE_AUDIT } from './contract/index.ts';
+import { GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
+import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
+import { VaultPort } from '@ferretry/core-vault/contract';
+import { MOVED_STATE, RECEIVED_STATE, RELOCATE_AUDIT } from './contract/index.ts';
 
 /**
  * Relocate (C-45, source side): moves a ferret to another machine the person's app is already paired to. The TARGET
@@ -22,6 +26,8 @@ export default definePlugin({
   kinds: ['command'],
 
   needs: { ferrets: FerretsPort },
+  // The target's neighbours, all optional: with one off, a move that needs it is refused with a sentence (never a crash).
+  uses: { projects: ProjectsPort, gitAccounts: GitAccountsPort, runtimes: RuntimesPort, vault: VaultPort },
 
   actions: {
     routes: [
@@ -59,10 +65,42 @@ export default definePlugin({
         audit: { record: RELOCATE_AUDIT.moved },
         guard: { none: 'two ids and an instant; nothing of the ferret' },
       }),
+      route('POST /v1/relocate/offers', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: { skip: 'opens a one-time public key in memory: nothing is written, nothing is read' },
+        guard: { none: 'a public key and an id, signed by this daemon; the private key never leaves memory' },
+      }),
+      route('POST /v1/relocate/offers/:offerId/preflight', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: { skip: 'a read: it says what this machine has and lacks and changes nothing' },
+        guard: { none: 'names, a harness, a remote with no credential and secret NAMES; never a value' },
+      }),
+      route('PUT /v1/relocate/offers/:offerId/chunks/:index', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: { skip: 'a chunk of ciphertext kept in memory; the import that opens it is audited' },
+        guard: { none: 'AES-GCM ciphertext only: nothing here can be read without the one-time key held in memory' },
+      }),
+      route('POST /v1/relocate/offers/:offerId/import', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: { record: RELOCATE_AUDIT.imported },
+        guard: { none: 'a header and a folder; every hash is verified before anything is written' },
+      }),
     ],
   },
 
-  data: { state: [MOVED_STATE] },
+  data: { state: [MOVED_STATE, RECEIVED_STATE] },
 
   // The working tree is read through the `imports` root, scoped to the one folder the ferret works in, and git is run
   // only to list, diff and bundle it.

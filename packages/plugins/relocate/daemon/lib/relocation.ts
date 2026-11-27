@@ -86,7 +86,7 @@ export class Relocation {
     if (to === this.deps.daemonId)
       throw new RelocateRefused(400, 'a machine cannot move a ferret to itself', 'same_machine');
     const { inputs } = await this.#inputs(ferretId);
-    return preflightView(await this.#planned(ferretId, inputs));
+    return preflightView(await this.#planned(ferretId, inputs), inputs.summary);
   }
 
   async export(ferretId: string, offer: RelocateOffer): Promise<ExportResponse> {
@@ -128,9 +128,7 @@ export class Relocation {
       const found = await preparation.wait(() => plan(after));
       if (found.refusals.length > 0) throw new RelocateRefused(409, found.refusals.join('; '), 'move_refused');
       const entries = await preparation.wait(() => gather(after, found));
-      const manifest = await preparation.wait(() =>
-        manifestOf(this.deps.crypto, { id: summary.id, name: stopped.name }, found, entries),
-      );
+      const manifest = await preparation.wait(() => manifestOf(this.deps.crypto, stopped, found, entries));
       const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
       const length = new Uint8Array(4);
       new DataView(length.buffer).setUint32(0, manifestBytes.length, false);
