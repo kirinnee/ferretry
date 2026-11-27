@@ -47,6 +47,14 @@
     "text": "",
     "timestamp": "2026-11-08T10:00:00.000Z"
   },
+  "claude/messageUserHarness": {
+    "harness": "claude",
+    "inputSource": "harness",
+    "kind": "message",
+    "role": "user",
+    "text": "",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
   "claude/turnCompleted": {
     "harness": "claude",
     "kind": "turn",
@@ -140,6 +148,14 @@
     "inputSource": "harness",
     "kind": "message",
     "role": "assistant",
+    "text": "",
+    "timestamp": "2026-11-08T10:00:00.000Z"
+  },
+  "codex/messageUserHarness": {
+    "harness": "codex",
+    "inputSource": "harness",
+    "kind": "message",
+    "role": "user",
     "text": "",
     "timestamp": "2026-11-08T10:00:00.000Z"
   },

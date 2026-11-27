@@ -31,10 +31,13 @@ import { expectGolden } from './golden-file.ts';
  * Every input is synthetic and fixed; nothing here reads a clock, a path, a random id or the host's environment.
  */
 
+const PREFLIGHT_STOP = 'preflight stops here';
+
 const AT = '2026-11-08T10:00:00.000Z' as HarnessTailRecord['at'];
 
 const RECORDS: Record<string, HarnessTailRecord> = {
   messageBare: { kind: 'message', role: 'user' } as never,
+  messageUserHarness: { kind: 'message', role: 'user', inputSource: 'harness', at: AT } as never,
   messageFull: { kind: 'message', role: 'assistant', inputSource: 'harness', at: AT } as never,
   workBare: { kind: 'work' } as never,
   workAt: { kind: 'work', at: AT } as never,
@@ -141,7 +144,7 @@ describe('E-276 0b golden: which transcript format a harness is read as', () => 
         preflight: {
           inspect: async (target: { harness: string }, chat: unknown) => {
             inspected.push({ harness: target.harness, chat });
-            throw new Error('preflight stops here');
+            throw new Error(PREFLIGHT_STOP);
           },
         } as never,
         transcripts: {
@@ -168,10 +171,10 @@ describe('E-276 0b golden: which transcript format a harness is read as', () => 
         );
         outcome = 'answered';
       } catch (error) {
-        outcome =
-          error instanceof ApiError
-            ? { status: error.status, code: error.code, mentionsHarness: error.message.includes(harness) }
-            : 'stopped in the preflight';
+        if (error instanceof ApiError)
+          outcome = { status: error.status, code: error.code, mentionsHarness: error.message.includes(harness) };
+        else if (error instanceof Error && error.message === PREFLIGHT_STOP) outcome = 'stopped in the preflight';
+        else throw error;
       }
       answers[`harness=${harness}`] = { tails, inspected, outcome };
     }
