@@ -53,6 +53,7 @@ const expectKits = (expected: ReadonlyMap<HarnessKind, RuntimesHarnessKit>) => {
 describe('host import kit threading', () => {
   it('keeps the kit instruction name aligned with the live preview table', () => {
     expect(claudeRuntimesKit.importSetup?.instructionsName).toBe(real.HOST_INSTRUCTIONS_NAME.claude);
+    expect(codexRuntimesKit.importSetup?.instructionsName).toBe(real.HOST_INSTRUCTIONS_NAME.codex);
   });
   it('hands harvest and loginNote each harness own real kit and refuses a missing map', () => {
     const withKits = planImport(scans, { digest: text => text, kits });
@@ -70,14 +71,24 @@ describe('host import kit threading', () => {
     expect(calls).toEqual([{ group: 'harvest', harness: 'claude', kit: undefined }]);
   });
 
-  for (const member of ['importSetup', 'harvest', 'loginNote'] as const) {
-    it(`refuses a Claude kit without ${member}`, () => {
-      const incomplete = new Map(kits);
-      incomplete.set('claude', { ...claudeRuntimesKit, [member]: undefined });
-      expect(() => planImport(scans, { kits: incomplete, digest: text => text })).toThrow(
-        'claude is not supported here',
-      );
-    });
+  it('never substitutes another harness kit for a missing Codex entry', () => {
+    const claudeOnly = new Map<HarnessKind, RuntimesHarnessKit>([['claude', claudeRuntimesKit]]);
+    expect(() => planImport(scans, { digest: text => text, kits: claudeOnly })).toThrow('codex is not supported here');
+  });
+
+  for (const [harness, own] of [
+    ['claude', claudeRuntimesKit],
+    ['codex', codexRuntimesKit],
+  ] as const) {
+    for (const member of ['importSetup', 'harvest', 'loginNote'] as const) {
+      it(`refuses a ${harness} kit without ${member}`, () => {
+        const incomplete = new Map(kits);
+        incomplete.set(harness, { ...own, [member]: undefined });
+        expect(() => planImport(scans, { kits: incomplete, digest: text => text })).toThrow(
+          `${harness} is not supported here`,
+        );
+      });
+    }
   }
 
   it('reads kits live through the file adapter for each host scan and the service planner', async () => {
