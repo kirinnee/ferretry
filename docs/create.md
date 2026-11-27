@@ -1,8 +1,8 @@
 # Create: pictures, sound and video for agents that cannot make them
 
 An agent whose runtime has no image or sound tool (an open-weight model behind Claude Code, say) calls
-`generate_image`, `generate_speech`, `generate_sfx`, `generate_music` or `generate_video`. Create makes the file on **the owner's own
-fal and ElevenLabs keys**, prices the call before it is sent, refuses past a daily limit, and asks the owner before one
+`generate_image`, `generate_speech`, `generate_sfx`, `generate_music`, `generate_video` or `generate_avatar_video`. Create makes the file on **the owner's own
+fal, ElevenLabs and HeyGen keys**, prices the call before it is sent, refuses past a daily limit, and asks the owner before one
 dear call. This page is the contract; the code is `packages/plugins/create`.
 
 Built: the core (tools, price table, ledger, daily cap, the ask), `generate_image`, the sound tools
@@ -12,8 +12,8 @@ clip is played from the media folder through the streamed byte route ([fy-render
 
 ## Turning it on
 
-1. The owner stores a key: `fy secret set FAL_KEY` (pictures, sound effects, music) and/or
-   `fy secret set ELEVENLABS_API_KEY` (speech). The value is never shown or returned; see [secrets.md](secrets.md).
+1. The owner stores a key: `fy secret set FAL_KEY` (pictures, sound effects, music),
+   `fy secret set ELEVENLABS_API_KEY` (speech) and/or `fy secret set HEYGEN_API_KEY` (avatar video). The value is never shown or returned; see [secrets.md](secrets.md).
 2. The owner names each in `config/create.yaml`. Only the owner can add that line (a ferret's write that adds a secret
    reference is held):
 
@@ -22,14 +22,16 @@ fal:
   key: ${secret:FAL_KEY}
 elevenlabs:
   key: ${secret:ELEVENLABS_API_KEY}
+heygen:
+  key: ${secret:HEYGEN_API_KEY}
 limits:
   dailyUsd: 5 # all creative tools together; refused past it
   askAboveUsd: 1 # one call dearer than this asks the owner first
 timeZone: America/Los_Angeles # where "a day" ends; default: this machine's own zone
 ```
 
-Without a tool's key (`fal.key` for the picture, sound-effect and music tools, `elevenlabs.key` for speech) the tool answers
-"creative tools are off" or "speech is off" and nothing leaves the machine. One key does not turn on the other
+Without a tool's key (`fal.key` for the picture, sound-effect and music tools, `elevenlabs.key` for speech, `heygen.key` for avatar video) the tool answers
+"creative tools are off", "speech is off" or "avatar video is off" and nothing leaves the machine. One key does not turn on the other
 provider's tools. Raising either limit, or
 changing `timeZone`, loosens spend, so the edit is held for the owner ([config-files.md](config-files.md)).
 
@@ -175,16 +177,42 @@ is always counted. It is given back (a second line, `refund: true`, that cancels
 appended to) only when the provider definitely billed nothing: the request never left, it was refused, or it answered 401, 403,
 429 or another 4xx. A timeout, a dropped connection, a 5xx or an answer that cannot be read stays counted.
 
+### Avatar video (HeyGen): two calls, the same money steps
+
+`generate_avatar_video(script, avatar, voice, aspect?)` has a HeyGen avatar read `script` (1–1 500 characters) in a voice,
+as a talking-head video (`16:9` default, or `9:16`, 720p, made by HeyGen's **Avatar IV** engine, which every request names). `avatar` and `voice` are ids from the owner's own HeyGen account:
+there is no default, so none is invented. It goes through the **same** steps as every creative tool: the one daily cap, the
+ask over $1, the reservation in the one ledger before HeyGen is called, the one queue. It answers a job id; the video is
+made in minutes. `avatar_video_status(job)` is free: while it is made it says so, and when it is made it fetches the file
+from HeyGen's storage with no key, saves it to the ferret's media folder and answers the `fy-render` block under the cost
+line. The job is kept in `state/create/avatar-jobs.jsonl` (owner-only) so a restart loses nothing.
+
+**The price is a table** (HeyGen has no price endpoint). HeyGen bills per generated second and per engine, so the request
+**pins the engine** (`avatar_iv`) and the reservation is that engine's per-second rate: Avatar IV's **$4.83 a minute**
+(a digital twin or studio avatar; a photo avatar is $2.31, and Create does not know which the owner's avatar is, so it
+reserves the dearer), billed by the second. The reservation is made before the video exists, so it is an **upper bound**
+on the length: the script at a slow **10 characters a second** plus a fixed **3 s** for the lead-in and tail, rounded up to
+the whole second. A 31-character script reserves 7 s = $0.57, 180 characters 21 s = $1.69 (over the $1 ask), 300 characters
+33 s = $2.66, 930 characters 96 s = $7.73 (over the default $5 daily limit) and 1 500 characters 153 s = $12.31, refused
+until the owner raises the limit. A faster read only makes the video shorter: once HeyGen reports the made video's length
+the reservation is **settled** to it (a refund line for the difference, or, if HeyGen ran longer than the bound, a line marked `overrun: true` for the excess,
+which counts toward the daily limit and is named in the job's result), once, and the cost line shows the settled cost.
+A video that reports no length (or a length of 0) stays at the reservation and is finished. The job is closed only after
+the settlement is written: a ledger that refuses it leaves the job open, and the next check settles it once. A reservation is given back only when HeyGen refused the submit with a 4xx. A video HeyGen
+fails, no longer knows, or finishes with no file stays **counted** (HeyGen's refund rules are not something Create relies
+on), and the ferret is told not to ask again.
+
 ## Where the key goes, and where it does not
 
 - `kernel.secrets.send` places `FAL_KEY` as `Authorization: Key …` on a request to **`fal.run`** (the run),
-  **`queue.fal.run`** (a video's queue, status and result) or **`api.fal.ai`** (the price), and `ELEVENLABS_API_KEY` as `xi-api-key: …` on a request to **`api.elevenlabs.io`**.
+  **`queue.fal.run`** (a video's queue, status and result) or **`api.fal.ai`** (the price), `ELEVENLABS_API_KEY` as `xi-api-key: …` on a request to **`api.elevenlabs.io`**, and `HEYGEN_API_KEY` as `x-api-key: …` on a request to **`api.heygen.com`**.
   Those are the only hosts it may reach (`permissions.network`, named exactly). Create never
   holds the value; a reply that echoes it is reported unreadable; the security log names the secret and host only
   ([secrets.md](secrets.md#a-plugins-own-key-placed-by-the-kernel)).
-- The picture or sound is fetched from `https://*.fal.media` with **no key**, and from nowhere else. A wildcard host can never
+- The picture or sound is fetched from `https://*.fal.media` with **no key**, and from nowhere else. An avatar video is fetched, with no key, from `https://*.heygen.ai` or `https://*.heygen.com` only. A wildcard host can never
   receive a key.
-- fal and ElevenLabs are third parties: the **prompt** (or, for speech, the **text**) goes to them, and the key is a key it can bill. The ask shows the prompt (at
+- fal, ElevenLabs and HeyGen are third parties: the **prompt** (for speech, the **text**; for an avatar video, the **script**,
+  with the avatar and voice ids) goes to them, and the key is a key it can bill. The ask shows the prompt (at
   most 400 characters) so the owner knows what they are approving; agenda text is readable by every ferret.
 
 ## Declared gaps
@@ -203,7 +231,8 @@ appended to) only when the provider definitely billed nothing: the request never
   ferret is told so if the write fails; a crash at that instant is not told). fal's own usage page shows the clip.
 - **fal's result is kept for an hour.** A job nobody checks within that hour may be unfetchable (it is then counted, not
   refunded).
-- **HeyGen avatar video is not built** (optional in the plan; it needs its own key, host and price table).
+- **HeyGen is built against its public API reference, not a live reply.** The request and status shapes (v3: `POST /v3/videos`, `GET /v3/videos/{video_id}`; HeyGen retired the v2 and v1 endpoints on 2026-10-31), the storage hosts (`*.heygen.ai`, `*.heygen.com`) and the price (Avatar IV at $4.83 a minute billed by the second, [HeyGen's API pricing page](https://help.heygen.com/en/articles/10060327-heygen-api-pricing-credits-explained)) are from public pages; the first real video waits for the owner's key. If a real video comes from another host it is refused after it was paid for, and said so.
+- **A HeyGen render longer than the upper bound is billed and flagged, not asked.** The reservation is made before the video exists, so a render that runs past it (a script spoken slower than 10 characters a second plus 3 s) has already been billed when Create learns the length. No approval is possible after the fact: the excess is recorded as an `overrun` line, counted toward the daily limit (later calls are refused once over it) and shown in the job's result.
 - **Estimates, not invoices.** fal returns no cost with a run, so the ledger holds the price that was shown. Its own
   usage page is the authority for the bill.
 - **No real run has been made.** Everything here was built and tested against fake fal and ElevenLabs servers; the first

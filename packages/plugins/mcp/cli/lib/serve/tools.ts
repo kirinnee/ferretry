@@ -317,7 +317,7 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   {
     name: 'browser_open',
     description:
-      'Open a named browser page, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins; "incognito": true gives a throwaway one.',
+      'Open a named browser page, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins; "incognito": true gives a throwaway one; "identity" opens it in another browser identity’s own Chrome (its own sign-ins and cookies), the built-in "agent" when omitted.',
     inputSchema: object(
       {
         name: NEW_NAME,
@@ -325,6 +325,12 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
         incognito: {
           type: 'boolean',
           description: 'A private page: its own cookies and storage, discarded when it closes.',
+        },
+        identity: {
+          type: 'string',
+          pattern: '^[a-z][a-z0-9-]{0,31}$',
+          description:
+            'The browser identity to open it in: its own profile, sign-ins and proxy. browser_list shows each page’s identity.',
         },
         askOwner: ASK_OWNER,
       },
@@ -1057,6 +1063,37 @@ const CREATE_TOOLS: readonly McpToolDefinition[] = [
       'Check a video job that generate_video queued. While it is being made it says so; when it is ready it saves the clip and answers the lines that show it in chat. Checking is free and can be repeated; a job fal fails with no output is refunded.',
     inputSchema: object(
       { job: { type: 'string', pattern: '^vid_[0-9a-f]{12}$', description: 'The job id generate_video answered.' } },
+      ['job'],
+    ),
+  },
+  {
+    name: 'generate_avatar_video',
+    plugin: 'create',
+    description:
+      'Queue one talking-avatar video with HeyGen, on the owner’s key and budget: the avatar reads your script in the owner’s own avatar and voice. It is priced first and paid for when queued; a call over the owner’s one-call limit asks them and sends nothing until they approve. It answers a job id at once: the video takes a few minutes, so fetch it with avatar_video_status. Do not call it again for the same video: that is charged again.',
+    inputSchema: object(
+      {
+        script: { type: 'string', minLength: 1, maxLength: 1_500, description: 'What the avatar says.' },
+        avatar: { type: 'string', description: 'A HeyGen avatar id from the owner’s HeyGen account.' },
+        voice: { type: 'string', description: 'A HeyGen voice id from the owner’s HeyGen account.' },
+        aspect: { type: 'string', enum: ['16:9', '9:16'], description: 'Shape; default 16:9.' },
+      },
+      ['script', 'avatar', 'voice'],
+    ),
+  },
+  {
+    name: 'avatar_video_status',
+    plugin: 'create',
+    description:
+      'Check an avatar video that generate_avatar_video queued. While it is being made it says so; when it is ready it saves the video and answers the lines that show it in chat. Checking is free and can be repeated.',
+    inputSchema: object(
+      {
+        job: {
+          type: 'string',
+          pattern: '^avt_[0-9a-f]{12}$',
+          description: 'The job id generate_avatar_video answered.',
+        },
+      },
       ['job'],
     ),
   },
