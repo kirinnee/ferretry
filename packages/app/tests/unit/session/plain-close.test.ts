@@ -1,7 +1,9 @@
 /** Plain carrier refusals cannot destroy a key or make an enduring stop page. */
 import { expect, test } from 'bun:test';
 import { isDeviceRefusal } from '../../../src/client/transport.ts';
+import { type ConnectPorts, registeredConnect } from '../../../src/connect/provides.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
+import { generated } from '../../../src/generated/surfaces.ts';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { stopOf } from '../../../src/shell/machine-stop.ts';
 import { ShapeMemory } from '../../../src/shell/shape-memory.ts';
@@ -9,6 +11,7 @@ import { SessionTransport, type CarrierDial, type SessionKeyRotation } from '../
 import { encodeFrame, FRAME_KINDS, utf8Bytes } from '../../../src/session/wire/index.ts';
 import { newDaemonIdentity, readyFrame, relayCrypto, testDevice, testSessionId } from '../../../src/testing/relay.ts';
 import { rotatingDial } from '../../../src/testing/rotating-daemon.ts';
+import { WebCryptoRelayCrypto } from '../../../src/session/webcrypto.ts';
 import { CORE, inventoryOf } from '../client/fixtures.ts';
 
 const until = async (condition: () => boolean) => {
@@ -18,6 +21,57 @@ const until = async (condition: () => boolean) => {
     await new Promise(resolve => setTimeout(resolve, 5));
   }
 };
+
+/** Bun has no IndexedDB: clone stored keys on both sides of the real store's database port. */
+function keyDatabase(initial: ReadonlyMap<string, CryptoKey>): IDBFactory {
+  const values = new Map([...initial].map(([slot, key]) => [slot, structuredClone(key)]));
+  const request = <T>(result: T) => {
+    const pending = { result, onsuccess: null as (() => void) | null };
+    queueMicrotask(() => pending.onsuccess?.());
+    return pending;
+  };
+  return {
+    open: () =>
+      request({
+        close() {},
+        transaction: () => ({
+          objectStore: () => ({
+            get: (slot: string) => request(structuredClone(values.get(slot))),
+            put: (key: CryptoKey, slot: string) => {
+              values.set(slot, structuredClone(key));
+              return request(slot);
+            },
+            delete: (slot: string) => {
+              values.delete(slot);
+              return request(undefined);
+            },
+          }),
+        }),
+      }) as unknown as IDBOpenDBRequest,
+  } as unknown as IDBFactory;
+}
+
+/** The key store returns opaque signing handles; retain their loaded CryptoKeys only in this test. */
+class PersistedKeyCrypto extends WebCryptoRelayCrypto {
+  readonly loaded = new WeakMap<ReturnType<WebCryptoRelayCrypto['deviceKeyHandle']>, CryptoKey>();
+
+  override deviceKeyHandle(key: CryptoKey) {
+    const handle = super.deviceKeyHandle(key);
+    this.loaded.set(handle, key);
+    return handle;
+  }
+}
+
+/** Synthetic extractable keys let this test hash persisted PKCS8 bytes, never print or write them. */
+async function persistedKeyDigest(key: CryptoKey | undefined): Promise<string | undefined> {
+  if (key === undefined) return undefined;
+  const bytes = new Uint8Array(await crypto.subtle.exportKey('pkcs8', key));
+  try {
+    return Buffer.from(await crypto.subtle.digest('SHA-256', bytes)).toString('hex');
+  } finally {
+    bytes.fill(0);
+  }
+}
 
 type Source = 'socket' | 'closed' | 'error';
 function forged(code: number, source: Source, beforeReady = false): CarrierDial {
@@ -118,8 +172,15 @@ test('a socket 4403 even before ready is connection loss', async () => {
 for (const code of [4403, 4426]) {
   test(`forged ${code}: background retry clears the page and preserves stored credentials`, async () => {
     const identity = await newDaemonIdentity();
-    const device = await testDevice();
-    const pending = (await testDevice()).claim.key;
+    // Extractability is solely a fixture choice; production keys remain non-extractable.
+    const active = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+    const pending = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+    const database = keyDatabase(
+      new Map([
+        [identity.daemonId, active.privateKey],
+        [`pending:${identity.daemonId}`, pending.privateKey],
+      ]),
+    );
     const values = new Map<string, string>();
     const store = {
       getItem: (key: string) => values.get(key) ?? null,
@@ -134,17 +195,52 @@ for (const code of [4403, 4426]) {
     daemons.add({
       daemon: identity.daemonId,
       machine: 'laptop',
-      deviceId: device.claim.deviceId,
+      deviceId: 'fy_dev_test',
       address: 'https://daemon.example.test',
     });
+    const paired = daemons.get(identity.daemonId);
+    if (paired === undefined) throw new Error('missing synthetic pairing');
+    const persistedCrypto = new PersistedKeyCrypto();
+    const unused = () => {
+      throw new Error('unexpected external carrier');
+    };
+    const ports: ConnectPorts = {
+      crypto: persistedCrypto,
+      subtle: crypto.subtle,
+      indexedDB: database,
+      daemons,
+      now: () => 1,
+      after: () => {},
+      openSocket: unused,
+      pairDirect: unused,
+    };
+    // Load Access through the shell's real registry: it builds its actual IndexedDB store and rotation.
+    const access = generated.surfaces.filter(entry => entry.id === 'access');
+    const claims = registeredConnect(access, ports).claims;
+    if (claims === undefined) throw new Error('missing registered Access claims');
+    // Each snapshot constructs a new provider and reads both slots through that real key store.
+    const keySnapshot = async () => {
+      const persisted = registeredConnect(access, ports).claims;
+      if (persisted === undefined) throw new Error('missing registered Access claims');
+      const current = (await persisted.claim(paired))?.key;
+      const replacement = await persisted.rotation?.pending(identity.daemonId);
+      return JSON.stringify([
+        await persistedKeyDigest(current === undefined ? undefined : persistedCrypto.loaded.get(current)),
+        await persistedKeyDigest(replacement === undefined ? undefined : persistedCrypto.loaded.get(replacement)),
+      ]);
+    };
+    expect((await claims.rotation?.pending(identity.daemonId)) !== undefined).toBe(true);
+    const keysBefore = await keySnapshot();
+    const device = await claims.claim(paired);
+    if (device === undefined) throw new Error('missing persisted active key');
     const shape = new ShapeMemory(store);
-    shape.saveInventory(identity.daemonId, device.claim.deviceId, {
+    shape.saveInventory(identity.daemonId, device.deviceId, {
       kind: 'read',
       entries: new Map(CORE.map(entry => [entry.id, { on: true, contract: entry.contract }])),
     });
     shape.saveGrants(
       identity.daemonId,
-      device.claim.deviceId,
+      device.deviceId,
       new Map([
         [
           'fleet',
@@ -160,24 +256,11 @@ for (const code of [4403, 4426]) {
     );
     const snapshot = () => JSON.stringify([...values]);
     const before = snapshot();
-    const mutations: string[] = [];
-    const rotation: SessionKeyRotation = {
-      amend: async (_session, _daemon, request) => ({ request, rotated: false }),
-      settle: async () => {
-        mutations.push('settle');
-      },
-      pending: async () => pending,
-      promote: async () => {
-        mutations.push('promote');
-      },
-      discard: async () => {
-        mutations.push('discard');
-      },
-    };
     let attack = true;
     let dials = 0;
+    const publicKey = Buffer.from(await crypto.subtle.exportKey('spki', active.publicKey)).toString('base64url');
     const genuine = rotatingDial(identity, {
-      accepts: () => [device.publicKey],
+      accepts: () => [publicKey],
       respond: async request => ({
         status: 200,
         body: request.path === '/v1/plugins' ? inventoryOf(CORE) : {},
@@ -186,8 +269,9 @@ for (const code of [4403, 4426]) {
     const transport = new SessionTransport({
       crypto: relayCrypto,
       daemonId: identity.daemonId,
-      device: device.claim,
-      rotation,
+      device,
+      claim: () => claims.claim(paired),
+      rotation: claims.rotation,
       dial: events => {
         dials++;
         return attack ? forged(code, 'closed')(events) : genuine.dial(events);
@@ -208,18 +292,17 @@ for (const code of [4403, 4426]) {
         expect(stopOf(runtime, identity.daemonId)?.kind).toBe('needs-reload');
         expect(snapshot() === before).toBe(true);
       }
-      expect(mutations).toEqual([]);
+      expect((await keySnapshot()) === keysBefore).toBe(true);
       const failedDials = dials;
       await until(() => dials > failedDials);
       // Retrying under the forged page still cannot change any persisted byte.
       if (code === 4426) expect(snapshot() === before).toBe(true);
-      expect(mutations).toEqual([]);
+      expect((await keySnapshot()) === keysBefore).toBe(true);
       attack = false;
       await until(() => stopOf(runtime, identity.daemonId) === undefined);
       expect(genuine.credentials.some(credential => credential.accepted)).toBe(true);
       expect(runtime.isRefused(identity.daemonId)).toBe(false);
-      expect(device.claim.key).toBeDefined();
-      expect(await rotation.pending(identity.daemonId)).toBe(pending);
+      expect((await keySnapshot()) === keysBefore).toBe(true);
     } finally {
       const connection = runtime.connection(identity.daemonId);
       if (connection.kind === 'connected') connection.client.stop();

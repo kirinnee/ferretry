@@ -291,7 +291,7 @@ allowed`, never `4403`, which would tell the device it is unpaired. The re-check
   `devices.json`, and absent from the device list — it must pair again. The check runs at boot, at
   every auth or renewal, and at every device-list read; there is no timer.
 - Revocation is unchanged and instant: the document is written, the registry entry dropped, and every
-  live socket the device holds — direct sessions included — is closed with `4403`.
+  live socket the device holds — direct sessions included — receives a sealed `4403` before the public `4440` close.
 
 ### A7. `devices.json` v2, and no compatibility
 
