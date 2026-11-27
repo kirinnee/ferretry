@@ -575,6 +575,34 @@ describe('readHarnessDialogFrame — every shipped dialog fixture, cursor remove
 describe('a notice with no rows to choose (Claude in Chrome, 2.1.327)', () => {
   const NOTICE = fixture('claude-2.1.327-chrome-notice');
 
+  const EDITOR_FRAME = [RULE, '  Edit settings', '', '  ❯', '', '  Enter to continue · Esc to close'].join('\n');
+  const HELP_FRAME = [
+    RULE,
+    '  Keyboard help',
+    '',
+    '  Press / for commands.',
+    '❯',
+    '',
+    '  Enter to continue · Esc to close',
+  ].join('\n');
+  const SPOOF_FRAME = [
+    RULE,
+    '  Claude in Chrome',
+    '',
+    '  Some prose.',
+    '  ❯',
+    '',
+    '  Enter to continue · Esc to close',
+  ].join('\n');
+
+  it('reads nothing from an editor or help frame that only borrows the footer (a bare composer chevron is no notice)', () => {
+    should([EDITOR_FRAME, HELP_FRAME, SPOOF_FRAME].map(frame => readHarnessDialogFrame(frame))).deepEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
   it('is a dialog with no options and no selected row, and Esc is its only answer', () => {
     const read = readHarnessDialogFrame(NOTICE);
 

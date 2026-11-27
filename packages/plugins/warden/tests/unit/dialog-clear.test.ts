@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CLAUDE_DIALOG_RULES, CODEX_DIALOG_RULES, DIALOG_NUDGES } from '../support/dialog-rules.ts';
+import type { FerretHarness, FerretsApi } from '@ferretry/core-ferrets/contract';
+import { ferretClearPane } from '../../daemon/dialog-clear.ts';
 import { type FormKey, RecordedHarnessSchema } from '@ferretry/core-ferrets/contract';
 import { DialogRuleSchema, DialogRulesFileSchema, isGrantLabel } from '../../contract/dialog-rules.ts';
 import {
@@ -768,5 +770,78 @@ describe('the ferret’s REGISTERED harness chooses the rule and the keys, never
       should(state.pressed).eql(screen.keys);
       should(result.cleared).equal(1);
     }
+  });
+});
+
+describe('a key is sent only if the live notice is still on screen when it is written (Claude in Chrome)', () => {
+  const chrome = SCREENS.find(screen => screen.rule === 'claude-chrome-notice') as Screen;
+  const NOTICE = frameOf(chrome, 1);
+  /** A working Claude composer: its footer says Esc interrupts the agent's work. */
+  const COMPOSER = ['● Reading the files…', '', '─'.repeat(40), '❯ ', '─'.repeat(40), '  esc to interrupt'].join('\n');
+
+  /** Ferrets' form seam over a pane that shows the notice for `noticeReads` captures, then a working composer. */
+  function seam(noticeReads: number) {
+    let reads = 0;
+    const pressed: FormKey[] = [];
+    const harness = {
+      form: {
+        capture: async () => {
+          reads += 1;
+          const shown = reads <= noticeReads;
+          return { ok: true, value: { visible: shown ? NOTICE : COMPOSER, blocking: shown ? 'dialog' : undefined } };
+        },
+        key: async (key: FormKey) => {
+          pressed.push(key);
+          return { ok: true, value: undefined };
+        },
+      },
+    } as unknown as FerretHarness;
+    const pane = ferretClearPane({ harness: async () => harness } as unknown as Pick<FerretsApi, 'harness'>);
+    return { pressed, ports: { frame: pane.frame, key: pane.key, words: async () => chrome.dialog } };
+  }
+
+  it('should press Escape when the notice is still there at the write (control)', async () => {
+    // Arrange
+    const { pressed, ports } = seam(99);
+    const { clear } = stand(ports);
+
+    // Act
+    const result = await clear.clear([watched(chrome)]);
+
+    // Assert
+    should(pressed).eql(['Escape']);
+    should(result.cleared).equal(1);
+  });
+
+  it('should press nothing, and hand the notice back, when a working composer replaced it before the key went', async () => {
+    // Arrange: the look's frame read sees the notice; the write path's own re-read sees the composer
+    const { pressed, ports } = seam(1);
+    const { clear, events } = stand(ports);
+
+    // Act
+    const result = await clear.clear([watched(chrome)]);
+
+    // Assert
+    should(pressed).eql([]);
+    should(result.cleared).equal(0);
+    should(result.toTell).have.length(1);
+    should(events.filter(event => event.type === 'fleet.warden_dialog_autocleared')).eql([]);
+  });
+
+  it('should not match a Claude in Chrome title that has rows, nor a frame without the notice’s own footer', () => {
+    // Arrange
+    const rule = BUILT_IN.find(each => each.id === 'claude-chrome-notice') as NonNullable<(typeof BUILT_IN)[number]>;
+    const withRows = words({
+      kind: 'other',
+      title: 'Claude in Chrome',
+      options: [row(1, 'Enable'), row(2, 'Not now')],
+    });
+
+    // Assert
+    should(ruleFor(withRows, BUILT_IN)).be.undefined();
+    should(frameShows(rule, chrome.dialog, ['  Claude in Chrome', '  ❯ ', '  esc to interrupt'].join('\n'))).equal(
+      false,
+    );
+    should(frameShows(rule, chrome.dialog, NOTICE)).equal(true);
   });
 });

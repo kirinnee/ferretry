@@ -40,6 +40,7 @@ export function ruleFor(dialog: ClearableDialogWords, rules: readonly DialogRule
     rule =>
       rule.kind === dialog.kind &&
       dialog.harness === rule.harness &&
+      (rule.rows !== 'none' || dialog.options.length === 0) &&
       matches(rule.title, dialog.title) &&
       matches(rule.body, (dialog.body ?? '').split('\n')[0] ?? ''),
   );
