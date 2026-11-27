@@ -19,7 +19,14 @@ interface Made {
   url: string | null;
 }
 
-/** HeyGen's API and storage as they answer, remembering every request that reached them. No real HeyGen is ever called. */
+/** The keys `POST /v3/videos` takes for an avatar video (the schema is `additionalProperties: false`); the fake refuses any other. */
+const V3_AVATAR_KEYS = ['type', 'avatar_id', 'script', 'voice_id', 'aspect_ratio', 'resolution', 'engine'];
+
+/**
+ * HeyGen's API and storage as they answer, remembering every request that reached them. No real HeyGen is ever called.
+ * It speaks only the v3 wire (`POST /v3/videos`, `GET /v3/videos/{id}`): the v2 and v1 paths HeyGen retired on 2026-10-31
+ * answer 404, as the real API does, so a client still on them fails here.
+ */
 class FakeHeygen {
   readonly seen: { host: string; path: string; method: string; headers: Headers; body: string | undefined }[] = [];
   readonly videos = new Map<string, Made>();
@@ -41,19 +48,35 @@ class FakeHeygen {
       body: typeof init?.body === 'string' ? init.body : undefined,
     });
     if (url.host === 'api.heygen.com') {
-      if (method === 'POST') {
+      const one = /^\/v3\/videos\/([^/]+)$/u.exec(url.pathname);
+      if (method === 'POST' && url.pathname === '/v3/videos' && url.search === '') {
         if (this.submit === 'drops') throw new Error('connection dropped');
         if (typeof this.submit === 'number') return new Response('no', { status: this.submit });
         if (this.submit === 'garbled') return Response.json({ data: { nothing: true } });
+        const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        const stray =
+          typeof body === 'object' && body !== null
+            ? Object.keys(body).filter(key => !V3_AVATAR_KEYS.includes(key))
+            : ['(no body)'];
+        if (stray.length > 0)
+          return Response.json(
+            { error: { code: 'invalid_parameter', message: `unknown: ${stray.join(',')}` } },
+            { status: 400 },
+          );
         const id = `hv${++this.count}`;
         this.videos.set(id, { status: 'pending', url: null });
-        return Response.json({ error: null, data: { video_id: id } });
+        return Response.json({ data: { video_id: id, status: 'waiting', output_format: 'mp4', resolution: '720p' } });
       }
-      if (this.statusAnswer === 'drops') throw new Error('connection dropped');
-      if (this.statusAnswer === 500) return new Response('no', { status: 500 });
-      const video = this.videos.get(url.searchParams.get('video_id') ?? '');
-      if (video === undefined || video.status === 'gone') return new Response('no', { status: 404 });
-      return Response.json({ code: 100, data: { status: video.status, video_url: video.url }, message: 'Success' });
+      if (method === 'GET' && one !== null) {
+        if (this.statusAnswer === 'drops') throw new Error('connection dropped');
+        if (this.statusAnswer === 500) return new Response('no', { status: 500 });
+        const id = decodeURIComponent(one[1]!);
+        const video = this.videos.get(id);
+        if (video === undefined || video.status === 'gone')
+          return Response.json({ error: { code: 'not_found', message: 'Video not found.' } }, { status: 404 });
+        return Response.json({ data: { id, status: video.status, video_url: video.url } });
+      }
+      return new Response('no such path', { status: 404 });
     }
     if (url.host.endsWith('heygen.ai')) {
       await this.cdnGate;
@@ -140,8 +163,13 @@ async function world(
 }
 
 const SHORT = 'Hello, and welcome to the show.';
-/** 1 000 characters: about 67 s of speech, so two started minutes. */
-const LONG = 'a'.repeat(1_000);
+/** 300 characters: 20 s of speech. */
+const LONG = 'a'.repeat(300);
+/** Avatar IV, pinned in the request, at HeyGen's dearest avatar type: $4.83 a minute, billed by the second: 80 500 micro-dollars each. */
+const PER_SECOND = 80_500;
+/** 31 characters: 3 s. */
+const SHORT_COST = 3 * PER_SECOND;
+const LONG_COST = 20 * PER_SECOND;
 
 const avatar = (w: World, input: Record<string, unknown> = {}) =>
   w.host.tool('generate_avatar_video', { script: SHORT, avatar: AVATAR, voice: VOICE, ...input });
@@ -158,12 +186,18 @@ const net = (w: World): number =>
   ledgerLines(w).reduce((sum, line) => sum + (line.refund === true ? -1 : 1) * (line.microUsd as number), 0);
 const jobLines = (w: World) => lines(w, 'avatar-jobs.jsonl');
 
-describe('HeyGen avatar video is priced from a table, by started minutes', () => {
-  test('a short script is one minute, a long one is two, and a started minute is charged whole', () => {
-    expect(priceAvatarVideo(SHORT)).toEqual({ ok: true, microUsd: 1_000_000, from: 'table' });
-    expect(priceAvatarVideo(LONG)).toEqual({ ok: true, microUsd: 2_000_000, from: 'table' });
-    expect(priceAvatarVideo('a'.repeat(900))).toEqual({ ok: true, microUsd: 1_000_000, from: 'table' });
-    expect(priceAvatarVideo('a'.repeat(901))).toEqual({ ok: true, microUsd: 2_000_000, from: 'table' });
+describe('HeyGen avatar video is priced from a table, by the second, at the pinned engine’s rate', () => {
+  test('Avatar IV’s $4.83 a minute is billed per second on the estimated duration, rounded UP', () => {
+    expect(priceAvatarVideo(SHORT)).toEqual({ ok: true, microUsd: SHORT_COST, from: 'table' });
+    expect(priceAvatarVideo(LONG)).toEqual({ ok: true, microUsd: LONG_COST, from: 'table' });
+    // 15 characters a second: 16 characters is a started second, so two
+    expect(priceAvatarVideo('a'.repeat(15))).toEqual({ ok: true, microUsd: PER_SECOND, from: 'table' });
+    expect(priceAvatarVideo('a'.repeat(16))).toEqual({ ok: true, microUsd: 2 * PER_SECOND, from: 'table' });
+    // a minute of speech is exactly HeyGen's published $4.83 a minute; never less
+    expect(priceAvatarVideo('a'.repeat(900))).toEqual({ ok: true, microUsd: 4_830_000, from: 'table' });
+    expect(priceAvatarVideo('a'.repeat(901))).toEqual({ ok: true, microUsd: 61 * PER_SECOND, from: 'table' });
+    // the longest script allowed is $8.05: over the default $5 daily limit, so it is refused until the owner raises the limit
+    expect(priceAvatarVideo('a'.repeat(1_500))).toEqual({ ok: true, microUsd: 100 * PER_SECOND, from: 'table' });
   });
 
   test('the video is fetched from HeyGen’s own storage over https and nowhere else', () => {
@@ -177,24 +211,25 @@ describe('HeyGen avatar video is priced from a table, by started minutes', () =>
 });
 
 describe('generate_avatar_video: priced before it is sent, reserved at submit, under the one cap and ask', () => {
-  test('a short script is $1.00, reserved once, sent with the key placed by the kernel, and answers a job id', async () => {
+  test('a short script costs $0.25 (3 s at Avatar IV’s $4.83 a minute), reserved once, sent with the key placed by the kernel, and answers a job id', async () => {
     const w = await world();
     const answer = await avatar(w);
     expect(answer.isError).toBeUndefined();
     const sent = w.fake.to('api.heygen.com', 'POST');
     expect(sent).toHaveLength(1);
-    expect(sent[0]!.path).toBe('/v2/video/generate');
+    expect(sent[0]!.path).toBe('/v3/videos');
     expect(sent[0]!.headers.get('x-api-key')).toBe(HEYGEN_KEY);
+    // the engine is pinned, so the price reserved is the price of the engine HeyGen will use
     expect(JSON.parse(sent[0]!.body!)).toEqual({
-      video_inputs: [
-        {
-          character: { type: 'avatar', avatar_id: AVATAR, avatar_style: 'normal' },
-          voice: { type: 'text', voice_id: VOICE, input_text: SHORT },
-        },
-      ],
-      dimension: { width: 1280, height: 720 },
+      type: 'avatar',
+      avatar_id: AVATAR,
+      script: SHORT,
+      voice_id: VOICE,
+      aspect_ratio: '16:9',
+      resolution: '720p',
+      engine: { type: 'avatar_iv' },
     });
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
     expect(ledgerLines(w)[0]).toMatchObject({
       tool: 'generate_avatar_video',
       model: 'avatar',
@@ -203,7 +238,7 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
     });
     const job = jobOf(answer.text);
     expect(answer.text).toContain('avatar_video_status');
-    expect(answer.text).toContain('$1.00');
+    expect(answer.text).toContain('$0.25');
     expect(answer.text).toContain('Do NOT call generate_avatar_video again');
     expect(jobLines(w)).toEqual([
       expect.objectContaining({
@@ -211,7 +246,7 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
         job,
         heygenVideo: 'hv1',
         ferret: 'test-ferret',
-        microUsd: 1_000_000,
+        microUsd: SHORT_COST,
       }),
     ]);
     // nothing was fetched and nothing delivered: the video does not exist yet
@@ -222,7 +257,25 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
   test('9:16 asks HeyGen for a tall frame', async () => {
     const w = await world();
     await avatar(w, { aspect: '9:16' });
-    expect(JSON.parse(w.fake.to('api.heygen.com', 'POST')[0]!.body!).dimension).toEqual({ width: 720, height: 1280 });
+    expect(JSON.parse(w.fake.to('api.heygen.com', 'POST')[0]!.body!)).toMatchObject({
+      aspect_ratio: '9:16',
+      resolution: '720p',
+    });
+  });
+
+  test('the retired v2 and v1 paths are never used: the fake refuses them, and a whole video is made on v3 alone', async () => {
+    const w = await world();
+    const job = jobOf((await avatar(w)).text);
+    w.fake.finish('hv1');
+    expect((await status(w, job)).text).toContain('type: video');
+    const paths = w.fake.to('api.heygen.com').map(request => `${request.method} ${request.path}`);
+    expect(paths).toEqual(['POST /v3/videos', 'GET /v3/videos/hv1']);
+    // and the fake does refuse the old spellings
+    for (const [method, path] of [
+      ['POST', '/v2/video/generate'],
+      ['GET', '/v1/video_status.get?video_id=hv1'],
+    ] as const)
+      expect((await w.fake.fetch(new URL(`https://api.heygen.com${path}`), { method })).status).toBe(404);
   });
 
   test('the key is never in the job file, the ledger or the answer', async () => {
@@ -236,10 +289,10 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
     expect(everything).not.toContain(HEYGEN_KEY);
   });
 
-  test('a $2.00 video is over the $1 limit: it asks and sends nothing; once approved the same request goes, once', async () => {
+  test('a $1.61 video (20 s) is over the $1 limit: it asks and sends nothing; once approved the same request goes, once', async () => {
     const w = await world();
     const answer = await avatar(w, { script: LONG });
-    expect(answer.text).toContain('$2.00');
+    expect(answer.text).toContain('$1.61');
     expect(answer.text).toContain('Nothing was spent');
     expect(w.fake.seen).toHaveLength(0);
     expect(ledgerLines(w)).toHaveLength(0);
@@ -251,7 +304,7 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
     w.asks.answerAs({ ferret: 'test-ferret', id: open!.id }, 'approve');
     const approved = await avatar(w, { script: LONG });
     expect(approved.text).toContain('Queued one avatar video');
-    expect(net(w)).toBe(2_000_000);
+    expect(net(w)).toBe(LONG_COST);
     expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(1);
   });
 
@@ -275,7 +328,7 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
           tool: 'generate_image',
           model: 'flux-pro',
           ferret: 'x',
-          microUsd: 4_500_000,
+          microUsd: 4_800_000,
           priced: 'table',
           request: '0123456789abcdef',
         },
@@ -285,7 +338,7 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
     expect(answer.isError).toBe(true);
     expect(answer.text).toContain('daily limit');
     expect(w.fake.seen).toHaveLength(0);
-    expect(net(w)).toBe(4_500_000);
+    expect(net(w)).toBe(4_800_000);
   });
 
   test('without a HeyGen key it is off and nothing leaves the machine', async () => {
@@ -328,7 +381,7 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
       const answer = await avatar(w);
       expect(answer.isError).toBe(true);
       expect(answer.text).toContain('may have billed');
-      expect(net(w)).toBe(1_000_000);
+      expect(net(w)).toBe(SHORT_COST);
       expect(jobLines(w)).toHaveLength(0);
     }
   });
@@ -341,10 +394,10 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
     expect(again.text).toContain(jobOf(first.text));
     expect(again.text).toContain('Nothing more was spent');
     expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(1);
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
     await avatar(w, { script: 'Another script.' });
     expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(2);
-    expect(net(w)).toBe(2_000_000);
+    expect(net(w)).toBe(SHORT_COST + 80_500);
   });
 });
 
@@ -371,16 +424,16 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
     ]);
     expect(ready.text).toContain('type: video');
     expect(ready.text).toContain(`src: media:create-avatar-${job.slice(4)}.mp4`);
-    expect(ready.text).toContain('avatar video, 16:9 · $1.00');
+    expect(ready.text).toContain('avatar video, 16:9 · $0.25');
     expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', job, outcome: 'delivered' });
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
 
     // asked again: the same answer, no new fetch, no new charge
     const again = await status(w, job);
     expect(again.text).toContain('type: video');
     expect(w.fake.to('resource2.heygen.ai')).toHaveLength(1);
     expect(w.delivered).toHaveLength(1);
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
   });
 
   test('a video HeyGen failed stays counted (no refund is relied on) and the ferret is told not to ask again', async () => {
@@ -391,12 +444,12 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
     expect(answer.isError).toBe(true);
     expect(answer.text).toContain('Not made');
     expect(answer.text).toContain('still counts');
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
     expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', outcome: 'counted' });
     const later = await status(w, job);
     expect(later.isError).toBe(true);
     expect(w.fake.to('api.heygen.com', 'GET')).toHaveLength(1);
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
   });
 
   test('a video HeyGen no longer knows, or a finished answer with no video, is counted too', async () => {
@@ -404,13 +457,13 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
     const goneJob = jobOf((await avatar(gone)).text);
     gone.fake.videos.get('hv1')!.status = 'gone';
     expect((await status(gone, goneJob)).text).toContain('still counts');
-    expect(net(gone)).toBe(1_000_000);
+    expect(net(gone)).toBe(SHORT_COST);
 
     const empty = await world();
     const emptyJob = jobOf((await avatar(empty)).text);
     empty.fake.finish('hv1', { url: null });
     expect((await status(empty, emptyJob)).text).toContain('held no video');
-    expect(net(empty)).toBe(1_000_000);
+    expect(net(empty)).toBe(SHORT_COST);
   });
 
   test('a check that cannot be read or does not answer is no verdict: the job is kept and asked again for free', async () => {
@@ -426,7 +479,7 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
     w.fake.videos.get('hv1')!.status = 'strange';
     expect((await status(w, job)).text).toContain('Could not check');
     expect(jobLines(w)).toHaveLength(1);
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
   });
 
   test('a link that is not on HeyGen’s own storage is never fetched: closed as counted, told not to retry', async () => {
@@ -439,7 +492,7 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
     expect(w.fake.seen.some(request => request.host === 'evil.example')).toBe(false);
     expect(w.delivered).toHaveLength(0);
     expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', outcome: 'counted' });
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
   });
 
   test('a storage read that fails is read again later, free; something that is not a video is closed as counted', async () => {
@@ -492,7 +545,7 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
     second.host.state('create').plant(SPEND_LEDGER, ledger);
     second.fake.videos.set('hv1', { status: 'completed', url: CDN });
     expect((await status(second, job)).text).toContain('type: video');
-    expect(net(second)).toBe(1_000_000);
+    expect(net(second)).toBe(SHORT_COST);
   });
 });
 
@@ -512,7 +565,7 @@ describe('avatar_video_status: the edges of the shared queue and the job file', 
     expect(answer.isError).toBe(true);
     expect(answer.text).toContain('the job could not be saved');
     expect(answer.text).toContain('Do NOT ask again');
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
   });
 
   test('an end that cannot be written changes nothing: the job stays open and is asked again', async () => {
@@ -523,7 +576,7 @@ describe('avatar_video_status: the edges of the shared queue and the job file', 
     const answer = await status(w, job);
     expect(answer.isError).toBe(true);
     expect(answer.text).toContain('its end could not be saved');
-    expect(net(w)).toBe(1_000_000);
+    expect(net(w)).toBe(SHORT_COST);
     w.jobsWrite.fails = false;
     expect((await status(w, job)).text).toContain('Not made');
   });
@@ -551,6 +604,16 @@ describe('avatar_video_status: the edges of the shared queue and the job file', 
     expect(turnedAway.every(answer => answer.text.includes('Nothing more was spent'))).toBe(true);
     expect(answers.filter(answer => answer.text.includes('type: video'))).toHaveLength(4);
     expect(w.delivered).toHaveLength(4);
-    expect(net(w)).toBe(6_000_000);
+    expect(net(w)).toBe(6 * 80_500);
+  });
+});
+
+describe('the owner is told what leaves the machine', () => {
+  test('docs/create.md names HeyGen, and the script, among the third parties a prompt is sent to', async () => {
+    const doc = await Bun.file(new URL('../../../../../docs/create.md', import.meta.url)).text();
+    const disclosure = doc.split('\n\n').find(paragraph => paragraph.includes('are third parties'));
+    expect(disclosure).toBeDefined();
+    expect(disclosure).toContain('HeyGen');
+    expect(disclosure).toContain('script');
   });
 });

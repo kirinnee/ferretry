@@ -180,16 +180,20 @@ appended to) only when the provider definitely billed nothing: the request never
 ### Avatar video (HeyGen): two calls, the same money steps
 
 `generate_avatar_video(script, avatar, voice, aspect?)` has a HeyGen avatar read `script` (1–1 500 characters) in a voice,
-as a talking-head video (`16:9` default, or `9:16`, 720p). `avatar` and `voice` are ids from the owner's own HeyGen account:
+as a talking-head video (`16:9` default, or `9:16`, 720p, made by HeyGen's **Avatar IV** engine, which every request names). `avatar` and `voice` are ids from the owner's own HeyGen account:
 there is no default, so none is invented. It goes through the **same** steps as every creative tool: the one daily cap, the
 ask over $1, the reservation in the one ledger before HeyGen is called, the one queue. It answers a job id; the video is
 made in minutes. `avatar_video_status(job)` is free: while it is made it says so, and when it is made it fetches the file
 from HeyGen's storage with no key, saves it to the ferret's media folder and answers the `fy-render` block under the cost
 line. The job is kept in `state/create/avatar-jobs.jsonl` (owner-only) so a restart loses nothing.
 
-**The price is a table** (HeyGen has no price endpoint): about **$1.00 per started minute** of avatar video, with the
-speaking time guessed from the script at 15 characters a second, rounded up, so a script of up to 900 characters is
-$1.00 and up to 1 500 is $2.00. A reservation is given back only when HeyGen refused the submit with a 4xx. A video HeyGen
+**The price is a table** (HeyGen has no price endpoint). HeyGen bills per generated second and per engine, so the request
+**pins the engine** (`avatar_iv`) and the reservation is that engine's per-second rate: Avatar IV's **$4.83 a minute**
+(a digital twin or studio avatar; a photo avatar is $2.31, and Create does not know which the owner's avatar is, so it
+reserves the dearer), billed by the second. The speaking time is guessed from the script at 15 characters a second and
+**rounded up to the whole second**, so a 31-character script is 3 s = $0.25, 300 characters is 20 s = $1.61, 900 is a
+minute = $4.83 and 1 500 is 100 s = $8.05, over the default $5 daily limit until the owner raises it. A reservation never
+undercounts the engine's rate, and the ask over $1 still triggers on a longer script. A reservation is given back only when HeyGen refused the submit with a 4xx. A video HeyGen
 fails, no longer knows, or finishes with no file stays **counted** (HeyGen's refund rules are not something Create relies
 on), and the ferret is told not to ask again.
 
@@ -202,7 +206,8 @@ on), and the ferret is told not to ask again.
   ([secrets.md](secrets.md#a-plugins-own-key-placed-by-the-kernel)).
 - The picture or sound is fetched from `https://*.fal.media` with **no key**, and from nowhere else. An avatar video is fetched, with no key, from `https://*.heygen.ai` or `https://*.heygen.com` only. A wildcard host can never
   receive a key.
-- fal and ElevenLabs are third parties: the **prompt** (or, for speech, the **text**) goes to them, and the key is a key it can bill. The ask shows the prompt (at
+- fal, ElevenLabs and HeyGen are third parties: the **prompt** (for speech, the **text**; for an avatar video, the **script**,
+  with the avatar and voice ids) goes to them, and the key is a key it can bill. The ask shows the prompt (at
   most 400 characters) so the owner knows what they are approving; agenda text is readable by every ferret.
 
 ## Declared gaps
@@ -221,7 +226,7 @@ on), and the ferret is told not to ask again.
   ferret is told so if the write fails; a crash at that instant is not told). fal's own usage page shows the clip.
 - **fal's result is kept for an hour.** A job nobody checks within that hour may be unfetchable (it is then counted, not
   refunded).
-- **HeyGen is built against its public API reference, not a live reply.** The request and status shapes (`POST /v2/video/generate`, `GET /v1/video_status.get`), the storage hosts (`*.heygen.ai`, `*.heygen.com`) and the price (about $1 a started minute, plan dependent) are from public pages; the first real video waits for the owner's key. If a real video comes from another host it is refused after it was paid for, and said so.
+- **HeyGen is built against its public API reference, not a live reply.** The request and status shapes (v3: `POST /v3/videos`, `GET /v3/videos/{video_id}`; HeyGen retired the v2 and v1 endpoints on 2026-10-31), the storage hosts (`*.heygen.ai`, `*.heygen.com`) and the price (Avatar IV at $4.83 a minute billed by the second, [HeyGen's API pricing page](https://help.heygen.com/en/articles/10060327-heygen-api-pricing-credits-explained)) are from public pages; the first real video waits for the owner's key. If a real video comes from another host it is refused after it was paid for, and said so.
 - **Estimates, not invoices.** fal returns no cost with a run, so the ledger holds the price that was shown. Its own
   usage page is the authority for the bill.
 - **No real run has been made.** Everything here was built and tested against fake fal and ElevenLabs servers; the first

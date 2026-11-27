@@ -1,7 +1,8 @@
 /**
  * HeyGen avatar video: the key's one spelling, the two tools' inputs, the job file and the price. HeyGen has no price
- * endpoint, so the table here is the whole price (always `table`); it is deliberately generous (a started minute is
- * charged whole, and the speaking time is estimated high), so the estimate is never under the bill.
+ * endpoint, so the table here is the whole price (always `table`). HeyGen bills per generated second and per engine, so
+ * the request PINS the engine and the price is that engine's published per-second rate on the estimated duration,
+ * rounded up: a reservation never undercounts, and the ask threshold still triggers.
  */
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
@@ -35,11 +36,14 @@ export const MAX_AVATAR_SCRIPT_CHARS = 1_500;
 
 export const AVATAR_ASPECTS = ['16:9', '9:16'] as const;
 export const AvatarAspectSchema = z.enum(AVATAR_ASPECTS);
-/** The frame each shape is asked for, in pixels (720p: what every HeyGen plan can render). */
-export const AVATAR_DIMENSIONS = Object.freeze({
-  '16:9': { width: 1280, height: 720 },
-  '9:16': { width: 720, height: 1280 },
-} as const);
+/** What every video is asked for: 720p (what every HeyGen plan can render), in the shape the ferret chose. */
+export const AVATAR_RESOLUTION = '720p';
+/**
+ * The engine EVERY request names (`engine: { type }` on `POST /v3/videos`). HeyGen's default is also Avatar IV, but a
+ * default can move; naming it keeps the price reserved the price of the engine that renders, and it serves photo and
+ * video avatars alike (Avatar III's `avatar_iii` is cheaper but cannot take every look).
+ */
+export const AVATAR_ENGINE = 'avatar_iv';
 
 /** An avatar and a voice are the owner's own HeyGen ids: there is no default, so none is ever invented for them. */
 export const GenerateAvatarVideoInputSchema = z.strictObject({
@@ -57,18 +61,20 @@ export const AvatarVideoStatusInputSchema = z.strictObject({
 
 // ─── the price ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** HeyGen API credits come to about one dollar per minute of avatar video on the API plans; every started minute is charged whole. */
-export const AVATAR_TABLE_MICRO_USD_PER_MINUTE: MicroUsd = 1_000_000;
-/** Speaking pace the length is guessed from: about 15 characters a second (150 words a minute). The guess is high-side by rounding up. */
+/**
+ * Avatar IV, charged by the actual seconds generated: $4.83 a minute for a digital twin or studio avatar, $2.31 for a photo
+ * avatar. Create does not know which kind the owner's avatar id is, so it reserves the dearer, per second: $4.83 / 60.
+ */
+export const AVATAR_IV_MICRO_USD_PER_SECOND: MicroUsd = 80_500;
+/** Speaking pace the length is guessed from: about 15 characters a second (150 words a minute). */
 export const AVATAR_CHARS_PER_SECOND = 15;
 export const AVATAR_PRICE_SOURCE =
-  'https://www.heygen.com/api-pricing (about $1 per started minute of avatar video; plan dependent, an estimate, not an invoice)';
+  'https://help.heygen.com/en/articles/10060327-heygen-api-pricing-credits-explained (Avatar IV, up to $4.83 a minute billed by the second; an estimate, not an invoice)';
 
-/** The cost of a script: its speaking time guessed from its length, rounded up to whole minutes, never under one. */
+/** The cost of a script: its speaking time guessed from its length, rounded UP to whole seconds, at Avatar IV's per-second rate. */
 export function priceAvatarVideo(script: string): Priced {
-  const seconds = Math.ceil([...script].length / AVATAR_CHARS_PER_SECOND);
-  const minutes = Math.max(1, Math.ceil(seconds / 60));
-  return { ok: true, microUsd: minutes * AVATAR_TABLE_MICRO_USD_PER_MINUTE, from: 'table' };
+  const seconds = Math.max(1, Math.ceil([...script].length / AVATAR_CHARS_PER_SECOND));
+  return { ok: true, microUsd: seconds * AVATAR_IV_MICRO_USD_PER_SECOND, from: 'table' };
 }
 
 // ─── the job file (state/create/avatar-jobs.jsonl) ───────────────────────────────────────────────────────────────

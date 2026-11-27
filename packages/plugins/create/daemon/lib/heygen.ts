@@ -4,7 +4,7 @@
  * avatar: a video takes minutes, so it is two calls, and it stands under the SAME money steps as every creative tool
  * (`paid-call.ts`: the one daily cap, the ask over a limit, the reservation before the provider is called, one queue).
  *
- *   generate_avatar_video  price it from the table BEFORE sending → cap, ask, RESERVE → `POST api.heygen.com/v2/video/generate`
+ *   generate_avatar_video  price it from the table BEFORE sending → cap, ask, RESERVE → `POST api.heygen.com/v3/videos`
  *                          → keep the job (`avatar-jobs.jsonl`) → answer at once with a job id.
  *   avatar_video_status    ask HeyGen about the job → still being made (say so), or made (fetch the file from HeyGen's
  *                          storage with no key, hand it to the ferret's media folder, answer with the piece to paste), or failed.
@@ -15,17 +15,20 @@
  * order that matters is the one `generate_video` keeps: the reservation is written before HeyGen is called and a job's end
  * before anything else, so a crash can only OVER-count.
  *
- * Wire (HeyGen API reference, "Create Avatar Video (V2)" and "Video Status"): `POST /v2/video/generate` answers
- * `{ data: { video_id } }`; `GET /v1/video_status.get?video_id=…` answers `{ data: { status, video_url } }`.
+ * Wire (HeyGen API reference, "Create Video" and "Get Video", v3; the v2/v1 endpoints were retired on 2026-10-31):
+ * `POST /v3/videos` with `{ type: 'avatar', avatar_id, script, voice_id, aspect_ratio, resolution, engine }` answers
+ * `{ data: { video_id, status } }`; `GET /v3/videos/{video_id}` answers `{ data: { id, status, video_url } }` with
+ * `status` one of pending, processing, completed, failed. The engine is pinned so the reservation is that engine's price.
  */
 import { randomBytes } from 'node:crypto';
 import type { CredentialPlacement, FetchPort, SecretsPort, StatePort } from '@ferretry/kernel/contract';
 import { MAX_MEDIA_BYTES } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
 import {
-  AVATAR_DIMENSIONS,
+  AVATAR_ENGINE,
   AVATAR_JOBS,
   type AvatarJobRecord,
+  AVATAR_RESOLUTION,
   AvatarVideoStatusInputSchema,
   GenerateAvatarVideoInputSchema,
   HEYGEN_API_HOST,
@@ -65,7 +68,7 @@ const REPLY_BYTES = 256 * 1024;
 
 const SubmitReplySchema = z.object({ data: z.object({ video_id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u) }) });
 
-/** `POST /v2/video/generate`: one avatar reading one script. HeyGen answers at once with the video's id; the video is made later. */
+/** `POST /v3/videos`: one avatar reading one script. HeyGen answers at once with the video's id; the video is made later. */
 async function submitAvatar(
   secrets: SecretsPort,
   input: { script: string; avatar: string; voice: string; aspect: '16:9' | '9:16' },
@@ -74,16 +77,16 @@ async function submitAvatar(
     KEY_NAME,
     {
       method: 'POST',
-      url: `https://${HEYGEN_API_HOST}/v2/video/generate`,
+      url: `https://${HEYGEN_API_HOST}/v3/videos`,
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({
-        video_inputs: [
-          {
-            character: { type: 'avatar', avatar_id: input.avatar, avatar_style: 'normal' },
-            voice: { type: 'text', voice_id: input.voice, input_text: input.script },
-          },
-        ],
-        dimension: AVATAR_DIMENSIONS[input.aspect],
+        type: 'avatar',
+        avatar_id: input.avatar,
+        script: input.script,
+        voice_id: input.voice,
+        aspect_ratio: input.aspect,
+        resolution: AVATAR_RESOLUTION,
+        engine: { type: AVATAR_ENGINE },
       }),
       timeoutMs: SUBMIT_TIMEOUT_MS,
       maxResponseBytes: REPLY_BYTES,
@@ -115,13 +118,13 @@ type Poll =
   /** A check that did not answer: never a verdict on the video. */
   | { readonly kind: 'retry'; readonly sentence: string };
 
-/** `GET /v1/video_status.get`: what HeyGen says of one video now. */
+/** `GET /v3/videos/{video_id}`: what HeyGen says of one video now. */
 async function pollAvatar(secrets: SecretsPort, videoId: string): Promise<Poll> {
   const outcome = await secrets.send(
     KEY_NAME,
     {
       method: 'GET',
-      url: `https://${HEYGEN_API_HOST}/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
+      url: `https://${HEYGEN_API_HOST}/v3/videos/${encodeURIComponent(videoId)}`,
       headers: { accept: 'application/json' },
       timeoutMs: POLL_TIMEOUT_MS,
       maxResponseBytes: REPLY_BYTES,
