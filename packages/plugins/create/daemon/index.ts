@@ -8,6 +8,7 @@ import {
   type ResolvedCreateConfig,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { avatarVideoTools } from './lib/heygen.ts';
 import { generateAudioTools } from './lib/generate-audio.ts';
 import { generateImageTool } from './lib/generate-image.ts';
 import { generateVideoTools } from './lib/generate-video.ts';
@@ -18,7 +19,7 @@ const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZ
 
 /**
  * Create (daemon half): the agent tools that make media for a ferret that cannot, spending the owner's own keys
- * through the kernel (it places `FAL_KEY` and `ELEVENLABS_API_KEY`; this plugin never holds them) under ONE daily cap
+ * through the kernel (it places `FAL_KEY`, `ELEVENLABS_API_KEY` and `HEYGEN_API_KEY`; this plugin never holds them) under ONE daily cap
  * and an ask over a limit, and one queue, so no two calls can pass the cap together.
  *
  * THE FILE reaches the chat with no step by the ferret: Ferrets' `deliverMedia` seam writes it into the ferret's own
@@ -48,6 +49,7 @@ export default implementDaemon(manifest, {
       serial: serialQueue(),
     };
     const video = generateVideoTools({ ...deps, state: kernel.state });
+    const avatar = avatarVideoTools({ ...deps, state: kernel.state });
     const generateImage = generateImageTool(deps);
     const audio = generateAudioTools(deps);
     /** A tool is a ferret's: the owner's own call has no ferret to hand the file to. */
@@ -70,6 +72,8 @@ export default implementDaemon(manifest, {
         generate_music: forFerret(audio.generate_music),
         generate_video: forFerret(video.generate_video),
         generation_status: forFerret(video.generation_status),
+        generate_avatar_video: forFerret(avatar.generate_avatar_video),
+        avatar_video_status: forFerret(avatar.avatar_video_status),
       },
       hooks: {
         'ask.sources:create-spend': { schema: CreateSpendRefSchema, title: 'Spend on a creative tool', form: false },
