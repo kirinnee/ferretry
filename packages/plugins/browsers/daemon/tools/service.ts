@@ -1379,23 +1379,7 @@ export class BrowserTools {
   private async listPages(caller: ToolCaller, tabs = false): Promise<BrowserToolAnswer> {
     const status = await this.ports.browser.status(caller.sessionId);
     const rows = await Promise.all(
-      status.pages.map(async page =>
-        this.listed(
-          caller,
-          {
-            surface: 'browser',
-            id: page.id,
-            title: page.title,
-            url: page.url,
-            ...(page.name === undefined ? {} : { name: page.name }),
-            ...(page.openedBy === undefined ? {} : { openedBy: page.openedBy }),
-            ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
-            ...(page.incognito === true ? { incognito: true } : {}),
-            ...(page.identity === undefined ? {} : { identity: page.identity }),
-          },
-          status.pages,
-        ),
-      ),
+      status.pages.map(async page => this.listed(caller, { ...surfaceOf(page), title: page.title }, status.pages)),
     );
     // A title and an address are what the page says: masked, for agent and person alike (S16).
     const visible = rows.filter((row): row is AgentSurface => row !== undefined);
@@ -1800,6 +1784,7 @@ function surfaceOf(found: PageRows[number]): ResolvedSurface {
     ...(found.openedBy === undefined ? {} : { openedBy: found.openedBy }),
     ...(found.incognito === true ? { incognito: true } : {}),
     ...(found.openerId === undefined ? {} : { openerId: found.openerId }),
+    ...(found.identity === undefined ? {} : { identity: found.identity }),
     url: found.url,
   };
 }
