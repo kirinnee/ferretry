@@ -52,7 +52,9 @@ describe('Settings › This device', () => {
   test('Palette is one chip per palette, each holding its light and its dark half in the style in force', async () => {
     await boot();
     const chips = [...page().querySelectorAll('[data-palette-chips] [data-palette-chip]')];
-    expect(chips.map(chip => chip.getAttribute('data-palette-chip'))).toEqual(PALETTES.map(palette => palette.id));
+    // Flat palettes first, then the gradient ones under their own "Gradient" group (the order on screen).
+    const onScreen = [...PALETTES.filter(palette => !palette.mesh), ...PALETTES.filter(palette => palette.mesh)];
+    expect(chips.map(chip => chip.getAttribute('data-palette-chip'))).toEqual(onScreen.map(palette => palette.id));
     for (const chip of chips) {
       const id = chip.getAttribute('data-palette-chip');
       const halves = [...chip.querySelectorAll('[data-swatch]')];

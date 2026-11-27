@@ -13,7 +13,8 @@ import {
   StylePicker,
 } from '../../../src/shell/appearance-pickers.tsx';
 import { AppearanceSpecimen } from '../../../src/shell/appearance-specimen.tsx';
-import { PALETTES, type PaletteId, STYLES, type StyleId } from '../../../src/theme/catalog.ts';
+import { PALETTE_PACKS } from '../../../src/generated/theme-packs.ts';
+import { PALETTES, type PaletteEntry, type PaletteId, STYLES, type StyleId } from '../../../src/theme/catalog.ts';
 
 let mounted: Mounted | undefined;
 afterEach(async () => {
@@ -35,6 +36,9 @@ describe('lookAttributes', () => {
     });
   });
 });
+
+/** The order the chips are laid out and walked in: flat palettes, then the gradient ones. */
+const visualOrder = [...PALETTES.filter(option => !option.mesh), ...PALETTES.filter(option => option.mesh)];
 
 function Palettes({ log }: { readonly log: PaletteId[] }) {
   const [value, setValue] = useState<PaletteId>('studio');
@@ -64,7 +68,7 @@ describe('PalettePicker', () => {
     await key('End')(group);
     await key('Home')(group);
     await key('x')(group);
-    expect(log).toEqual(['geist', 'mission', 'geist', PALETTES[PALETTES.length - 1]?.id as PaletteId, 'studio']);
+    expect(log).toEqual(['geist', 'mission', 'geist', visualOrder.at(-1)?.id as PaletteId, 'studio']);
   });
 
   it('should bring the VISIBLE chip into view after a keyboard move, not only focus its hidden radio', async () => {
@@ -80,7 +84,7 @@ describe('PalettePicker', () => {
     } finally {
       HTMLElement.prototype.scrollIntoView = original;
     }
-    expect(revealed[0]).toBe(`${PALETTES[PALETTES.length - 1]?.id}:nearest`);
+    expect(revealed[0]).toBe(`${visualOrder.at(-1)?.id}:nearest`);
   });
 
   it('should draw each half of each chip in the style it was given', async () => {
@@ -88,6 +92,70 @@ describe('PalettePicker', () => {
     const halves = [...mounted.container.querySelectorAll('[data-palette-chip] [data-swatch]')];
     expect(halves).toHaveLength(PALETTES.length * 2);
     expect(new Set(halves.map(half => half.getAttribute('data-style')))).toEqual(new Set(['neo']));
+  });
+});
+
+/** A palette whose pack sets `mesh`, as the catalogue hands it over. It names no real pack: the flag is all that joins the group. */
+const FIXTURE_MESH = {
+  id: 'zz-fixture-mesh',
+  label: 'Fixture glow',
+  blurb: 'A test-only gradient palette.',
+  mesh: true,
+} as unknown as PaletteEntry;
+
+describe('PalettePicker gradient group', () => {
+  const flat = PALETTES.filter(option => !option.mesh);
+  const gradient = PALETTES.filter(option => option.mesh);
+
+  it('should carry the pack’s own mesh flag into the catalogue, so a new mesh palette joins with no edit', () => {
+    expect(gradient.map(option => option.id).sort()).toEqual(
+      PALETTE_PACKS.filter(pack => 'mesh' in pack)
+        .map(pack => pack.id)
+        .sort(),
+    );
+    expect(gradient.length).toBeGreaterThan(0);
+  });
+
+  it('should show mesh palettes under a labelled "Gradient" group after the flat ones, in one radiogroup', async () => {
+    mounted = await mount(<Palettes log={[]} />);
+    const radios = must(mounted.container.querySelector('[role="radiogroup"][aria-label="Palette"]'), 'the group');
+    const group = must(radios.querySelector('fieldset'), 'the Gradient group');
+    expect(must(group.querySelector('legend'), 'the Gradient legend').textContent).toBe('Gradient');
+    expect([...group.querySelectorAll('input')].map(input => input.value)).toEqual(gradient.map(option => option.id));
+    const ids = [...radios.querySelectorAll('input')].map(input => input.value);
+    expect(ids).toEqual([...flat, ...gradient].map(option => option.id));
+    expect(radios.querySelectorAll('fieldset')).toHaveLength(1);
+  });
+
+  it('should put a fixture mesh pack in the group and walk the arrow keys through flat then gradient', async () => {
+    const log: PaletteId[] = [];
+    const palettes = [FIXTURE_MESH, ...PALETTES.filter(option => !option.mesh)];
+    const Fixture = () => {
+      const [value, setValue] = useState<PaletteId>(PALETTES.filter(option => !option.mesh).at(-1)?.id as PaletteId);
+      return (
+        <PalettePicker
+          palettes={palettes}
+          value={value}
+          style="neo"
+          onChange={next => {
+            log.push(next);
+            setValue(next);
+          }}
+        />
+      );
+    };
+    mounted = await mount(<Fixture />);
+    const radios = must(mounted.container.querySelector('[role="radiogroup"]'), 'the group');
+    const group = must(radios.querySelector('fieldset'), 'the Gradient group');
+    expect([...group.querySelectorAll('input')].map(input => input.value)).toEqual(['zz-fixture-mesh']);
+    await key('ArrowRight')(radios);
+    expect(log as string[]).toEqual(['zz-fixture-mesh']);
+  });
+
+  it('should add no group and no heading when no palette is a mesh', async () => {
+    mounted = await mount(<PalettePicker palettes={flat} value="studio" style="studio" onChange={() => undefined} />);
+    expect(mounted.container.querySelector('fieldset')).toBeNull();
+    expect(mounted.container.querySelector('legend')).toBeNull();
   });
 });
 

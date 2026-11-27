@@ -37,6 +37,8 @@ export interface PaletteEntry {
   readonly label: string;
   /** One line on the colours. */
   readonly blurb: string;
+  /** The pack paints a gradient mesh behind the page, so the picker lists it under "Gradient". Absent means false. */
+  readonly mesh?: true;
 }
 
 /**
@@ -62,7 +64,14 @@ export const STYLES: readonly StyleEntry[] = Object.freeze(
  * every style. Mesh, Aurora, Afterglow and Briefing paint a gradient mesh behind the page (`--surface-mesh`).
  */
 export const PALETTES: readonly PaletteEntry[] = Object.freeze(
-  PALETTE_PACKS.map(({ id, label, blurb }): PaletteEntry => ({ id, label, blurb })),
+  PALETTE_PACKS.map(
+    (pack): PaletteEntry => ({
+      id: pack.id,
+      label: pack.label,
+      blurb: pack.blurb,
+      ...('mesh' in pack ? { mesh: true } : {}),
+    }),
+  ),
 );
 
 /** The style pack flagged `default: true` (the generator pins that there is exactly one). */
