@@ -21,10 +21,10 @@ export class CaptureFields {
   private readonly nodes = new Set<string>();
   private readonly nativeNodes = new Set<string>();
   private readonly sessions = new WeakMap<Frame, Promise<CDPSession | undefined>>();
+  private readonly searchable = new WeakSet<CDPSession>();
   private pending = Promise.resolve();
-  private documents: { session: CDPSession; frameId: string }[] = [];
-  captureSessions(): readonly CDPSession[] {
-    return [...new Set(this.documents.map(document => document.session))];
+  captureSessions(): Promise<readonly CDPSession[]> {
+    return this.frameSessions();
   }
 
   constructor(
@@ -54,12 +54,32 @@ export class CaptureFields {
   protectedInput(): boolean {
     return this.protection.held();
   }
-  async binary(): Promise<void> {
-    const scan = await this.scan();
-    if (this.protection.held() || scan.filled)
-      throw new Error(
-        "PDF and downloads are withheld because this browser context received a sensitive value; restart this identity's browser to export again",
-      );
+  hasKnownNodes(): boolean {
+    return this.nodes.size > 0;
+  }
+
+  /** Chromium's selector search includes closed shadow roots without serializing the entire DOM/layout. */
+  async sensitiveNode(): Promise<boolean> {
+    if (this.hasKnownNodes()) return true;
+    for (const session of await this.frameSessions()) {
+      if (!this.searchable.has(session)) {
+        await session.send('DOM.enable');
+        this.searchable.add(session);
+      }
+      const search = await session.send('DOM.performSearch', {
+        query:
+          '[type="password" i], [autocomplete~="current-password" i], [autocomplete~="new-password" i], [autocomplete~="one-time-code" i]',
+        includeUserAgentShadowDOM: true,
+      });
+      try {
+        if (!Number.isInteger(search.resultCount) || search.resultCount < 0)
+          throw new Error('sensitive node search incomplete');
+        if (search.resultCount > 0) return true;
+      } finally {
+        await session.send('DOM.discardSearchResults', { searchId: search.searchId });
+      }
+    }
+    return false;
   }
 
   scan(): Promise<CaptureScan> {
@@ -71,8 +91,8 @@ export class CaptureFields {
     return work;
   }
 
-  private async read(): Promise<CaptureScan> {
-    if (this.page.isClosed()) return { rects: [], filled: false };
+  private async frameSessions(): Promise<CDPSession[]> {
+    if (this.page.isClosed()) throw new Error('a related page closed during sensitive field inspection');
     const main = await this.session();
     const sessions: CDPSession[] = [main];
     for (const frame of this.page.frames()) {
@@ -93,10 +113,17 @@ export class CaptureFields {
       if (session !== undefined) sessions.push(session);
       else this.sessions.delete(frame);
     }
+    return sessions;
+  }
+
+  private async read(): Promise<CaptureScan> {
+    const sessions = await this.frameSessions();
+    const main = sessions[0];
     const rects: CaptureRect[] = [];
+    const textBoxes: { text: string; rect: CaptureRect }[] = [];
+    const childTexts: string[] = [];
     let filled = false;
     let childSensitive = false;
-    this.documents = [];
     for (const session of sessions) {
       const snapshot = await session.send('DOMSnapshot.captureSnapshot', { computedStyles: [] });
       const strings = snapshot.strings;
@@ -109,10 +136,10 @@ export class CaptureFields {
       let count = 0;
       for (const document of snapshot.documents) {
         const nodes = document.nodes;
+        const layout = new Map(document.layout.nodeIndex.map((node, index) => [node, document.layout.bounds[index]]));
         count += nodes.backendNodeId?.length ?? 0;
         if (count > MAX_NODES) throw new Error('this page is too large to check for sensitive fields');
         const frameId = word(document.frameId);
-        this.documents.push({ session, frameId });
         const inputs = new Map<number, string>();
         if (nodes.inputValue !== undefined)
           for (const [at, node] of nodes.inputValue.index.entries()) inputs.set(node, word(nodes.inputValue.value[at]));
@@ -126,11 +153,10 @@ export class CaptureFields {
           const key = `${frameId}:${nodeId}`;
           const value = inputs.get(at) ?? '';
           const text = word(nodes.nodeValue?.[at]);
-          if (text !== '' && this.contextValues.text(text) !== text) {
-            const layout = document.layout.nodeIndex.indexOf(at);
-            const box = document.layout.bounds[layout];
+          if (text !== '') {
+            const box = layout.get(at);
             if (box !== undefined) {
-              if (session !== main || document !== snapshot.documents[0]) childSensitive = true;
+              if (session !== main || document !== snapshot.documents[0]) childTexts.push(text);
               else {
                 const [x, y, w, h] = box;
                 if (
@@ -141,7 +167,10 @@ export class CaptureFields {
                   !box.every(Number.isFinite)
                 )
                   throw new Error('a private text box could not be measured');
-                rects.push({ x: x - (document.scrollOffsetX ?? 0), y: y - (document.scrollOffsetY ?? 0), w, h });
+                textBoxes.push({
+                  text,
+                  rect: { x: x - (document.scrollOffsetX ?? 0), y: y - (document.scrollOffsetY ?? 0), w, h },
+                });
               }
             }
           }
@@ -171,20 +200,33 @@ export class CaptureFields {
         }
       }
     }
-    if (childSensitive) {
+    const childRects: CaptureRect[] = [];
+    if (childSensitive || childTexts.length > 0) {
       for (const frame of this.page.frames()) {
         if (frame === this.page.mainFrame()) continue;
         const element = await frame.frameElement();
         try {
           const box = await element.boundingBox();
-          if (box !== null) rects.push({ x: box.x, y: box.y, w: box.width, h: box.height });
+          if (box !== null) childRects.push({ x: box.x, y: box.y, w: box.width, h: box.height });
         } finally {
           await element.dispose();
         }
       }
     }
-    if (rects.length > MAX_RECTS) throw new Error('this page has too many sensitive fields to capture');
-    return { rects, filled };
+    const values = this.contextValues;
+    return {
+      filled,
+      // Resolve echoes only AFTER every related page has contributed its native values.
+      get rects() {
+        const masked = [
+          ...rects,
+          ...textBoxes.filter(box => values.text(box.text) !== box.text).map(box => box.rect),
+          ...(childSensitive || childTexts.some(text => values.text(text) !== text) ? childRects : []),
+        ];
+        if (masked.length > MAX_RECTS) throw new Error('this page has too many sensitive fields to capture');
+        return masked;
+      },
+    };
   }
 }
 

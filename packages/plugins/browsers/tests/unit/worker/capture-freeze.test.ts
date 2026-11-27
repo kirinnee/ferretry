@@ -24,8 +24,8 @@ function twoTabs(
     } as unknown as Page;
     lifecycle.set(name, 'active');
     const session = {
-      async send(method: string, { state }: { state: State }) {
-        if (method === 'DOMSnapshot.captureSnapshot') throw new Error(INSPECTION_FAILURE);
+      async send(method: string, { state }: { state: State } = { state: 'active' }) {
+        if (method === 'Animation.enable') throw new Error(INSPECTION_FAILURE);
         expect(method).toBe('Page.setWebLifecycleState');
         commands.push([name, state]);
         await onLifecycle(name, state);
@@ -121,3 +121,57 @@ it('capture cleanup restores a late freeze acknowledgement without freezing the 
     ['survivor', 'active'],
   ]);
 });
+
+for (const failure of ['timeout', 'crash', 'navigation'] as const) {
+  it(`context discovery withholds a capture when another tab has an incomplete ${failure} inspection`, async () => {
+    const handlers = new Map<Page, Map<string, () => void>>();
+    const context = { pages: () => [...handlers.keys()], on: () => undefined } as unknown as BrowserContext;
+    const makePage = () => {
+      const events = new Map<string, () => void>();
+      const page = {
+        context: () => context,
+        on: (event: string, callback: () => void) => events.set(event, callback),
+      } as unknown as Page;
+      handlers.set(page, events);
+      return page;
+    };
+    const target = makePage();
+    const related = makePage();
+    const capture = new BrowserCapture(
+      async () => {
+        throw new Error('no pixels may be acquired');
+      },
+      async () => {
+        throw new Error('no pixels may be composed');
+      },
+      work => work,
+    );
+    const visited: Page[] = [];
+    capture.of(target).scan = async () => {
+      visited.push(target);
+      return { rects: [], filled: false };
+    };
+    capture.of(related).scan = async () => {
+      visited.push(related);
+      if (failure === 'navigation') {
+        handlers.get(related)?.get('framenavigated')?.();
+        return { rects: [], filled: false };
+      }
+      throw new Error(`synthetic related ${failure}`);
+    };
+    await expect(capture.inspect([target])).rejects.toThrow(
+      failure === 'navigation' ? /changed/u : new RegExp(failure),
+    );
+    expect(visited).toEqual([target, related]);
+    await expect(capture.binary(target)).rejects.toThrow();
+    capture.of(target).sensitiveNode = async () => false;
+    capture.of(related).sensitiveNode = async () => {
+      if (failure === 'navigation') {
+        handlers.get(related)?.get('framenavigated')?.();
+        return false;
+      }
+      throw new Error(`synthetic related ${failure}`);
+    };
+    await expect(capture.frame(target, 'unsafe-native-frame')).rejects.toThrow();
+  });
+}

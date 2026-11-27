@@ -771,6 +771,7 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
   const listed = shown.length === 0 ? [await anyPage()] : shown;
   const active = focus.isClosed() ? (listed[0] as Page) : focus;
   const state = pageStates.get(active) ?? { state: 'ready' as const };
+  await capture.inspect(listed);
   const pages = await Promise.all(
     listed.map(async item => {
       const identity = {
@@ -782,7 +783,6 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
         const url = item.url() || 'about:blank';
         const title = await safeTitle(item);
         const challenge = await challengeOf(item);
-        await capture.inspect([item]);
         return {
           ...identity,
           url: displayUrl(url, item),
@@ -824,8 +824,26 @@ async function acted(page: Page, extra: Readonly<Record<string, unknown>> = {}):
   const dialog = pending === undefined || safe ? pending : { type: pending.type, message: '[capture withheld]' };
   const notices = await downloads.notices(pageId(page));
   const started = safe ? notices : notices.map(notice => ({ ...notice, name: 'withheld-download' }));
+  let status: Record<string, unknown>;
+  try {
+    status = await snapshot(page, safe ? (capture.masks(page).data(extra) as Record<string, unknown>) : {});
+  } catch {
+    // An action can finish while another tab navigates. Keep controls available, withholding all observations.
+    return {
+      url: 'about:blank',
+      title: '[capture withheld]',
+      activePageId: pageId(page),
+      actedPageId: pageId(page),
+      pages: livePages()
+        .slice(0, MAX_PAGES)
+        .map(item => ({ id: pageId(item), url: 'about:blank', title: '[capture withheld]' })),
+      pageState: 'ready',
+      canGoBack: false,
+      canGoForward: false,
+    };
+  }
   return {
-    ...(await snapshot(page, safe ? (capture.masks(page).data(extra) as Record<string, unknown>) : {})),
+    ...status,
     actedPageId: pageId(page),
     ...(dialog === undefined ? {} : { dialog: capture.masks(page).data(dialog) }),
     ...(started.length === 0 ? {} : { downloads: capture.masks(page).data(started) }),
@@ -999,7 +1017,7 @@ async function stopScreencast(id: string): Promise<void> {
 async function frame(event: CaptureFrameEvent, session: CDPSession, page: Page, epoch: number): Promise<void> {
   const id = pageId(page);
   if (screencasts.get(id) !== session || typeof event.data !== 'string' || typeof event.sessionId !== 'number') return;
-  const pixels = await capture.frame(page);
+  const pixels = await capture.frame(page, event.data);
   if (screencasts.get(id) !== session || castEpochs.get(id) !== epoch) return;
   frameSerial += 1;
   heldFrames.set(frameSerial, { session, cdpSessionId: event.sessionId });
@@ -1299,20 +1317,20 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'download': {
       const page = targetPage(params.pageId);
-      await capture.of(page).binary();
+      await capture.binary(page);
       const staged = await downloads.claim(
         pageId(page),
         typeof params.downloadId === 'string' ? params.downloadId : undefined,
       );
-      await capture.of(page).binary();
+      await capture.binary(page);
       return await acted(page, { staged });
     }
     case 'pdf': {
       const page = targetPage(params.pageId);
-      await capture.of(page).binary();
+      await capture.binary(page);
       const base64 = await printPdf(await cdpOf(page));
       const title = await safeTitle(page);
-      await capture.of(page).binary();
+      await capture.binary(page);
       const staged = await downloads.stagePdf(pageId(page), base64, capture.masks(page).text(title));
       return await acted(page, { staged });
     }
@@ -1427,7 +1445,7 @@ async function answer(request: Request): Promise<void> {
     const result = await run(request);
     if (content && page) await capture.inspect([page]);
     // Observations and sealed-copy values stay on their daemon-private seams; masking would falsify Vault facts.
-    send({ id: request.id, ok: true, result });
+    send({ id: request.id, ok: true, result: !internal && page ? capture.masks(page).data(result) : result });
     if (request.method === 'close') process.exit(0);
   } catch (error) {
     const inspected =

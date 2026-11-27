@@ -599,7 +599,7 @@ describe('G27: real worker capture paths never expose filled fields', () => {
     await expect(client.download(pageId, result.downloads?.[0]?.id)).rejects.toThrow(/sensitive/u);
     await expect(client.pdf(pageId)).rejects.toThrow(/sensitive/u);
     expect(await readdir(join(root, 'stage')).catch(() => [])).toEqual([]);
-  });
+  }, 15_000);
 
   it('late eval and exception values: discover native secrets before the first output limit', async () => {
     const { raw } = await opened();

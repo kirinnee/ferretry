@@ -105,6 +105,9 @@ remains sensitive after page JavaScript changes its type or autocomplete. Masks 
 context; they are not returned, logged or written to disk. Input-request/vault masks last for that context's life.
 Each native field keeps just its last nonempty observed value, replacing its previous mask on a nonempty edit;
 clearing or removing the field retains its last settled mask. The daemon's vault masking remains behind this boundary.
+Discovery covers every page in the context before any capture or export decision. An incomplete inspection of a
+related page, including navigation, a crash or a timeout, withholds the capture. Text replies are scrubbed again
+after discovery, before leaving the worker.
 Durable masks and binary taint come only from full input-request/vault values or native sensitive-field values.
 Ordinary viewer typing and search do not register per-keystroke masks or taint a context. Private routing identifiers,
 staging paths and origin proofs are preserved. Native line-ending changes are covered for the full values.
@@ -113,8 +116,10 @@ Screenshots, input-request field pictures and the shared CDP screencast used by 
 field rectangles and literal DOM text echo rectangles painted black before leaving the worker. A sensitive child frame is masked as a whole, including
 cross-origin frames; closed shadow roots are inspected by DevTools too. The compositor is private to the worker and
 cannot be named by a tool. Captures freeze related pages and pause field animations for one bounded turn, use one
-explicit clip, and refuse a changed renderer generation or geometry. Screencast events trigger fresh captures;
-their older pixels are never forwarded. A failed inspection or paint withholds the capture. Long renderer work
+explicit clip, and refuse a changed renderer generation or geometry. With no masks or taint, one cheap context scan
+per screencast frame can pass through native pixels without freezing the renderer if it finds no sensitive node.
+A newly discovered sensitive node drops that frame; subsequent frames use one frozen context scan and a freshly
+masked capture. A failed inspection or paint withholds the capture. Long renderer work
 withholds pixels without blocking another page's input or dialog dismissal.
 
 PDF and download exports stay refused for that browser context after protected input or an observed sensitive value,

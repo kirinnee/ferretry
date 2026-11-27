@@ -146,7 +146,8 @@ one-time.
 Browser capture masking adds a separate floor: password/autocomplete-sensitive fields, including `one-time-code`,
 are painted over in pictures, and input-request values are scrubbed from browser text for the worker's life.
 This does not stop a ferret from reading a code from its inbox or typing one into the sign-in page. The terminal
-code behavior below is unchanged; browser pictures and scripts no longer provide a second way to read the field.
+code behavior below is unchanged. Pictures mask the field; script results receive the same exact-match text scrub.
+An agent's own eval can re-encode or probe a value beyond that scrub's declared bounds.
 
 - **The input** says "One-time code: the ferret can see it.", flags it neutral (not the red of `plain`, not the amber
   of `private`), and shows the value as it is typed (no Show toggle, no numeric pad: a device code may hold letters).
@@ -1682,6 +1683,9 @@ makes the input stricter.
 - **A `plain` value is visible by design.** It is marked on the input.
 - **A browser value drawn into pixels outside its sensitive field can appear in a screenshot.** The field itself is
   painted over; a canvas or generated image elsewhere is outside that mask.
+- **A slow submitted login can lose its field before it changes documents.** Submitted browser fills clear at about
+  three seconds. If the page has not moved on, cleanup reports `did-not-move-on` and suspends the owner's
+  pre-approved rule or plan line. A login needing longer must be retried with that limitation in mind.
 - **A one-time `code` is weaker than `private` on purpose** (the owner's decision, see [one-time codes](#one-time-codes-code)).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
   and core dumps are out of scope.
