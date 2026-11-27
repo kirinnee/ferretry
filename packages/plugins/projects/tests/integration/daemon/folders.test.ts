@@ -23,7 +23,7 @@ function machine(answer: (call: Call) => Partial<SpawnResult> | 'throw', directo
           stat: async (path: string) => (directories.includes(path) ? { kind: 'directory' } : undefined),
         }) as unknown as RootHandle,
     },
-  } as unknown as Pick<KernelPorts, 'roots' | 'spawn'>;
+  } as unknown as Pick<KernelPorts, 'roots' | 'spawn' | 'paths'>;
   return { folders: kernelFolders(kernel), calls };
 }
 
@@ -90,7 +90,7 @@ describe('kernelFolders and the imports root', () => {
         },
       },
       roots: { root: () => handle as RootHandle },
-    } as unknown as Pick<KernelPorts, 'roots' | 'spawn'>);
+    } as unknown as Pick<KernelPorts, 'roots' | 'spawn' | 'paths'>);
 
   test('a folder the root will not name is neither a directory nor a name the owner may give', async () => {
     const folders = rooted({ resolve: () => ({ ok: false, reason: 'outside' }) as never });
