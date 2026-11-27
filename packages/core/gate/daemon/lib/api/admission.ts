@@ -634,6 +634,7 @@ export class GateAdmission implements Admission {
     const remedy = this.#wardenRemedy(descriptor, authentication, request, params, actor);
     if (remedy.kind === 'refused') return refused(remedy.response);
 
+    let claimedStepUp = false;
     const standing: CallStanding = {
       actor,
       credential: authentication,
@@ -642,6 +643,16 @@ export class GateAdmission implements Admission {
       presentation,
       spendStepUp: () => {
         if (subject !== undefined) this.deps.stepUps.spend(subject);
+      },
+      claimStepUp: () => {
+        if (claimedStepUp || subject === undefined || !presentation.stepUp || request.signal?.aborted === true)
+          return false;
+        // No await between the live check and spend: two admitted handlers cannot share a single-use window.
+        // A proof spent by THIS admission belongs to this request alone; a reusable window's spend is a no-op.
+        if (!spentStepUp && !this.deps.stepUps.held(subject)) return false;
+        this.deps.stepUps.spend(subject);
+        claimedStepUp = true;
+        return true;
       },
       spendFreshStepUp: () => {
         if (subject !== undefined) this.deps.stepUps.spendFresh(subject);

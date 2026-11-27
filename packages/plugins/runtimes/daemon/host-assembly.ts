@@ -33,7 +33,7 @@ import { harnessAwareWhich } from './adapters/harness-lookup.ts';
 import { statePins } from './adapters/starter-pins.ts';
 import { HostPlatform } from './adapters/host-platform.ts';
 import { toolInstaller } from './adapters/tool-installer.ts';
-import { PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
+import { harnessKits, PROVIDER_ANSWER_MS, withinMs } from './adapters/profile-components.ts';
 import { writeAllConfigWriter } from './adapters/config-write-all.ts';
 import { credentialMounts, FleetDisk, sourceMounts } from './adapters/fleet-disk.ts';
 import { FleetManifestUnreadableError, manifestIsUnreadable, readFleetManifest } from './adapters/manifest-file.ts';
@@ -476,6 +476,8 @@ export function fileAssembly(
       Object.fromEntries(
         (ctx.uses?.usage.current()?.pauses() ?? []).map(held => [held.login as string, held.pause] as const),
       ),
+    // What each harness's plugin gives Runtimes for its own harness, read live with every materialisation.
+    kits: () => harnessKits(hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY)),
     // The setup's and the clone's own writes ask this; a catalogue apply asks the PLAN it applies (catalog-service.ts).
     preflight: refuseBeforeWriting(config),
   };

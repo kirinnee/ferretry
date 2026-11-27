@@ -73,6 +73,9 @@ function fakeDaemons(initial: readonly PairedDaemon[] = []) {
   };
 }
 
+/** Every document load a finished pairing asked for (V-B20: a real load, never a router move). */
+let loads: string[] = [];
+
 function setup(
   carrier: (input: PairDirectInput) => Promise<PairedOver>,
   initial: readonly PairedDaemon[] = [],
@@ -89,7 +92,15 @@ function setup(
     },
     pair: carrier,
   } as unknown as DaemonlessPorts;
-  const Page = pairPage(ports, { store, scanHost: () => null, defaultName: () => 'My phone', ...environment });
+  const Page = pairPage(ports, {
+    store,
+    scanHost: () => null,
+    defaultName: () => 'My phone',
+    openDocument: href => {
+      loads.push(href);
+    },
+    ...environment,
+  });
   return { Page, store, daemons };
 }
 
@@ -114,6 +125,7 @@ const paired = (): PairDirectInput[] => [];
 
 let view: Mounted | null = null;
 afterEach(async () => {
+  loads = [];
   await view?.unmount();
   view = null;
 });
@@ -218,10 +230,12 @@ describe('the /pair page', () => {
     expect(inputs[0]).toMatchObject({ address: 'https://daemon.example.test', daemonId: DAEMON, code: FAKE_CODE });
     expect(inputs[0]?.key.deviceName).toBe('My phone');
     expect(store.keys.has(DAEMON)).toBe(true);
-    expect(moves.at(-1)).toEqual({ to: `/d/${DAEMON}`, replace: undefined });
+    expect(loads.at(-1)).toEqual(`/d/${DAEMON}`);
+    // V-B20: the router did not carry the person on in the link's own document
+    expect(moves).toEqual([]);
     // R-pairing rules: the code reached no console, no storage, no live region, no address.
     expect(leaks).toEqual([]);
-    expect(moves.some(move => move.to.includes(FAKE_CODE))).toBe(false);
+    expect(loads.some(href => href.includes(FAKE_CODE))).toBe(false);
     for (const region of must(view, 'the page').container.querySelectorAll(
       '[aria-live], [role="status"], [role="alert"]',
     )) {
@@ -249,8 +263,8 @@ describe('the /pair page', () => {
     await interact(() => button('Pair this device').click());
     await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
     expect(store.keys.has(DAEMON)).toBe(true);
-    expect(moves.at(-1)).toEqual({ to: '/onboarding', replace: undefined });
-    expect(moves.some(move => move.to.includes(FAKE_CODE))).toBe(false);
+    expect(loads.at(-1)).toEqual('/onboarding');
+    expect(loads.some(href => href.includes(FAKE_CODE))).toBe(false);
   });
 
   it('M2 only a plain same-origin path can be a return: no host, scheme, query or fragment', () => {
@@ -307,7 +321,7 @@ describe('the /pair page', () => {
     expect(must(view, 'the page').container.textContent).not.toContain(FAKE_CODE);
     expect(leaks).toEqual([]);
     // Nothing navigated to a machine: the refusal ends the attempt.
-    expect(moves.every(move => !move.to.startsWith('/d/'))).toBe(true);
+    expect(loads.every(href => !href.startsWith('/d/'))).toBe(true);
   });
 
   it('declares its fragment as a path fragment of its own daemon-less /pair screen', () => {
@@ -441,6 +455,26 @@ describe('the /pair page', () => {
     expect(view.container.querySelector('[data-device-refused]')).toBeNull();
   });
 
+  it('explains replacement on the pair page without claiming this browser was removed', async () => {
+    const { Page } = setup(async () => {
+      throw new Error('not used');
+    }, [
+      {
+        daemon: DAEMON,
+        machine: 'workstation',
+        deviceId: DEVICE,
+        address: 'https://daemon.example.test',
+        carriers: [],
+        pairedAt: 1,
+        lastSelectedAt: 1,
+      } as PairedDaemon,
+    ]);
+    view = await mount(<Page {...props(`https://pwa.example.test/pair?replaced=${DAEMON}`, [])} />);
+    expect(view.container.textContent).toContain('Ferretry on this machine was reinstalled or replaced');
+    expect(view.container.textContent).toContain('Pair again');
+    expect(view.container.textContent).not.toContain('no longer accepts this browser');
+  });
+
   // G2: the page is drawn without the shell's chrome (manifest.test.ts), so it carries its own way back.
   describe('has its own way back, because it draws no sidebar or bars', () => {
     const back = (): HTMLElement | null => view?.container.querySelector<HTMLElement>('[data-pairing-close]') ?? null;
@@ -572,10 +606,10 @@ describe('the /pair page offers the first passkey on its success screen', () => 
       'stays open for about 7 minutes',
     );
     expect(page.textContent).toContain('Add a passkey now');
-    expect(moves).toEqual([]);
+    expect(loads).toEqual([]);
     // One clear way on, and it moves on.
     await interact(() => button('Not now').click());
-    expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+    expect(loads).toEqual([`/d/${DAEMON}`]);
   });
 
   it('P-H2 should start the existing ceremony when pressed, then offer "Continue" instead of navigating by itself', async () => {
@@ -606,9 +640,9 @@ describe('the /pair page offers the first passkey on its success screen', () => 
     await interact(() => button('Add a passkey now').click());
     await interact(() => new Promise(resolve => setTimeout(resolve, 0)));
     expect(paths.slice(0, 2)).toEqual(['/v1/passkeys', '/v1/passkeys/options']);
-    expect(moves).toEqual([]);
+    expect(loads).toEqual([]);
     await interact(() => button('Continue').click());
-    expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+    expect(loads).toEqual([`/d/${DAEMON}`]);
   });
 
   it('P-H6 should show "Not now" while the machine is still being asked, and navigate once a read that never answers hits its deadline', async () => {
@@ -633,14 +667,14 @@ describe('the /pair page offers the first passkey on its success screen', () => 
     expect(must(view, 'the page').container.textContent).toContain('Connected');
     expect(must(view, 'the page').container.querySelector('[data-first-passkey-offer]')).toBeNull();
     expect(button('Not now')).toBeDefined();
-    expect(moves).toEqual([]);
+    expect(loads).toEqual([]);
     expect(timers).toHaveLength(1);
     // The deadline passes: the read settles as "nothing to offer" and the page moves on, as it did before the offer.
     await interact(async () => {
       timers[0]?.();
       await new Promise(resolve => setTimeout(resolve, 0));
     });
-    expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+    expect(loads).toEqual([`/d/${DAEMON}`]);
   });
 
   it('P-H7 should move on at once when "Not now" is pressed while the machine is still being asked', async () => {
@@ -649,7 +683,7 @@ describe('the /pair page offers the first passkey on its success screen', () => 
     const moves: Navigation[] = [];
     await pairNow(Page, moves);
     await interact(() => button('Not now').click());
-    expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+    expect(loads).toEqual([`/d/${DAEMON}`]);
   });
 
   it('P-H3 should show no button and navigate as before when the window is closed, a passkey is held or the machine cannot be reached', async () => {
@@ -661,11 +695,12 @@ describe('the /pair page offers the first passkey on its success screen', () => 
         },
       } satisfies Partial<PairPageEnvironment>,
     ]) {
+      loads = [];
       const { Page } = setup(paired, [], environment);
       const moves: Navigation[] = [];
       await pairNow(Page, moves);
       expect(must(view, 'the page').container.querySelector('[data-first-passkey-offer]')).toBeNull();
-      expect(moves).toEqual([{ to: `/d/${DAEMON}`, replace: undefined }]);
+      expect(loads).toEqual([`/d/${DAEMON}`]);
       await view?.unmount();
       view = null;
     }

@@ -304,14 +304,95 @@ describe('P1-1: a navigation or a swapped frame during a call is seen', () => {
 });
 
 describe('P1-1: a pairing link committed in any frame', () => {
-  it('should refuse a read of a page still on the app a pairing link arrived on, with no code live and no marker', async () => {
-    const { tabs, tools, app } = await pairingWorld();
-    tabs.navigation.set(app.id, { ...cleanNavigation(`${APP_ORIGIN}/`, 0), seq: 2, taintSeq: 2 });
+  it('should refuse a read of a page on the app a pairing link arrived on while its document began under a live code, with no marker', async () => {
+    const { tabs, tools, app, pairing, clock } = await pairingWorld();
+    // the code was live when the document began and is over now (it was neither redeemed through this page nor known to be)
+    pairing.open('pairing-1', clock.at + 120 * SECOND);
+    tabs.navigation.set(app.id, { ...cleanNavigation(`${APP_ORIGIN}/`, clock.at), seq: 2, taintSeq: 2 });
+    clock.at += 10 * SECOND;
+    pairing.close('pairing-1');
+    clock.at += SECOND;
 
     const { answer, error } = await attempt(tools, { tool: 'browser.read', name: 'app' });
 
     should(answer).be.undefined();
     should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
+  });
+
+  it('V-B20 should read the app’s own page that a real navigation brought in after the pairing was over, on a target a link once tainted', async () => {
+    // Arrange — the link opened the document; the code was redeemed; then the app's own /d/ page was loaded for real
+    const { tabs, tools, app, pairing, clock } = await pairingWorld();
+    pairing.open('pairing-1', clock.at + 120 * SECOND);
+    tabs.navigation.set(app.id, {
+      ...cleanNavigation(`${APP_ORIGIN}/pair`, clock.at),
+      seq: 2,
+      taintSeq: 2,
+      linked: true,
+    });
+    clock.at += 10 * SECOND;
+    pairing.close('pairing-1');
+    const before = await attempt(tools, { tool: 'browser.read', name: 'app' });
+    clock.at += SECOND;
+    tabs.navigation.set(app.id, {
+      ...cleanNavigation(`${APP_ORIGIN}/d/m1`, clock.at),
+      seq: 3,
+      taintSeq: 2,
+      linked: false,
+      documentAt: clock.at,
+    });
+    clock.at += SECOND;
+
+    // Act
+    const after = await attempt(tools, { tool: 'browser.read', name: 'app' });
+
+    // Assert — unpaired (the link's own document) refused, paired (a new document, no code since) answered
+    should(before.error?.message).equal(PAIRING_SCREEN_REFUSAL);
+    should(after.error).be.undefined();
+    should(after.answer?.output).equal('hello');
+  });
+
+  it('V-B20 should still refuse that page when a code was live after its document began', async () => {
+    const { tabs, tools, app, pairing, clock } = await pairingWorld();
+    tabs.navigation.set(app.id, {
+      ...cleanNavigation(`${APP_ORIGIN}/d/m1`, clock.at),
+      seq: 3,
+      taintSeq: 2,
+      documentAt: clock.at,
+    });
+    clock.at += SECOND;
+    pairing.open('pairing-2', clock.at + 120 * SECOND);
+    clock.at += SECOND;
+    pairing.close('pairing-2');
+    clock.at += SECOND;
+
+    const { answer, error } = await attempt(tools, { tool: 'browser.read', name: 'app' });
+
+    should(answer).be.undefined();
+    should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
+  });
+
+  it('V-B20 keeps historical console and network reads refused after the pairing document is replaced', async () => {
+    const { tabs, tools, app, pairing, clock } = await pairingWorld();
+    pairing.open('pairing-history', clock.at + 120 * SECOND);
+    clock.at += SECOND;
+    pairing.close('pairing-history');
+    clock.at += SECOND;
+    tabs.navigation.set(app.id, {
+      ...cleanNavigation(`${APP_ORIGIN}/d/m1`, clock.at),
+      seq: 3,
+      taintSeq: 2,
+      documentAt: clock.at,
+    });
+    for (const call of [
+      { tool: 'browser.console', name: 'app' },
+      { tool: 'browser.network', name: 'app', action: 'list' },
+      { tool: 'browser.network', name: 'app', action: 'get', id: 'r1' },
+    ] as const) {
+      const { answer, error } = await attempt(tools, call);
+      should(answer).be.undefined();
+      should(error?.message).equal(PAIRING_SCREEN_REFUSAL);
+    }
+    should(contentCalls(tabs)).eql([]);
   });
 
   it('should refuse a read during which a link of the pairing grammar was committed, wherever the page went after', async () => {

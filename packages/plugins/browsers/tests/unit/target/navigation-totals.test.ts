@@ -105,6 +105,7 @@ describe('the daemon’s belief in the totals', () => {
     taintSeq: 0,
     linked: false,
     watchedSince: 1,
+    documentAt: 1,
     totals: { links: { 'https://app.example.test': 2 }, lost: 0 },
   };
 

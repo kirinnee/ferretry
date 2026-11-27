@@ -4,7 +4,7 @@
  */
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
+import { ConversationSourceSchema, FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 export const CONVERSATION_NAME_MAX = 120;
 export const CONVERSATION_PREVIEW_MAX = 120;
@@ -24,6 +24,7 @@ const HarnessIdSchema = z.string().min(1);
 export const LinkableConversationSchema = z.strictObject({
   id: LinkIdSchema,
   harness: HarnessIdSchema,
+  source: ConversationSourceSchema.optional(),
   project: z.string().min(1),
   name: z.string().min(1).max(CONVERSATION_NAME_MAX).optional(),
   preview: z.string().max(CONVERSATION_PREVIEW_MAX),

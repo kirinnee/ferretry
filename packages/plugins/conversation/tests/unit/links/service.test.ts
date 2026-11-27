@@ -42,6 +42,7 @@ const build = async (
   const asked: Array<{ copy: boolean }> = [];
   const needs: ConstructorParameters<typeof LinkService>[0] = {
     index,
+    owners: async () => new Map(),
     previewer: {
       preview: async (conversation, count) =>
         await new FileConversationDescriber(conversationFiles(owner), PARSERS).preview(
@@ -242,7 +243,7 @@ describe('links', () => {
 
   test('O8-12 stage copies a host-only Claude transcript into the pool by the index’s own path, and starts no ferret and writes no link', async () => {
     const { service, copies, asked, stored } = await build();
-    expect(await service.stage('claude-code', ID)).toEqual(ok(undefined));
+    expect((await service.stage('claude-code', ID)).ok).toBe(true);
     // The source is the file's path below the harness's history folder, exactly what `Harness.importConversation` takes.
     expect(copies).toEqual([{ id: ID, path: PATH }]);
     expect(asked).toEqual([]);
@@ -262,7 +263,7 @@ describe('links', () => {
       nowMs: () => 0,
     });
     await index.refresh();
-    expect(await new LinkService({ ...needs, index }).stage('codex', CODEX)).toEqual(ok(undefined));
+    expect((await new LinkService({ ...needs, index }).stage('codex', CODEX)).ok).toBe(true);
     expect(copies).toEqual([{ id: CODEX, path: rollout }]);
   });
 

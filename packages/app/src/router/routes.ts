@@ -193,7 +193,8 @@ export const daemonSettingsHref = (daemon: string, plugin?: string, tab?: string
 export const DEVICE_SETTINGS_HREF = '/settings';
 /** This device's own section of a machine's Settings (`/d/<daemon>/settings/device`); the bare `/settings` page is the recovery page for a browser with no usable machine. */
 export const deviceSettingsHref = (daemon: string): string => daemonSettingsHref(daemon, 'device');
-/** Access's pairing page, told which machine refused this browser (a machine id is not a secret; no code rides it). */
-export const pairAgainHref = (daemon: string): string => `/pair?refused=${encodeURIComponent(daemon)}`;
+/** Access's pairing page, told which machine needs pairing and why (a non-secret id, never a code). */
+export const pairAgainHref = (daemon: string, reason: 'refused' | 'replaced' = 'refused'): string =>
+  `/pair?${reason}=${encodeURIComponent(daemon)}`;
 /** The app's home (the daemon list). `/` is the public landing page; the app lives under `/app/`. */
 export const HOME_HREF = '/app/';

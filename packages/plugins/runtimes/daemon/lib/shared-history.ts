@@ -102,7 +102,7 @@ export function sharedHistoryPoolDirectory(fleetDirectory: string, kind: Harness
 }
 
 /**
- * The pool request for EVERY harness, with no switch.
+ * The pool request for EVERY harness, with no switch: `homesOf` answers each harness's homes by asking.
  *
  * History is always shared in the account model (H1): there is no `sharedHistory` setting to read,
  * so a harness is pooled whenever it has a runtime. A harness with no home yet still gets its
@@ -111,8 +111,8 @@ export function sharedHistoryPoolDirectory(fleetDirectory: string, kind: Harness
  */
 export function sharedHistoryPoolRequests(
   fleetDirectory: string,
-  homes: Readonly<Record<HarnessKind, readonly SharedHistoryHome[]>>,
+  homesOf: (kind: HarnessKind) => readonly SharedHistoryHome[],
 ): readonly SharedHistoryRequest[] {
   const poolRoot = sharedHistoryPoolRoot(fleetDirectory);
-  return supportedKinds().map(kind => ({ kind, poolRoot, homes: homes[kind] }));
+  return supportedKinds().map(kind => ({ kind, poolRoot, homes: homesOf(kind) }));
 }
