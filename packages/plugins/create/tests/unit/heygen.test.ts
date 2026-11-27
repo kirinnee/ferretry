@@ -27,6 +27,8 @@ class FakeHeygen {
   /** The status read answers this instead of the video's own state while set. */
   statusAnswer: 'ok' | 'drops' | 500 = 'ok';
   cdn: 'ok' | 'not-found' | 'wrong-type' = 'ok';
+  /** While set, storage answers only once this resolves: a download that is in flight. */
+  cdnGate: Promise<void> | undefined;
   private count = 0;
 
   readonly fetch = async (url: URL, init?: RequestInit): Promise<Response> => {
@@ -54,6 +56,7 @@ class FakeHeygen {
       return Response.json({ code: 100, data: { status: video.status, video_url: video.url }, message: 'Success' });
     }
     if (url.host.endsWith('heygen.ai')) {
+      await this.cdnGate;
       if (this.cdn === 'not-found') return new Response('no', { status: 404 });
       return new Response(MP4, {
         headers: { 'content-type': this.cdn === 'wrong-type' ? 'text/html' : 'video/mp4' },
@@ -76,10 +79,17 @@ interface World {
   readonly delivered: { ferret: string; name: string; bytes: number }[];
   readonly host: Awaited<ReturnType<typeof testHost>>;
   readonly standing: { current: CallStanding };
+  /** While true, a write to the jobs file fails (a full or damaged disk). */
+  readonly jobsWrite: { fails: boolean };
 }
 
 async function world(
-  options: { key?: boolean; ledger?: readonly object[]; deliver?: 'ok' | 'nowhere' } = {},
+  options: {
+    key?: boolean;
+    ledger?: readonly object[];
+    deliver?: 'ok' | 'nowhere';
+    limits?: { dailyUsd?: number; askAboveUsd?: number };
+  } = {},
 ): Promise<World> {
   const standing: { current: CallStanding } = { current: ferretStanding(ferretId('test-ferret')) };
   const fake = new FakeHeygen();
@@ -103,7 +113,12 @@ async function world(
     fakes: { asks, ferrets },
     fetch: fake.fetch,
     vault: { HEYGEN_API_KEY: HEYGEN_KEY },
-    config: { 'create.yaml': options.key === false ? {} : { heygen: { key: '${secret:HEYGEN_API_KEY}' } } },
+    config: {
+      'create.yaml': {
+        ...(options.key === false ? {} : { heygen: { key: '${secret:HEYGEN_API_KEY}' } }),
+        ...(options.limits === undefined ? {} : { limits: options.limits }),
+      },
+    },
   });
   if (options.ledger !== undefined)
     host
@@ -114,7 +129,14 @@ async function world(
           .map(line => JSON.stringify({ format: 1, ...line, day: dayOf(new Date(host.clock.nowMs()), 'UTC') }))
           .join('\n')}\n`,
       );
-  return { fake, asks, delivered, host, standing };
+  const jobsWrite = { fails: false };
+  const files = host.state('create').files;
+  const set = files.set.bind(files);
+  files.set = (path, text) => {
+    if (jobsWrite.fails && path === 'avatar-jobs.jsonl') throw new Error('the disk is full');
+    return set(path, text);
+  };
+  return { fake, asks, delivered, host, standing, jobsWrite };
 }
 
 const SHORT = 'Hello, and welcome to the show.';
@@ -471,5 +493,64 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
     second.fake.videos.set('hv1', { status: 'completed', url: CDN });
     expect((await status(second, job)).text).toContain('type: video');
     expect(net(second)).toBe(1_000_000);
+  });
+});
+
+describe('avatar_video_status: the edges of the shared queue and the job file', () => {
+  test('a status request that names no valid job is refused before anything is read', async () => {
+    const w = await world();
+    const answer = await status(w, 'not-a-job');
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('not valid');
+    expect(w.fake.seen).toHaveLength(0);
+  });
+
+  test('a job that cannot be saved after HeyGen queued it is paid for and counted, and says not to ask again', async () => {
+    const w = await world();
+    w.jobsWrite.fails = true;
+    const answer = await avatar(w);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('the job could not be saved');
+    expect(answer.text).toContain('Do NOT ask again');
+    expect(net(w)).toBe(1_000_000);
+  });
+
+  test('an end that cannot be written changes nothing: the job stays open and is asked again', async () => {
+    const w = await world();
+    const job = jobOf((await avatar(w)).text);
+    w.fake.videos.get('hv1')!.status = 'failed';
+    w.jobsWrite.fails = true;
+    const answer = await status(w, job);
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('its end could not be saved');
+    expect(net(w)).toBe(1_000_000);
+    w.jobsWrite.fails = false;
+    expect((await status(w, job)).text).toContain('Not made');
+  });
+
+  test('a second ask while the video is coming down fetches nothing; past two downloads and two waiting, the rest are turned away', async () => {
+    const w = await world({ limits: { dailyUsd: 20 } });
+    const jobs: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      jobs.push(jobOf((await avatar(w, { script: `script number ${i}` })).text));
+      w.fake.finish(`hv${i + 1}`);
+    }
+    let open!: () => void;
+    w.fake.cdnGate = new Promise<void>(resolve => (open = resolve));
+    const asked = jobs.map(job => status(w, job));
+    await Bun.sleep(200);
+    // Two are coming down; two more wait for a place; two were turned away at once.
+    expect(w.fake.to('resource2.heygen.ai')).toHaveLength(2);
+    // Asking for one that is coming down is told so and starts no second fetch.
+    const meanwhile = await status(w, jobs[0]!);
+    expect(meanwhile.text).toContain('is being fetched right now');
+    open();
+    const answers = await Promise.all(asked);
+    const turnedAway = answers.filter(answer => answer.text.includes('Too many videos'));
+    expect(turnedAway).toHaveLength(2);
+    expect(turnedAway.every(answer => answer.text.includes('Nothing more was spent'))).toBe(true);
+    expect(answers.filter(answer => answer.text.includes('type: video'))).toHaveLength(4);
+    expect(w.delivered).toHaveLength(4);
+    expect(net(w)).toBe(6_000_000);
   });
 });
