@@ -212,6 +212,9 @@ Nodes.
   outside `/nix/store`. `scripts/ci/test.sh` and `scripts/ci/build-pwa.sh` run it first, so every CI
   test lane and both PWA builds (`ci.yaml` `pwa-bundle`, `pwa-pages.yaml` `build`) refuse a drifted
   `PATH` before doing any work. The Pages release build must stay that script, not a bare `task`.
+- On Linux every shell also sets `FONTCONFIG_FILE` to a flake-built fonts configuration over DejaVu
+  (`nix/shells.nix`), so Chrome in the browser tiers has fonts on a host that has none; the same script
+  fails when it is missing.
 - Do not add a tool to a workflow with `actions/setup-node` or rely on the image's Node. If a new
   script needs another runtime, add it to the flake and to the guard's list.
 

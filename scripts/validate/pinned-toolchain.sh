@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fails when `node`, `bun` or `tmux` resolves outside /nix/store, and prints the version of each.
+# Fails when `node`, `bun` or `tmux` resolves outside /nix/store (and, on Linux, when the shell carries no fonts
+# configuration for the browser tests), and prints the version of each.
 #
 # The flake pins the toolchain, but PATH decides which binary a script actually runs. The `vite`
 # bin is `#!/usr/bin/env node`, so with no pinned Node in the devshell the PWA build ran on whatever
@@ -24,5 +25,16 @@ for tool in node bun tmux; do
   [[ ${resolved} == /nix/store/* ]] ||
     fail "${tool} resolves to ${resolved}, outside /nix/store: the runner image's ${tool}, not the one the flake pins"
 done
+
+# fonts (Linux): Chrome in the visual and browser tiers finds fonts through fontconfig. A host with none gives it an empty
+# font set, so every unit-free "does this label fit" measurement is wrong and Chromium needs a hand-made config before
+# it renders text at all. The devshell hands it one (nix/shells.nix): a file in /nix/store that names a font directory.
+if [[ "$(uname -s)" == Linux ]]; then
+  fonts="${FONTCONFIG_FILE:-}"
+  [[ -n ${fonts} && ${fonts} == /nix/store/* && -r ${fonts} ]] ||
+    fail "FONTCONFIG_FILE is ${fonts:-unset}, not a fonts configuration from /nix/store: Chrome would draw no text"
+  grep -q '<dir>/nix/store/.*dejavu' "${fonts}" ||
+    fail "FONTCONFIG_FILE (${fonts}) names no DejaVu font directory, so Chrome would have no font to draw with"
+fi
 
 echo "✅ node $(node --version), bun $(bun --version) and $(tmux -V) come from /nix/store"

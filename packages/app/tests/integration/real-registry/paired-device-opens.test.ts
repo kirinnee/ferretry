@@ -6,6 +6,7 @@ import type { DaemonRegistry } from '../../../../../scripts/test/two-release/rel
 import { realDaemonRegistry } from '../../../../../scripts/test/two-release/real-release.ts';
 import { standings, wholeDaemonBlocked } from '../../../src/client/inventory.ts';
 import { CORE_IDS } from '@ferretry/kernel/contract';
+import { inventorySurfacesOf } from '@ferretry/kernel/host';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { type AppSession, openApp } from '../two-release/session.ts';
 
@@ -117,7 +118,14 @@ describe('narrowing still narrows', () => {
       };
       const fullStandings = read(full);
       const limitedStandings = read(limited);
-      for (const entry of surfaces) expect(fullStandings.get(entry.id)).toEqual({ state: 'allowed' });
+      // "Every package" is every package with something a device could reach: the daemon hides one that declares no route,
+      // socket or tool (a harness adapter such as OpenCode, whose app half is empty), so it is named, not allowed.
+      const reachable = (entry: SurfaceEntry): boolean =>
+        entry.core || entry.id === 'access' || inventorySurfacesOf(entry.manifest).length > 0;
+      for (const entry of surfaces)
+        expect(fullStandings.get(entry.id)).toEqual(
+          reachable(entry) ? { state: 'allowed' } : { state: 'blocked', reason: 'missing' },
+        );
       for (const id of CORE_IDS) expect(limitedStandings.get(id)).toEqual({ state: 'allowed' });
       const hidden = surfaces.filter(entry => limitedStandings.get(entry.id)?.state === 'blocked');
       expect(hidden.length).toBeGreaterThan(0);
