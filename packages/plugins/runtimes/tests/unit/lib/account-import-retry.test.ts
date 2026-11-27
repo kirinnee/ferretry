@@ -1,7 +1,14 @@
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type HostDocumentRead, type HostHarnessScan, type ImportOptions } from '../../../daemon/lib/account/import.ts';
 import { mergeImport, mergeImportRecord, planImport } from '../../../daemon/lib/account/import-plan.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 const digest = (text: string): string => String(Bun.hash(text));
 const text = (source: string, body: string): HostDocumentRead => ({
@@ -27,10 +34,10 @@ const scan = (harness: 'claude' | 'codex', login: HostHarnessScan['login']): Hos
 
 /** The first import, committed (the configuration and its record), then the same scan planned again on top of it. */
 const retried = (scans: readonly HostHarnessScan[], again: Partial<ImportOptions> = {}) => {
-  const first = planImport(scans, { digest });
+  const first = planImport(scans, { kits: IMPORT_KITS, digest });
   const existing = mergeImport(undefined, first);
   const record = mergeImportRecord(first);
-  return { first, existing, retry: planImport(scans, { digest, existing, record, ...again }) };
+  return { first, existing, retry: planImport(scans, { kits: IMPORT_KITS, digest, existing, record, ...again }) };
 };
 
 describe('planImport — a retry on the same committed import record', () => {
@@ -63,7 +70,7 @@ describe('planImport — a retry on the same committed import record', () => {
   it('should keep a Ferretry login the person already signed in, not overwrite it with an empty slot', () => {
     // Arrange
     const scans = [scan('codex', { state: 'not-shareable' })];
-    const first = planImport(scans, { digest });
+    const first = planImport(scans, { kits: IMPORT_KITS, digest });
     const signedIn = mergeImport(undefined, first);
     const credentialId = Object.keys(signedIn.credentials)[0] as string;
     const withLogin = {
@@ -73,6 +80,7 @@ describe('planImport — a retry on the same committed import record', () => {
 
     // Act
     const retry = planImport(scans, {
+      kits: IMPORT_KITS,
       digest,
       existing: withLogin as typeof signedIn,
       record: mergeImportRecord(first),
@@ -98,10 +106,10 @@ describe('planImport — a retry on the same committed import record', () => {
   it('should not reuse a runtime when there is no import record: that is a first import', () => {
     // Arrange
     const scans = [scan('codex', { state: 'not-shareable' })];
-    const existing = mergeImport(undefined, planImport(scans, { digest }));
+    const existing = mergeImport(undefined, planImport(scans, { kits: IMPORT_KITS, digest }));
 
     // Act
-    const plan = planImport(scans, { digest, existing });
+    const plan = planImport(scans, { kits: IMPORT_KITS, digest, existing });
 
     // Assert
     should(Object.keys(plan.credentials)).deepEqual(['codex-you-2']);

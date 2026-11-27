@@ -50,20 +50,34 @@ const expectKits = (expected: ReadonlyMap<HarnessKind, RuntimesHarnessKit>) => {
 };
 
 describe('host import kit threading', () => {
-  it('hands harvest and loginNote each harness own real kit without changing the plan', () => {
+  it('keeps the kit instruction name aligned with the live preview table', () => {
+    expect(claudeRuntimesKit.importSetup?.instructionsName).toBe(real.HOST_INSTRUCTIONS_NAME.claude);
+  });
+  it('hands harvest and loginNote each harness own real kit and refuses a missing map', () => {
     const withKits = planImport(scans, { digest: text => text, kits });
     expectKits(kits);
     expect(calls.map(call => call.group).sort()).toEqual(['harvest', 'harvest', 'loginNote', 'loginNote']);
+    expect(withKits.imported).toEqual(['claude', 'codex']);
     calls.length = 0;
-    expect(planImport(scans, { digest: text => text })).toEqual(withKits);
-    expectKits(new Map());
+    expect(() => planImport(scans, { kits: undefined, digest: text => text })).toThrow('claude is not supported here');
+    expect(calls).toEqual([{ group: 'harvest', harness: 'claude', kit: undefined }]);
   });
 
   it('never substitutes another harness kit for a missing entry', () => {
     const codexOnly = new Map<HarnessKind, RuntimesHarnessKit>([['codex', codexRuntimesKit]]);
-    planImport(scans, { digest: text => text, kits: codexOnly });
-    expectKits(codexOnly);
+    expect(() => planImport(scans, { digest: text => text, kits: codexOnly })).toThrow('claude is not supported here');
+    expect(calls).toEqual([{ group: 'harvest', harness: 'claude', kit: undefined }]);
   });
+
+  for (const member of ['importSetup', 'harvest', 'loginNote'] as const) {
+    it(`refuses a Claude kit without ${member}`, () => {
+      const incomplete = new Map(kits);
+      incomplete.set('claude', { ...claudeRuntimesKit, [member]: undefined });
+      expect(() => planImport(scans, { kits: incomplete, digest: text => text })).toThrow(
+        'claude is not supported here',
+      );
+    });
+  }
 
   it('reads kits live through the file adapter for each host scan and the service planner', async () => {
     const requested: HarnessKind[] = [];
