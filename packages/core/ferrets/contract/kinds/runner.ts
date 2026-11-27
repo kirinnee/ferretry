@@ -511,6 +511,13 @@ export interface RunnerFormCapture {
    */
   readonly blocking?: 'permission' | 'dialog' | undefined;
   /**
+   * What the runner's dialog reader read on that SAME frame when `blocking` is `'dialog'`: the title, how many rows it
+   * has and its footer line. A caller that must act on the screen it is looking at (a key that dismisses a notice) takes
+   * these from here and keeps no second parse of `visible`, so it can never disagree with the reader. Pane words held
+   * for the one decision; never logged or stored.
+   */
+  readonly dialog?: { readonly title: string; readonly options: number; readonly footer: string } | undefined;
+  /**
    * Additive (stuck-send snapshot): where tmux put the cursor on the VISIBLE frame, zero-based, when it said. The
    * cursor is what tells a composer's placeholder from typed input, so a frame kept to explain a send that could not be
    * typed is unreadable without it. Absent when tmux did not answer.

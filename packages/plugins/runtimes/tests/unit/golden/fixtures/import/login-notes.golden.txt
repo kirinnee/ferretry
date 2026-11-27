@@ -1,0 +1,167 @@
+"claude":
+  [
+    {
+      "credential":
+        "harness": "claude"
+        "store": "host"
+      "login":
+        "email": "person@example.test"
+        "state": "signed-in"
+      "note": "Login · person@example.test. Ferretry and your own `claude` share this login: signing out in one signs out both."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "host"
+      "login": "state": "signed-in"
+      "note": "Login · your login. Ferretry and your own `claude` share this login: signing out in one signs out both."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "host"
+      "login":
+        "email": "person@example.test"
+        "state": "refresh-due"
+      "note": "Login · person@example.test · Refresh due. Ferretry renews it the first time you launch."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "host"
+      "login": "state": "not-signed-in"
+      "note": "Claude Code isn't signed in on this machine. Your setup was still imported; sign in later and every runtime on this login can launch."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "host"
+      "login": "state": "unknown"
+      "note": "Claude Code sign-in is unknown (Logins has no host discovery fact). Your login stays shared in place."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "host"
+      "login":
+        "reason": "golden reason"
+        "state": "unknown"
+      "note": "Claude Code sign-in is unknown (golden reason). Your login stays shared in place."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "host"
+      "login": "state": "unreadable"
+      "note": "Ferretry couldn't read your Claude Code login (no reason given). It is still shared in place; check it on the Sign-ins tab."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "host"
+      "login":
+        "reason": "a locked keychain"
+        "state": "unreadable"
+      "note": "Ferretry couldn't read your Claude Code login (a locked keychain). It is still shared in place; check it on the Sign-ins tab."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "ferretry"
+      "login":
+        "reason": "it is kept in a keyring"
+        "state": "not-shareable"
+      "note": "Your Claude Code login can't be shared in place (it is kept in a keyring), so this login needs its own sign-in."
+    }
+    {
+      "credential":
+        "harness": "claude"
+        "store": "ferretry"
+      "login": "state": "not-shareable"
+      "note": "Your Claude Code login can't be shared in place (it is not kept in a file), so this login needs its own sign-in."
+    }
+  ]
+"codex":
+  [
+    {
+      "credential":
+        "harness": "codex"
+        "store": "host"
+      "login":
+        "email": "person@example.test"
+        "state": "signed-in"
+      "note": "Login · person@example.test. Ferretry and your own `codex` share this login: signing out in one signs out both."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "host"
+      "login": "state": "signed-in"
+      "note": "Login · your login. Ferretry and your own `codex` share this login: signing out in one signs out both."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "host"
+      "login":
+        "email": "person@example.test"
+        "state": "refresh-due"
+      "note": "Login · person@example.test · Refresh due. Ferretry renews it the first time you launch."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "host"
+      "login": "state": "not-signed-in"
+      "note": "Codex isn't signed in on this machine. Your setup was still imported; sign in later and every runtime on this login can launch."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "host"
+      "login": "state": "unknown"
+      "note": "Codex sign-in is unknown (Logins has no host discovery fact). Your login stays shared in place."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "host"
+      "login":
+        "reason": "golden reason"
+        "state": "unknown"
+      "note": "Codex sign-in is unknown (golden reason). Your login stays shared in place."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "host"
+      "login": "state": "unreadable"
+      "note": "Ferretry couldn't read your Codex login (no reason given). It is still shared in place; check it on the Sign-ins tab."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "host"
+      "login":
+        "reason": "a locked keychain"
+        "state": "unreadable"
+      "note": "Ferretry couldn't read your Codex login (a locked keychain). It is still shared in place; check it on the Sign-ins tab."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "ferretry"
+      "login":
+        "reason": "it is kept in a keyring"
+        "state": "not-shareable"
+      "note": "Your Codex login can't be shared in place (it is kept in a keyring), so this login needs its own sign-in."
+    }
+    {
+      "credential":
+        "harness": "codex"
+        "store": "ferretry"
+      "login": "state": "not-shareable"
+      "note": "Your Codex login can't be shared in place (it is not kept in a file), so this login needs its own sign-in."
+    }
+  ]
+"thirdKey": "threw": "opencode is not supported here"

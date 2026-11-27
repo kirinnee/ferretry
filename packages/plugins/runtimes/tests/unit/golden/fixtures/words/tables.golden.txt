@@ -1,0 +1,83 @@
+"assets":
+  "claude":
+    "hooks": null
+    "hooksDir": null
+    "mcp":
+      "dest": ".mcp.json"
+      "field": "mcp"
+      "materialization": "link"
+    "memory":
+      "dest": "CLAUDE.md"
+      "field": "memory"
+      "materialization": "link"
+    "settings":
+      "dest": "settings.json"
+      "field": "settings"
+      "format": "json"
+      "materialization": "generated"
+    "skills":
+      "dest": "skills"
+      "field": "skills"
+      "materialization": "link"
+  "codex":
+    "hooks":
+      "dest": "hooks.json"
+      "field": "hooks"
+      "materialization": "link"
+    "hooksDir":
+      "dest": "hooks"
+      "field": "hooksDir"
+      "materialization": "link"
+    "mcp": null
+    "memory":
+      "dest": "AGENTS.md"
+      "field": "memory"
+      "materialization": "link"
+    "settings":
+      "dest": "config.toml"
+      "field": "settings"
+      "format": "toml"
+      "materialization": "generated"
+    "skills":
+      "dest": "skills"
+      "field": "skills"
+      "materialization": "link"
+"displayNames":
+  "claude": "Claude Code"
+  "codex": "Codex"
+"fastMode":
+  "Claude-OPUS-5": true
+  "claude-opus-4-8": true
+  "claude-opus-5-5": true
+  "claude-sonnet-5-5": false
+  "gpt-6": false
+"instructionsNames":
+  "claude": "CLAUDE.md"
+  "codex": "AGENTS.md"
+"keyOfKind":
+  "claude": "claude-code"
+  "codex": "codex"
+"ownedEntry":
+  ".system": true
+  "claudeSystem": false
+  "mine": false
+"ownedSkillEntries":
+  "claude": []
+  "codex":
+    [
+      ".system"
+    ]
+"packages":
+  "claude":
+    "cask": "claude-code"
+    "nixpkgs": "claude-code"
+    "npm": "@anthropic-ai/claude-code"
+  "codex":
+    "cask": "codex"
+    "nixpkgs": "codex"
+    "npm": "@openai/codex"
+"supportedKinds":
+  [
+    "claude"
+    "codex"
+  ]

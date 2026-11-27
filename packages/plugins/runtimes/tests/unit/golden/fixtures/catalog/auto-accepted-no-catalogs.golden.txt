@@ -1,0 +1,1440 @@
+"components":
+  "format": "present"
+  "kinds":
+    [
+      {
+        "components":
+          [
+            {
+              "content":
+                "form": "text"
+                "redacted": false
+                "text":
+                  <<<
+                    See
+                    @docs/guide.md
+
+                  >>>
+              "detail":
+                "file": "components/instructions/imports.md"
+                "kind": "instructions"
+              "editNote": "Used by 1 profile and 3 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "instructions"
+              "name": "imports"
+              "partial":
+                [
+                  {
+                    "harness": "codex"
+                    "reason": "Partly supported on Codex: imports pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files."
+                  }
+                ]
+              "reference": "instructions/imports"
+              "remove":
+                "available": false
+                "reason": "It is a layer in codex. Remove it from that profile first."
+              "scope": "generic"
+              "usedBy":
+                "profiles":
+                  [
+                    "codex"
+                  ]
+                "runtimes":
+                  [
+                    "codex-env"
+                    "codex-host"
+                    "codex-kept"
+                  ]
+              "warnings": []
+            }
+            {
+              "content":
+                "form": "text"
+                "redacted": false
+                "text":
+                  <<<
+                    Be kind.
+
+                  >>>
+              "detail":
+                "file": "components/instructions/main.md"
+                "kind": "instructions"
+              "editNote": "Used by 2 profiles and 4 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "instructions"
+              "name": "main"
+              "partial": []
+              "reference": "instructions/main"
+              "remove":
+                "available": false
+                "reason": "It is a layer in claude and mixed. Remove it from those profiles first."
+              "scope": "generic"
+              "usedBy":
+                "profiles":
+                  [
+                    "claude"
+                    "mixed"
+                  ]
+                "runtimes":
+                  [
+                    "claude-env"
+                    "claude-host"
+                    "claude-kept"
+                    "claude-on-mixed"
+                  ]
+              "warnings": []
+            }
+          ]
+        "description": "Guidance every session reads first."
+        "kind": "instructions"
+        "label": "Instructions"
+      }
+      {
+        "components":
+          [
+            {
+              "detail":
+                "env": []
+                "kind": "mcp"
+                "url": "https://docs.example.test/mcp"
+              "editNote": "Used by 1 profile and 3 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "mcp"
+              "name": "docs"
+              "partial": []
+              "reference": "mcp/docs"
+              "remove":
+                "available": false
+                "reason": "It is a layer in codex. Remove it from that profile first."
+              "scope": "generic"
+              "usedBy":
+                "profiles":
+                  [
+                    "codex"
+                  ]
+                "runtimes":
+                  [
+                    "codex-env"
+                    "codex-host"
+                    "codex-kept"
+                  ]
+              "warnings": []
+            }
+            {
+              "detail":
+                "env": []
+                "kind": "mcp"
+                "url": "https://feed.example.test/sse"
+              "editNote": "Used by 1 profile and 3 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "mcp"
+              "name": "feed"
+              "partial":
+                [
+                  {
+                    "harness": "codex"
+                    "reason": "Partly supported on Codex: feed is reached over SSE. Codex connects to servers over streamable HTTP, so it may not reach this one."
+                  }
+                ]
+              "reference": "mcp/feed"
+              "remove":
+                "available": false
+                "reason": "It is a layer in claude. Remove it from that profile first."
+              "scope": "generic"
+              "usedBy":
+                "profiles":
+                  [
+                    "claude"
+                  ]
+                "runtimes":
+                  [
+                    "claude-env"
+                    "claude-host"
+                    "claude-kept"
+                  ]
+              "warnings": []
+            }
+            {
+              "detail":
+                "args":
+                  [
+                    "server-files"
+                  ]
+                "argsEtag": "a99d7ee0067621d731740310f388c53fc8b0dc291b62c36158365c1050bf77f9"
+                "command": "npx"
+                "env":
+                  [
+                    {
+                      "name": "FILES_TOKEN"
+                      "value": "${secret:GOLDEN_FILES}"
+                    }
+                  ]
+                "kind": "mcp"
+              "editNote": "Used by 1 profile and 3 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "mcp"
+              "name": "files"
+              "partial": []
+              "reference": "mcp/files"
+              "remove":
+                "available": false
+                "reason": "It is a layer in claude. Remove it from that profile first."
+              "scope": "generic"
+              "usedBy":
+                "profiles":
+                  [
+                    "claude"
+                  ]
+                "runtimes":
+                  [
+                    "claude-env"
+                    "claude-host"
+                    "claude-kept"
+                  ]
+              "warnings": []
+            }
+            {
+              "detail":
+                "auth": "oauth"
+                "env": []
+                "kind": "mcp"
+                "url": "https://notes.example.test/mcp"
+              "editNote": "Used by 1 profile and 3 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "mcp"
+              "name": "notes"
+              "partial": []
+              "reference": "mcp/notes"
+              "remove":
+                "available": false
+                "reason": "It is a layer in codex. Remove it from that profile first."
+              "scope": "generic"
+              "usedBy":
+                "profiles":
+                  [
+                    "codex"
+                  ]
+                "runtimes":
+                  [
+                    "codex-env"
+                    "codex-host"
+                    "codex-kept"
+                  ]
+              "warnings": []
+            }
+          ]
+        "description": "Tools a session can call."
+        "kind": "mcp"
+        "label": "MCP servers"
+      }
+      {
+        "components":
+          [
+            {
+              "detail":
+                "items":
+                  [
+                    "review"
+                  ]
+                "kind": "skills"
+              "editNote": "Used by 2 profiles and 6 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "skills"
+              "name": "mine"
+              "partial":
+                [
+                  {
+                    "harness": "codex"
+                    "reason": "Partly supported on Codex: review limits which tools it may use. Codex ignores that limit and loads the rest."
+                  }
+                  {
+                    "harness": "codex"
+                    "reason": "Partly supported on Codex: review picks its own model. Codex ignores that and uses the runtime's model."
+                  }
+                ]
+              "reference": "skills/mine"
+              "remove":
+                "available": false
+                "reason": "It is a layer in claude and codex. Remove it from those profiles first."
+              "scope": "generic"
+              "usedBy":
+                "profiles":
+                  [
+                    "claude"
+                    "codex"
+                  ]
+                "runtimes":
+                  [
+                    "claude-env"
+                    "claude-host"
+                    "claude-kept"
+                    "codex-env"
+                    "codex-host"
+                    "codex-kept"
+                  ]
+              "warnings": []
+            }
+          ]
+        "description": "Named abilities a session can use."
+        "kind": "skills"
+        "label": "Skills"
+      }
+      {
+        "components":
+          [
+            {
+              "content":
+                "entries":
+                  [
+                    {
+                      "key": "model"
+                      "value": "claude-opus-5-5"
+                    }
+                  ]
+                "form": "entries"
+              "detail":
+                "env":
+                  [
+                    {
+                      "name": "KEPT"
+                      "value": "yes"
+                    }
+                  ]
+                "file": "components/settings/claude.json"
+                "flags":
+                  [
+                    "--verbose"
+                  ]
+                "flagsEtag": "c579ac009dadbb5eba6bf1831dd993609945878a9ee6d4fcd3811d9ee91ee9f9"
+                "kind": "settings"
+              "editNote": "Used by 2 profiles and 4 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "harness": "claude-code"
+              "kind": "settings"
+              "name": "claudeSettings"
+              "partial": []
+              "reference": "settings/claudeSettings"
+              "remove":
+                "available": false
+                "reason": "It is a layer in claude and mixed. Remove it from those profiles first."
+              "scope": "claude-code"
+              "usedBy":
+                "profiles":
+                  [
+                    "claude"
+                    "mixed"
+                  ]
+                "runtimes":
+                  [
+                    "claude-env"
+                    "claude-host"
+                    "claude-kept"
+                    "claude-on-mixed"
+                  ]
+              "warnings": []
+            }
+            {
+              "content":
+                "entries":
+                  [
+                    {
+                      "key": "model"
+                      "value": "gpt-6"
+                    }
+                  ]
+                "form": "entries"
+              "detail":
+                "env": []
+                "file": "components/settings/codex.toml"
+                "kind": "settings"
+              "editNote": "Used by 2 profiles and 4 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "harness": "codex"
+              "kind": "settings"
+              "name": "codexSettings"
+              "partial": []
+              "reference": "settings/codexSettings"
+              "remove":
+                "available": false
+                "reason": "It is a layer in codex and mixed. Remove it from those profiles first."
+              "scope": "codex"
+              "usedBy":
+                "profiles":
+                  [
+                    "codex"
+                    "mixed"
+                  ]
+                "runtimes":
+                  [
+                    "claude-on-mixed"
+                    "codex-env"
+                    "codex-host"
+                    "codex-kept"
+                  ]
+              "warnings": []
+            }
+          ]
+        "description": "Flags, environment and options for one tool."
+        "kind": "settings"
+        "label": "Settings"
+      }
+      {
+        "components": []
+        "description": "Commands that run at points in a session, for one tool."
+        "kind": "hooks"
+        "label": "Hooks"
+      }
+      {
+        "components":
+          [
+            {
+              "detail":
+                "default": "claude-opus-5-5"
+                "kind": "modelSets"
+                "models":
+                  [
+                    "claude-opus-5-5"
+                    "claude-sonnet-5-5"
+                  ]
+              "editNote": "Used by 1 profile and 3 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "modelSets"
+              "name": "claude"
+              "partial": []
+              "reference": "modelSets/claude"
+              "remove":
+                "available": false
+                "reason": "It is a layer in claude. Remove it from that profile first."
+              "scope": "claude-code"
+              "usedBy":
+                "profiles":
+                  [
+                    "claude"
+                  ]
+                "runtimes":
+                  [
+                    "claude-env"
+                    "claude-host"
+                    "claude-kept"
+                  ]
+              "warnings": []
+            }
+            {
+              "detail":
+                "default": "gpt-6"
+                "kind": "modelSets"
+                "models":
+                  [
+                    "gpt-6"
+                    "gpt-6-mini"
+                  ]
+              "editNote": "Used by 2 profiles and 4 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "kind": "modelSets"
+              "name": "codex"
+              "partial": []
+              "reference": "modelSets/codex"
+              "remove":
+                "available": false
+                "reason": "It is a layer in codex and mixed. Remove it from those profiles first."
+              "scope": "codex"
+              "usedBy":
+                "profiles":
+                  [
+                    "codex"
+                    "mixed"
+                  ]
+                "runtimes":
+                  [
+                    "claude-on-mixed"
+                    "codex-env"
+                    "codex-host"
+                    "codex-kept"
+                  ]
+              "warnings": []
+            }
+          ]
+        "description": "The models a runtime offers, and its default."
+        "kind": "modelSets"
+        "label": "Model sets"
+      }
+    ]
+"machine":
+  "agendaMode": true
+  "agentControl":
+    "browsers": true
+    "ferretrySettings": false
+    "files": true
+    "pageScripts": false
+    "terminals": true
+  "agentPermissions": "auto"
+  "authority":
+    "applyRefusal": "granted"
+    "mayApply": true
+  "autoResume": true
+  "browserFirewallFailure": "warn"
+  "browserMode": "headless"
+  "browserPorts": "random"
+  "browserProxy": null
+  "defaultRuntime": "claude-env"
+  "format": "present"
+  "lastAutoResume": null
+  "name": "golden-machine"
+  "publicUsageFeed": false
+  "runningSessions": 0
+  "runtimeCount": 8
+  "setUp": true
+  "tools":
+    [
+      {
+        "command": "/opt/harness/bin/claude"
+        "harness": "claude-code"
+        "installed": true
+        "label": "Claude Code"
+      }
+      {
+        "command": "/opt/harness/bin/codex"
+        "harness": "codex"
+        "installed": true
+        "label": "Codex"
+      }
+    ]
+"profiles":
+  "format": "present"
+  "profiles":
+    [
+      {
+        "baseFor": []
+        "harnesses":
+          [
+            {
+              "applied":
+                [
+                  "instructions/main"
+                  "mcp/files"
+                  "mcp/feed"
+                  "skills/mine"
+                  "settings/claudeSettings"
+                  "modelSets/claude"
+                ]
+              "available": "available": true
+              "conflicts": []
+              "harness": "claude-code"
+              "partial": []
+              "skipped": []
+            }
+            {
+              "applied":
+                [
+                  "instructions/main"
+                  "mcp/files"
+                  "mcp/feed"
+                  "skills/mine"
+                ]
+              "available": "available": true
+              "conflicts": []
+              "harness": "codex"
+              "partial":
+                [
+                  {
+                    "reason": "Partly supported on Codex: feed is reached over SSE. Codex connects to servers over streamable HTTP, so it may not reach this one."
+                    "reference": "mcp/feed"
+                  }
+                  {
+                    "reason": "Partly supported on Codex: review limits which tools it may use. Codex ignores that limit and loads the rest."
+                    "reference": "skills/mine"
+                  }
+                  {
+                    "reason": "Partly supported on Codex: review picks its own model. Codex ignores that and uses the runtime's model."
+                    "reference": "skills/mine"
+                  }
+                ]
+              "skipped":
+                [
+                  {
+                    "reference": "settings/claudeSettings"
+                    "sentence": "Settings claudeSettings is for Claude Code only, so it is skipped on Codex."
+                  }
+                  {
+                    "reference": "modelSets/claude"
+                    "sentence": "Model set claude has no Codex model, so it is skipped on Codex."
+                  }
+                ]
+            }
+          ]
+        "layers":
+          [
+            "instructions/main"
+            "mcp/files"
+            "mcp/feed"
+            "skills/mine"
+            "settings/claudeSettings"
+            "modelSets/claude"
+          ]
+        "name": "claude"
+        "remove": "available": true
+        "scope":
+          "kind": "scoped"
+          "scope": "claude-code"
+        "usedBy":
+          [
+            "claude-env"
+            "claude-host"
+            "claude-kept"
+          ]
+        "wouldIncludeItself":
+          [
+            "claude"
+          ]
+      }
+      {
+        "baseFor": []
+        "harnesses":
+          [
+            {
+              "applied":
+                [
+                  "instructions/imports"
+                  "mcp/docs"
+                  "mcp/notes"
+                  "skills/mine"
+                ]
+              "available": "available": true
+              "conflicts": []
+              "harness": "claude-code"
+              "partial": []
+              "skipped":
+                [
+                  {
+                    "reference": "settings/codexSettings"
+                    "sentence": "Settings codexSettings is for Codex only, so it is skipped on Claude Code."
+                  }
+                  {
+                    "reference": "modelSets/codex"
+                    "sentence": "Model set codex has no Claude Code model, so it is skipped on Claude Code."
+                  }
+                ]
+            }
+            {
+              "applied":
+                [
+                  "instructions/imports"
+                  "mcp/docs"
+                  "mcp/notes"
+                  "skills/mine"
+                  "settings/codexSettings"
+                  "modelSets/codex"
+                ]
+              "available": "available": true
+              "conflicts": []
+              "harness": "codex"
+              "partial":
+                [
+                  {
+                    "reason": "Partly supported on Codex: imports pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files."
+                    "reference": "instructions/imports"
+                  }
+                  {
+                    "reason": "Partly supported on Codex: review limits which tools it may use. Codex ignores that limit and loads the rest."
+                    "reference": "skills/mine"
+                  }
+                  {
+                    "reason": "Partly supported on Codex: review picks its own model. Codex ignores that and uses the runtime's model."
+                    "reference": "skills/mine"
+                  }
+                ]
+              "skipped": []
+            }
+          ]
+        "layers":
+          [
+            "instructions/imports"
+            "mcp/docs"
+            "mcp/notes"
+            "skills/mine"
+            "settings/codexSettings"
+            "modelSets/codex"
+          ]
+        "name": "codex"
+        "remove": "available": true
+        "scope":
+          "kind": "scoped"
+          "scope": "codex"
+        "usedBy":
+          [
+            "codex-env"
+            "codex-host"
+            "codex-kept"
+          ]
+        "wouldIncludeItself":
+          [
+            "codex"
+          ]
+      }
+      {
+        "baseFor": []
+        "harnesses":
+          [
+            {
+              "applied": []
+              "available":
+                "available": false
+                "reason": "This profile has no layers yet."
+              "conflicts": []
+              "harness": "claude-code"
+              "partial": []
+              "skipped": []
+            }
+            {
+              "applied": []
+              "available":
+                "available": false
+                "reason": "This profile has no layers yet."
+              "conflicts": []
+              "harness": "codex"
+              "partial": []
+              "skipped": []
+            }
+          ]
+        "layers": []
+        "name": "empty"
+        "remove": "available": true
+        "scope":
+          "kind": "scoped"
+          "scope": "generic"
+        "usedBy":
+          [
+            "codex-on-empty"
+          ]
+        "wouldIncludeItself":
+          [
+            "empty"
+          ]
+      }
+      {
+        "baseFor": []
+        "harnesses":
+          [
+            {
+              "applied":
+                [
+                  "instructions/main"
+                  "settings/claudeSettings"
+                ]
+              "available": "available": true
+              "conflicts": []
+              "harness": "claude-code"
+              "partial": []
+              "skipped":
+                [
+                  {
+                    "reference": "settings/codexSettings"
+                    "sentence": "Settings codexSettings is for Codex only, so it is skipped on Claude Code."
+                  }
+                  {
+                    "reference": "modelSets/codex"
+                    "sentence": "Model set codex has no Claude Code model, so it is skipped on Claude Code."
+                  }
+                ]
+            }
+            {
+              "applied":
+                [
+                  "instructions/main"
+                  "settings/codexSettings"
+                  "modelSets/codex"
+                ]
+              "available": "available": true
+              "conflicts": []
+              "harness": "codex"
+              "partial": []
+              "skipped":
+                [
+                  {
+                    "reference": "settings/claudeSettings"
+                    "sentence": "Settings claudeSettings is for Claude Code only, so it is skipped on Codex."
+                  }
+                ]
+            }
+          ]
+        "layers":
+          [
+            "instructions/main"
+            "settings/claudeSettings"
+            "settings/codexSettings"
+            "modelSets/codex"
+          ]
+        "name": "mixed"
+        "remove": "available": true
+        "scope":
+          "kind": "mixed"
+          "sentence": "Profile mixed can't be both Claude only and Codex only: settings claudeSettings is Claude only and settings codexSettings is Codex only."
+        "usedBy":
+          [
+            "claude-on-mixed"
+          ]
+        "wouldIncludeItself":
+          [
+            "mixed"
+          ]
+      }
+    ]
+"runtimes":
+  "format": "present"
+  "runtimes":
+    [
+      {
+        "credential":
+          "id": "claude-env"
+          "store": "environment"
+        "fixedLayer":
+          "agentPermissions": "auto"
+          "entries":
+            [
+              {
+                "key": "permissions.defaultMode"
+                "value": "auto"
+              }
+              {
+                "key": "trust prompt"
+                "value": "off"
+              }
+              {
+                "key": "onboarding screens"
+                "value": "off"
+              }
+              {
+                "key": "Remote Control at startup"
+                "value": "off"
+              }
+              {
+                "key": "one-time prompts (nudges, upsells, notices)"
+                "value": "off"
+              }
+              {
+                "key": "skipAutoPermissionPrompt"
+                "value": "true"
+              }
+              {
+                "key": "--disallowed-tools=AskUserQuestion"
+                "value": "true"
+              }
+              {
+                "key": "Ferretry tools (terminals and browsers)"
+                "value": "on"
+              }
+              {
+                "key": "Ferretry tools instruction"
+                "value": "on"
+              }
+            ]
+          "overridden": []
+        "harness": "claude-code"
+        "id": "00000000-0000-4000-8000-000000000002"
+        "launch": "available": true
+        "modelSet":
+          "declaredDefault": "claude-opus-5-5"
+          "default": "claude-opus-5-5"
+          "models":
+            [
+              {
+                "available": true
+                "id": "claude-opus-5-5"
+              }
+              {
+                "available": true
+                "id": "claude-sonnet-5-5"
+              }
+            ]
+          "name": "claude"
+          "source": "model-set"
+        "name": "claude-env"
+        "profile": "claude"
+        "sameAs": []
+        "stack":
+          "applied":
+            [
+              "instructions/main"
+              "mcp/files"
+              "mcp/feed"
+              "skills/mine"
+              "settings/claudeSettings"
+              "modelSets/claude"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped": []
+        "wrapper": "claude-env"
+      }
+      {
+        "credential":
+          "id": "claude-host"
+          "store": "host"
+        "fixedLayer":
+          "agentPermissions": "auto"
+          "entries":
+            [
+              {
+                "key": "permissions.defaultMode"
+                "value": "auto"
+              }
+              {
+                "key": "trust prompt"
+                "value": "off"
+              }
+              {
+                "key": "onboarding screens"
+                "value": "off"
+              }
+              {
+                "key": "Remote Control at startup"
+                "value": "off"
+              }
+              {
+                "key": "one-time prompts (nudges, upsells, notices)"
+                "value": "off"
+              }
+              {
+                "key": "skipAutoPermissionPrompt"
+                "value": "true"
+              }
+              {
+                "key": "--disallowed-tools=AskUserQuestion"
+                "value": "true"
+              }
+              {
+                "key": "Ferretry tools (terminals and browsers)"
+                "value": "on"
+              }
+              {
+                "key": "Ferretry tools instruction"
+                "value": "on"
+              }
+            ]
+          "overridden": []
+        "harness": "claude-code"
+        "id": "00000000-0000-4000-8000-000000000000"
+        "launch": "available": true
+        "modelSet":
+          "declaredDefault": "claude-opus-5-5"
+          "default": "claude-opus-5-5"
+          "models":
+            [
+              {
+                "available": true
+                "id": "claude-opus-5-5"
+              }
+              {
+                "available": true
+                "id": "claude-sonnet-5-5"
+              }
+            ]
+          "name": "claude"
+          "source": "model-set"
+        "name": "claude-host"
+        "profile": "claude"
+        "sameAs": []
+        "stack":
+          "applied":
+            [
+              "instructions/main"
+              "mcp/files"
+              "mcp/feed"
+              "skills/mine"
+              "settings/claudeSettings"
+              "modelSets/claude"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped": []
+        "wrapper": "claude-host"
+      }
+      {
+        "credential":
+          "id": "claude-kept"
+          "label": "Work"
+          "store": "ferretry"
+        "fixedLayer":
+          "agentPermissions": "auto"
+          "entries":
+            [
+              {
+                "key": "permissions.defaultMode"
+                "value": "auto"
+              }
+              {
+                "key": "trust prompt"
+                "value": "off"
+              }
+              {
+                "key": "onboarding screens"
+                "value": "off"
+              }
+              {
+                "key": "Remote Control at startup"
+                "value": "off"
+              }
+              {
+                "key": "one-time prompts (nudges, upsells, notices)"
+                "value": "off"
+              }
+              {
+                "key": "skipAutoPermissionPrompt"
+                "value": "true"
+              }
+              {
+                "key": "--disallowed-tools=AskUserQuestion"
+                "value": "true"
+              }
+              {
+                "key": "Ferretry tools (terminals and browsers)"
+                "value": "on"
+              }
+              {
+                "key": "Ferretry tools instruction"
+                "value": "on"
+              }
+            ]
+          "overridden": []
+        "harness": "claude-code"
+        "id": "00000000-0000-4000-8000-000000000001"
+        "launch": "available": true
+        "modelSet":
+          "declaredDefault": "claude-opus-5-5"
+          "default": "claude-opus-5-5"
+          "models":
+            [
+              {
+                "available": true
+                "id": "claude-opus-5-5"
+              }
+              {
+                "available": true
+                "id": "claude-sonnet-5-5"
+              }
+            ]
+          "name": "claude"
+          "source": "model-set"
+        "name": "claude-kept"
+        "profile": "claude"
+        "sameAs": []
+        "stack":
+          "applied":
+            [
+              "instructions/main"
+              "mcp/files"
+              "mcp/feed"
+              "skills/mine"
+              "settings/claudeSettings"
+              "modelSets/claude"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped": []
+        "wrapper": "claude-kept"
+      }
+      {
+        "credential":
+          "id": "claude-host"
+          "store": "host"
+        "fixedLayer":
+          "agentPermissions": "auto"
+          "entries":
+            [
+              {
+                "key": "permissions.defaultMode"
+                "value": "auto"
+              }
+              {
+                "key": "trust prompt"
+                "value": "off"
+              }
+              {
+                "key": "onboarding screens"
+                "value": "off"
+              }
+              {
+                "key": "Remote Control at startup"
+                "value": "off"
+              }
+              {
+                "key": "one-time prompts (nudges, upsells, notices)"
+                "value": "off"
+              }
+              {
+                "key": "skipAutoPermissionPrompt"
+                "value": "true"
+              }
+              {
+                "key": "--disallowed-tools=AskUserQuestion"
+                "value": "true"
+              }
+              {
+                "key": "Ferretry tools (terminals and browsers)"
+                "value": "on"
+              }
+              {
+                "key": "Ferretry tools instruction"
+                "value": "on"
+              }
+            ]
+          "overridden": []
+        "harness": "claude-code"
+        "id": "00000000-0000-4000-8000-000000000006"
+        "launch":
+          "available": false
+          "reason": "No model list for Claude Code yet"
+        "modelSet": "source": "harness-default"
+        "name": "claude-on-mixed"
+        "profile": "mixed"
+        "sameAs": []
+        "stack":
+          "applied":
+            [
+              "instructions/main"
+              "settings/claudeSettings"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped":
+            [
+              {
+                "reference": "settings/codexSettings"
+                "sentence": "Settings codexSettings is for Codex only, so it is skipped on Claude Code."
+              }
+              {
+                "reference": "modelSets/codex"
+                "sentence": "Model set codex has no Claude Code model, so it is skipped on Claude Code."
+              }
+            ]
+        "wrapper": "claude-on-mixed"
+      }
+      {
+        "credential":
+          "id": "codex-env"
+          "store": "environment"
+        "fixedLayer":
+          "agentPermissions": "auto"
+          "entries":
+            [
+              {
+                "key": "approval_policy"
+                "value": "on-request"
+              }
+              {
+                "key": "sandbox_mode"
+                "value": "workspace-write"
+              }
+              {
+                "key": "trust prompt"
+                "value": "off"
+              }
+              {
+                "key": "--no-alt-screen"
+                "value": "true"
+              }
+              {
+                "key": "one-time prompts (nudges, upsells, notices)"
+                "value": "off"
+              }
+              {
+                "key": "Ferretry tools (terminals and browsers)"
+                "value": "on"
+              }
+              {
+                "key": "Ferretry tools instruction"
+                "value": "on"
+              }
+            ]
+          "overridden": []
+        "harness": "codex"
+        "id": "00000000-0000-4000-8000-000000000005"
+        "launch": "available": true
+        "modelSet":
+          "declaredDefault": "gpt-6"
+          "default": "gpt-6"
+          "models":
+            [
+              {
+                "available": true
+                "id": "gpt-6"
+              }
+              {
+                "available": true
+                "id": "gpt-6-mini"
+              }
+            ]
+          "name": "codex"
+          "source": "model-set"
+        "name": "codex-env"
+        "profile": "codex"
+        "sameAs": []
+        "stack":
+          "applied":
+            [
+              "instructions/imports"
+              "mcp/docs"
+              "mcp/notes"
+              "skills/mine"
+              "settings/codexSettings"
+              "modelSets/codex"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "codex"
+          "partial":
+            [
+              {
+                "reason": "Partly supported on Codex: imports pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files."
+                "reference": "instructions/imports"
+              }
+              {
+                "reason": "Partly supported on Codex: review limits which tools it may use. Codex ignores that limit and loads the rest."
+                "reference": "skills/mine"
+              }
+              {
+                "reason": "Partly supported on Codex: review picks its own model. Codex ignores that and uses the runtime's model."
+                "reference": "skills/mine"
+              }
+            ]
+          "skipped": []
+        "wrapper": "codex-env"
+      }
+      {
+        "credential":
+          "id": "codex-host"
+          "store": "host"
+        "fixedLayer":
+          "agentPermissions": "auto"
+          "entries":
+            [
+              {
+                "key": "approval_policy"
+                "value": "on-request"
+              }
+              {
+                "key": "sandbox_mode"
+                "value": "workspace-write"
+              }
+              {
+                "key": "trust prompt"
+                "value": "off"
+              }
+              {
+                "key": "--no-alt-screen"
+                "value": "true"
+              }
+              {
+                "key": "one-time prompts (nudges, upsells, notices)"
+                "value": "off"
+              }
+              {
+                "key": "Ferretry tools (terminals and browsers)"
+                "value": "on"
+              }
+              {
+                "key": "Ferretry tools instruction"
+                "value": "on"
+              }
+            ]
+          "overridden": []
+        "harness": "codex"
+        "id": "00000000-0000-4000-8000-000000000003"
+        "launch": "available": true
+        "modelSet":
+          "declaredDefault": "gpt-6"
+          "default": "gpt-6"
+          "models":
+            [
+              {
+                "available": true
+                "id": "gpt-6"
+              }
+              {
+                "available": true
+                "id": "gpt-6-mini"
+              }
+            ]
+          "name": "codex"
+          "source": "model-set"
+        "name": "codex-host"
+        "profile": "codex"
+        "sameAs": []
+        "stack":
+          "applied":
+            [
+              "instructions/imports"
+              "mcp/docs"
+              "mcp/notes"
+              "skills/mine"
+              "settings/codexSettings"
+              "modelSets/codex"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "codex"
+          "partial":
+            [
+              {
+                "reason": "Partly supported on Codex: imports pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files."
+                "reference": "instructions/imports"
+              }
+              {
+                "reason": "Partly supported on Codex: review limits which tools it may use. Codex ignores that limit and loads the rest."
+                "reference": "skills/mine"
+              }
+              {
+                "reason": "Partly supported on Codex: review picks its own model. Codex ignores that and uses the runtime's model."
+                "reference": "skills/mine"
+              }
+            ]
+          "skipped": []
+        "wrapper": "codex-host"
+      }
+      {
+        "credential":
+          "id": "codex-kept"
+          "store": "ferretry"
+        "fixedLayer":
+          "agentPermissions": "auto"
+          "entries":
+            [
+              {
+                "key": "approval_policy"
+                "value": "on-request"
+              }
+              {
+                "key": "sandbox_mode"
+                "value": "workspace-write"
+              }
+              {
+                "key": "trust prompt"
+                "value": "off"
+              }
+              {
+                "key": "--no-alt-screen"
+                "value": "true"
+              }
+              {
+                "key": "one-time prompts (nudges, upsells, notices)"
+                "value": "off"
+              }
+              {
+                "key": "Ferretry tools (terminals and browsers)"
+                "value": "on"
+              }
+              {
+                "key": "Ferretry tools instruction"
+                "value": "on"
+              }
+            ]
+          "overridden": []
+        "harness": "codex"
+        "id": "00000000-0000-4000-8000-000000000004"
+        "launch": "available": true
+        "modelSet":
+          "declaredDefault": "gpt-6"
+          "default": "gpt-6"
+          "models":
+            [
+              {
+                "available": true
+                "id": "gpt-6"
+              }
+              {
+                "available": true
+                "id": "gpt-6-mini"
+              }
+            ]
+          "name": "codex"
+          "source": "model-set"
+        "name": "codex-kept"
+        "profile": "codex"
+        "sameAs": []
+        "stack":
+          "applied":
+            [
+              "instructions/imports"
+              "mcp/docs"
+              "mcp/notes"
+              "skills/mine"
+              "settings/codexSettings"
+              "modelSets/codex"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "codex"
+          "partial":
+            [
+              {
+                "reason": "Partly supported on Codex: imports pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files."
+                "reference": "instructions/imports"
+              }
+              {
+                "reason": "Partly supported on Codex: review limits which tools it may use. Codex ignores that limit and loads the rest."
+                "reference": "skills/mine"
+              }
+              {
+                "reason": "Partly supported on Codex: review picks its own model. Codex ignores that and uses the runtime's model."
+                "reference": "skills/mine"
+              }
+            ]
+          "skipped": []
+        "wrapper": "codex-kept"
+      }
+      {
+        "credential":
+          "id": "codex-host"
+          "store": "host"
+        "fixedLayer":
+          "agentPermissions": "auto"
+          "entries":
+            [
+              {
+                "key": "approval_policy"
+                "value": "on-request"
+              }
+              {
+                "key": "sandbox_mode"
+                "value": "workspace-write"
+              }
+              {
+                "key": "trust prompt"
+                "value": "off"
+              }
+              {
+                "key": "--no-alt-screen"
+                "value": "true"
+              }
+              {
+                "key": "one-time prompts (nudges, upsells, notices)"
+                "value": "off"
+              }
+              {
+                "key": "Ferretry tools (terminals and browsers)"
+                "value": "on"
+              }
+              {
+                "key": "Ferretry tools instruction"
+                "value": "on"
+              }
+            ]
+          "overridden": []
+        "harness": "codex"
+        "id": "00000000-0000-4000-8000-000000000007"
+        "launch":
+          "available": false
+          "reason": "This profile has no layers yet."
+        "modelSet": "source": "harness-default"
+        "name": "codex-on-empty"
+        "profile": "empty"
+        "sameAs": []
+        "stack":
+          "applied": []
+          "available":
+            "available": false
+            "reason": "This profile has no layers yet."
+          "conflicts": []
+          "harness": "codex"
+          "partial": []
+          "skipped": []
+        "wrapper": "codex-on-empty"
+      }
+    ]

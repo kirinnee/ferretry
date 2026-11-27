@@ -1,0 +1,13 @@
+"golden":
+  "args":
+    [
+      "server-files"
+      "--root"
+      "/srv/files"
+    ]
+  "command": "npx"
+  "env": "FILES_MODE": "read"
+  "env_vars":
+    [
+      "FILES_TOKEN"
+    ]

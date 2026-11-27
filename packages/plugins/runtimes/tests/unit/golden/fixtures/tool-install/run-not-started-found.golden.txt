@@ -1,0 +1,48 @@
+"outcomes":
+  [
+    {
+      "cause": "could-not-start"
+      "harness": "claude"
+      "manualCommand": "npm install -g @anthropic-ai/claude-code"
+      "outcome": "failed"
+      "output": []
+      "reason": "npm could not be started here: the program was not found"
+    }
+    {
+      "cause": "could-not-start"
+      "harness": "codex"
+      "manualCommand": "npm install -g @openai/codex"
+      "outcome": "failed"
+      "output": []
+      "reason": "npm could not be started here: the program was not found"
+    }
+  ]
+"runs":
+  [
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@anthropic-ai/claude-code"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@openai/codex"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+  ]

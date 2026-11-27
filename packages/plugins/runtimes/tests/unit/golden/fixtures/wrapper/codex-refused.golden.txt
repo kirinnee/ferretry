@@ -1,0 +1,9 @@
+<<<
+  #!/bin/sh
+  # ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten
+  # runtime codex-golden 00000000-0000-4000-8000-00000000000a (codex)
+
+  echo 'ferretry: codex-golden cannot start: it cannot launch at all: golden reason' >&2
+  exit 1
+
+>>>

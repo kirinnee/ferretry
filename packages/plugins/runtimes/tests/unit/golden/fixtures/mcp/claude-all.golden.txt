@@ -1,0 +1,30 @@
+"http":
+  "type": "http"
+  "url": "https://docs.example.test/mcp"
+"oauth":
+  "headers": "Authorization": "Bearer ${FY_MCP_OAUTH_BCE92E878ABCC0FF_TOKEN}"
+  "type": "http"
+  "url": "https://notes.example.test/mcp"
+"oauth-sse":
+  "headers": "Authorization": "Bearer ${FY_MCP_OAUTH_SSE_2A80F5995F5FD817_TOKEN}"
+  "type": "sse"
+  "url": "https://feed.example.test/sse"
+"sse":
+  "type": "sse"
+  "url": "https://feed.example.test/sse"
+"stdio":
+  "args":
+    [
+      "server-files"
+      "--root"
+      "/srv/files"
+    ]
+  "command": "npx"
+  "env":
+    "FILES_MODE": "read"
+    "FILES_TOKEN": "${FILES_TOKEN}"
+  "type": "stdio"
+"stdio-bare":
+  "args": []
+  "command": "golden-server"
+  "type": "stdio"

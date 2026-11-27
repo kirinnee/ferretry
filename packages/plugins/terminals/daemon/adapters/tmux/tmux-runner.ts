@@ -54,7 +54,7 @@ import { scriptLine } from '../../lib/tmux/script.ts';
 import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard.ts';
 import { DEV_CHANNELS_ON_SCREEN } from '../../lib/tmux/startup.ts';
 import { TERMINAL_TMUX_PREFIX } from '../../lib/terminal/runtime-policy.ts';
-import { paneBlockingDialog } from '../../lib/tmux/harness-dialog.ts';
+import { paneBlockingDialog, readDialogFrame } from '../../lib/tmux/harness-dialog.ts';
 import { paneBlockingPermission } from '../../lib/tmux/permission-prompt.ts';
 import { LaunchGuardRefusal, RealHarnessRefusedError, type TmuxLaunchGuard } from '../../lib/tmux/harness-guard.ts';
 import { TMUX_PROGRAM } from './kernel-tmux-process.ts';
@@ -828,6 +828,7 @@ export class TmuxRunner implements Runner {
               visible: state.visible,
               history: state.history,
               ...(blockingOf(shown) === undefined ? {} : { blocking: blockingOf(shown) }),
+              ...(blockingOf(shown) === 'dialog' ? { dialog: readDialogFrame(shown) } : {}),
               ...(cursorX === undefined || cursorY === undefined ? {} : { cursorX, cursorY }),
             } satisfies RunnerFormCapture as never,
           };

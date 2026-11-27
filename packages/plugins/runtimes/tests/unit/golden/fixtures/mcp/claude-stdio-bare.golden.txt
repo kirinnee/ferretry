@@ -1,0 +1,4 @@
+"golden":
+  "args": []
+  "command": "golden-server"
+  "type": "stdio"
