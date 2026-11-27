@@ -50,6 +50,8 @@ export interface FerretTurns {
    * stored attachments. Any file named outside it is not this ferret's, whatever the document says.
    */
   attachmentsFolder?(): Promise<string>;
+  /** A delivered copy proved through the no-link attachment scope, or none. Only bare, unencoded components. */
+  attachmentFile?(attachmentId: string, filename: string): Promise<string | undefined>;
   /** Additive (#45 BG-051, today's `clearMarkers`): clears the completion markers a previous turn left. */
   clearMarkers?(): Promise<void>;
 }

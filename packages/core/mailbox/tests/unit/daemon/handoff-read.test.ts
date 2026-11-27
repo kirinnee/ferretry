@@ -14,11 +14,15 @@ function world(parts: {
   readonly turns?: readonly FerretTurnDocument[];
   readonly queued?: Readonly<Record<string, string>>;
   readonly root?: string | undefined;
+  readonly delivered?: readonly string[];
 }) {
   const turns = {
     list: async () => parts.turns ?? [],
     readQueued: async (sendId: string) => parts.queued?.[sendId],
     ...(parts.root === undefined ? {} : { attachmentsFolder: async () => parts.root as string }),
+    ...(parts.root === undefined
+      ? {}
+      : { attachmentFile: async (id: string, filename: string) => `${parts.root}/${id}/${filename}` }),
   };
   const send = buildSendHalf({
     kernel: {
@@ -32,7 +36,15 @@ function world(parts: {
     clock: { now: () => '2026-11-16T18:00:00.000Z' },
     queue: {},
     queueStore: {},
-    ledger: {},
+    ledger: {
+      list: async () => (parts.turns ?? []).map(turn => ({ turn: turn.turn, attachmentIds: parts.delivered ?? [] })),
+    },
+    attachments: {
+      download: async (_ferret: string, id: string) => ({
+        attachment: { id, filename: 'shot.png', mime: 'image/png' },
+        bytes: new Uint8Array(),
+      }),
+    },
     channel: {},
     askedQuestion: async () => undefined,
   } as unknown as SendHalfDeps);
@@ -56,7 +68,7 @@ describe('a hand-off read back by the Mailbox', () => {
       { path: '/elsewhere/attachments/att_9/planted.png', mime: 'image/png' },
       { path: `${ROOT}/att_1/shot.png`, mime: 'image/png' },
     ])}\n`;
-    const handoffOf = world({ turns: [{ turn: 8, text }], root: ROOT });
+    const handoffOf = world({ turns: [{ turn: 8, text }], root: ROOT, delivered: ['att_1'] });
 
     should((await handoffOf(ID, 'turn-008')).attachments).deepEqual([
       // A path the document names outside the trusted root is only a label, whatever its folders are called.
@@ -75,7 +87,7 @@ describe('a hand-off read back by the Mailbox', () => {
 
   it('D-31: should keep the image chip’s id when the old protocol reminder trails the attachment list', async () => {
     const text = `${messageWithAttachments('look', [{ path: `${ROOT}/att_1/shot.png`, mime: 'image/png' }])}\n\n${REMINDER}\n`;
-    const handoffOf = world({ turns: [{ turn: 8, text }], root: ROOT });
+    const handoffOf = world({ turns: [{ turn: 8, text }], root: ROOT, delivered: ['att_1'] });
 
     should(await handoffOf(ID, 'turn-008')).deepEqual({
       name: 'turn-008',

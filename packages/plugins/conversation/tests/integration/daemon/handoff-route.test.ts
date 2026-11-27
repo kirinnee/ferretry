@@ -5,6 +5,8 @@ import type { FerretId, FerretTurnDocument, FerretTurns } from '@ferretry/core-f
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import { HandoffDocumentSchema } from '@ferretry/core-mailbox/contract';
+import { ConversationPort } from '../../../contract/index.ts';
+import { SENDS_STATE } from '../../../contract/state.ts';
 import daemon from '../../../daemon/index.ts';
 import { wardenStandIn } from '../../support/warden-plugin.ts';
 
@@ -32,6 +34,7 @@ class TurnDocs extends FakeFerrets {
       },
       readQueued: async sendId => this.queued[sendId],
       attachmentsFolder: async () => `/state/ferrets/sessions/${ferret}/attachments`,
+      attachmentFile: async (id, filename) => `/state/ferrets/sessions/${ferret}/attachments/${id}/${filename}`,
     };
   }
 }
@@ -47,7 +50,39 @@ async function world(documents: readonly FerretTurnDocument[]) {
   });
   const get = async (name: string, ferret = 'f1') =>
     await host.request('GET', `/v1/ferrets/${ferret}/handoffs/${name}`, { as: owner() });
-  return { host, ferrets, get };
+  const recordAttachment = async (turn: number) => {
+    const added = await host.provided(ConversationPort).addAttachment(F1, {
+      filename: 'shot.png',
+      mime: 'image/png',
+      base64: Buffer.from('FIXTURE image').toString('base64'),
+    });
+    if (!added.ok) throw new Error(added.error.message);
+    const id = added.value.id;
+    const downloaded = await host.provided(ConversationPort).attachment(F1, id);
+    if (!downloaded.ok) throw new Error(downloaded.error.message);
+    ferrets.documents = ferrets.documents.map(document => ({
+      ...document,
+      text: document.text.replaceAll('/att-1/', `/${id}/`),
+    }));
+    host.state('conversation').plant(
+      SENDS_STATE,
+      `${JSON.stringify({
+        format: 1,
+        sendId: `send-${turn}`,
+        acceptedAt: '2026-11-08T09:00:00Z',
+        acceptedTurn: 0,
+        turn,
+        path: 'turn-file',
+        message: 'look',
+        attachmentIds: [id],
+        fate: 'delivered',
+        at: '2026-11-08T09:00:00Z',
+      })}\n`,
+      'f1',
+    );
+    return id;
+  };
+  return { host, ferrets, get, recordAttachment };
 }
 
 describe('the hand-off read route', () => {
@@ -79,16 +114,17 @@ describe('the hand-off read route', () => {
   test('files listed under the words come back as attachments; only a copy in the ferret’s own folder carries an id', async () => {
     const own = '/state/ferrets/sessions/f1/attachments/att-1/shot.png';
     const other = '/elsewhere/notes/att-2/notes.txt';
-    const { get } = await world([
+    const { get, recordAttachment } = await world([
       {
         turn: 3,
         text: `see these\n\nAttached files — open them from these paths:\n- ${own} (image/png)\n- ${other} (text/plain)\n`,
       },
     ]);
+    const attachmentId = await recordAttachment(3);
     const body = HandoffDocumentSchema.parse(await (await get('turn-003')).json());
     expect(body.message).toBe('see these');
     expect(body.attachments).toEqual([
-      { attachmentId: 'att-1', filename: 'shot.png', mime: 'image/png' },
+      { attachmentId, filename: 'shot.png', mime: 'image/png' },
       { filename: 'notes.txt', mime: 'text/plain' },
     ]);
   });
@@ -96,17 +132,18 @@ describe('the hand-off read route', () => {
   test('a foreign path whose folders are merely named like the attachments folder is a plain label, and a trailing legacy reminder keeps the real image’s id', async () => {
     const planted = '/elsewhere/attachments/att-9/planted.png';
     const own = '/state/ferrets/sessions/f1/attachments/att-1/shot.png';
-    const { get } = await world([
+    const { get, recordAttachment } = await world([
       {
         turn: 4,
         text: `both\n\nAttached files — open them from these paths:\n- ${planted} (image/png)\n- ${own} (image/png)\n\nContinue using the same completion and interaction protocol.\n`,
       },
     ]);
+    const attachmentId = await recordAttachment(4);
     const body = HandoffDocumentSchema.parse(await (await get('turn-004')).json());
     expect(body.message).toBe('both');
     expect(body.attachments).toEqual([
       { filename: 'planted.png', mime: 'image/png' },
-      { attachmentId: 'att-1', filename: 'shot.png', mime: 'image/png' },
+      { attachmentId, filename: 'shot.png', mime: 'image/png' },
     ]);
   });
 

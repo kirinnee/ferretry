@@ -399,12 +399,10 @@ export interface FerretSessionPort {
    * it is up (today's `firstTurnInstruction`). Unbound: no turn document is written and nothing is typed.
    */
   assign?(ferret: FerretId, prompt: string): Promise<string>;
-  /**
-   * Additive (`start -f`, today's `initialAttachments`): the absolute path of THIS ferret's own `attachments/` folder
-   * (one of `FERRET_READABLE_FOLDERS`), where the opening message's files are planned. Names the path only; {@link attach}
-   * makes it. Unbound: a start that carries attachments is refused.
-   */
+  /** This ferret's `attachments/` folder, named before the planner writes it. Unbound: attached starts refuse. */
   attachmentsFolder?(ferret: FerretId): Promise<string>;
+  /** A delivered attachment proved through its own scope's no-follow descriptors; no path from message text. */
+  attachmentFile?(ferret: FerretId, attachmentId: string, filename: string): Promise<string | undefined>;
   /**
    * Additive: writes the planned files into the ferret's `attachments/` folder (`0700`, files `0600`) before `assign`; a bare `name`.
    */
