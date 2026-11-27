@@ -1468,6 +1468,7 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
         profile: profile.slice('profile/'.length),
         ...(theirRuntime.harness === undefined ? {} : { harness: theirRuntime.harness }),
         ...(theirRuntime.compactAt === undefined ? {} : { compactAt: theirRuntime.compactAt }),
+        ...(theirRuntime.namedByOwner === undefined ? {} : { namedByOwner: true }),
         ...(disabled === undefined ? {} : { disabled }),
         ...keyed(entry.ref),
       };
