@@ -51,9 +51,16 @@ export function createAgendaAskScreen(runtime: AgendaRuntime, fleet?: AgendaFlee
             answerPorts={answerFilePorts({ daemon, client: runtime.client }, fleet)}
             {...(open === undefined ? {} : { open })}
             onOpenSettled={opened =>
-              navigate(opened || ferret === undefined ? links.agenda(daemon) : links.chat(daemon, ferret), {
-                replace: true,
-              })
+              navigate(
+                opened && open !== undefined
+                  ? `${links.agenda(daemon)}?ask=${open.id}&session=${encodeURIComponent(open.sessionId)}`
+                  : ferret === undefined
+                    ? links.agenda(daemon)
+                    : links.chat(daemon, ferret),
+                {
+                  replace: true,
+                },
+              )
             }
             onNavigate={to => navigate(to)}
             onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}

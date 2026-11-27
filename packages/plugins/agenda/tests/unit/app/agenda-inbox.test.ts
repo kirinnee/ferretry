@@ -427,7 +427,7 @@ describe('the undo window', () => {
     expect(sent).toEqual([]);
     advance(1);
     expect(sent).toEqual(['A1:Done']);
-    expect(deferred.getSnapshot().sending).toEqual([card('A1').key]);
+    expect(deferred.getSnapshot().sending.map(entry => entry.key)).toEqual([card('A1').key]);
     await settled();
     expect(deferred.getSnapshot()).toEqual({ pending: [], sending: [], failed: [] });
   });
