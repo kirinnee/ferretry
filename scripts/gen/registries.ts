@@ -10,6 +10,7 @@
  *   packages/cli/src/generated/slim.ts              what `fy mcp serve` loads instead of the registry (tool door facts + serve half)
  *   packages/app/src/generated/surfaces.ts          app halves + contract hashes
  *   packages/app/src/generated/plugin-styles.css    every app half's `app/styles.css`, imported once by the shell
+ *   packages/app/src/generated/theme-packs.{ts,css} every style, palette and font pack folder under app/src/theme/packs
  *   generated/hooks.md                              offers, takers and their order
  *   generated/contract-hashes.json                  canonical + effective hash per package (the release compare)
  *
@@ -46,6 +47,7 @@ import {
 } from './lib/hashes.ts';
 import { type ImportEdge, importsOf, scannedImportsOf } from './lib/imports.ts';
 import { readPendingApps } from './lib/pending-apps.ts';
+import { THEME_PACKS_CSS, THEME_PACKS_TS, themePackFiles } from './lib/theme-packs.ts';
 import {
   HALVES,
   type LoadedSubsystem,
@@ -66,6 +68,8 @@ export const GENERATED = {
   slim: 'packages/cli/src/generated/slim.ts',
   surfaces: 'packages/app/src/generated/surfaces.ts',
   pluginStyles: 'packages/app/src/generated/plugin-styles.css',
+  themePacks: THEME_PACKS_TS,
+  themePackCss: THEME_PACKS_CSS,
   hooks: 'generated/hooks.md',
   hashes: 'generated/contract-hashes.json',
 } as const;
@@ -852,6 +856,7 @@ export function generateGlobal(model: Model): ReadonlyMap<string, string> {
     ...slimFiles(model),
     [GENERATED.surfaces, surfacesRegistry(model)],
     [GENERATED.pluginStyles, pluginStyles(model)],
+    ...themePackFiles(model.ws.root),
     [GENERATED.hooks, hooksMarkdown(model)],
     [GENERATED.hashes, hashesJson(model)],
   ]);

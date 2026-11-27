@@ -6,7 +6,8 @@
     "src/worker/filter-document.ts",
     "src/worker/notifications.ts",
     "src/release/keeper.ts",
-    "src/release/storage.ts"
+    "src/release/storage.ts",
+    "src/theme/pack-contract.ts"
   ],
   "allowed": {
     "entry:src/main.tsx": "the browser entry point the app shell build bundles from index.html; nothing imports it.",
@@ -14,6 +15,7 @@
     "ignore:src/worker/notifications.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
     "ignore:src/release/keeper.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
     "ignore:src/worker/filter-document.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
-    "ignore:src/release/storage.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports."
+    "ignore:src/release/storage.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
+    "ignore:src/theme/pack-contract.ts": "read today only by scripts/gen/lib/theme-packs.ts (the theme-pack generator); the app reaches it from the generated theme-packs.ts in the next G2 units, and this line goes then."
   }
 }
