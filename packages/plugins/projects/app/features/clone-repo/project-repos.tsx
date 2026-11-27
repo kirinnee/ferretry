@@ -9,7 +9,12 @@
 import { Spinner } from '@ferretry/app/ui';
 import { TriangleAlert } from 'lucide-react';
 import { type FormEvent, useId, useState } from 'react';
-import { CloneRepoRequestSchema, type ProjectInfo } from '../../../contract/index.ts';
+import {
+  cloneAddressHasCredentials,
+  CloneRepoCredentialsMessage,
+  CloneRepoRequestSchema,
+  type ProjectInfo,
+} from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
 import { reasonOf } from '../../lib/client.ts';
 import { CLONE_ADDRESS_UNUSABLE, CLONE_PATIENCE } from '../../lib/registration-model.ts';
@@ -32,7 +37,8 @@ export function ProjectRepos({
   >({ kind: 'idle' });
   const repos = project.repos ?? [];
   const typed = url.trim();
-  const usable = CloneRepoRequestSchema.safeParse({ url: typed }).success;
+  const parsed = CloneRepoRequestSchema.safeParse({ url: typed });
+  const usable = parsed.success;
   const busy = phase.kind === 'busy';
 
   const submit = (event: FormEvent) => {
@@ -80,12 +86,22 @@ export function ProjectRepos({
             spellCheck={false}
             disabled={busy}
             onChange={event => {
+              if (cloneAddressHasCredentials(event.target.value)) {
+                event.target.value = '';
+                setUrl('');
+                setPhase({ kind: 'refused', message: CloneRepoCredentialsMessage });
+                return;
+              }
               setUrl(event.target.value);
               if (phase.kind === 'refused') setPhase({ kind: 'idle' });
             }}
           />
         </label>
-        {typed !== '' && !usable && <p className="m-0 text-meta leading-base text-warn">{CLONE_ADDRESS_UNUSABLE}</p>}
+        {typed !== '' && !usable && (
+          <p className="m-0 text-meta leading-base text-warn">
+            {parsed.error?.issues[0]?.message ?? CLONE_ADDRESS_UNUSABLE}
+          </p>
+        )}
         <p className="m-0 text-meta leading-base text-muted">{CLONE_PATIENCE}</p>
         {phase.kind === 'refused' && (
           <p className="m-0 flex items-start gap-xs text-meta text-err" role="alert" data-project-clone-refused="">

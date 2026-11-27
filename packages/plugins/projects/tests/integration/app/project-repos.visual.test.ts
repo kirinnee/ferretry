@@ -46,7 +46,7 @@ beforeAll(async () => {
   const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
   server = Bun.serve({
     hostname: '127.0.0.1',
-    port: 0,
+    port: Number(process.env.FY_PROJECT_REPOS_TEST_PORT ?? '7498'),
     fetch: request => {
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
@@ -102,6 +102,18 @@ const STATES: readonly { name: string; query: string; act?: (page: Page) => Prom
     waitFor: '[data-project-clone-refused]',
   },
   {
+    name: 'credentials',
+    query: 'repos=2',
+    act: async page => await type(page, 'https://fixture-user:fixture-secret@example.invalid/repo.git'),
+    waitFor: '[data-project-clone-refused]',
+  },
+  {
+    name: 'local',
+    query: 'repos=2',
+    act: async page => await type(page, 'file:///synthetic/outside/repo.git'),
+    waitFor: '[data-project-clone-submit][disabled]',
+  },
+  {
     name: 'cloned',
     query: 'repos=2&clone=ok',
     act: async page => {
@@ -140,11 +152,15 @@ for (const look of LOOKS)
               await page.waitForSelector(state.waitFor);
               await page.waitForTimeout(400);
               await page.locator('[data-project-repos]').scrollIntoViewIfNeeded();
-              if (shotsDir !== '')
+              if (shotsDir !== '') {
                 await page.screenshot({
                   path: join(shotsDir, `${look.style}-${viewport.name}-${scheme}-${state.name}.png`),
                   fullPage: true,
                 });
+                await page.locator('[data-project-repos]').screenshot({
+                  path: join(shotsDir, `${look.style}-${viewport.name}-${scheme}-${state.name}-form.png`),
+                });
+              }
               const misses = await roundSafeMisses(page);
               expect(misses, `\n${describeRoundMisses(misses)}`).toEqual([]);
               const overflow = await page.evaluate(
@@ -155,6 +171,14 @@ for (const look of LOOKS)
                 expect(await page.inputValue('[data-project-clone-url]'), 'the address is cleared').toBe('');
               if (state.name === 'refused')
                 expect(await page.inputValue('[data-project-clone-url]'), 'the address is kept').toBe(URL_OK);
+              if (state.name === 'credentials') {
+                expect(await page.inputValue('[data-project-clone-url]')).toBe('');
+                expect(await page.locator('[data-project-clone-refused]').innerText()).toContain(
+                  'Accounts and secrets',
+                );
+                expect(await page.content()).not.toContain('fixture-secret');
+                expect(await page.locator('[data-project-clone-submit]').isDisabled()).toBe(true);
+              }
             } finally {
               await context.close();
             }

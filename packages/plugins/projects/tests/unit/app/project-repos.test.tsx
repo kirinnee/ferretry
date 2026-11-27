@@ -50,6 +50,17 @@ const cloneNow = async (mounted: Mounted, url: string): Promise<void> => {
 };
 
 describe('the project page: Repositories (F-101)', () => {
+  it('MUST 3: clears inline credentials immediately, explains Accounts/secrets, and sends nothing', async () => {
+    const calls: Call[] = [];
+    const mounted = await open(page({}, calls, () => PROJECT));
+    await cloneNow(mounted, 'https://fixture-user:fixture-secret@example.invalid/repo.git');
+    const input = must(mounted.container.querySelector<HTMLInputElement>('[data-project-clone-url]'), 'the address');
+    expect(input.value).toBe('');
+    expect(mounted.container.textContent).toContain('Accounts and secrets');
+    expect(mounted.container.innerHTML).not.toContain('fixture-secret');
+    expect(calls.filter(call => call.route === CLONE)).toEqual([]);
+    await mounted.unmount();
+  });
   it('lists the repositories the project holds, and says so when it holds none', async () => {
     const some = await open(page({}, [], () => withRepos('app', 'lib')));
     const rows = [...some.container.querySelectorAll('[data-project-repo]')].map(row =>

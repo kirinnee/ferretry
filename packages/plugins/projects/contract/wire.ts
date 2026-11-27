@@ -81,8 +81,23 @@ export const cloneFolderName = (url: string): string | null => {
   return name === '' || name === '.' || name === '..' ? null : name;
 };
 
-/** `POST /v1/projects/:id/repos`: clone this repository into the project's folder, beside what is already there. */
-export const CloneRepoRequestSchema = z.strictObject({ url: ProjectCloneUrlSchema });
+export const CloneRepoCredentialsMessage =
+  'Use Accounts and secrets for sign-in, then paste a repository address without credentials.';
+
+/** SSH usernames (for example `git`) select an account; passwords and HTTPS userinfo embed credentials. */
+export const cloneAddressHasCredentials = (value: string): boolean => {
+  if (/^https?:\/\/[^/?#]*@/iu.test(value.trim())) return true;
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  return url.password !== '';
+};
+
+/** Existing-project clones accept remote sources only: local sources would bypass the folder reader's policy. */
+export const CloneRepoRequestSchema = z.strictObject({
+  url: ProjectCloneUrlSchema.refine(value => !URL.canParse(value) || new URL(value).protocol !== 'file:', {
+    message: 'Use an https:// or ssh:// remote repository address; local sources are not allowed here.',
+  }).refine(value => !cloneAddressHasCredentials(value), { message: CloneRepoCredentialsMessage }),
+});
 export type CloneRepoRequest = z.infer<typeof CloneRepoRequestSchema>;
 
 /** Every route is explicit: scanning a path is never a registration operation (today's `RegisterProjectRequestSchema`). */

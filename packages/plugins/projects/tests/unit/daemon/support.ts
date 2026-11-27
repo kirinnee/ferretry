@@ -21,7 +21,7 @@ export function fakeMachine(
   const dirs = new Set(directories);
   const repos = new Map(Object.entries(repositories));
   const calls: string[] = [];
-  return {
+  const machine: FakeMachine = {
     directories: dirs,
     repositories: repos,
     calls,
@@ -51,6 +51,12 @@ export function fakeMachine(
       dirs.add(path);
       repos.set(path, `${path}/.git`);
     },
+    gitCloneInto: async (url, parent, name, verdict) => {
+      const path = `${parent}/${name}`;
+      if ((await verdict(parent)) || (await verdict(path))) throw new Error('folder refused');
+      if (dirs.has(path)) throw new Error('destination exists');
+      await machine.gitClone(url, path);
+    },
     gitCommonDirectory: async root => repos.get(root),
     home: async () => home,
     isCheckout: async (root, common) => {
@@ -58,6 +64,7 @@ export function fakeMachine(
       return repos.get(root) === common && !notCheckouts.includes(root);
     },
   };
+  return machine;
 }
 
 /** The registry file in memory, with the same one-at-a-time update the kernel's state port gives. */
