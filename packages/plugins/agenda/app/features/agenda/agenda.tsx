@@ -39,6 +39,7 @@ import type {
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
+import { useAnswerReceipts } from '../../hooks/use-answer-receipts.ts';
 import { type InboxAction, withAskVersion } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
@@ -46,7 +47,8 @@ import { type AgendaTabFilter, agendaTabModel } from '../../lib/agenda-tab.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
-import { itemHistory } from '../../lib/agenda-history.ts';
+import { itemHistory, withDeviceEvents } from '../../lib/agenda-history.ts';
+import { pendingAnswerEvents } from '../../lib/pending-answer-history.ts';
 import { actionSentence, inboxCardKey, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sendAgendaAction } from '../../lib/agenda-send.ts';
@@ -561,15 +563,29 @@ export const useAgenda = ({
   const previous = paged > 0 ? openItems[paged - 1] : undefined;
   const next = paged >= 0 && paged < openItems.length - 1 ? openItems[paged + 1] : undefined;
   const lifecycle = useItemLifecycle({ connection, scope, client, item: cardItem, board: openItems, records });
-  const history = useMemo(
-    () =>
-      cardItem === undefined
-        ? []
-        : lifecycle.conversation === null
-          ? itemHistory(cardItem, entries)
-          : storedHistory(cardItem, lifecycle.conversation, lifecycle.conversationGap),
-    [cardItem, entries, lifecycle.conversation, lifecycle.conversationGap],
-  );
+  // The answers this device has given and not yet seen settle: read where they live, so the chat line (which mounts no
+  // Inbox) says them too.
+  const receipts = useAnswerReceipts();
+  const history = useMemo(() => {
+    if (cardItem === undefined) return [];
+    const spoken =
+      lifecycle.conversation === null
+        ? itemHistory(cardItem, entries)
+        : storedHistory(cardItem, lifecycle.conversation, lifecycle.conversationGap);
+    // An answer still inside its undo window, or on its way, is already said here, and leaves with Undo.
+    return withDeviceEvents(
+      spoken,
+      pendingAnswerEvents(receipts, inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id), cardItem),
+    );
+  }, [
+    cardItem,
+    entries,
+    lifecycle.conversation,
+    lifecycle.conversationGap,
+    receipts,
+    connection.daemonId,
+    scope.sessionId,
+  ]);
   const cardError = cardItem === undefined ? null : busy.get(cardItem.id);
   // A question the owner replied to is not answered by the reply: its options stay live under the "replied" line.
   const questionKept =
