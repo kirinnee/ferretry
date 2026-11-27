@@ -3,7 +3,6 @@ import { milliseconds } from '@ferretry/std';
 import { type BrowserMode, type BrowserProxyStatus, DEFAULT_BROWSER_IDENTITY } from '../../contract/index.ts';
 import type { ResolvedBrowserPorts } from '../proxy/wire/ports.ts';
 import {
-  agentBrowserArguments,
   type StealthLaunch,
   BrowserControlError,
   type BrowserProfilePort,
@@ -13,8 +12,8 @@ import {
   defaultCdpTransport,
   honestChromeUserAgent,
   listenerHeldRefusal,
-  selectChromeExecutable,
 } from './control/index.ts';
+import { type BrowserEngine, chromiumEngine } from './engine.ts';
 import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../proxy/index.ts';
 import type { BrowserSessionLauncher } from '../pages/service.ts';
 import type { ChildHandle, Clock, FetchPort, SpawnPort } from '@ferretry/kernel/contract';
@@ -25,9 +24,10 @@ import type { BrowserDisplayPort } from './control/adapters/login-runtime.ts';
 import { ProxySignInRelay } from '../proxy/adapters/sign-in-relay.ts';
 import { BrowserWorkerClient, type StartWorker, type WorkerClientOptions } from './client.ts';
 
-/** Launches the machine's ONE agent Chrome — in the machine's Browser mode (headless by default; a real
- * window when the owner asked for one), over the dedicated agent profile, shared by every session — and the
- * worker that drives it. The profile lease is held until both
+/** Launches ONE identity's Chrome — in the machine's Browser mode (headless by default; a real
+ * window when the owner asked for one), over that identity's own profile, shared by every session that uses the
+ * identity — and the worker that drives it. Each identity has its own lease, DevTools port, display and proxy relay, so
+ * identities launch and run in parallel and never share a process, a profile or a screen. The profile lease is held until both
  * Chrome and the worker are gone, so a login window can never open over a live automation browser —
  * and a lease kept because cleanup could not be confirmed closes the profile to EVERY later launch,
  * this same session's retry included; only confirmed cleanup or dead-owner recovery frees it.
@@ -44,7 +44,7 @@ import { BrowserWorkerClient, type StartWorker, type WorkerClientOptions } from 
  * way the daemon spawns Chrome itself, so it holds the real child: the pid on the lease, the exit it waits
  * on and the process it reaps are Chrome's own. A worker that dies is a browser restart: the daemon reaps Chrome
  * ITSELF (`LeasedBrowser`), never trusting the worker to have closed it, and starts a fresh pair on the next need. */
-/** Who holds the agent profile's lease: the machine's agent browser, not any one session. */
+/** Who holds an identity's profile lease: that identity's browser, not any one session. */
 const AGENT_BROWSER_HOLDER = 'agent-browser';
 
 /**
@@ -64,21 +64,28 @@ export interface SessionBrowserModeOptions {
   readonly limits?: { browserCommand(command: readonly string[]): Promise<readonly string[]> };
   /** This machine's Browser mode right now. Absent means headless, which is what every daemon ran before. */
   readonly mode?: () => Promise<BrowserMode>;
-  /** The private display a Linux `window` browser draws into. */
+  /** The private display a Linux `window` browser of the default identity draws into (the login window's own). */
   readonly display?: BrowserDisplayPort;
+  /**
+   * The display of any OTHER identity's window browser: its own X server, taken on first use and closed with its Chrome, so
+   * two identities' windows, focus and live view never cross. Absent, such an identity shares `display`.
+   */
+  readonly identityDisplay?: (identity: string) => BrowserDisplayPort;
+  /** The engine an identity runs (the machine's, or its own). Absent: Chromium, the only one. */
+  readonly engine?: (identity: string) => BrowserEngine;
   /**
    * Whether this launch is a STEALTH identity's (the machine switch on and the identity not opted out), read at every
    * launch like the mode, and the hygiene it gets ({@link StealthLaunch}), given the proxy the launch resolved so its
    * exit can set the zone and language. `undefined` is every other launch, which is unchanged. An unreadable answer is
    * `undefined` too: hiding automation is never the fallback.
    */
-  readonly stealth?: (proxy: ResolvedBrowserProxy | undefined) => Promise<StealthLaunch | undefined>;
+  readonly stealth?: (proxy: ResolvedBrowserProxy | undefined, identity: string) => Promise<StealthLaunch | undefined>;
   /**
-   * The proxy the shared browser goes through, read at every launch like the mode. Unlike the mode, a proxy
+   * The proxy this identity's browser goes through (its own, else the machine's), read at every launch like the mode. Unlike the mode, a proxy
    * that cannot be resolved REFUSES the launch: starting without it would send traffic its owner asked to route
    * elsewhere straight out of this machine. `undefined` means no proxy.
    */
-  readonly proxy?: () => Promise<ResolvedBrowserProxy | undefined>;
+  readonly proxy?: (identity: string) => Promise<ResolvedBrowserProxy | undefined>;
   /**
    * How the worker reaches Chrome's DevTools protocol, read at every launch like the mode. Absent, or
    * unreadable, means the default (`defaultCdpTransport`): the port. A pipe is refused ({@link PIPE_TRANSPORT_REFUSAL}).
@@ -132,17 +139,17 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     private readonly modes: SessionBrowserModeOptions,
   ) {}
 
-  async launch(viewport: { readonly width: number; readonly height: number }): Promise<BrowserAutomation> {
+  async launch(
+    viewport: { readonly width: number; readonly height: number },
+    identity: string = DEFAULT_BROWSER_IDENTITY,
+  ): Promise<BrowserAutomation> {
     // Both preconditions are checked BEFORE the profile is leased: a machine with no worker or no browser has
     // nothing to clean up, and the refusal is the one plain sentence that names the fix.
     const noWorker = this.modes.workerRefusal?.();
     if (noWorker !== undefined) throw new BrowserControlError('launch_failed', noWorker);
     const host = this.ports.host;
-    const executable = selectChromeExecutable(host.platform, this.environment.FY_CHROME_BIN, host.exists, {
-      home: this.environment.HOME,
-      path: this.environment.PATH,
-      available: command => host.which(command, this.environment.PATH) !== undefined,
-    });
+    const engine = this.modes.engine?.(identity) ?? chromiumEngine;
+    const executable = engine.executable(host, this.environment);
     // The display is a precondition too: a Linux real window with no Xvfb refuses here, before any lease.
     const platform = this.modes.platform ?? host.platform;
     const configuredMode = await this.mode();
@@ -156,13 +163,22 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       const refusal = await this.modes.checkFirewall?.().catch(() => undefined);
       if (refusal !== undefined) throw new BrowserControlError('launch_failed', refusal);
     }
-    const proxy = await this.modes.proxy?.();
-    const stealth = await this.modes.stealth?.(proxy).catch(() => undefined);
+    const proxy = await this.modes.proxy?.(identity);
+    const stealth = await this.modes.stealth?.(proxy, identity).catch(() => undefined);
     // A stealth identity is always a real window, whatever Browser mode says: a headless Chrome is the first thing a bot check reads.
     const mode: BrowserMode = stealth === undefined ? configuredMode : 'window';
-    const version = await chromeVersion(this.ports.spawn, executable);
-    const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
-    const lease = await this.profile.acquire(DEFAULT_BROWSER_IDENTITY, { sessionId: AGENT_BROWSER_HOLDER });
+    const version = await engine.version(this.ports.spawn, executable);
+    const displayPort = mode === 'window' && platform === 'linux' ? this.displayPort(identity) : undefined;
+    const display = displayPort === undefined ? undefined : await displayPort.display();
+    // Only a display this launch took for its own identity goes away with its Chrome; the default identity's is the login window's too.
+    const ownDisplay = identity === DEFAULT_BROWSER_IDENTITY ? undefined : displayPort;
+    let lease: Awaited<ReturnType<BrowserProfilePort['acquire']>>;
+    try {
+      lease = await this.profile.acquire(identity, { sessionId: AGENT_BROWSER_HOLDER });
+    } catch (error) {
+      await ownDisplay?.close().catch(() => undefined);
+      throw error;
+    }
     let chrome: ChromeChild | undefined;
     let relay: ProxySignInRelay | undefined;
     try {
@@ -182,7 +198,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         // HEADLESS unless the owner chose a real window. A real window keeps every page's window painting
         // while another has focus (`agentBrowserArguments`), because an agent may be driving — and a
         // person watching — any of them at once.
-        ...agentBrowserArguments(executable, lease.profile, cdp, viewport, platform, mode, {
+        ...engine.command(executable, lease.profile, cdp, viewport, platform, mode, {
           ...(userAgent === undefined ? {} : { userAgent }),
           ...(stealth === undefined ? {} : { stealth }),
           ...(proxy === undefined
@@ -204,7 +220,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
             ...browserEnvironment(
               display,
               this.environment,
-              display === undefined ? undefined : this.modes.display?.authority(),
+              display === undefined ? undefined : displayPort?.authority(),
             ),
             // Chrome takes its zone from the process: the identity's own, where its proxy exit named one.
             ...(stealth?.timezone === undefined ? {} : { TZ: stealth.timezone }),
@@ -227,6 +243,8 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
           endpoint,
           environment: this.environment,
           ...(stealth === undefined ? {} : { stealth: true }),
+          // Two Chromes number their pages alike: another identity's ids carry its name, so they never meet.
+          ...(identity === DEFAULT_BROWSER_IDENTITY ? {} : { pagePrefix: `${identity}-` }),
           readyTimeoutMs: WORKER_ATTACH_TIMEOUT_MS,
           ...(this.modes.stageDirectory === undefined ? {} : { stageDirectory: this.modes.stageDirectory }),
         });
@@ -243,6 +261,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         proxy === undefined ? undefined : browserProxyStatus(proxy.setting),
         // A window on a desktop other than Linux's private display draws on this computer's own clipboard.
         mode === 'window' && platform !== 'linux',
+        ownDisplay,
       );
     } catch (error) {
       // A failed launch owns the same ordering obligation as a close: the browser it started is still
@@ -259,6 +278,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         await lease.release().catch(() => undefined);
       }
       await relay?.close().catch(() => undefined);
+      await ownDisplay?.close().catch(() => undefined);
       throw error;
     }
   }
@@ -269,11 +289,16 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     return (await this.modes.mode?.().catch(() => undefined)) ?? 'headless';
   }
 
-  private async privateDisplay(): Promise<string> {
-    if (this.modes.display === undefined) {
+  /** The display this identity's window draws into; absent when the daemon has none (the refusal is made when it is asked). */
+  private displayPort(identity: string): BrowserDisplayPort {
+    const port =
+      identity === DEFAULT_BROWSER_IDENTITY
+        ? this.modes.display
+        : (this.modes.identityDisplay?.(identity) ?? this.modes.display);
+    if (port === undefined) {
       throw new BrowserControlError('launch_failed', 'this daemon has no private display for a real browser window');
     }
-    return await this.modes.display.display();
+    return port;
   }
 }
 
@@ -299,6 +324,8 @@ class LeasedBrowser implements BrowserAutomation {
     private readonly relay?: ProxySignInRelay,
     readonly proxy?: BrowserProxyStatus,
     private readonly clipboardShared = false,
+    /** The identity's own X server, closed with its Chrome. */
+    private readonly display?: BrowserDisplayPort,
   ) {
     // Either child settling means the SESSION is over: the worker without Chrome drives nothing, and
     // Chrome without its worker is a window still holding the profile that nothing drives — and is never
@@ -382,6 +409,8 @@ class LeasedBrowser implements BrowserAutomation {
     // died first, is no reason to leave a browser up (and the worker's process group is not signalled: GAP).
     const chromeGone = await reapChrome(this.clock, this.chrome, 'SIGTERM', this.shutdownTimeoutMs);
     await this.relay?.close().catch(() => undefined);
+    // An X server of its own lives exactly as long as its Chrome: nothing is drawing on it once Chrome is confirmed gone.
+    if (chromeGone) await this.display?.close().catch(() => undefined);
     // Released LAST and only on BOTH confirmations: a lease that outlives either child by even a
     // moment lets a login window or the next session open a second Chrome over a profile the first one
     // is still writing to. A survivor therefore KEEPS the lease — an unreleased lease costs this
@@ -497,13 +526,6 @@ function defined(source: Readonly<Record<string, string | undefined>>): Record<s
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) if (value !== undefined) result[key] = value;
   return result;
-}
-async function chromeVersion(spawn: Pick<SpawnPort, 'run'>, executable: string): Promise<string> {
-  const ran = await spawn.run(executable, ['--version']);
-  const version = ran.stdout.trim();
-  if (ran.exitCode !== 0 || version === '')
-    throw new BrowserControlError('launch_failed', 'Chrome did not report a version');
-  return version;
 }
 async function freePort(): Promise<number> {
   return await new Promise((resolve, reject) => {

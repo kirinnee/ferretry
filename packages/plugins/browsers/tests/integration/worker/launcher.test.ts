@@ -1352,4 +1352,104 @@ describe('shared browser limits at the actual child launch seams', () => {
     const next = await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' });
     await next.release();
   });
+
+  describe('one identity’s browser', () => {
+    /** A launcher over a recording fake Chrome and an injected worker that records how it was asked to attach. */
+    async function identityLauncher(modes: Omit<SessionBrowserModeOptions, 'listenerProver'>) {
+      const chrome = await fakeChrome({ recordArguments: true });
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-identity-profile-'));
+      roots.push(root);
+      const attached: { readonly pagePrefix?: string }[] = [];
+      const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        PORTS,
+        environment(chrome),
+        async options => {
+          attached.push({ ...(options.pagePrefix === undefined ? {} : { pagePrefix: options.pagePrefix }) });
+          return worker as never;
+        },
+        { listenerProver: unprovenListenerProver(), ...modes },
+      );
+      return { chrome, root, launcher, attached };
+    }
+    const xvfb = (name: string) => ({
+      taken: 0,
+      closed: 0,
+      async display() {
+        this.taken += 1;
+        return name;
+      },
+      authority: () => undefined,
+      async close() {
+        this.closed += 1;
+      },
+    });
+
+    it('should lease each identity’s own profile, so two identities launch at once and one twice is refused', async () => {
+      // Arrange
+      const { chrome, root, launcher } = await identityLauncher({});
+
+      // Act
+      const work = await launcher.launch({ width: 800, height: 600 }, 'work');
+      opened.push(work);
+      const shop = await launcher.launch({ width: 800, height: 600 }, 'shop');
+      opened.push(shop);
+      const again = await launcher.launch({ width: 800, height: 600 }, 'work').then(
+        () => undefined,
+        (error: unknown) => error as Error,
+      );
+
+      // Assert — each Chrome ran over its own folder, and the same identity is exclusive.
+      should(await readFile(`${chrome}.args`, 'utf8')).match(/--user-data-dir=.*\/data\/(work|shop)/u);
+      should(again?.name).equal('BrowserProfileBusyError');
+      await new BrowserProfileStore(root).acquire('agent', { sessionId: 'free' }).then(lease => lease.release());
+    });
+
+    it('should name the identity to the proxy, the stealth and the engine reads, and prefix its page ids', async () => {
+      // Arrange
+      const asked: string[] = [];
+      const { launcher, attached } = await identityLauncher({
+        proxy: async identity => {
+          asked.push(`proxy:${identity}`);
+          return undefined;
+        },
+        stealth: async (_proxy, identity) => {
+          asked.push(`stealth:${identity}`);
+          return undefined;
+        },
+      });
+
+      // Act
+      opened.push(await launcher.launch({ width: 800, height: 600 }, 'work'));
+      opened.push(await launcher.launch({ width: 800, height: 600 }));
+
+      // Assert — the default identity's page ids are what they always were; another's carry its name.
+      should(asked).deepEqual(['proxy:work', 'stealth:work', 'proxy:agent', 'stealth:agent']);
+      should(attached).deepEqual([{ pagePrefix: 'work-' }, {}]);
+    });
+
+    it('should draw a non-default identity on a display of its own and close it with its Chrome, leaving the shared one alone', async () => {
+      // Arrange
+      const shared = xvfb(':10');
+      const own = xvfb(':11');
+      const { launcher } = await identityLauncher({
+        mode: async () => 'window',
+        platform: 'linux',
+        display: shared,
+        identityDisplay: () => own,
+      });
+
+      // Act
+      const work = await launcher.launch({ width: 800, height: 600 }, 'work');
+      const home = await launcher.launch({ width: 800, height: 600 });
+      await work.close();
+      await home.close();
+
+      // Assert — the identity's X server was taken for it and went with its Chrome; the shared one was used and never closed.
+      should(own).match({ taken: 1, closed: 1 });
+      should(shared).match({ taken: 1, closed: 0 });
+    });
+  });
 });
