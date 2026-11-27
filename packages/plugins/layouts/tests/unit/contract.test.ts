@@ -90,6 +90,11 @@ test('a theme item names a style and a palette by any well-formed pack id, and i
     light: {},
     dark: {},
   });
+  // an OLD id reads as the pack it became, on read only
+  expect(ThemeSchema.parse({ ...item, style: 'aqua', palette: 'ma' })).toMatchObject({
+    style: 'lucid',
+    palette: 'vaporwave',
+  });
   expect(ThemeSchema.safeParse({ ...item, style: 'Not An Id' }).success).toBe(false);
   expect(ThemeSchema.safeParse({ ...item, light: { bg: 'url(x)' } }).success).toBe(false);
 });

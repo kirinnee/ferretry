@@ -369,9 +369,9 @@ describe('a theme item names a style and a palette by pack id', () => {
     for (const style of STYLE_IDS) expect(ThemeSchema.parse({ ...item, style }).style).toBe(style);
     for (const palette of PALETTE_IDS) expect(ThemeSchema.parse({ ...item, palette }).palette).toBe(palette);
     // an id with no pack still parses (the app falls back to the default look and the saved item is left as it is)
-    expect(ThemeSchema.parse({ ...item, style: 'ma', palette: 'phosphor' })).toMatchObject({
-      style: 'ma',
-      palette: 'phosphor',
+    expect(ThemeSchema.parse({ ...item, style: 'zz-gone', palette: 'zz-none' })).toMatchObject({
+      style: 'zz-gone',
+      palette: 'zz-none',
     });
     expect(ThemeSchema.safeParse(item).success).toBe(true);
   });

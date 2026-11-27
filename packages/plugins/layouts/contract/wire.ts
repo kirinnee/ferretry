@@ -243,7 +243,7 @@ export const TokensSchema = z.strictObject(
  * STRICT: this contract owns them, and both daemon and app refuse names the stylesheet does not read and values that could
  * close a declaration, load a resource, or smuggle an expression.
  */
-export const ThemeSchema = z.object({
+const ThemeObjectSchema = z.object({
   id: ThemeIdSchema,
   label: z.string().min(1).max(60),
   style: PackIdSchema.optional(),
@@ -251,7 +251,29 @@ export const ThemeSchema = z.object({
   light: TokensSchema.default({}),
   dark: TokensSchema.default({}),
 });
-export type Theme = z.infer<typeof ThemeSchema>;
+export type Theme = z.infer<typeof ThemeObjectSchema>;
+
+/**
+ * An OLD style or palette id an item still carries reads as the id it became (the tables above), so a saved item keeps its
+ * look; a style that brought a palette (`contrast`) gives it when the item names none. Read mapping only: nothing is rewritten.
+ */
+export const ThemeSchema = z.preprocess(value => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const item = value as Record<string, unknown>;
+  const removedStyle =
+    typeof item.style === 'string' && Object.hasOwn(REMOVED_STYLE_IDS, item.style)
+      ? (REMOVED_STYLE_IDS[item.style as keyof typeof REMOVED_STYLE_IDS] as { style: string; palette?: string })
+      : undefined;
+  const palette =
+    typeof item.palette === 'string' && Object.hasOwn(REMOVED_PALETTE_IDS, item.palette)
+      ? REMOVED_PALETTE_IDS[item.palette as keyof typeof REMOVED_PALETTE_IDS]
+      : (item.palette ?? removedStyle?.palette);
+  return {
+    ...item,
+    ...(removedStyle === undefined ? {} : { style: removedStyle.style }),
+    ...(palette === undefined ? {} : { palette }),
+  };
+}, ThemeObjectSchema);
 
 /**
  * The keys of a layout that `config/layout.yaml` may change, field by field, so `fy layout set nav.side right` stores
