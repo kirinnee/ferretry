@@ -44,7 +44,8 @@ const codeOf = async (promise: Promise<unknown>): Promise<string> => {
   }
 };
 
-describe.skipIf(process.platform !== 'linux')('renameNoReplace on Linux', () => {
+const nativeHost = process.platform === 'linux' || process.platform === 'darwin';
+describe.skipIf(!nativeHost)('renameNoReplace on the native host', () => {
   test('moves between two held folders, and a taken name is EEXIST with both files untouched', async () => {
     const { a, b } = await folders();
     await writeFile(`${a}/x`, 'source');
@@ -200,16 +201,20 @@ describe('where there is no no-replace move', () => {
     expect((await readdir(parent)).sort()).toEqual(['a', 'b']);
   });
 
-  test('nothing is bound on a platform other than Linux', () => {
-    expect(() => loadNoReplaceRename(undefined, undefined, 'darwin')).toThrow('no renameat2 on darwin');
+  test('nothing is bound on an unsupported platform', () => {
+    expect(() => loadNoReplaceRename(undefined, undefined, 'unsupported')).toThrow(
+      'no exclusive rename on unsupported',
+    );
   });
 
-  test('a host with no descriptor path has no no-replace move', async () => {
+  test('a host with no descriptor path still moves through its held descriptors', async () => {
     const { a } = await folders();
     const fs = nodeFs(() => crypto.randomUUID(), { descriptorFolder: '/nonexistent-descriptor-folder' });
     const folder = await fs.openDirectory(a);
     try {
-      expect(folder.renameNoReplace).toBeUndefined();
+      await writeFile(`${a}/source`, 'held');
+      await moveOf(folder)('source', folder, 'target');
+      expect(await readFile(`${a}/target`, 'utf8')).toBe('held');
     } finally {
       await folder.close();
     }

@@ -115,11 +115,13 @@ describe('worktree removal over the contributed terminal roots', () => {
       if (code !== 0) throw new Error(stderr);
       return stdout;
     };
-    const pin = world.io.pinner.pin.bind(world.io.pinner);
+    const checkout = world.io.repoAccess.checkout.bind(world.io.repoAccess);
+    let pins = 0;
     let opened = false;
-    world.io.pinner.pin = async target => {
-      const held = await pin(target);
-      if (target === path && !opened) {
+    world.io.repoAccess.checkout = async (target, repository) => {
+      const held = await checkout(target, repository);
+      // The first hold binds removal identity; the second is the final pin after Git preflight.
+      if (target === path && ++pins === 2 && !opened) {
         opened = true;
         await tmux('new-session', '-d', '-s', 'late-probe', '-c', path, '/bin/sh');
         roots = [(await tmux('display-message', '-p', '-t', 'late-probe', '#{pane_current_path}')).trim()];
@@ -139,8 +141,8 @@ describe('worktree removal over the contributed terminal roots', () => {
   });
 });
 
-// The contributor owns pane admission; Ferrets must hold that reservation through the actual Git spawn.
-test('A: holds contributed exclusion while Git is paused at remove, then releases it', async () => {
+// The contributor owns pane admission; Ferrets must hold that reservation through actual deletion.
+test('A: holds contributed exclusion while quarantine is paused, then releases it', async () => {
   let reserved = false;
   const source: TerminalRootsSource = {
     roots: async () => [],
@@ -170,13 +172,11 @@ test('A: holds contributed exclusion while Git is paused at remove, then release
   const proceed = new Promise<void>(resolve => {
     unpause = resolve;
   });
-  const run = world.io.git.runBytes.bind(world.io.git);
-  world.io.git.runBytes = async (program, args, options) => {
-    if (args.includes('worktree') && args.includes('remove')) {
-      reached();
-      await proceed;
-    }
-    return await run(program, args, options);
+  const quarantine = world.io.fileSystem.quarantineRename;
+  world.io.fileSystem.quarantineRename = async (...args) => {
+    reached();
+    await proceed;
+    await quarantine(...args);
   };
   const removing = world.call('POST /v1/worktrees/remove', {
     body: { path, overrides: ['accept_unpushed_commits'], deleteBranch: false, confirmations: [] },

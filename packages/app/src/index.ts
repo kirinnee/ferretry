@@ -230,6 +230,7 @@ export {
   swatchAttributes,
 } from './theme/catalog.ts';
 export { CODE_FACE_URLS } from './theme/fonts.ts';
+export * from './theme/render-contract.ts';
 export {
   DEFAULT_THEME_PREFERENCE,
   THEME_FAMILIES,

@@ -88,6 +88,18 @@ export interface GitRunner {
 export type WorktreeFileType = 'directory' | 'file' | 'symlink' | 'other' | 'missing';
 
 export interface WorktreeFileSystem {
+  directoryIdentity(target: string): Promise<string | undefined>;
+  quarantineRename(
+    target: string,
+    quarantine: string,
+    expectedIdentity: string,
+    beforeRename?: () => Promise<void>,
+  ): Promise<void>;
+  removeTree(
+    target: string,
+    expectedIdentity: string,
+    beforeDelete?: () => Promise<void>,
+  ): Promise<'deleted' | 'already_missing'>;
   makeDirectory(target: string, mode: number): Promise<void>;
   realPath(target: string): Promise<string>;
   type(target: string): Promise<WorktreeFileType>;

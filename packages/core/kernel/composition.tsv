@@ -4,6 +4,7 @@ composition	host/config/agent-reach.ts	-	-	which configuration files an agent ma
 oversize	host/config/service.ts	1635	2026-12-16	one config service; split by file family when next touched
 composition	host/host.ts	-	-	bootHost: the kernel boot sequence
 oversize	host/host.ts	2020	2026-11-30	bootHost: one 1,270-line boot function; K2 turns it into boot steps
+composition	host/root-removal.ts	-	-	the descriptor removal walk extracted from roots.ts
 composition	host/roots.ts	-	-	the fence and pinned-path code every folder grant goes through
 oversize	host/roots.ts	3708	2026-12-16	fence and pinned-path code; security-critical, split only after an Opus plan
 oversize	manifest/types.ts	600	2026-12-31	setup steps gained stepHost in r10 O4; split by feature after r10

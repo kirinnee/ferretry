@@ -46,3 +46,11 @@ runs:
         FY_RELAY_DIRECTORY_ORIGIN: 'off'
         FY_UPDATE_CHECK: 'off'
       run: ./scripts/ci/in-devshell.sh timeout --kill-after=15 300 bun test --config=bunfig.int.toml --timeout 120000 packages/core/kernel/tests/integration/host/node-fs-held-folder.test.ts
+    - name: Kernel darwin tests (node-fs-noreplace, the real exclusive rename)
+      shell: bash
+      env:
+        FY_MODEL_CATALOG: 'off'
+        FY_LOCAL_MODELS: 'off'
+        FY_RELAY_DIRECTORY_ORIGIN: 'off'
+        FY_UPDATE_CHECK: 'off'
+      run: ./scripts/ci/in-devshell.sh timeout --kill-after=15 300 bun test --config=bunfig.int.toml --timeout 120000 packages/core/kernel/tests/integration/host/node-fs-noreplace.test.ts

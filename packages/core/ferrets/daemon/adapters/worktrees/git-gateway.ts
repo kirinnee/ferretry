@@ -375,24 +375,4 @@ export class GitWorktreeGateway {
       'git branch delete',
     );
   }
-
-  /**
-   * Removes the checkout.
-   *
-   * `force` is Git's own, and it is NOT a blanket force: the caller reaches it only by having
-   * consented to the exact class of loss — uncommitted content — that makes Git refuse, and every
-   * other blocker has already been decided separately. Without it a consented
-   * `discard_worktree_changes` would be accepted by the daemon and then refused by Git, which is a
-   * removal that says yes and does nothing.
-   */
-  async remove(cwd: GitWorkingDirectory, force = false): Promise<void> {
-    await runGit(
-      this.runner,
-      cwd,
-      ['worktree', 'remove', ...(force ? ['--force'] : []), '--', '.'],
-      'git worktree remove',
-      [0],
-      { timeoutMs: 120_000 },
-    );
-  }
 }

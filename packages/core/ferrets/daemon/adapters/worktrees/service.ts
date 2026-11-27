@@ -27,9 +27,17 @@ import type {
   WorktreeListEntry,
   WorktreeRemovalBlocker,
   WorktreeRemovalEvidence,
+  WorktreeAdoptionIdentity,
 } from '../../lib/worktrees/types.ts';
 import type { GitWorktreeGateway } from './git-gateway.ts';
 import type { WorktreeOperationQueue } from './queue.ts';
+import {
+  quarantinePath,
+  removalIdentity,
+  verifyRemovalMetadata,
+  removeRecordedMetadata,
+  removeQuarantinedCheckout,
+} from './quarantine.ts';
 
 const OWNERSHIP_MARKER = 'worktree-owner';
 
@@ -253,6 +261,7 @@ export class ManagedWorktreeAdapter {
     private readonly clock: WorktreeClock,
     private readonly queue: WorktreeOperationQueue,
     private readonly pinner: WorktreeDirectoryPinner,
+    private readonly verifiedRemovalIdentity?: WorktreeAdoptionIdentity,
   ) {}
 
   async create(input: CreateManagedWorktreeInput): Promise<CreatedManagedWorktree> {
@@ -602,6 +611,8 @@ export class ManagedWorktreeAdapter {
   /** Recheck Git and occupancy under the repository queue, then pin before deleting. */
   async remove(input: RemoveManagedWorktreeInput): Promise<RemovedManagedWorktree> {
     return await this.queue.run(input.managed.commonDir, async () => {
+      const identity =
+        this.verifiedRemovalIdentity ?? (await removalIdentity(this.fileSystem, input.managed).catch(() => undefined));
       const preflight = await this.examine(input);
       const uncleared = unclearedRemovalBlockers(preflight.decision.blockers, input.overrides);
       if (uncleared.length > 0) {
@@ -620,7 +631,7 @@ export class ManagedWorktreeAdapter {
         );
       }
 
-      const discarding = fresh.decision.blockers.some(blocker => blocker.override === 'discard_worktree_changes');
+      if (identity === undefined) throw new WorktreeRemovalRefusal('checkout identity could not be established');
       await this.#withPinned(
         fresh.decision.path,
         () =>
@@ -628,7 +639,7 @@ export class ManagedWorktreeAdapter {
             `refusing to remove ${fresh.decision.path}: checkout identity changed at the mutation boundary`,
             fresh.decision.blockers,
           ),
-        async (pinnedCwd, identity) => {
+        async (pinnedCwd, checkoutIdentity) => {
           await verifyWorktreeOccupancy(refreshed, input.refreshEvidence);
           if (input.expectedHead !== undefined) {
             const head = await this.gateway.head(pinnedCwd);
@@ -638,7 +649,7 @@ export class ManagedWorktreeAdapter {
               head !== input.expectedHead ||
               branch !== `refs/heads/${input.managed.branch}` ||
               Object.values(status).some(Boolean) ||
-              (input.expectedIdentity !== undefined && identity !== input.expectedIdentity.checkout)
+              (input.expectedIdentity !== undefined && checkoutIdentity !== input.expectedIdentity.checkout)
             )
               throw new WorktreeRemovalRefusal('the reviewed checkout changed at the mutation boundary', [
                 {
@@ -646,8 +657,35 @@ export class ManagedWorktreeAdapter {
                   message: 'the checkout identity, branch, head or files changed; refresh and review it again',
                 },
               ]);
+          } else {
+            const status = await this.gateway.status(pinnedCwd);
+            if (JSON.stringify(status) !== JSON.stringify(fresh.live.status))
+              throw new WorktreeRemovalRefusal('the checkout status changed at the mutation boundary');
           }
-          return await this.gateway.remove(pinnedCwd, discarding);
+          await input.recordRemovalIdentity?.(identity);
+          const quarantine = quarantinePath(input.managed);
+          try {
+            await verifyRemovalMetadata(this.fileSystem, input.managed, identity);
+            await this.fileSystem.quarantineRename(
+              input.managed.path,
+              quarantine,
+              identity.checkout,
+              async () => await verifyRemovalMetadata(this.fileSystem, input.managed, identity),
+            );
+            await verifyRemovalMetadata(this.fileSystem, input.managed, identity);
+            const completed = await removeQuarantinedCheckout(
+              this.fileSystem,
+              input.managed,
+              identity,
+              input.recordRemovalIdentity,
+            );
+            await removeRecordedMetadata(this.fileSystem, input.managed, completed, input.recordRemovalIdentity);
+          } catch (error) {
+            throw new WorktreeError(
+              'unsafe_remove',
+              `removal refused; inspect recovery path ${quarantine}: ${message(error)}`,
+            );
+          }
         },
       );
       const retained = { path: fresh.decision.path, branch: input.managed.branch, removedAt: this.clock.nowIso() };

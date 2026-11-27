@@ -1909,7 +1909,7 @@ that plugin's minted pool view (a forged view or another plugin's is `not_own`).
 fixed deny list and closed entry list still apply (`denied`, `not_listed`). The target is `<same entry>/...` or
 `.conflicts/<same ferret>/<same entry>/...`; other shapes are `denied`, and `.conflicts` is special only in that first
 position. Parents are made `0700` only inside the pool. Both parents are held through the no-follow descriptor walk,
-then Linux `renameat2(RENAME_NOREPLACE)` moves between those held parent descriptors. An existing target is
+then Linux `renameat2(RENAME_NOREPLACE)` or macOS `renameatx_np(RENAME_EXCL)` moves between those held parent descriptors. An existing target is
 `HistoryPoolError('exists')`, including one created concurrently: the source stays in place and the target is never replaced.
 Only regular-file leaves move; a folder, link or other kind is `not_file`, and a source file with another hard link is
 `hard_link`. A placed credential is refused by the same placed/private guards. A folder cannot carry an unchecked descendant
@@ -1917,7 +1917,7 @@ through this door.
 Private-place guards hold at both ends; the pool end reuses `reachHistoryEntry` and its held base, including the
 device/inode check that refuses a real agent home swapped into the pool's place DURING this call. It does not establish
 where an already-planted real folder came from. Another device is `changed`, with no copy fallback. A host without
-atomic descriptor-relative no-replace rename (including macOS today) refuses `no_descriptor_reach`; there is no plain-rename
+atomic descriptor-relative no-replace rename refuses `no_descriptor_reach`; there is no plain-rename
 fallback. Refusals before the syscall move no file; empty target-parent folders already made may remain. A failed
 post-move proof attempts atomic no-replace restoration; if the source name was taken meanwhile, the file can remain
 in the pool. For a proven hard-linked inode, the kernel instead drops its pool name when restoration fails (another

@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { RENDER_PALETTE_TOKENS, RENDER_STYLE_TOKENS } from '@ferretry/app';
 import { ensureDom } from '@ferretry/app/testing';
 
 ensureDom();
@@ -139,5 +140,32 @@ describe('look.ts', () => {
     root.style.setProperty('--hm-shape', 'wobbly');
     root.style.setProperty('--hm-header', 'huge');
     expect(readLook()).toMatchObject({ shape: 'shaped', header: 'band' });
+  });
+});
+
+describe('the hypermedia stylesheets read the app only through the renderer contract', () => {
+  const contract: ReadonlySet<string> = new Set([...RENDER_PALETTE_TOKENS, ...RENDER_STYLE_TOKENS]);
+  const sheets = ['dh-theme.css', 'hypermedia.css'].map(name =>
+    withoutComments(readFileSync(join(folder, name), 'utf8')),
+  );
+  const text = sheets.join('\n');
+  /** Every custom property either stylesheet declares. The 3D stage's `--stage-<name>` values are set by `stage-colours.ts` from the recipes here. */
+  const own = new Set([...text.matchAll(/(--[\w-]+)\s*:/gu)].map(match => (match[1] as string).slice(2)));
+  const read = [...new Set([...text.matchAll(/var\(\s*--([\w-]+)/gu)].map(match => match[1] as string))];
+  const foreign = read.filter(name => !own.has(name) && !name.startsWith('stage-'));
+
+  it('finds what it is checking', () => {
+    expect(read.length).toBeGreaterThan(100);
+    expect(foreign.length).toBeGreaterThan(80);
+  });
+
+  it('reads no app token the theme is not required to resolve', () => {
+    expect(foreign.filter(name => !contract.has(name))).toEqual([]);
+  });
+
+  it('copies only contract tokens onto the wrapper (`--fyhm-<x>: var(--<x>)`), which is how a name both sides use gets read', () => {
+    const copied = [...text.matchAll(/--fyhm-[\w-]+\s*:\s*var\(\s*--([\w-]+)\s*\)/gu)].map(match => match[1] as string);
+    expect(copied.length).toBeGreaterThan(10);
+    expect(copied.filter(name => !contract.has(name))).toEqual([]);
   });
 });

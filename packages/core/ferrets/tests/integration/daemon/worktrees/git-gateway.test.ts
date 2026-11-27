@@ -512,35 +512,6 @@ describe('GitWorktreeGateway worktree lifecycle', () => {
     // Assert
     should((actual as Error).message).containEql('git worktree add failed');
   });
-
-  it('should remove a linked worktree through the shared Git directory', async () => {
-    // Arrange
-    const repository = await tempRepository('gw-remove');
-    const linked = path.join(await tempDirectory('gw-remove-child'), 'wt');
-    await setupGit(repository.root, 'worktree', 'add', '-b', 'feature/remove', '--', linked);
-    // Act
-    await gateway().remove(linked);
-
-    // Assert
-    should(await files.type(linked)).equal('missing');
-    should(await gateway().list(repository.root)).have.length(1);
-    should(await gateway().localBranchExists(repository.root, 'feature/remove')).be.true();
-  });
-
-  it('should refuse to remove a checkout Git considers unsafe to delete', async () => {
-    // Arrange
-    const repository = await tempRepository('gw-remove-dirty');
-    const linked = path.join(await tempDirectory('gw-remove-dirty-child'), 'wt');
-    await setupGit(repository.root, 'worktree', 'add', '-b', 'feature/dirty', '--', linked);
-    await Bun.write(path.join(linked, 'README.md'), '# changed\n');
-
-    // Act
-    const actual = await error(gateway().remove(linked));
-
-    // Assert
-    should((actual as Error).message).containEql('git worktree remove failed');
-    should(await files.type(linked)).equal('directory');
-  });
 });
 
 describe('GitWorktreeGateway status and push state', () => {
@@ -809,20 +780,5 @@ describe('GitWorktreeGateway destructive operations', () => {
     // Assert — Git's own `-d` refusal is a second opinion this side keeps
     should(refusal).be.instanceof(Error);
     should(await setupGit(repository.root, 'branch', '--list', '--format=%(refname:short)')).equal('main\n');
-  });
-
-  it('should remove a dirty checkout only when the consent that covers it was given', async () => {
-    // Arrange
-    const repository = await tempRepository('gw-remove-force');
-    const destination = path.join(await tempDirectory('gw-remove-force-dest'), 'checkout');
-    await setupGit(repository.root, 'worktree', 'add', '-b', 'feature/dirty', '--', destination, repository.head);
-    await Bun.write(path.join(destination, 'README.md'), '# edited\n');
-    // Act
-    const refusal = await error(gateway().remove(destination));
-    await gateway().remove(destination, true);
-
-    // Assert — without the forceful form a consented discard says yes and does nothing
-    should(refusal).be.instanceof(Error);
-    should(await files.type(destination)).equal('missing');
   });
 });

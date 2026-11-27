@@ -214,16 +214,16 @@ describe('adopt in place through the real roots and Git', () => {
   it('should preserve a foreign folder swapped in after the final removal pin', async () => {
     const world = await fixture('adopt-final-pin');
     should((await world.call('POST /v1/worktrees/adopt', { body: { path: world.target } })).status).equal(200);
-    const run = world.io.git.runBytes;
+    const quarantine = world.io.fileSystem.quarantineRename;
     let swapped = false;
-    world.io.git.runBytes = async (program, args, options) => {
-      if (!swapped && args.includes('remove')) {
+    world.io.fileSystem.quarantineRename = async (...args) => {
+      if (!swapped) {
         swapped = true;
         await rename(world.target, `${world.target}-old`);
         await mkdir(world.target);
         await Bun.write(path.join(world.target, 'keep.txt'), 'belongs to somebody else\n');
       }
-      return await run(program, args, options);
+      return await quarantine(...args);
     };
     await world
       .call('POST /v1/worktrees/remove', {
