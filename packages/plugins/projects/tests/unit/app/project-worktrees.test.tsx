@@ -179,8 +179,8 @@ describe('the project page: Branches & worktrees (F-120, F-121)', () => {
         <ProjectDetailPage
           client={page(
             {
-              [LIST]: (call: Call) =>
-                listAnswer(call.query?.commonDir ?? '', [
+              [LIST]: () =>
+                listAnswer('/work/ferretry/.git', [
                   row('/work/ferretry', 'main', { main: true, tracked: 'none' }),
                   row('/work/trees/nav', 'feat/nav'),
                 ]),
@@ -199,9 +199,8 @@ describe('the project page: Branches & worktrees (F-120, F-121)', () => {
       interact,
     );
     expect(mounted.container.querySelector('[data-project-worktrees="none"]')).toBeNull();
-    expect(calls.filter(call => call.route === LIST).map(call => call.query)).toEqual([
-      { commonDir: '/work/ferretry/.git' },
-    ]);
+    // R2-1: the project's own repository is asked about by the project's id; the daemon owns the directory.
+    expect(calls.filter(call => call.route === LIST).map(call => call.query)).toEqual([{ project: PROJECT.id }]);
     await mounted.unmount();
   });
 
@@ -218,7 +217,7 @@ describe('the project page: Branches & worktrees (F-120, F-121)', () => {
           client={page(
             {
               [LIST]: (call: Call) =>
-                call.query?.commonDir === '/work/main/.git'
+                call.query?.project === PROJECT.id
                   ? listAnswer('/work/main/.git', [
                       row('/work/main', 'main', { main: true, tracked: 'none' }),
                       row('/work/ferretry', 'feat/this'),
@@ -239,9 +238,7 @@ describe('the project page: Branches & worktrees (F-120, F-121)', () => {
       interact,
     );
     expect(mounted.container.querySelector('[data-project-worktree-state="failed"]')).toBeNull();
-    expect(calls.filter(call => call.route === LIST).map(call => call.query)).toEqual([
-      { commonDir: '/work/main/.git' },
-    ]);
+    expect(calls.filter(call => call.route === LIST).map(call => call.query)).toEqual([{ project: PROJECT.id }]);
     await mounted.unmount();
   });
 

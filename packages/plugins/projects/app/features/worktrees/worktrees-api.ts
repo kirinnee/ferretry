@@ -20,6 +20,12 @@ export interface WorktreeSource {
   readonly name: string;
   readonly folder: string;
   readonly commonDir: string;
+  /**
+   * Set for the project's OWN repository: it is asked about by the project's id, and the daemon answers from the directory
+   * registration recorded (it takes no path for it, and refuses one it does not know). The repositories found inside the
+   * folder have no id of their own and are asked about by their `.git` folder.
+   */
+  readonly project?: string;
 }
 
 /**
@@ -39,7 +45,8 @@ export const worktreeSources = (project: ProjectInfo): readonly WorktreeSource[]
     if (!sources.some(known => known.commonDir === source.commonDir)) sources.push(source);
   };
   const repos = project.repos ?? [];
-  if (project.git !== undefined) add({ name: baseName(root), folder: root, commonDir: project.git.commonDirectory });
+  if (project.git !== undefined)
+    add({ name: baseName(root), folder: root, commonDir: project.git.commonDirectory, project: project.id });
   for (const repo of repos) {
     if (repo.path === '.') {
       // The folder itself: its recorded common directory already stands above; only a record that has none falls back.
@@ -52,8 +59,15 @@ export const worktreeSources = (project: ProjectInfo): readonly WorktreeSource[]
   return sources;
 };
 
-export const readRepoWorktrees = async (client: ProjectsClient, commonDir: string): Promise<RepoWorktreeListResponse> =>
-  RepoWorktreeListResponseSchema.parse(await client.call(LIST_ROUTE, { query: { commonDir } }));
+export const readRepoWorktrees = async (
+  client: ProjectsClient,
+  source: WorktreeSource,
+): Promise<RepoWorktreeListResponse> =>
+  RepoWorktreeListResponseSchema.parse(
+    await client.call(LIST_ROUTE, {
+      query: source.project === undefined ? { commonDir: source.commonDir } : { project: source.project },
+    }),
+  );
 
 /** Takes the checkout over where it stands: Ferrets never moves it. */
 export const adoptWorktree = async (client: ProjectsClient, path: string): Promise<void> => {

@@ -35,7 +35,8 @@ const client = scripted({
   [FILES]: (call: { query?: Readonly<Record<string, string>> }) =>
     answerFor(summaryOf(), call.query?.q, Number(call.query?.limit ?? 50)),
   [LIST]: (call: { query?: Readonly<Record<string, string>> }) => {
-    const dir = call.query?.commonDir ?? '';
+    // A project's own repository is asked about by its id; the scene's project records this directory.
+    const dir = call.query?.commonDir ?? (call.query?.project === undefined ? '' : '/work/ferretry/site/.git');
     if (mode === 'slow') return new Promise(() => undefined);
     if (mode === 'failed' && dir.endsWith('/docs/.git'))
       throw Object.assign(new Error('that folder is not a git common directory.'), { status: 422 });

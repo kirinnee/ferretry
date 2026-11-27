@@ -128,7 +128,7 @@ function RepoGroup({
 
   const read = useCallback(
     (alive: () => boolean) =>
-      readRepoWorktrees(client, commonDir).then(
+      readRepoWorktrees(client, source).then(
         list => {
           if (alive()) setReading({ kind: 'ready', list });
         },
@@ -139,7 +139,7 @@ function RepoGroup({
             );
         },
       ),
-    [client, commonDir],
+    [client, source],
   );
   useEffect(() => {
     if (reading.kind === 'ready')

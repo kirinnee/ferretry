@@ -134,6 +134,8 @@ describe('the project worktree inventory over real Git (V-B3 round 1)', () => {
     const project = await w.listed(registered.id);
     expect(project.repos).toBeUndefined();
     expect(project.git?.commonDirectory).toBe(`${w.main}/.git`);
+    // R2-1: the project's own repository is asked about by its id (the daemon holds the directory), never by a path.
+    expect(worktreeSources(project).map(source => source.project)).toEqual([registered.id]);
     expect(await branchesOf(project)).toEqual(['feat/a', 'feat/b', 'main']);
   });
 
