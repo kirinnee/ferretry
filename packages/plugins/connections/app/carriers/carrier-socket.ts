@@ -211,8 +211,8 @@ class WalkingSocket implements ScopedSocket {
   #closedHere = false;
   #ended = false;
   #keyed = false;
-  /** The session ended before acceptance on a leg that carried its frames: the walk may go on, once. */
-  #unsent = false;
+  /** Held until the session finishes any pending handshake/decryption and asks to walk on, once. */
+  #unsent: LegFailure | undefined;
   #servingSince: number | undefined;
   #lastHeardAt: number;
   #pongDeadline: { readonly within: number; readonly cancel: () => void } | undefined;
@@ -267,7 +267,7 @@ class WalkingSocket implements ScopedSocket {
   cancel(reason: string): void {
     if (this.#ended) return;
     this.#closedHere = true;
-    this.#unsent = false;
+    this.#unsent = undefined;
     this.#stop();
     this.#socket?.close(1000, reason);
     this.#end(1000, reason, undefined, true);
@@ -462,9 +462,15 @@ class WalkingSocket implements ScopedSocket {
 
   /** The dial for a fresh session on the walk's next leg, when this session ended unsent and the walk is current. */
   #onward(): CarrierDial | undefined {
-    if (!this.#unsent) return undefined;
-    this.#unsent = false;
+    const failure = this.#unsent;
+    this.#unsent = undefined;
+    if (failure === undefined) return undefined;
     if (this.walk.scope.stale() !== undefined || this.walk.finished()) return undefined;
+    // A close may have landed while verification was awaiting crypto. Publish only after the session settles that
+    // boundary: a keyed leg's raw 4404 cannot become replacement proof on the next leg (nor 4429 stop a stream walk).
+    const settled = this.#keyed ? { ...failure, code: 1006, reason: 'the connection was lost' } : failure;
+    this.#legFailed(settled);
+    if (this.#streamRefused(settled.code)) return undefined;
     return events => new WalkingSocket(this.deps, this.walk, events).adapted;
   }
 
@@ -485,8 +491,7 @@ class WalkingSocket implements ScopedSocket {
   }
 
   #unsentFailure(code: number, reason: string): void {
-    this.#legFailed({ method: this.#method, code, reason, opened: true });
-    this.#unsent = this.walk.scope.stale() === undefined;
+    this.#unsent = { method: this.#method, code, reason, opened: true };
   }
 
   /**
@@ -504,8 +509,7 @@ class WalkingSocket implements ScopedSocket {
     if (options.close !== undefined) {
       this.#socket?.close(code === 1006 ? 1000 : code, options.close);
     }
-    if (phase === 'carrying' && this.#streamRefused(code)) this.#unsent = false;
-    else if (phase === 'carrying') this.#unsentFailure(code, reason);
+    if (phase === 'carrying') this.#unsentFailure(code, reason);
     else if (phase === 'accepted' && !this.#closedHere) {
       this.#dropped(code, reason);
       this.#droppedWith = code;

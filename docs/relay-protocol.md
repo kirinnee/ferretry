@@ -180,10 +180,14 @@ the server; asking for the daemon role against a direct address is an error, not
 
 **The direct carrier, exactly.** `fyd` serves `GET /v1/rendezvous/<its own daemonId>/client` as a
 WebSocket upgrade on its own listener. **One socket is one session**: on upgrade the daemon mints the
-16-byte `sessionId` and sends the client the same `ready` a rendezvous sends (`limits` included), and
-that is the only control frame on the socket — the daemon never sends `challenge`, accepts no
-`claim`, and refuses with `4400` a client that sends any control frame at all. The session's end is
-the socket's close, with the code the session ended with. A wrong `daemonId` is answered over the socket, not with an HTTP status a browser
+16-byte `sessionId` and sends the client the same `ready` a rendezvous sends (`limits` included).
+The daemon never sends `challenge`, accepts no `claim`, and refuses with `4400` a client that sends
+any control frame at all. After keying, the daemon sends the real terminal code and reason in a sealed
+`session-end` data record, then a generic `closed` control and WebSocket close, both carrying only
+`4440` / `the session concluded`. The client authenticates the sealed verdict; a plain close after
+the verified handshake means only connection loss, including one racing asynchronous handshake
+verification, and cannot become replacement proof on a later carrier leg. A wrong `daemonId` before
+the handshake is answered over the socket, not with an HTTP status a browser
 cannot read: the upgrade is accepted and the socket closed `4404` ("this daemon does not answer for that
 fingerprint"), holding no slot and naming nothing of this daemon's own identity — the words the `404` carried.
 The client reads that as proof of a replaced daemon (§13, "A replaced daemon"). An upgrade is
@@ -2631,7 +2635,7 @@ exactly one sealed outcome:
 ```
 
 and then sends `session-end` and tears down with `4440`. One attempt per session, success or failure; there is no
-second record, no retry on the same channel, and **no edge from a pairing session to serving**. A
+second pairing attempt, no retry on the same channel, and **no edge from a pairing session to serving**. A
 device that paired reconnects as an ordinary request session, proving the key it just registered.
 
 - **`paired.response` is the redemption response of the pairing API, verbatim** — validated by the

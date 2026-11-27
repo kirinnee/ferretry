@@ -1418,6 +1418,7 @@ export class RelayClientSession {
       return;
     }
     if (message.t === 'session-end') {
+      if (this.#phase === 'streaming') this.#streamClosed = { code: message.code, reason: message.reason };
       this.#fail(message.code, message.reason, false);
       this.deps.socket.close(RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON);
       return;
@@ -1773,11 +1774,9 @@ export class RelayClientSession {
     // it is not holding would leave it waiting forever on a session that is already over.
     this.#refusePairing?.(failure);
     this.#refuseJoin?.(failure);
-    // A stream that dies without a sealed close still ENDED, and its consumer is entitled to know
-    // in the same shape as an orderly close. `1006` is the browser's own word for "abnormally, with
-    // no close frame", which is exactly what this is.
+    // Keep the stream verdict latched by an authenticated session-end. Without one, an abnormal end still says 1006.
     if (streaming) {
-      this.#streamClosed = { code: 1006, reason };
+      this.#streamClosed ??= { code: 1006, reason };
       this.#announceStreamClosed(this.#streamClosed);
     }
     if (close) this.deps.socket.close(code, reason);

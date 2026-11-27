@@ -249,6 +249,12 @@ for (const code of [4403, 4426]) {
     const snapshot = () => JSON.stringify([...values]);
     const before = snapshot();
     let attack = true;
+    let recoveredGrants = false;
+    const saveGrants = shape.saveGrants.bind(shape);
+    shape.saveGrants = (...args) => {
+      saveGrants(...args);
+      if (!attack) recoveredGrants = true;
+    };
     let dials = 0;
     const publicKey = Buffer.from(await crypto.subtle.exportKey('spki', active.publicKey)).toString('base64url');
     const genuine = rotatingDial(identity, {
@@ -300,6 +306,8 @@ for (const code of [4403, 4426]) {
       await until(() => stopOf(runtime, identity.daemonId) === undefined);
       expect(genuine.credentials.some(credential => credential.accepted)).toBe(true);
       expect(runtime.isRefused(identity.daemonId)).toBe(false);
+      // The page clears on inventory; the separate authenticated grants read must also finish before the snapshot.
+      await until(() => recoveredGrants);
       // Genuine recovery leaves the persisted pairing, inventory and grants exactly the authenticated state.
       expect(snapshot() === before).toBe(true);
       expect((await keySnapshot()) === keysBefore).toBe(true);
