@@ -1,0 +1,281 @@
+"applied":
+  [
+    {
+      "documents":
+        [
+          {
+            "content":
+              <<<
+                model = "gpt-6"
+                approval_policy = "on-request"
+
+                [shell_environment_policy]
+                inherit = "core"
+
+                [profiles.fast]
+                model = "gpt-6-mini"
+
+              >>>
+            "expect": "absent"
+            "mode": 384
+            "path": "/state/fleet/assets/components/settings/codex-settings.toml"
+          }
+          {
+            "content":
+              <<<
+                {
+                  "version": 1,
+                  "components": {
+                    "instructions/codex-instructions": {
+                      "sources": [
+                        "/host/home/.codex/AGENTS.md"
+                      ],
+                      "digest": "b1a72c642eec2b5d5ba5ca20f71b47d597164e6c61d9c5468fb249af1b30e10d"
+                    },
+                    "mcp/files": {
+                      "sources": [
+                        "/host/home/.codex/config.toml"
+                      ],
+                      "digest": "c18340a27c1ef11985ee95643cb0085025ddf5969de718b126c3cae8e4a08c9a"
+                    },
+                    "mcp/docs": {
+                      "sources": [
+                        "/host/home/.codex/config.toml"
+                      ],
+                      "digest": "03c031c89df2605d0037fd4a9eb1092075446d5628064b9054cd0e454976bed2"
+                    },
+                    "skills/codex-skills": {
+                      "sources": [
+                        "/host/home/.codex/skills/deploy"
+                      ],
+                      "digest": "a1de6f66f386e08a415bc452869d0828781a77536f1ecddc989b9e89e0a3adf2"
+                    },
+                    "settings/codex-settings": {
+                      "sources": [
+                        "/host/home/.codex/config.toml"
+                      ],
+                      "digest": "c8e4514111bd9f896262951eefe13fdb9f8291a1d6cb92bbaabe0d6267145cb6"
+                    },
+                    "modelSets/codex-models": {
+                      "sources": [
+                        "/host/home/.codex/config.toml"
+                      ],
+                      "digest": "b7fb53f421fd667770b882734fb8fc3f5c1878de96d0ddee51449c2be9458610"
+                    }
+                  },
+                  "profiles": {
+                    "codex": "codex-default"
+                  }
+                }
+
+              >>>
+            "expect": "absent"
+            "mode": 384
+            "path": "/state/fleet/setup/import.json"
+          }
+        ]
+      "operations":
+        [
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/bin"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes"
+          }
+          {
+            "content":
+              <<<
+                {
+                  "version": 1,
+                  "runtimes": {
+                    "codex-default": {
+                      "id": "00000000-0000-4000-8000-000000000001",
+                      "formerNames": []
+                    }
+                  }
+                }
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/ids.json"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/shared/codex/sqlite"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy"
+          }
+          {
+            "keep":
+              [
+                "materialised.json"
+              ]
+            "kind": "prune-directory"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+            "recordedAs": ".fy"
+          }
+          {
+            "keep": []
+            "kind": "prune-directory"
+            "only":
+              [
+                "hooks"
+                "hooks.json"
+              ]
+            "ownLinksUnder": "/state/fleet/assets"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+          }
+          {
+            "content":
+              <<<
+                <!-- Generated from instructions/ferretry-work-alone, instructions/codex-instructions. Edit those components, not this file. -->
+
+                # Working well on your own
+
+                - When a choice is yours to make, make it: pick the sensible option and say what you chose, rather than stopping at "should I continue?".
+                - If only the owner can decide something that blocks you, ask through the channel your launch instructions name (if they name none, ask in the conversation), then carry on with whatever is not blocked.
+                - Commit, push or open a pull request only when asked to.
+                - Verify before you say it is done: run the checks, read their output, and report a failure as a failure.
+                - Follow the repository's own `CLAUDE.md` / `AGENTS.md`. Where they disagree with this page, they win.
+
+                # Golden Codex notes
+                Be brief.
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/AGENTS.md"
+            "unlessUnrecorded":
+              "key": "AGENTS.md"
+              "ownLinksUnder": "/state/fleet/assets"
+              "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/skills"
+          }
+          {
+            "keep":
+              [
+                ".system"
+              ]
+            "kind": "prune-directory"
+            "ownLinksUnder": "/state/fleet/assets/skills"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/skills"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+            "recordedAs": "skills"
+          }
+          {
+            "format": "toml"
+            "kind": "settings"
+            "layers":
+              [
+                {
+                  "from": "inline"
+                  "settings":
+                    "approval_policy": "on-request"
+                    "cli_auth_credentials_store": "file"
+                    "mcp_servers":
+                      "docs": "url": "https://docs.example.test/mcp"
+                      "files":
+                        "args":
+                          [
+                            "server-files"
+                          ]
+                        "command": "npx"
+                        "env_vars":
+                          [
+                            "FILES_TOKEN"
+                          ]
+                    "model": "gpt-6"
+                    "profiles": "fast": "model": "gpt-6-mini"
+                    "shell_environment_policy": "inherit": "core"
+                    "sqlite_home": "/state/fleet/shared/codex/sqlite"
+                }
+              ]
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/config.toml"
+            "preserveExisting": true
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/rules"
+          }
+          {
+            "content":
+              <<<
+                prefix_rule(pattern=["pkill"], decision="forbidden", justification="pkill can stop other ferrets' processes; stop the one process you started instead")
+                prefix_rule(pattern=["killall"], decision="forbidden", justification="killall can stop other ferrets' processes; stop the one process you started instead")
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/rules/ferretry.rules"
+            "unlessUnrecorded":
+              "byName": true
+              "key": "rules/ferretry.rules"
+              "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+          }
+          {
+            "content":
+              <<<
+                {"version":1,"entries":["AGENTS.md","rules/ferretry.rules"]}
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+            "recordsMaterialised": true
+          }
+          {
+            "content":
+              <<<
+                #!/bin/sh
+                # ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten
+                # runtime codex-default 00000000-0000-4000-8000-000000000001 (codex)
+
+                echo 'ferretry: codex-default cannot start: its login "codex-you" cannot be reached: your own Codex home could not be named, because CODEX_HOME is set to a relative path' >&2
+                exit 1
+
+              >>>
+            "kind": "file"
+            "mode": 493
+            "path": "/state/fleet/bin/codex-default"
+          }
+          {
+            "keep":
+              [
+                "codex-default"
+              ]
+            "kind": "prune"
+            "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten"
+            "path": "/state/fleet/bin"
+          }
+        ]
+    }
+  ]
+"description": "Login codex-you: shared with codex in your terminal — signing out in one signs out both. Adds 6 parts of your setup. Profile codex-default. Runtimes: codex-default. Login · codex@example.test. Ferretry and your own `codex` share this login: signing out in one signs out both. 1 secret value went to Ferretry's secret store and is never shown: mcp.files.env.FILES_TOKEN. Filed in the secret store: FILES_TOKEN."
+"summary": "1 runtime created on studio: Codex · your terminal sign-in. Filed in the secret store: FILES_TOKEN."

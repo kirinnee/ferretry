@@ -1,0 +1,192 @@
+"held": 2
+"landed":
+  [
+    "mcp/claude-files.yaml"
+    "skills/claude-skills.yaml"
+    "skills/codex-skills.yaml"
+    "claude-code/settings/claude-settings.yaml"
+  ]
+"refused": 3
+"sentences":
+  [
+    "Saved: your Claude MCP servers and skills and settings, your Codex skills."
+    "Held until you confirm: your Codex MCP servers and settings."
+    "Written with a warning: your Claude skills (one file was large); your Claude skills (hidden files not handed over: review/.hidden)."
+    "Not written: your MCP servers (the owner is switched off); your Codex settings (the settings this was made from could not be read); your Claude settings (no answer)."
+  ]
+"writes":
+  [
+    {
+      "file": "mcp/claude-files.yaml"
+      "kind": "mcp"
+      "name": "claude-files"
+      "reference": "mcp/claude-files"
+      "text":
+        <<<
+          {
+            "command": "npx",
+            "args": [
+              "files"
+            ]
+          }
+
+        >>>
+    }
+    {
+      "file": "mcp/codex-files.yaml"
+      "kind": "mcp"
+      "name": "codex-files"
+      "reference": "mcp/codex-files"
+      "text":
+        <<<
+          {
+            "command": "npx",
+            "args": [
+              "files"
+            ]
+          }
+
+        >>>
+    }
+    {
+      "file": "mcp/shared.yaml"
+      "kind": "mcp"
+      "name": "shared"
+      "reference": "mcp/shared"
+      "text":
+        <<<
+          {
+            "url": "https://docs.example.test/mcp"
+          }
+
+        >>>
+    }
+    {
+      "file": "skills/claude-skills.yaml"
+      "files":
+        [
+          {
+            "content":
+              <<<
+                ---
+                name: review
+                ---
+
+              >>>
+            "path": "review/SKILL.md"
+          }
+        ]
+      "kind": "skills"
+      "name": "claude-skills"
+      "reference": "skills/claude-skills"
+      "skipped":
+        [
+          "review/.hidden"
+        ]
+      "text":
+        <<<
+          {
+            "items": [
+              "review"
+            ]
+          }
+
+        >>>
+    }
+    {
+      "file": "skills/codex-skills.yaml"
+      "files":
+        [
+          {
+            "content":
+              <<<
+                ---
+                name: deploy
+                ---
+
+              >>>
+            "path": "deploy/SKILL.md"
+          }
+        ]
+      "kind": "skills"
+      "name": "codex-skills"
+      "reference": "skills/codex-skills"
+      "text":
+        <<<
+          {
+            "items": [
+              "deploy"
+            ]
+          }
+
+        >>>
+    }
+    {
+      "file": "claude-code/settings/claude-settings.yaml"
+      "harness": "claude"
+      "kind": "settings"
+      "name": "claude-settings"
+      "reference": "settings/claude-settings"
+      "text":
+        <<<
+          {
+            "harness": "claude",
+            "document": {
+              "theme": "dark",
+              "env": {
+                "EDITOR": "vim"
+              }
+            }
+          }
+
+        >>>
+    }
+    {
+      "file": "codex/settings/codex-settings.yaml"
+      "harness": "codex"
+      "kind": "settings"
+      "name": "codex-settings"
+      "reference": "settings/codex-settings"
+      "text":
+        <<<
+          {
+            "harness": "codex",
+            "document": {
+              "model": "gpt-6",
+              "shell_environment_policy": {
+                "inherit": "core"
+              }
+            }
+          }
+
+        >>>
+    }
+    {
+      "file": "codex/settings/codex-broken.yaml"
+      "harness": "codex"
+      "kind": "settings"
+      "name": "codex-broken"
+      "problem": "the settings this was made from could not be read"
+      "reference": "settings/codex-broken"
+    }
+    {
+      "file": "claude-code/settings/claude-inline.yaml"
+      "harness": "claude"
+      "kind": "settings"
+      "name": "claude-inline"
+      "reference": "settings/claude-inline"
+      "text":
+        <<<
+          {
+            "harness": "claude",
+            "document": {
+              "verbose": true
+            },
+            "env": {
+              "MODE": "x"
+            }
+          }
+
+        >>>
+    }
+  ]

@@ -1,0 +1,683 @@
+"applied":
+  [
+    {
+      "documents":
+        [
+          {
+            "content":
+              <<<
+                {
+                  "model": "claude-opus-5-5",
+                  "permissions": {
+                    "allow": [
+                      "Bash(ls:*)"
+                    ]
+                  }
+                }
+
+              >>>
+            "expect": "absent"
+            "mode": 384
+            "path": "/state/fleet/assets/components/settings/claude-settings.json"
+          }
+          {
+            "content":
+              <<<
+                model = "gpt-6"
+                approval_policy = "on-request"
+
+                [shell_environment_policy]
+                inherit = "core"
+
+                [profiles.fast]
+                model = "gpt-6-mini"
+
+              >>>
+            "expect": "absent"
+            "mode": 384
+            "path": "/state/fleet/assets/components/settings/codex-settings.toml"
+          }
+          {
+            "content":
+              <<<
+                {
+                  "version": 1,
+                  "components": {
+                    "instructions/claude-instructions": {
+                      "sources": [
+                        "/host/home/.claude/CLAUDE.md"
+                      ],
+                      "digest": "32925f403c14b48c13b195dfff95ec143a7b7fcf761dfca5ef6337057e5f9898"
+                    },
+                    "instructions/codex-instructions": {
+                      "sources": [
+                        "/host/home/.codex/AGENTS.md"
+                      ],
+                      "digest": "b1a72c642eec2b5d5ba5ca20f71b47d597164e6c61d9c5468fb249af1b30e10d"
+                    },
+                    "mcp/files": {
+                      "sources": [
+                        "/host/home/.claude.json",
+                        "/host/home/.codex/config.toml"
+                      ],
+                      "digest": "c18340a27c1ef11985ee95643cb0085025ddf5969de718b126c3cae8e4a08c9a"
+                    },
+                    "mcp/docs": {
+                      "sources": [
+                        "/host/home/.claude.json",
+                        "/host/home/.codex/config.toml"
+                      ],
+                      "digest": "03c031c89df2605d0037fd4a9eb1092075446d5628064b9054cd0e454976bed2"
+                    },
+                    "mcp/missing": {
+                      "sources": [
+                        "/host/home/.claude.json"
+                      ],
+                      "digest": "dcf44a7bf0b67350efa16ba21a3da6b1cdc5ec2497c79be9ed320dbeff71de7b"
+                    },
+                    "skills/claude-skills": {
+                      "sources": [
+                        "/host/home/.claude/skills/review"
+                      ],
+                      "digest": "780795e42041df0bc146e83c5f2d7b77e379e38eb490d2441ba92e046b23dede"
+                    },
+                    "skills/codex-skills": {
+                      "sources": [
+                        "/host/home/.codex/skills/deploy"
+                      ],
+                      "digest": "a1de6f66f386e08a415bc452869d0828781a77536f1ecddc989b9e89e0a3adf2"
+                    },
+                    "settings/claude-settings": {
+                      "sources": [
+                        "/host/home/.claude/settings.json"
+                      ],
+                      "digest": "31ee2ebfd8bea2c5addda5307872f22519f2f835f118f53d2ea56ba24e224b77"
+                    },
+                    "modelSets/claude-models": {
+                      "sources": [
+                        "/host/home/.claude/settings.json"
+                      ],
+                      "digest": "30f2c7a89fdb87376ee31600239a73ba5d6993df83da82cac910dec1c1954a5c"
+                    },
+                    "settings/codex-settings": {
+                      "sources": [
+                        "/host/home/.codex/config.toml"
+                      ],
+                      "digest": "c8e4514111bd9f896262951eefe13fdb9f8291a1d6cb92bbaabe0d6267145cb6"
+                    },
+                    "modelSets/codex-models": {
+                      "sources": [
+                        "/host/home/.codex/config.toml"
+                      ],
+                      "digest": "b7fb53f421fd667770b882734fb8fc3f5c1878de96d0ddee51449c2be9458610"
+                    }
+                  },
+                  "profiles": {
+                    "claude": "claude-default",
+                    "codex": "codex-default"
+                  }
+                }
+
+              >>>
+            "expect": "absent"
+            "mode": 384
+            "path": "/state/fleet/setup/import.json"
+          }
+        ]
+      "operations":
+        [
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/bin"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes"
+          }
+          {
+            "content":
+              <<<
+                {
+                  "version": 1,
+                  "runtimes": {
+                    "claude-default": {
+                      "id": "00000000-0000-4000-8000-000000000001",
+                      "formerNames": []
+                    },
+                    "codex-default": {
+                      "id": "00000000-0000-4000-8000-000000000002",
+                      "formerNames": []
+                    }
+                  }
+                }
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/ids.json"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/shared/codex/sqlite"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy"
+          }
+          {
+            "keep":
+              [
+                "materialised.json"
+                "fixed.json"
+              ]
+            "kind": "prune-directory"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+            "recordedAs": ".fy"
+          }
+          {
+            "keep": []
+            "kind": "prune-directory"
+            "only":
+              [
+                "hooks"
+              ]
+            "ownLinksUnder": "/state/fleet/assets"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+          }
+          {
+            "content":
+              <<<
+                <!-- Generated from instructions/ferretry-work-alone, instructions/claude-instructions. Edit those components, not this file. -->
+
+                # Working well on your own
+
+                - When a choice is yours to make, make it: pick the sensible option and say what you chose, rather than stopping at "should I continue?".
+                - If only the owner can decide something that blocks you, ask through the channel your launch instructions name (if they name none, ask in the conversation), then carry on with whatever is not blocked.
+                - Commit, push or open a pull request only when asked to.
+                - Verify before you say it is done: run the checks, read their output, and report a failure as a failure.
+                - Follow the repository's own `CLAUDE.md` / `AGENTS.md`. Where they disagree with this page, they win.
+
+                # Golden Claude notes
+                Be kind.
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/CLAUDE.md"
+            "unlessUnrecorded":
+              "key": "CLAUDE.md"
+              "ownLinksUnder": "/state/fleet/assets"
+              "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/skills"
+          }
+          {
+            "keep": []
+            "kind": "prune-directory"
+            "ownLinksUnder": "/state/fleet/assets/skills"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/skills"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+            "recordedAs": "skills"
+          }
+          {
+            "format": "json"
+            "kind": "settings"
+            "layers":
+              [
+                {
+                  "from": "inline"
+                  "settings":
+                    "cleanupPeriodDays": 90
+                    "model": "claude-opus-5-5"
+                    "permissions":
+                      "allow":
+                        [
+                          "Bash(ls:*)"
+                        ]
+                    "statusLine":
+                      "command": "'fy' statusline"
+                      "type": "command"
+                }
+              ]
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/settings.json"
+            "preserveExisting": true
+          }
+          {
+            "format": "json"
+            "kind": "settings"
+            "layers":
+              [
+                {
+                  "from": "inline"
+                  "settings":
+                    "mcpServers":
+                      "docs":
+                        "type": "http"
+                        "url": "https://docs.example.test/mcp"
+                      "files":
+                        "args":
+                          [
+                            "server-files"
+                          ]
+                        "command": "npx"
+                        "env": "FILES_TOKEN": "${FILES_TOKEN}"
+                        "type": "stdio"
+                      "missing":
+                        "args": []
+                        "command": "golden-not-installed"
+                        "type": "stdio"
+                }
+              ]
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.claude.json"
+            "preserveExisting": true
+            "priorMembers": "mcpServers": {}
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+            "replaceKeys":
+              [
+                "mcpServers"
+              ]
+          }
+          {
+            "content":
+              <<<
+                {
+                  "permissions": {
+                    "defaultMode": "bypassPermissions",
+                    "deny": [
+                      "Bash(pkill:*)",
+                      "Bash(killall:*)"
+                    ]
+                  },
+                  "remoteControlAtStartup": false,
+                  "skipDangerousModePermissionPrompt": true
+                }
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/fixed.json"
+            "unlessUnrecorded":
+              "byName": true
+              "key": ".fy/fixed.json"
+              "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+          }
+          {
+            "content":
+              <<<
+                {"version":1,"entries":[".fy/fixed.json","CLAUDE.md"]}
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/materialised.json"
+            "recordsMaterialised": true
+          }
+          {
+            "content":
+              <<<
+                #!/bin/sh
+                # ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten
+                # runtime claude-default 00000000-0000-4000-8000-000000000001 (claude)
+
+                if [ -z "${FILES_TOKEN:-}" ]; then printf '%s\n' 'ferretry: FILES_TOKEN is not set — this account takes it from Ferretry'\''s secret store (secret FILES_TOKEN). Launch it through the daemon, or run: fy secret set FILES_TOKEN' >&2; exit 1; fi
+
+                export CLAUDE_CONFIG_DIR='/state/fleet/homes/00000000-0000-4000-8000-000000000001'
+                export BASH_DEFAULT_TIMEOUT_MS='600000'
+                export CLAUDE_SECURESTORAGE_CONFIG_DIR=''
+                export EDITOR='vim'
+                export FY_CREDENTIAL='claude-you'
+                export FY_HOME='/state'
+                export FY_RUNTIME='claude-default'
+                export MCP_TIMEOUT='60000'
+
+                # A ferret started in auto mode runs unattended: the fixed layer, the seeded prompts and the trusted folder.
+                if [ "${FY_SESSION_MODE:-}" = auto ]; then
+
+                  # Seed the one-time prompts that would otherwise stall a launch nobody is watching. Re-asserted
+                  # every run, because an apply-time write drifts when a home is rebuilt or a harness upgrades, and
+                  # the failure is silent and total. Set FY_SEED_FIRST_RUN=0 to launch without it.
+                  if [ "${FY_SEED_FIRST_RUN:-1}" = "1" ]; then
+                    if command -v jq >/dev/null 2>&1; then
+                      _fy_seed_cfg="$CLAUDE_CONFIG_DIR/.claude.json"
+                      FY_SEED_PWD="$PWD"
+                      export FY_SEED_PWD
+                      if ! jq -e '((.projects[$ENV.FY_SEED_PWD].hasTrustDialogAccepted) == true) and (.hasCompletedOnboarding == true) and (.hasCompletedClaudeInChromeOnboarding == true) and (.claudeInChromeDefaultEnabled != null) and (.["hasSeenAutoDefaultNudge"] == true) and (.["hasSeenEffortMediumNudge"] == true) and (.["hasSeenEffortMediumNudgeByModel"]["claude-opus-5"] == true) and (.["hasSeenEffortMediumNudgeByModel"]["claude-fable-5-1"] == true) and ((.["fullscreenUpsellSeenCount"] // 0) >= 3)' "$_fy_seed_cfg" >/dev/null 2>&1; then
+                        mkdir -p "$CLAUDE_CONFIG_DIR"
+                        _fy_seed_tmp="$(mktemp "$CLAUDE_CONFIG_DIR/.claude.json.fy-XXXXXX" 2>/dev/null)"
+                        if [ -n "$_fy_seed_tmp" ]; then
+                          if [ -f "$_fy_seed_cfg" ]; then
+                            _fy_seed_ok="$(jq '.projects[$ENV.FY_SEED_PWD].hasTrustDialogAccepted = true | .hasCompletedOnboarding = true | .hasCompletedClaudeInChromeOnboarding = true | (if .claudeInChromeDefaultEnabled == null then .claudeInChromeDefaultEnabled = false else . end) | .["hasSeenAutoDefaultNudge"] = true | .["hasSeenEffortMediumNudge"] = true | .["hasSeenEffortMediumNudgeByModel"]["claude-opus-5"] = true | .["hasSeenEffortMediumNudgeByModel"]["claude-fable-5-1"] = true | .["fullscreenUpsellSeenCount"] = ([(.["fullscreenUpsellSeenCount"] // 0), 3] | max)' "$_fy_seed_cfg" > "$_fy_seed_tmp" 2>/dev/null && echo y)"
+                          else
+                            _fy_seed_ok="$(jq -n '{} | .projects[$ENV.FY_SEED_PWD].hasTrustDialogAccepted = true | .hasCompletedOnboarding = true | .hasCompletedClaudeInChromeOnboarding = true | (if .claudeInChromeDefaultEnabled == null then .claudeInChromeDefaultEnabled = false else . end) | .["hasSeenAutoDefaultNudge"] = true | .["hasSeenEffortMediumNudge"] = true | .["hasSeenEffortMediumNudgeByModel"]["claude-opus-5"] = true | .["hasSeenEffortMediumNudgeByModel"]["claude-fable-5-1"] = true | .["fullscreenUpsellSeenCount"] = ([(.["fullscreenUpsellSeenCount"] // 0), 3] | max)' > "$_fy_seed_tmp" 2>/dev/null && echo y)"
+                          fi
+                          if [ "$_fy_seed_ok" = y ]; then
+                            mv "$_fy_seed_tmp" "$_fy_seed_cfg"
+                          else
+                            rm -f "$_fy_seed_tmp"
+                          fi
+                        fi
+                      fi
+                      if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+                        FY_SEED_KEY="$ANTHROPIC_API_KEY"
+                        if [ "${#FY_SEED_KEY}" -gt 20 ]; then
+                          FY_SEED_KEY="$(printf %s "$ANTHROPIC_API_KEY" | tail -c 20)"
+                        fi
+                        export FY_SEED_KEY
+                        if ! jq -e '(.customApiKeyResponses.approved // []) | index($ENV.FY_SEED_KEY) != null' "$_fy_seed_cfg" >/dev/null 2>&1; then
+                          mkdir -p "$CLAUDE_CONFIG_DIR"
+                          _fy_seed_tmp="$(mktemp "$CLAUDE_CONFIG_DIR/.claude.json.fy-XXXXXX" 2>/dev/null)"
+                          if [ -n "$_fy_seed_tmp" ]; then
+                            if [ -f "$_fy_seed_cfg" ]; then
+                              _fy_seed_ok="$(jq '.customApiKeyResponses.approved = (((.customApiKeyResponses.approved // []) + [$ENV.FY_SEED_KEY]) | unique)' "$_fy_seed_cfg" > "$_fy_seed_tmp" 2>/dev/null && echo y)"
+                            else
+                              _fy_seed_ok="$(jq -n '{customApiKeyResponses: {approved: [$ENV.FY_SEED_KEY]}}' > "$_fy_seed_tmp" 2>/dev/null && echo y)"
+                            fi
+                            if [ "$_fy_seed_ok" = y ]; then
+                              mv "$_fy_seed_tmp" "$_fy_seed_cfg"
+                            else
+                              rm -f "$_fy_seed_tmp"
+                            fi
+                          fi
+                        fi
+                        unset FY_SEED_KEY
+                      fi
+                      unset FY_SEED_PWD
+                    else
+                      echo "ferretry: jq is not installed, so this account's first-run prompts were not seeded — a launch nobody is watching may stall at one. Install jq, or set FY_SEED_FIRST_RUN=0 to silence this." >&2
+                    fi
+                  fi
+
+                  # One live writer per conversation: claim the one these arguments resume before handing this pid to
+                  # the harness. Only a refusal (exit 75: another session is writing it) stops the launch; any other failure warns and launches anyway.
+                  _fy_claim=0
+                  for _fy_arg in "$@"; do
+                    case "$_fy_arg" in --resume|--resume=*|-r|--session-id|--session-id=*) _fy_claim=1 ;; esac
+                  done
+                  if [ "$_fy_claim" = 1 ]; then
+                    if command -v '/opt/ferretry/bin/fy' >/dev/null 2>&1; then
+                      '/opt/ferretry/bin/fy' history claim --harness claude --pid $$ --from-arguments -- "$@"
+                      _fy_status=$?
+                      if [ "$_fy_status" -eq 75 ]; then exit 75; fi
+                      if [ "$_fy_status" -ne 0 ]; then
+                        if [ -n "${FY_SESSION_ID:-}" ]; then
+                          echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so not launching: this session must hold its conversation before it writes" >&2
+                          exit 75
+                        fi
+                        echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so launching anyway" >&2
+                      fi
+                    else
+                      if [ -n "${FY_SESSION_ID:-}" ]; then
+                        echo "ferretry: fy was not found, so this session could not check whether another session is writing this conversation; not launching" >&2
+                        exit 75
+                      fi
+                      echo "ferretry: fy was not found, so this launch did not check whether another session is writing this conversation; launching anyway" >&2
+                    fi
+                  fi
+                  set -- --disallowed-tools=AskUserQuestion "$@"
+
+                  # This ferret's own sections of the appended system prompt: each switch the daemon set to 1.
+                  if [ "${FY_SUB_FERRET:-0}" = 1 ]; then _fy_sections='
+
+                Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver'\''s turn end). Only a password, code or approval the daemon asks for reaches the owner from you.'; else _fy_sections=''; fi
+                  if [ "${FY_BROWSER_STEALTH:-0}" = 1 ]; then _fy_sections="$_fy_sections"'
+
+                On the owner'\''s identities the browser passes bot checks and solves token checks (Turnstile, reCAPTCHA, hCaptcha) itself. You may try a simple picture puzzle shown in the page yourself; never use outside tools or services to solve or bypass a check, and never change the browser'\''s identity. If a check stays, ask the owner (browser_ask_owner).'; else _fy_sections="$_fy_sections"'
+
+                Never solve captchas, spoof a browser or identity.'; fi
+                  if [ "${FY_HYPERMEDIA:-0}" = 1 ]; then _fy_sections="$_fy_sections"'
+
+                Hypermedia: to teach, explain or compare anything not simple, show it, not just say it. Inline: never publish a page or link unless asked.
+                Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).
+                Write Markdown. Parts are fences: ```terminal, ```filetree, ```editor, ```tierlist, ```alignment, ```mermaid, ```animation (`3d` after it: 3D); `@step <caption>` lines give a part steps (mermaid: `%% @step <caption>`); :::tabs and :::accordion; `:::human` is for people, `:::llm` after a part for another agent.
+                - mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.
+                - Charts, svg, interactive html, maps, media, live tasks: a fence whose info string is exactly fy-render: `type: chart|svg|html|map|image|video|audio|pdf|lottie|task|board`, `alt: <one line>`, `---`, then the payload.
+                - chart (fy-render only; a part named chart is shown as code): YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.
+                References are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.
+                Every spec: `fy render guide <part>`. Before sending, run `fy render check <file|->`: prints `line N: …` per problem; exit 1 on error.
+                Draws in chat and the ferret'\''s Queue panel; agenda, tasks, Board, PRs, All queues show code; never in files, docs, commits.'; fi
+                  if [ "${FY_PACK:-0}" = 1 ]; then _fy_sections="$_fy_sections"'
+
+                Pack mode: hand self-contained parts of your task to sub-ferrets (each on the model that suits it). Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line.
+                1. `fy recommend` lists usable models, most quota first, with start commands.
+                2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"`: Ferretry chooses). Always pass `--name` (2–5 Title Case words). The brief is all it knows: what to do, where, what to report.
+                3. If refused (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, try the next. limit_reached or depth_exceeded: do it yourself.
+                4. `fy wait <id>` prints its result; check it, then combine. Label sends: `--kind blocker|action|fyi` (fyi rarely).
+                Check your children with `fy status --subtree` instead of asking them. Delegate screenshot review to a sub-agent and keep only its verdict.
+                Stop unneeded sub-ferrets: `fy stop children <your id> --yes`.'; fi
+                  if [ "${FY_PACK:-0}" = 1 ] && [ -n "${FY_PACK_ROUTING:-}" ]; then _fy_routing="$(printf '%s' "$FY_PACK_ROUTING" | tr -d '"\\\000-\037\177')"; _fy_sections="$_fy_sections"'
+                '"$_fy_routing"; fi
+                  if [ "${FY_AGENDA:-0}" = 1 ] && [ "${FY_SUB_FERRET:-0}" != 1 ]; then _fy_sections="$_fy_sections"'
+
+                Agenda mode: one channel of the owner'\''s attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (`fy search`): none fits→open, else closest. `split` misfits, `merge` items that share.
+                Open: `fy agenda add --title "<topic>" --premise "<now>" --context "<facts>" "<ask>"`. Title ≤40, ask ≤80. Read cold: no ids/paths/jargon (`--term X=meaning`); short points, answer first, no headings. Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`); todo=`--step`s; info=Got it; permission=Approve/Deny. `--blocking`=stuck, `--will-block`=later, `--by <time>`.
+                Needs you buzzes; Resting is quiet. Owner reply/answer rests it; `answer <id> "…"` returns it. `rest <id> --why …`=working. Ask/answer stack on the topic'\''s ONE item: `show <id> --yaml` whole→`patch <id> --file f`; chat points there. Float EVERY open ask in premise (where we are) + ask (what I need); answered Q&A→`History`, oldest first, with answer. Tabs by kind, serial stays one; steps/explainers stay. Only you mark it `done` when nothing'\''s left. Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.
+                Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.'; fi
+                  _fy_help="$({ '/opt/harness/bin/claude' --help </dev/null 2>/dev/null & _fy_p=$!; { sleep 3; kill "$_fy_p"; } >/dev/null 2>&1 & _fy_k=$!; wait "$_fy_p" 2>/dev/null; kill "$_fy_k" 2>/dev/null; })"
+                  case "$_fy_help" in *--system-prompt-snapshot*) set -- --system-prompt-snapshot=off "$@" ;; esac
+
+                  exec '/opt/harness/bin/claude' '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--append-system-prompt=Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person'\''s hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.
+
+                Ferretry settings: this machine'\''s logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (`fy config path`). Before changing any, read `fy config guide` and follow it: never write a secret value into a file (the owner runs `fy secret set NAME`; then ${secret:NAME}), run `fy config check` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.'"$_fy_sections" '--settings' '/state/fleet/homes/00000000-0000-4000-8000-000000000001/.fy/fixed.json' "$@"
+                fi
+
+                # One live writer per conversation: claim the one these arguments resume before handing this pid to
+                # the harness. Only a refusal (exit 75: another session is writing it) stops the launch; any other failure warns and launches anyway.
+                _fy_claim=0
+                for _fy_arg in "$@"; do
+                  case "$_fy_arg" in --resume|--resume=*|-r|--session-id|--session-id=*) _fy_claim=1 ;; esac
+                done
+                if [ "$_fy_claim" = 1 ]; then
+                  if command -v '/opt/ferretry/bin/fy' >/dev/null 2>&1; then
+                    '/opt/ferretry/bin/fy' history claim --harness claude --pid $$ --from-arguments -- "$@"
+                    _fy_status=$?
+                    if [ "$_fy_status" -eq 75 ]; then exit 75; fi
+                    if [ "$_fy_status" -ne 0 ]; then
+                      if [ -n "${FY_SESSION_ID:-}" ]; then
+                        echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so not launching: this session must hold its conversation before it writes" >&2
+                        exit 75
+                      fi
+                      echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so launching anyway" >&2
+                    fi
+                  else
+                    if [ -n "${FY_SESSION_ID:-}" ]; then
+                      echo "ferretry: fy was not found, so this session could not check whether another session is writing this conversation; not launching" >&2
+                      exit 75
+                    fi
+                    echo "ferretry: fy was not found, so this launch did not check whether another session is writing this conversation; launching anyway" >&2
+                  fi
+                fi
+
+                exec '/opt/harness/bin/claude' '--model' 'claude-opus-5-5' "$@"
+
+              >>>
+            "kind": "file"
+            "mode": 493
+            "path": "/state/fleet/bin/claude-default"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/.fy"
+          }
+          {
+            "keep":
+              [
+                "materialised.json"
+              ]
+            "kind": "prune-directory"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/.fy"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/.fy/materialised.json"
+            "recordedAs": ".fy"
+          }
+          {
+            "keep": []
+            "kind": "prune-directory"
+            "only":
+              [
+                "hooks"
+                "hooks.json"
+              ]
+            "ownLinksUnder": "/state/fleet/assets"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/.fy/materialised.json"
+          }
+          {
+            "content":
+              <<<
+                <!-- Generated from instructions/ferretry-work-alone, instructions/codex-instructions. Edit those components, not this file. -->
+
+                # Working well on your own
+
+                - When a choice is yours to make, make it: pick the sensible option and say what you chose, rather than stopping at "should I continue?".
+                - If only the owner can decide something that blocks you, ask through the channel your launch instructions name (if they name none, ask in the conversation), then carry on with whatever is not blocked.
+                - Commit, push or open a pull request only when asked to.
+                - Verify before you say it is done: run the checks, read their output, and report a failure as a failure.
+                - Follow the repository's own `CLAUDE.md` / `AGENTS.md`. Where they disagree with this page, they win.
+
+                # Golden Codex notes
+                Be brief.
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/AGENTS.md"
+            "unlessUnrecorded":
+              "key": "AGENTS.md"
+              "ownLinksUnder": "/state/fleet/assets"
+              "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/.fy/materialised.json"
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/skills"
+          }
+          {
+            "keep":
+              [
+                ".system"
+              ]
+            "kind": "prune-directory"
+            "ownLinksUnder": "/state/fleet/assets/skills"
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/skills"
+            "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/.fy/materialised.json"
+            "recordedAs": "skills"
+          }
+          {
+            "format": "toml"
+            "kind": "settings"
+            "layers":
+              [
+                {
+                  "from": "inline"
+                  "settings":
+                    "approval_policy": "on-request"
+                    "cli_auth_credentials_store": "file"
+                    "mcp_servers":
+                      "docs": "url": "https://docs.example.test/mcp"
+                      "files":
+                        "args":
+                          [
+                            "server-files"
+                          ]
+                        "command": "npx"
+                        "env_vars":
+                          [
+                            "FILES_TOKEN"
+                          ]
+                    "model": "gpt-6"
+                    "profiles": "fast": "model": "gpt-6-mini"
+                    "shell_environment_policy": "inherit": "core"
+                    "sqlite_home": "/state/fleet/shared/codex/sqlite"
+                }
+              ]
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/config.toml"
+            "preserveExisting": true
+          }
+          {
+            "kind": "directory"
+            "mode": 448
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/rules"
+          }
+          {
+            "content":
+              <<<
+                prefix_rule(pattern=["pkill"], decision="forbidden", justification="pkill can stop other ferrets' processes; stop the one process you started instead")
+                prefix_rule(pattern=["killall"], decision="forbidden", justification="killall can stop other ferrets' processes; stop the one process you started instead")
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/rules/ferretry.rules"
+            "unlessUnrecorded":
+              "byName": true
+              "key": "rules/ferretry.rules"
+              "record": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/.fy/materialised.json"
+          }
+          {
+            "content":
+              <<<
+                {"version":1,"entries":["AGENTS.md","rules/ferretry.rules"]}
+
+              >>>
+            "kind": "file"
+            "mode": 384
+            "path": "/state/fleet/homes/00000000-0000-4000-8000-000000000002/.fy/materialised.json"
+            "recordsMaterialised": true
+          }
+          {
+            "content":
+              <<<
+                #!/bin/sh
+                # ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten
+                # runtime codex-default 00000000-0000-4000-8000-000000000002 (codex)
+
+                echo 'ferretry: codex-default cannot start: its login "codex-you" cannot be reached: your own Codex home could not be named, because CODEX_HOME is set to a relative path' >&2
+                exit 1
+
+              >>>
+            "kind": "file"
+            "mode": 493
+            "path": "/state/fleet/bin/codex-default"
+          }
+          {
+            "keep":
+              [
+                "claude-default"
+                "codex-default"
+              ]
+            "kind": "prune"
+            "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten"
+            "path": "/state/fleet/bin"
+          }
+        ]
+    }
+  ]
+"description": "Login claude-you: shared with claude in your terminal — signing out in one signs out both. Login codex-you: shared with codex in your terminal — signing out in one signs out both. Adds 11 parts of your setup. Profile claude-default. Profile codex-default. Runtimes: claude-default, codex-default. Login · claude@example.test. Ferretry and your own `claude` share this login: signing out in one signs out both. 1 secret value went to Ferretry's secret store and is never shown: mcp.files.env.FILES_TOKEN. Login · codex@example.test. Ferretry and your own `codex` share this login: signing out in one signs out both. 1 secret value went to Ferretry's secret store and is never shown: mcp.files.env.FILES_TOKEN. Instructions: different from your CLAUDE.md · kept separately. Filed in the secret store: FILES_TOKEN."
+"summary": "2 runtimes created on studio: Claude · your terminal sign-in, Codex · your terminal sign-in. Filed in the secret store: FILES_TOKEN."

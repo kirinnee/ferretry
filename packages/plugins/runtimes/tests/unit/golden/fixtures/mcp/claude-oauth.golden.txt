@@ -1,0 +1,4 @@
+"golden":
+  "headers": "Authorization": "Bearer ${FY_MCP_GOLDEN_960ACF65EDDBD221_TOKEN}"
+  "type": "http"
+  "url": "https://notes.example.test/mcp"

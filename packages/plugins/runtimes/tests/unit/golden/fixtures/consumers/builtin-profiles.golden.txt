@@ -1,0 +1,102 @@
+"components":
+  "instructions":
+    [
+      "ferretry-work-alone"
+    ]
+  "settings":
+    "ferretry-claude-comfort":
+      "document": "cleanupPeriodDays": 90
+      "env":
+        "BASH_DEFAULT_TIMEOUT_MS": "600000"
+        "MCP_TIMEOUT": "60000"
+      "harness": "claude"
+"document":
+  "components":
+    "instructions":
+      "ferretry-work-alone":
+        "text":
+          <<<
+            # Working well on your own
+
+            - When a choice is yours to make, make it: pick the sensible option and say what you chose, rather than stopping at "should I continue?".
+            - If only the owner can decide something that blocks you, ask through the channel your launch instructions name (if they name none, ask in the conversation), then carry on with whatever is not blocked.
+            - Commit, push or open a pull request only when asked to.
+            - Verify before you say it is done: run the checks, read their output, and report a failure as a failure.
+            - Follow the repository's own `CLAUDE.md` / `AGENTS.md`. Where they disagree with this page, they win.
+
+          >>>
+    "modelSets":
+      "ferretry-claude":
+        "default": "claude-opus-5-5"
+        "models":
+          [
+            "claude-opus-5-5"
+          ]
+      "ferretry-codex":
+        "default": "gpt-6"
+        "models":
+          [
+            "gpt-6"
+          ]
+    "settings":
+      "ferretry-claude-comfort":
+        "document": "cleanupPeriodDays": 90
+        "env":
+          "BASH_DEFAULT_TIMEOUT_MS": "600000"
+          "MCP_TIMEOUT": "60000"
+        "harness": "claude"
+  "profiles":
+    "ferretry-claude":
+      "layers":
+        [
+          "modelSets/ferretry-claude"
+          "instructions/ferretry-work-alone"
+          "settings/ferretry-claude-comfort"
+        ]
+    "ferretry-codex":
+      "layers":
+        [
+          "modelSets/ferretry-codex"
+          "instructions/ferretry-work-alone"
+        ]
+"layers":
+  "claudeNamedModelSet":
+    [
+      "modelSets/pinned"
+      "instructions/ferretry-work-alone"
+      "settings/ferretry-claude-comfort"
+    ]
+  "claudeWithStarter":
+    [
+      "modelSets/ferretry-claude"
+      "instructions/ferretry-work-alone"
+      "settings/ferretry-claude-comfort"
+    ]
+  "claudeWithout":
+    [
+      "instructions/ferretry-work-alone"
+      "settings/ferretry-claude-comfort"
+    ]
+  "codexWithStarter":
+    [
+      "modelSets/ferretry-codex"
+      "instructions/ferretry-work-alone"
+    ]
+  "codexWithout":
+    [
+      "instructions/ferretry-work-alone"
+    ]
+"starterModelSets":
+  "claude":
+    "default": "claude-opus-5-5"
+    "models":
+      [
+        "claude-opus-5-5"
+      ]
+  "codex":
+    "default": "gpt-6"
+    "models":
+      [
+        "gpt-6"
+      ]
+  "codexNone": null

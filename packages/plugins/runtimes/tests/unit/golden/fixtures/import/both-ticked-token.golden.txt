@@ -1,0 +1,612 @@
+"plan":
+  "components":
+    [
+      {
+        "kind": "instructions"
+        "name": "claude-instructions"
+        "value":
+          "harness": "claude"
+          "text":
+            <<<
+              # Golden Claude notes
+              Be kind.
+
+            >>>
+      }
+      {
+        "kind": "instructions"
+        "name": "codex-instructions"
+        "value":
+          "harness": "codex"
+          "text":
+            <<<
+              # Golden Codex notes
+              Be brief.
+
+            >>>
+      }
+      {
+        "kind": "mcp"
+        "name": "files"
+        "value":
+          "args":
+            [
+              "server-files"
+            ]
+          "command": "npx"
+          "env": "FILES_TOKEN": "${secret:FILES_TOKEN}"
+      }
+      {
+        "kind": "mcp"
+        "name": "docs"
+        "value": "url": "https://docs.example.test/mcp"
+      }
+      {
+        "kind": "mcp"
+        "name": "missing"
+        "value":
+          "command": "golden-not-installed"
+          "harness": "claude"
+      }
+      {
+        "kind": "skills"
+        "name": "claude-skills"
+        "value":
+          "harness": "claude"
+          "items":
+            [
+              "review"
+            ]
+      }
+      {
+        "kind": "skills"
+        "name": "codex-skills"
+        "value":
+          "harness": "codex"
+          "items":
+            [
+              "deploy"
+            ]
+      }
+      {
+        "kind": "settings"
+        "name": "claude-settings"
+        "value":
+          "env":
+            "EDITOR": "vim"
+            "GH_TOKEN": "${secret:GH_TOKEN}"
+          "file": "components/settings/claude-settings.json"
+          "harness": "claude"
+      }
+      {
+        "kind": "modelSets"
+        "name": "claude-models"
+        "value":
+          "default": "claude-opus-5-5"
+          "models":
+            [
+              "claude-opus-5-5"
+            ]
+      }
+      {
+        "kind": "settings"
+        "name": "codex-settings"
+        "value":
+          "env": "PAGER": "less"
+          "file": "components/settings/codex-settings.toml"
+          "harness": "codex"
+      }
+      {
+        "kind": "modelSets"
+        "name": "codex-models"
+        "value":
+          "default": "gpt-6"
+          "models":
+            [
+              "gpt-6"
+              "gpt-6-mini"
+            ]
+      }
+    ]
+  "credentials":
+    "claude-you":
+      "harness": "claude"
+      "store": "host"
+    "codex-you":
+      "harness": "codex"
+      "store": "host"
+  "duplicates": []
+  "files":
+    [
+      {
+        "from": "/host/home/.claude/skills/review"
+        "kind": "copy-directory"
+        "path": "skills/review"
+      }
+      {
+        "from": "/host/home/.codex/skills/deploy"
+        "kind": "copy-directory"
+        "path": "skills/deploy"
+      }
+      {
+        "content":
+          <<<
+            {
+              "model": "claude-opus-5-5",
+              "permissions": {
+                "allow": [
+                  "Bash(ls:*)"
+                ]
+              }
+            }
+
+          >>>
+        "kind": "write"
+        "path": "components/settings/claude-settings.json"
+      }
+      {
+        "content":
+          <<<
+            model = "gpt-6"
+            approval_policy = "on-request"
+
+            [shell_environment_policy]
+            inherit = "core"
+
+            [profiles.fast]
+            model = "gpt-6-mini"
+
+          >>>
+        "kind": "write"
+        "path": "components/settings/codex-settings.toml"
+      }
+    ]
+  "imported":
+    [
+      "claude"
+      "codex"
+    ]
+  "loginEnvs":
+    [
+      {
+        "harness": "claude"
+        "login": "claude-you"
+        "minted":
+          [
+            {
+              "name": "GH_TOKEN"
+              "secretName": "GH_TOKEN"
+            }
+          ]
+        "plain":
+          [
+            {
+              "name": "EDITOR"
+              "value": "vim"
+            }
+          ]
+      }
+      {
+        "harness": "codex"
+        "login": "codex-you"
+        "minted": []
+        "plain":
+          [
+            {
+              "name": "PAGER"
+              "value": "less"
+            }
+          ]
+      }
+    ]
+  "notes":
+    [
+      {
+        "harness": "claude"
+        "text": "Login · claude@example.test. Ferretry and your own `claude` share this login: signing out in one signs out both."
+      }
+      {
+        "harness": "claude"
+        "text": "2 secret values went to Ferretry's secret store and are never shown: env.GH_TOKEN, mcp.files.env.FILES_TOKEN."
+      }
+      {
+        "harness": "codex"
+        "text": "Login · codex@example.test · Refresh due. Ferretry renews it the first time you launch."
+      }
+      {
+        "harness": "codex"
+        "text": "1 secret value went to Ferretry's secret store and is never shown: mcp.files.env.FILES_TOKEN."
+      }
+      {
+        "harness": "codex"
+        "text": "Instructions: different from your CLAUDE.md · kept separately."
+      }
+    ]
+  "preview":
+    "harnesses":
+      [
+        {
+          "account":
+            "email": "claude@example.test"
+            "state": "signed-in"
+          "codexProfiles": []
+          "harness": "claude"
+          "installed": true
+          "instructions":
+            "bytes": 31
+            "name": "CLAUDE.md"
+            "source": "/host/home/.claude/CLAUDE.md"
+          "mcpServers":
+            [
+              "files"
+              "docs"
+              "missing"
+            ]
+          "missingCommands":
+            [
+              "golden-not-installed"
+            ]
+          "problems": []
+          "projectInstructions":
+            [
+              {
+                "file": "CLAUDE.md"
+                "path": "/work/golden-project"
+                "verified": true
+              }
+            ]
+          "secretKeys":
+            [
+              "env.GH_TOKEN"
+              "mcp.files.env.FILES_TOKEN"
+            ]
+          "settings":
+            "count": 4
+            "hooks": 1
+            "source": "/host/home/.claude/settings.json"
+          "skills":
+            [
+              "review"
+            ]
+        }
+        {
+          "account":
+            "email": "codex@example.test"
+            "state": "refresh-due"
+          "codexProfiles":
+            [
+              {
+                "model": "gpt-6-mini"
+                "name": "fast"
+              }
+            ]
+          "harness": "codex"
+          "installed": true
+          "instructions":
+            "bytes": 31
+            "name": "AGENTS.md"
+            "source": "/host/home/.codex/AGENTS.md"
+          "mcpServers":
+            [
+              "files"
+              "docs"
+            ]
+          "missingCommands": []
+          "problems":
+            [
+              "Left out of your config.toml: shell_environment_policy.set.GITHUB_TOKEN (a GitHub token: not imported unless you tick it)."
+            ]
+          "projectInstructions": []
+          "secretKeys":
+            [
+              "mcp.files.env.FILES_TOKEN"
+              "shell_environment_policy.set.GITHUB_TOKEN"
+            ]
+          "settings":
+            "count": 5
+            "hooks": 1
+            "source": "/host/home/.codex/config.toml"
+          "skills":
+            [
+              "deploy"
+            ]
+        }
+      ]
+    "instructionsIdentical": false
+  "profiles":
+    "claude-default":
+      "layers":
+        [
+          "profile/ferretry-claude"
+          "instructions/claude-instructions"
+          "mcp/files"
+          "mcp/docs"
+          "mcp/missing"
+          "skills/claude-skills"
+          "settings/claude-settings"
+          "modelSets/claude-models"
+        ]
+    "codex-default":
+      "layers":
+        [
+          "profile/ferretry-codex"
+          "instructions/codex-instructions"
+          "mcp/files"
+          "mcp/docs"
+          "skills/codex-skills"
+          "settings/codex-settings"
+          "modelSets/codex-models"
+        ]
+  "record":
+    "components":
+      "instructions/claude-instructions":
+        "digest": "32925f403c14b48c13b195dfff95ec143a7b7fcf761dfca5ef6337057e5f9898"
+        "sources":
+          [
+            "/host/home/.claude/CLAUDE.md"
+          ]
+      "instructions/codex-instructions":
+        "digest": "b1a72c642eec2b5d5ba5ca20f71b47d597164e6c61d9c5468fb249af1b30e10d"
+        "sources":
+          [
+            "/host/home/.codex/AGENTS.md"
+          ]
+      "mcp/docs":
+        "digest": "03c031c89df2605d0037fd4a9eb1092075446d5628064b9054cd0e454976bed2"
+        "sources":
+          [
+            "/host/home/.claude.json"
+            "/host/home/.codex/config.toml"
+          ]
+      "mcp/files":
+        "digest": "c18340a27c1ef11985ee95643cb0085025ddf5969de718b126c3cae8e4a08c9a"
+        "sources":
+          [
+            "/host/home/.claude.json"
+            "/host/home/.codex/config.toml"
+          ]
+      "mcp/missing":
+        "digest": "dcf44a7bf0b67350efa16ba21a3da6b1cdc5ec2497c79be9ed320dbeff71de7b"
+        "sources":
+          [
+            "/host/home/.claude.json"
+          ]
+      "modelSets/claude-models":
+        "digest": "30f2c7a89fdb87376ee31600239a73ba5d6993df83da82cac910dec1c1954a5c"
+        "sources":
+          [
+            "/host/home/.claude/settings.json"
+          ]
+      "modelSets/codex-models":
+        "digest": "b7fb53f421fd667770b882734fb8fc3f5c1878de96d0ddee51449c2be9458610"
+        "sources":
+          [
+            "/host/home/.codex/config.toml"
+          ]
+      "settings/claude-settings":
+        "digest": "d5866b98560fd9545179855864fb59f85ce998fcd6564232a9136eaa32913655"
+        "sources":
+          [
+            "/host/home/.claude/settings.json"
+          ]
+      "settings/codex-settings":
+        "digest": "c8e4514111bd9f896262951eefe13fdb9f8291a1d6cb92bbaabe0d6267145cb6"
+        "sources":
+          [
+            "/host/home/.codex/config.toml"
+          ]
+      "skills/claude-skills":
+        "digest": "780795e42041df0bc146e83c5f2d7b77e379e38eb490d2441ba92e046b23dede"
+        "sources":
+          [
+            "/host/home/.claude/skills/review"
+          ]
+      "skills/codex-skills":
+        "digest": "a1de6f66f386e08a415bc452869d0828781a77536f1ecddc989b9e89e0a3adf2"
+        "sources":
+          [
+            "/host/home/.codex/skills/deploy"
+          ]
+    "profiles":
+      "claude": "claude-default"
+      "codex": "codex-default"
+    "version": 1
+  "runtimes":
+    "claude-default":
+      "credential": "claude-you"
+      "profile": "claude-default"
+    "codex-default":
+      "credential": "codex-you"
+      "profile": "codex-default"
+  "secrets":
+    [
+      {
+        "from": "settings.json · env.GH_TOKEN"
+        "name": "GH_TOKEN"
+        "value": "FAKE_GH_VALUE_NOT_A_TOKEN"
+      }
+      {
+        "from": "claude MCP server files · files.env.FILES_TOKEN"
+        "name": "FILES_TOKEN"
+        "value": "FAKE_FILES_TOKEN_VALUE"
+      }
+    ]
+  "starters": {}
+  "updates": []
+  "warnings":
+    "mcp/missing":
+      [
+        "Command not found: golden-not-installed. Install it on this machine; the server starts working once it is there."
+      ]
+"scans":
+  [
+    {
+      "command": "/opt/harness/bin/claude"
+      "harness": "claude"
+      "instructions":
+        "bytes": 31
+        "kind": "text"
+        "source": "/host/home/.claude/CLAUDE.md"
+        "text":
+          <<<
+            # Golden Claude notes
+            Be kind.
+
+          >>>
+      "login":
+        "email": "claude@example.test"
+        "state": "signed-in"
+      "mcp":
+        "bytes": 439
+        "kind": "text"
+        "source": "/host/home/.claude.json"
+        "text":
+          <<<
+            {
+              "mcpServers": {
+                "files": {
+                  "type": "stdio",
+                  "command": "npx",
+                  "args": [
+                    "server-files"
+                  ],
+                  "env": {
+                    "FILES_TOKEN": "FAKE_FILES_TOKEN_VALUE"
+                  }
+                },
+                "docs": {
+                  "type": "http",
+                  "url": "https://docs.example.test/mcp"
+                },
+                "missing": {
+                  "type": "stdio",
+                  "command": "golden-not-installed"
+                }
+              },
+              "projects": {
+                "/work/golden-project": {}
+              }
+            }
+          >>>
+      "missingCommands":
+        [
+          "golden-not-installed"
+        ]
+      "problems": []
+      "projectInstructions":
+        [
+          {
+            "file": "CLAUDE.md"
+            "path": "/work/golden-project"
+            "verified": true
+          }
+        ]
+      "settings":
+        "bytes": 385
+        "kind": "text"
+        "source": "/host/home/.claude/settings.json"
+        "text":
+          <<<
+            {
+              "model": "claude-opus-5-5",
+              "env": {
+                "GH_TOKEN": "FAKE_GH_VALUE_NOT_A_TOKEN",
+                "EDITOR": "vim"
+              },
+              "permissions": {
+                "allow": [
+                  "Bash(ls:*)"
+                ]
+              },
+              "hooks": {
+                "PreToolUse": [
+                  {
+                    "matcher": "Bash",
+                    "hooks": [
+                      {
+                        "type": "command",
+                        "command": "echo golden"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          >>>
+      "skills":
+        [
+          {
+            "digest": "17b00456dbbec5673f5a13bb7e04a580ca61260cb115169dc1cd64d30b8ba08f"
+            "item": "review"
+            "source": "/host/home/.claude/skills/review"
+          }
+        ]
+    }
+    {
+      "command": "/opt/harness/bin/codex"
+      "harness": "codex"
+      "hooks":
+        "bytes": 73
+        "kind": "text"
+        "source": "/host/home/.codex/hooks.json"
+        "text": "{\"hooks\":{\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"echo done\"}]}]}}"
+      "instructions":
+        "bytes": 31
+        "kind": "text"
+        "source": "/host/home/.codex/AGENTS.md"
+        "text":
+          <<<
+            # Golden Codex notes
+            Be brief.
+
+          >>>
+      "login":
+        "email": "codex@example.test"
+        "state": "refresh-due"
+      "missingCommands": []
+      "problems": []
+      "settings":
+        "bytes": 482
+        "kind": "text"
+        "source": "/host/home/.codex/config.toml"
+        "text":
+          <<<
+            model = "gpt-6"
+            approval_policy = "on-request"
+
+            [mcp_servers.files]
+            command = "npx"
+            args = ["server-files"]
+
+            [mcp_servers.files.env]
+            FILES_TOKEN = "FAKE_FILES_TOKEN_VALUE"
+
+            [mcp_servers.docs]
+            url = "https://docs.example.test/mcp"
+
+            [mcp_servers.archive]
+            command = "npx"
+            args = ["server-archive"]
+            enabled = false
+
+            [shell_environment_policy]
+            inherit = "core"
+
+            [shell_environment_policy.set]
+            GITHUB_TOKEN = "FAKE_CODEX_GITHUB_VALUE"
+            PAGER = "less"
+
+            [profiles.fast]
+            model = "gpt-6-mini"
+
+          >>>
+      "skills":
+        [
+          {
+            "digest": "65c3da7c85e08e6cb57d9895a0d51bee36dbe83cc07f3259da63d327c585f412"
+            "item": "deploy"
+            "source": "/host/home/.codex/skills/deploy"
+          }
+        ]
+    }
+  ]

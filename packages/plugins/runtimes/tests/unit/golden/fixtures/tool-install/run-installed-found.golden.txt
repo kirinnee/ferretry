@@ -1,0 +1,52 @@
+"outcomes":
+  [
+    {
+      "command": "npm install -g @anthropic-ai/claude-code"
+      "harness": "claude"
+      "outcome": "installed"
+      "output":
+        [
+          "added 1 package"
+        ]
+      "path": "/bin/claude"
+    }
+    {
+      "command": "npm install -g @openai/codex"
+      "harness": "codex"
+      "outcome": "installed"
+      "output":
+        [
+          "added 1 package"
+        ]
+      "path": "/bin/codex"
+    }
+  ]
+"runs":
+  [
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@anthropic-ai/claude-code"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@openai/codex"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+  ]

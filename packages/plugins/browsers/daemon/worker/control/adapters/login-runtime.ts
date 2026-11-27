@@ -254,6 +254,7 @@ export interface XvfbDisplayOptions extends BrowserLoginTiming {
  */
 export class XvfbDisplay implements BrowserDisplayPort {
   private readonly timing: ReturnType<typeof resolveTiming>;
+  private readonly terminateGraceMs: number;
   private readonly spawn: (argv: readonly string[]) => XvfbChild;
   private taken: Promise<string> | undefined;
   private child: XvfbChild | undefined;
@@ -261,6 +262,7 @@ export class XvfbDisplay implements BrowserDisplayPort {
 
   constructor(private readonly options: XvfbDisplayOptions) {
     this.timing = resolveTiming(options, options.processes.clock);
+    this.terminateGraceMs = options.terminateGraceMs ?? DEFAULT_TIMING.terminateGraceMs;
     this.spawn =
       options.spawn ??
       (([program, ...args]) => {
@@ -299,7 +301,14 @@ export class XvfbDisplay implements BrowserDisplayPort {
     this.taken = undefined;
     await this.discardAuthority();
     if (child === undefined) return;
+    // Resolved only once the server has really exited, so a caller that waits for `close()` — an identity's
+    // slot, a daemon shutdown — is never left with an X server still running behind it. SIGTERM, a grace,
+    // then SIGKILL and one more bounded wait: an unreapable process must not hang the caller forever.
+    const watch = watchExit(child);
     child.kill('SIGTERM');
+    if (await awaitExit(watch, this.timing, this.terminateGraceMs)) return;
+    child.kill('SIGKILL');
+    await awaitExit(watch, this.timing, this.terminateGraceMs);
   }
 
   private async take(): Promise<string> {
@@ -658,6 +667,27 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
     while (!exited && this.timing.now() < deadline) await this.timing.sleep(this.timing.pollIntervalMs);
     if (!exited) child.kill('SIGKILL');
   }
+}
+
+/** Observes a child's exit without blocking on it; a rejected `exited` still means it is not running. */
+function watchExit(child: BrowserLoginChild): { readonly exited: () => boolean } {
+  let exited = false;
+  const settle = (): void => {
+    exited = true;
+  };
+  void child.exited.then(settle, settle);
+  return { exited: () => exited };
+}
+
+/** Polls until the watched child has exited or the grace is spent; whether it has. */
+async function awaitExit(
+  watch: { readonly exited: () => boolean },
+  timing: Required<Pick<BrowserLoginTiming, 'pollIntervalMs' | 'now' | 'sleep'>>,
+  graceMs: number,
+): Promise<boolean> {
+  const deadline = timing.now() + graceMs;
+  while (!watch.exited() && timing.now() < deadline) await timing.sleep(timing.pollIntervalMs);
+  return watch.exited();
 }
 
 /** A free loopback TCP port, taken by binding one and releasing it. */

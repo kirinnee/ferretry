@@ -1,0 +1,30 @@
+"described":
+  [
+    "Partly supported on Codex: imports pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files."
+    "Partly supported on Codex: sse is reached over SSE. Codex connects to servers over streamable HTTP, so it may not reach this one."
+    "Partly supported on Codex: review limits which tools it may use. Codex ignores that limit and loads the rest."
+    "Partly supported on Codex: review picks its own model. Codex ignores that and uses the runtime's model."
+  ]
+"notes":
+  [
+    {
+      "harness": "codex"
+      "reason": "imports pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files."
+      "reference": "instructions/imports"
+    }
+    {
+      "harness": "codex"
+      "reason": "sse is reached over SSE. Codex connects to servers over streamable HTTP, so it may not reach this one."
+      "reference": "mcp/sse"
+    }
+    {
+      "harness": "codex"
+      "reason": "review limits which tools it may use. Codex ignores that limit and loads the rest."
+      "reference": "skills/mine"
+    }
+    {
+      "harness": "codex"
+      "reason": "review picks its own model. Codex ignores that and uses the runtime's model."
+      "reference": "skills/mine"
+    }
+  ]

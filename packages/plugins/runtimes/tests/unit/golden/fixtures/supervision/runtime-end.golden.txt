@@ -1,0 +1,68 @@
+"results":
+  "an unknown ferret stopped":
+    [
+      "ferrets.get nobody"
+    ]
+  "claudeFailed stopped":
+    [
+      "ferrets.get claudeFailed"
+    ]
+  "claudeStopped stopped":
+    [
+      "ferrets.get claudeStopped"
+    ]
+  "codexExplainedButNotFailed stopped":
+    [
+      "ferrets.get codexExplainedButNotFailed"
+      "wrapperOf codex-work"
+      "afterSessionEnded /fleet/bin/codex-work"
+    ]
+  "codexFailed stopped":
+    [
+      "ferrets.get codexFailed"
+      "wrapperOf codex-work"
+      "afterSessionEnded /fleet/bin/codex-work"
+      "launchFailed {\"ferret\":\"codexFailed\",\"runtime\":\"codex-work\",\"message\":\"golden words for a launch that failed\"}"
+    ]
+  "codexFailed when the follow-up throws":
+    [
+      "ferrets.get codexFailed"
+      "wrapperOf codex-work"
+      "afterSessionEnded /fleet/bin/codex-work"
+      "warn a Codex ferret stopped, but its runtime's follow-up could not run: the fleet folder cannot be opened"
+    ]
+  "codexFailedUnexplained stopped":
+    [
+      "ferrets.get codexFailedUnexplained"
+      "wrapperOf codex-work"
+      "afterSessionEnded /fleet/bin/codex-work"
+    ]
+  "codexNoRuntime stopped":
+    [
+      "ferrets.get codexNoRuntime"
+    ]
+  "codexRunning stopped":
+    [
+      "ferrets.get codexRunning"
+    ]
+  "codexStopped gone": []
+  "codexStopped running": []
+  "codexStopped stopped":
+    [
+      "ferrets.get codexStopped"
+      "wrapperOf codex-work"
+      "afterSessionEnded /fleet/bin/codex-work"
+    ]
+  "codexStopped with no state": []
+  "codexStopped with the host offering no seams": []
+  "codexStopsAgain stopped":
+    [
+      "ferrets.get codexStopsAgain"
+      "wrapperOf codex-work"
+      "afterSessionEnded /fleet/bin/codex-work"
+    ]
+  "codexUnpublished stopped":
+    [
+      "ferrets.get codexUnpublished"
+      "wrapperOf codex-unpublished"
+    ]

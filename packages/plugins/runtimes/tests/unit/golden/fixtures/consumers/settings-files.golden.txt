@@ -1,0 +1,87 @@
+"claudeEntries": "refused": "settings cl-settings has no value for a.keep to keep; type one"
+"claudeFlagsAndEnv":
+  "component":
+    "env": "MODE": "x"
+    "flags":
+      [
+        "--fast"
+      ]
+    "harness": "claude"
+  "consequences": []
+  "files": []
+  "summary": "Add settings fresh"
+"claudeHooks":
+  "component": null
+  "consequences": []
+  "files":
+    [
+      {
+        "content": "{\"hooks\":{}}"
+        "file": "components/hooks/fresh.json"
+      }
+    ]
+  "summary": "Add hooks fresh"
+"claudeInstructions":
+  "component": null
+  "consequences": []
+  "files": []
+  "summary": "Add instructions fresh"
+"claudeJson":
+  "component":
+    "file": "components/settings/fresh.json"
+    "harness": "claude"
+  "consequences": []
+  "files":
+    [
+      {
+        "content": "{\"theme\":\"dark\"}"
+        "file": "components/settings/fresh.json"
+      }
+    ]
+  "summary": "Add settings fresh"
+"claudeJsonThatIsToml": "refused": "the settings fresh text is not valid JSON: cannot parse json settings: JSON Parse error: Unexpected identifier \"model\""
+"codexEntries": "refused": "settings cx-settings has no value for a.keep to keep; type one"
+"codexFlagsAndEnv":
+  "component":
+    "env": "MODE": "x"
+    "flags":
+      [
+        "--search"
+      ]
+    "harness": "codex"
+  "consequences": []
+  "files": []
+  "summary": "Add settings fresh"
+"codexInstructions":
+  "component": null
+  "consequences": []
+  "files": []
+  "summary": "Add instructions fresh"
+"codexToml":
+  "component":
+    "file": "components/settings/fresh.toml"
+    "harness": "codex"
+  "consequences": []
+  "files":
+    [
+      {
+        "content":
+          <<<
+            model = "gpt-6"
+
+          >>>
+        "file": "components/settings/fresh.toml"
+      }
+    ]
+  "summary": "Add settings fresh"
+"codexTomlThatIsJson":
+  "refused":
+    <<<
+      the settings fresh text is not valid TOML: cannot parse toml settings: Invalid TOML document: incomplete key-value: cannot find end of key
+
+      1:  {"theme":"dark"}
+          ^
+
+    >>>
+"thirdHarness": "refused": "opencode is not supported here"
+"wireKeyClaude": "refused": "claude is not supported here"

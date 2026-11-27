@@ -109,6 +109,8 @@ export const DialogRuleSchema = z
     body: Pattern.optional(),
     /** A pattern over one printed line of the live frame, checked fresh before any key (a fixed harness phrase). */
     text: Pattern.optional(),
+    /** `none`: the rule fits only a screen recorded with NO rows to choose (a notice), never a list that shares its title. */
+    rows: z.literal('none').optional(),
     action: DialogActionSchema,
   })
   .refine(rule => rule.title !== undefined || rule.text !== undefined, {

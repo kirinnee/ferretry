@@ -1,5 +1,5 @@
 import type { ConfigPort } from '@ferretry/kernel/contract';
-import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretsApi, HarnessForm } from '@ferretry/core-ferrets/contract';
 import { type DialogRule, WARDEN_DIALOG_RULES } from '../contract/dialog-rules.ts';
 import type { BuiltInDialogRules } from './dialog-rules-source.ts';
 import { type ClearFrame, type DialogClearPorts, dialogWordsOf } from './lib/index.ts';
@@ -16,6 +16,18 @@ export function dialogRulesInEffect(
   return async () => [...builtIn.rules(), ...(config.file(WARDEN_DIALOG_RULES)?.rules ?? [])];
 }
 
+/** One read of a ferret's pane through its form seam, or `undefined` when it cannot be read. */
+async function readFrame(seam: HarnessForm | undefined): Promise<ClearFrame | undefined> {
+  const read = await seam?.capture().catch(() => undefined);
+  return read?.ok === true
+    ? {
+        visible: read.value.visible,
+        blocking: read.value.blocking ?? false,
+        ...(read.value.dialog === undefined ? {} : { dialog: read.value.dialog }),
+      }
+    : undefined;
+}
+
 /**
  * A ferret's own pane, through Ferrets' form seam (`FerretHarness.form`): the runner reads it masked and guards every key
  * with `kernel.act(<pane>, 'keys')`, so a Vault hold presses NOTHING and answers a refusal. Nothing here names a tmux pane.
@@ -26,12 +38,14 @@ export function ferretClearPane(
   const form = async (sessionId: string) => (await ferrets.harness?.(sessionId as FerretId))?.form;
   return {
     words: async sessionId => dialogWordsOf(await ferrets.prompt?.(sessionId as FerretId).catch(() => undefined)),
-    frame: async (sessionId): Promise<ClearFrame | undefined> => {
-      const read = await (await form(sessionId))?.capture().catch(() => undefined);
-      return read?.ok === true ? { visible: read.value.visible, blocking: read.value.blocking ?? false } : undefined;
-    },
-    key: async (sessionId, key) => {
-      const typed = await (await form(sessionId))?.key(key).catch(() => undefined);
+    frame: async (sessionId): Promise<ClearFrame | undefined> => await readFrame(await form(sessionId)),
+    // The write path: ONE fresh read of the pane, the caller's test on it, then the key. A frame that is unreadable or no
+    // longer the screen the key was planned for presses nothing (a composer swapped in after the look must not get an Esc).
+    key: async (sessionId, key, stillOn) => {
+      const seam = await form(sessionId);
+      const live = await readFrame(seam);
+      if (live === undefined || !stillOn(live)) return false;
+      const typed = await seam?.key(key).catch(() => undefined);
       return typed?.ok === true;
     },
     // After a declined prompt the pane is idle (or its turn goes on): type the message, else queue it. Never awaited.

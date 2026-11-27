@@ -1,0 +1,29 @@
+"byWrapperName": "/fleet/homes/codex-a"
+"homeIds":
+  "/elsewhere/codex-a": null
+  "/fleet/homes": null
+  "/fleet/homes/": null
+  "/fleet/homes/.": null
+  "/fleet/homes/..": null
+  "/fleet/homes/codex-a": "codex-a"
+  "/fleet/homes/codex-a/": null
+  "/fleet/homes/codex-a/nested": null
+"pidFiles":
+  "": null
+  "[]": null
+  "nonsense": null
+  "null": null
+  "{\"pid\":\"100\"}": null
+  "{\"pid\":0}": null
+  "{\"pid\":100,\"processStartTime\":\"x\"}": 100
+  "{\"pid\":1}": null
+  "{\"pid\":2.5}": null
+  "{\"pid\":9007199254740993}": null
+"runtimeHomes":
+  "/fleet/bin/claude-a": null
+  "/fleet/bin/codex-a": "/fleet/homes/codex-a"
+  "/fleet/bin/codex-climb": null
+  "/fleet/bin/codex-dot": null
+  "/fleet/bin/codex-nested": "/fleet/homes/codex-a/nested"
+  "/fleet/bin/codex-outside": null
+  "/fleet/bin/codex-trailing": "/fleet/homes/codex-trailing"

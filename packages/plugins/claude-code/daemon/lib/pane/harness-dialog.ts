@@ -281,6 +281,45 @@ function hooksList(lines: readonly string[], footer: string): HarnessDialog | un
 }
 
 /**
+ * A Claude notice with no rows to choose: a title and a few paragraphs under the full-width rule, then the footer
+ * "Enter to continue · Esc to close" ("Claude in Chrome", Claude Code 2.1.327). Nothing is selected, so it is answered by
+ * its Esc alone. It is read by its SIGNATURE, not its shape: the notice's own title ({@link NOTICE_TITLE}) and its
+ * exact footer ({@link NOTICE_FOOTER}), with no cursor, numbered row or composer glyph (a bare `❯` included) under the
+ * rule. An editor or help frame that borrows the footer, a list, the idle composer or a bare footer is never one.
+ */
+/** The title of a Claude notice with no rows (2.1.327 draws "Claude in Chrome"); a new notice is added here, by its own words. */
+const NOTICE_TITLE = /^claude in chrome$/iu;
+
+/** That notice's footer, whole: a footer that only names Enter and Esc is not it. */
+const NOTICE_FOOTER = /^\s*enter to continue \u00B7 esc to close\s*$/iu;
+
+/** A composer or cursor glyph at the start of a line, bare or not: the idle prompt is never a notice's paragraph. */
+const COMPOSER_GLYPH = /^\s*[\u276F\u203A>]/u;
+
+function noticeDialog(lines: readonly string[], footerAt: number, footer: string): HarnessDialog | undefined {
+  const closer = ESCAPE_WORD.exec(footer)?.[1]?.toLowerCase();
+  if (closer === undefined || !NOTICE_FOOTER.test(footer)) return undefined;
+  let rule = -1;
+  for (let index = footerAt - 1; rule < 0 && index >= Math.max(0, footerAt - HEADER_REACH_LINES); index -= 1)
+    if (RULE.test(lines[index] as string)) rule = index;
+  if (rule < 0) return undefined;
+  const under = lines.slice(rule + 1, footerAt);
+  const header = under.filter(line => !blank(line)).map(line => line.trim());
+  if (header.length < 2 || !NOTICE_TITLE.test(header[0] as string)) return undefined;
+  if (under.some(line => COMPOSER_GLYPH.test(line) || rowOf(line)?.cursor === true || rowOf(line)?.digit === true))
+    return undefined;
+  const dialog = {
+    harness: 'claude-code' as const,
+    kind: 'other' as const,
+    title: clip(header[0] as string, LIMITS.title),
+    body: clip(header.slice(1).join('\n'), LIMITS.body),
+    options: [],
+    escape: closer,
+  };
+  return { id: promptDigest(JSON.stringify(dialog)), ...dialog };
+}
+
+/**
  * A dialog a frame is parked on, and whether its cursor was positively read.
  *
  * `cursorRead` is false for a RECOGNISED dialog whose cursor is on no row or on several (a redraw, a stale marker):
@@ -327,6 +366,9 @@ export function readHarnessDialogFrame(pane: string): HarnessDialogFrame | undef
   if (parsePermissionPrompt(pane) !== undefined) return undefined;
   const list = hooksList(lines, footer);
   if (list !== undefined) return { dialog: list, cursorRead: true, names: namesOf(list) };
+
+  const info = noticeDialog(lines, footerAt, footer);
+  if (info !== undefined) return { dialog: info, cursorRead: true, names: namesOf(info) };
 
   const found = dialogRows(lines, 0, footerAt);
   if (found === undefined) return undefined;
