@@ -19,9 +19,14 @@ export function readCssWithImports(file: string): string {
   );
 }
 
-/** Every theme token declaration, in cascade order: the generated theme packs (`index.css` imports them first), then `themes.css` with all its imports inlined. */
+/**
+ * Every theme token declaration: `themes.css` with all its imports inlined, then the generated theme packs (palettes as data).
+ * The real page imports the packs once from `index.css`, before `themes.css`; here they come after so the bases stay first in the
+ * text (a reader asking for "the first `--muted`" gets the default). Palette selectors out-rank the bases, so the order never
+ * decides a colour, and a before/after dump of every token of every style x palette x mode is the same either way.
+ */
 export const readThemeCss = (): string =>
-  `${readFileSync(join(stylesRoot, '../generated/theme-packs.css'), 'utf8')}\n${readCssWithImports(join(stylesRoot, 'themes.css'))}`;
+  `${readCssWithImports(join(stylesRoot, 'themes.css'))}\n${readFileSync(join(stylesRoot, '../generated/theme-packs.css'), 'utf8')}`;
 
 /** One file under `src/styles` (`style/neo.css`, `tokens/base-palette.css`, …). */
 export const readStyleFile = (relative: string): string => readFileSync(join(stylesRoot, relative), 'utf8');
