@@ -47,7 +47,7 @@ import {
 import { onboardingScreen } from '../../onboarding-screen.ts';
 import type { SummaryStep } from '../../views/steps-screen.tsx';
 import { readLater, rememberLater } from './client-later.ts';
-import { markProjectSetupShown, PROJECT_SETUP_STEP } from './project-resume.ts';
+import { forgetProjectDraft, markProjectSetupShown, PROJECT_SETUP_STEP } from './project-resume.ts';
 import {
   advance,
   AGENTS_KEY,
@@ -361,8 +361,10 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
         return;
       }
       const daemon = step.appliesTo[0]?.daemon ?? target;
-      if (how === 'later') rememberLater(env.current.storage(), step.key, env.current.now());
-      else if (how === 'done' || how === 'found')
+      if (how === 'later') {
+        rememberLater(env.current.storage(), step.key, env.current.now());
+        if (step.key === PROJECT_SETUP_STEP) forgetProjectDraft(env.current.storage(), target);
+      } else if (how === 'done' || how === 'found')
         recordClientStep(env.current.storage(), step.plugin, step.id, daemon, env.current.now());
       // This device's own answers reach the closing summary from here (a machine step's come back from the machine).
       setOutcomes(known => ({ ...known, [step.key]: how }));
@@ -452,6 +454,8 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
   // The run ended: what is still passed over will never be asked, so the machine hears it was skipped (see the header).
   useEffect(() => {
     if (run.at !== END) return;
+    // Before the steps are read the run sits at END too: only a run that was read and has ended forgets the project draft.
+    if (target !== undefined && ready !== undefined) forgetProjectDraft(env.current.storage(), target);
     for (const key of run.notNeeded) {
       const step = pages.find(candidate => candidate.key === key);
       // A page that holds an answer (before the run or during it) keeps it: `skipped` would replace its found / done state.
@@ -460,7 +464,7 @@ export function useSetupFlow(client: PluginClient, deps: FlowDeps = {}): SetupFl
       toldAtEnd.current.add(key);
       sendDaemon(step, 'skipped');
     }
-  }, [run.at, run.notNeeded, pages, answered, sendDaemon]);
+  }, [run.at, run.notNeeded, pages, answered, sendDaemon, target, ready]);
 
   // The closing summary ticks Runtimes only when the machine has a runtime (runtimes-made.ts).
   const runtimesRead = useRuntimesRead(targetRow?.client, run.at === END);

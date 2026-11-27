@@ -200,3 +200,87 @@ describe('the setup flow ends in project setup', () => {
           }
         });
 });
+
+describe('the setup flow keeps its folder picks across a refusal and a reload (E-257)', () => {
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      for (const style of STYLES)
+        it(`a refused folder is still picked after a reload, and the made one is not forgotten (${viewport.name}, ${scheme}, ${style})`, async () => {
+          const context = await browser.newContext({
+            viewport: { width: viewport.width, height: viewport.height },
+            colorScheme: scheme,
+            deviceScaleFactor: viewport.phone ? 2 : 1,
+            hasTouch: viewport.phone,
+            isMobile: viewport.phone,
+          });
+          const origin = server?.url.origin ?? '';
+          await context.route('**/*', async route =>
+            new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+          );
+          const tab = await context.newPage();
+          const problems: string[] = [];
+          tab.on('pageerror', error => problems.push(error.message));
+          try {
+            await tab.goto(`${origin}/?theme=studio-${scheme}&style=${style}&refuse=atlas`);
+            await tab.waitForSelector('[data-explorer-state="ready"]');
+            const shot = async (name: string): Promise<void> => {
+              if (shotsDir !== '')
+                await tab.screenshot({
+                  path: join(shotsDir, `refusal-${viewport.name}-${scheme}-${style}-${name}.png`),
+                  fullPage: true,
+                });
+            };
+            // Pick the home folder, then atlas; the daemon takes the first and refuses the second.
+            await tab.getByRole('button', { name: 'Add this folder' }).click();
+            await tab.click('[data-explorer-entry="atlas"]');
+            await tab.waitForFunction(() => document.querySelector('[data-explorer-up]') !== null);
+            await tab.getByRole('button', { name: 'Add this folder' }).click();
+            await tab.waitForFunction(() => document.querySelectorAll('[data-projects-step-picks] li').length === 2);
+            await tab.click('[data-step-next]');
+            await tab.waitForSelector('[data-flow-commit-error]');
+            expect(await tab.evaluate(() => window.__registered)).toEqual(['/home/sam']);
+            await shot('1-refused');
+
+            // A reload: the run's memory is gone, the machine now holds a project. The page must not pass over, and the
+            // refused folder is still on the list.
+            await tab.reload();
+            await tab.waitForSelector('[data-explorer-state="ready"]');
+            const listed = await tab.evaluate(() =>
+              [...document.querySelectorAll('[data-projects-step-picks] li .mono')].map(path => path.textContent ?? ''),
+            );
+            expect(listed).toEqual(['/home/sam/atlas']);
+            // E-257 MUST 1: the refusal is still said on the row after the reload, and fits inside it and the screen.
+            const note = await tab.evaluate(() => {
+              const label = document.querySelector('[data-projects-step-refused]');
+              const row = label?.closest('li')?.getBoundingClientRect();
+              const box = label?.getBoundingClientRect();
+              return {
+                text: label?.textContent ?? '',
+                inside:
+                  row !== undefined &&
+                  box !== undefined &&
+                  box.left >= row.left &&
+                  box.right <= row.right &&
+                  box.bottom <= row.bottom &&
+                  box.right <= window.innerWidth,
+              };
+            });
+            expect(note.text).toContain('that folder cannot be a project');
+            expect(note.inside, 'the refusal label sits inside its row and the screen').toBe(true);
+            expect(await tab.evaluate(() => window.__passedOver), 'the page is not passed over').toBe(false);
+            expect(
+              await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+              'no sideways scroll',
+            ).toBeLessThanOrEqual(0);
+            await shot('2-after-reload');
+            // Next does not send the refused folder again as an ordinary pick.
+            await tab.click('[data-step-next]');
+            await tab.waitForSelector('[data-flow-commit-error]');
+            expect(await tab.evaluate(() => window.__registered), 'a refused pick is not sent again').toEqual([]);
+            expect(await tab.evaluate(() => window.__error)).toContain('that folder cannot be a project');
+            expect(problems).toEqual([]);
+          } finally {
+            await context.close();
+          }
+        });
+});

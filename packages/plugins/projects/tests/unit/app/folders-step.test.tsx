@@ -2,7 +2,7 @@
  * The setup flow's last page, "Add your projects" (C59 O8-13): the Add project explorer to pick one folder or several, the
  * same registration when Next saves, a pass-over on a machine that already has a project, and the words the end page opens.
  */
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import { FoldersStep } from '../../../app/views/folders-step.tsx';
 import { ANSWERED, type Call, clickEvent, PROJECT, refusal, scripted } from './support/client.ts';
@@ -48,7 +48,12 @@ const addThisFolder = (mounted: Mounted): Promise<void> => {
   return press(must(add, 'the Add this folder button'));
 };
 const picks = (mounted: Mounted): string[] =>
-  [...mounted.container.querySelectorAll('[data-projects-step-picks] li')].map(node => node.textContent ?? '');
+  [...mounted.container.querySelectorAll('[data-projects-step-picks] li .mono')].map(node => node.textContent ?? '');
+const refusedNote = (mounted: Mounted): string | undefined =>
+  mounted.container.querySelector('[data-projects-step-refused]')?.textContent ?? undefined;
+const draftPicks = (): string[] =>
+  (JSON.parse(localStorage.getItem('fy.projects.setup-folders.workstation') ?? '{}') as { picks?: string[] }).picks ??
+  [];
 
 describe('the Add your projects step', () => {
   it('is passed over (not recorded, nothing drawn first) on a machine that already has a project', async () => {
@@ -209,5 +214,188 @@ describe('the Add your projects step', () => {
     expect(picks(mounted)).toHaveLength(0);
     expect(recorder.count('commit')).toBe(afterAdd + 1);
     await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('Skip for now');
+  });
+});
+
+describe('the Add your projects step keeps its work per save (E-257)', () => {
+  // The draft lives in the browser's storage; one test's draft must never answer another's.
+  afterEach(() => localStorage.clear());
+
+  const ATLAS = '/home/k/atlas';
+  /** `/home/k` registers; the atlas folder is refused. The registry holds the first once it is made. */
+  const halfRefused = () => {
+    let made = false;
+    return {
+      [LIST]: () => (made ? [ANSWERED] : []),
+      [REGISTER]: (call: Call) => {
+        if ((call.body as { path: string }).path === ATLAS) throw refusal(422, 'that folder cannot be a project');
+        made = true;
+        return ANSWERED;
+      },
+    };
+  };
+  const pickBoth = async (mounted: Mounted): Promise<void> => {
+    await settleUntil(
+      () => mounted.container.querySelector('[data-explorer-state="ready"]') !== null,
+      'the explorer',
+      interact,
+    );
+    await addThisFolder(mounted);
+    await press(must(mounted.container.querySelector('[data-explorer-entry="atlas"]'), 'atlas'));
+    await settleUntil(
+      () => mounted.container.querySelector('[data-explorer-state="ready"]') !== null,
+      'atlas',
+      interact,
+    );
+    await addThisFolder(mounted);
+  };
+  const reopen = async (
+    recorder: ReturnType<typeof stepRecorder>,
+    routes: Record<string, unknown>,
+    calls: Call[] = [],
+  ) => {
+    const again = await mount(
+      <FoldersStep
+        step={recorder.host}
+        client={scripted({ [FOLDERS]: listingFor, ...routes }, calls)}
+        daemon="workstation"
+      />,
+    );
+    await settleUntil(
+      () => recorder.calls.some(call => call === 'ready' || call === 'notNeeded'),
+      'the page decides',
+      interact,
+    );
+    return again;
+  };
+
+  it('a refusal on the second folder keeps the first made, the refused one still picked, when the page is drawn again', async () => {
+    const routes = halfRefused();
+    const { recorder, mounted } = await open(routes);
+    await pickBoth(mounted);
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    expect(recorder.segment.madeIds).toBe(ANSWERED.id);
+    await mounted.unmount();
+    const again = await reopen(recorder, routes);
+    expect(recorder.count('notNeeded')).toBe(0);
+    expect(picks(again)).toEqual([ATLAS]);
+    await again.unmount();
+  });
+
+  it('a reload (the run memory gone) keeps the refused folder picked and still does not pass the page over', async () => {
+    const routes = halfRefused();
+    const { recorder, mounted } = await open(routes);
+    await pickBoth(mounted);
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    await mounted.unmount();
+    const fresh = stepRecorder('client');
+    const again = await reopen(fresh, routes);
+    expect(fresh.count('notNeeded')).toBe(0);
+    expect(fresh.count('ready')).toBe(1);
+    expect(picks(again)).toEqual([ATLAS]);
+    await again.unmount();
+  });
+
+  it('a finished save leaves no draft: a later visit to a machine with a project passes the page over', async () => {
+    const { recorder, mounted } = await open({});
+    await pickBoth(mounted);
+    await must(recorder.committed, 'a save').call(null);
+    await mounted.unmount();
+    const fresh = stepRecorder('client');
+    const again = await reopen(fresh, { [LIST]: [ANSWERED], [REGISTER]: ANSWERED });
+    expect(fresh.count('notNeeded')).toBe(1);
+    await again.unmount();
+  });
+
+  it('a reload shows the refused folder AS refused, and Next never sends it again as an ordinary pick (MUST 1)', async () => {
+    const routes = halfRefused();
+    const { recorder, mounted } = await open(routes);
+    await pickBoth(mounted);
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    await interact(() => undefined);
+    expect(refusedNote(mounted)).toContain('that folder cannot be a project');
+    await mounted.unmount();
+    const fresh = stepRecorder('client');
+    const calls: Call[] = [];
+    const again = await reopen(fresh, routes, calls);
+    expect(picks(again)).toEqual([ATLAS]);
+    expect(refusedNote(again)).toContain('that folder cannot be a project');
+    // Next does not send it again, in this reload or on a second press: it says the folder is refused and stays.
+    await expect(must(fresh.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    await expect(must(fresh.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    expect(calls.filter(call => call.route === REGISTER)).toHaveLength(0);
+    await again.unmount();
+  });
+
+  it('removing a refused folder clears its refusal, and picking it again asks the daemon afresh (MUST 1)', async () => {
+    const routes = halfRefused();
+    const { recorder, mounted } = await open(routes);
+    await pickBoth(mounted);
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    await interact(() => undefined);
+    expect(refusedNote(mounted)).toContain('that folder cannot be a project');
+    await press(must(mounted.container.querySelector(`[aria-label="Remove ${ATLAS}"]`), 'the remove button'));
+    expect(refusedNote(mounted)).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem('fy.projects.setup-folders.workstation') ?? '{}').refused ?? {}).toEqual({});
+    await addThisFolder(mounted);
+    expect(refusedNote(mounted)).toBeUndefined();
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    await mounted.unmount();
+  });
+
+  /** The first folder's registration waits on the gate; the second is picked too. */
+  const heldFirst = (outcome: 'refuse' | 'make') => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const routes = {
+      [LIST]: [],
+      [REGISTER]: async (call: Call) => {
+        if ((call.body as { path: string }).path !== '/home/k') return ANSWERED;
+        await gate;
+        if (outcome === 'refuse') throw refusal(422, 'that folder cannot be a project');
+        return ANSWERED;
+      },
+    };
+    return { routes, release: () => release() };
+  };
+  const removeSecondWhileFirstIsInFlight = async (outcome: 'refuse' | 'make') => {
+    const held = heldFirst(outcome);
+    const { recorder, mounted, calls } = await open(held.routes);
+    await pickBoth(mounted);
+    const saving = must(recorder.committed, 'a save').call(null);
+    const settled = saving.then(
+      () => 'saved',
+      (cause: Error) => cause.message,
+    );
+    await settleUntil(() => calls.some(call => call.route === REGISTER), 'the first registration starts', interact);
+    await press(must(mounted.container.querySelector(`[aria-label="Remove ${ATLAS}"]`), 'the remove button'));
+    held.release();
+    const ended = await settled;
+    await interact(() => undefined); // the page's own re-draw after the save ends
+    return { settled: ended, mounted, calls };
+  };
+
+  it('a pick removed while the first folder is still registering is never sent, even after a refusal (MUST 2)', async () => {
+    const { settled, mounted, calls } = await removeSecondWhileFirstIsInFlight('refuse');
+    expect(settled).toContain('cannot be a project');
+    expect(calls.filter(call => call.route === REGISTER).map(call => call.body)).toEqual([
+      { kind: 'existing-folder', path: '/home/k' },
+    ]);
+    // ...and the refusal does not write the removed pick back into the page or the draft.
+    expect(picks(mounted)).toEqual(['/home/k']);
+    expect(draftPicks()).toEqual(['/home/k']);
+    await mounted.unmount();
+  });
+
+  it('a pick removed while the first folder is still registering is never sent when the first is made (MUST 2)', async () => {
+    const { settled, mounted, calls } = await removeSecondWhileFirstIsInFlight('make');
+    expect(settled).toBe('saved');
+    expect(calls.filter(call => call.route === REGISTER).map(call => call.body)).toEqual([
+      { kind: 'existing-folder', path: '/home/k' },
+    ]);
+    expect(draftPicks()).toEqual([]);
+    await mounted.unmount();
   });
 });

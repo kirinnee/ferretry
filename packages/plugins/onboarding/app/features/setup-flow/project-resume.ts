@@ -16,6 +16,19 @@ import { readLater } from './client-later.ts';
 /** The page that is the flow's last: `<plugin>.<step>`. */
 export const PROJECT_SETUP_STEP = 'projects.folders';
 
+/**
+ * The folders the person picked on the project page but never saved are kept in this browser's storage, one draft per machine
+ * (projects' `folders-step.tsx` owns the key and the format). Skip for now and the end of the run end the draft: it is removed
+ * here, without reading it, so a later run on this machine starts with no leftover paths.
+ */
+export const forgetProjectDraft = (storage: LedgerStorage | undefined, daemon: string): void => {
+  try {
+    storage?.removeItem?.(`fy.projects.setup-folders.${daemon}`);
+  } catch {
+    // Storage that refuses leaves the draft where it is.
+  }
+};
+
 /** The ledger entry that says project setup was shown (`onboarding.project-setup`). */
 const SHOWN = { plugin: 'onboarding', step: 'project-setup' } as const;
 
