@@ -377,6 +377,7 @@ export class FleetSetupService {
     const reading = await this.#read();
     const scans = await this.#scans();
     const plan = planImport(scans, {
+      ...(catalog.kits === undefined ? {} : { kits: catalog.kits() }),
       ...(reading.format === 'none' ? {} : { existing: reading.model }),
       ...(await this.#recordOption()),
       starters: starterModelsOf(await this.deps.catalog.modelCatalogs?.()),
@@ -679,6 +680,7 @@ export class FleetSetupService {
       );
     }
     const planning = {
+      ...(catalog.kits === undefined ? {} : { kits: catalog.kits() }),
       ...(change.include === undefined ? {} : { include: change.include.map(harnessKind) }),
       ...(change.skip === undefined ? {} : { skip: change.skip }),
       ...(existing === undefined ? {} : { existing }),

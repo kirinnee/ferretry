@@ -476,7 +476,7 @@ export function fileAssembly(
       Object.fromEntries(
         (ctx.uses?.usage.current()?.pauses() ?? []).map(held => [held.login as string, held.pause] as const),
       ),
-    // What each harness's plugin gives Runtimes for its own harness, read live with every materialisation.
+    // What each harness's plugin gives Runtimes for its own harness, read live with every materialisation and host import.
     kits: () => harnessKits(hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY)),
     // The setup's and the clone's own writes ask this; a catalogue apply asks the PLAN it applies (catalog-service.ts).
     preflight: refuseBeforeWriting(config),
