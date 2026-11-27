@@ -183,7 +183,10 @@ describe('NodeSessionBrowserLauncher', () => {
     should(calls[0]).match(/^worker:http:\/\/127\.0\.0\.1:\d+$/u);
     await browser.close();
     should(calls).containEql('worker-close');
-    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+      'sessionId',
+      'again',
+    );
   });
 
   it('should hand the input bridge’s four calls to the worker, each on the page it names', async () => {
@@ -307,7 +310,10 @@ describe('NodeSessionBrowserLauncher', () => {
     should(started).match(/--remote-debugging-port=\d+/u);
     should(started).not.containEql('--remote-debugging-pipe');
     await browser.close();
-    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+      'sessionId',
+      'again',
+    );
   });
 
   it.if(process.platform === 'linux')(
@@ -344,7 +350,10 @@ describe('NodeSessionBrowserLauncher', () => {
           `port ${String(port)} is held by another program (uid ${String(process.getuid?.())}), not this browser — someone may be squatting it; pick another port base or free it`,
         );
         should(asked).deepEqual([]);
-        should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+        should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+          'sessionId',
+          'again',
+        );
       } finally {
         await squatter.stop(true);
       }
@@ -430,7 +439,10 @@ describe('NodeSessionBrowserLauncher', () => {
       // Act + Assert — the refusal names why, and nothing was leased or started (no Chrome recorded its arguments).
       await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith(PIPE_TRANSPORT_REFUSAL);
       await should(readFile(`${chrome}.args`, 'utf8')).be.rejected();
-      should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+      should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+        'sessionId',
+        'again',
+      );
     });
   });
 
@@ -612,7 +624,10 @@ describe('NodeSessionBrowserLauncher', () => {
       should((refused as Error).message).equal(
         'the browser was not started because the loopback firewall failed its check',
       );
-      should(await new BrowserProfileStore(root).acquire({ sessionId: 'after' })).have.property('sessionId', 'after');
+      should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'after' })).have.property(
+        'sessionId',
+        'after',
+      );
     });
 
     it('should not ask the firewall check about a start on random ports', async () => {
@@ -656,7 +671,10 @@ describe('NodeSessionBrowserLauncher', () => {
       const refused = await launcher.launch({ width: 800, height: 600 }).catch((error: unknown) => error);
       should(refused).instanceOf(BrowserControlError);
       should((refused as Error).message).equal('uid 999 gets ports outside 1024–32767');
-      should(await new BrowserProfileStore(root).acquire({ sessionId: 'after' })).have.property('sessionId', 'after');
+      should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'after' })).have.property(
+        'sessionId',
+        'after',
+      );
     });
   });
 
@@ -833,7 +851,10 @@ describe('NodeSessionBrowserLauncher', () => {
         'this daemon has no private display for a real browser window',
       );
       for (const { root } of [withoutXvfb, withoutDisplay])
-        should(await new BrowserProfileStore(root).acquire({ sessionId: 'next' })).have.property('sessionId', 'next');
+        should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'next' })).have.property(
+          'sessionId',
+          'next',
+        );
     });
   });
 
@@ -918,7 +939,10 @@ describe('NodeSessionBrowserLauncher', () => {
     should(code).equal(3);
     should(alive(chromePid)).be.false();
     should(WORKERS.terminated(WORKERS.started() - 1)).be.true();
-    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+      'sessionId',
+      'again',
+    );
   });
 
   it('should close the worker and free the profile when Chrome is the child that dies', async () => {
@@ -951,7 +975,10 @@ describe('NodeSessionBrowserLauncher', () => {
     // Assert
     should(alive(chromePid)).be.false();
     should(WORKERS.terminated(WORKERS.started() - 1)).be.true();
-    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+      'sessionId',
+      'again',
+    );
   });
 
   it('should escalate to SIGKILL and wait for a stubborn Chrome before releasing the lease', async () => {
@@ -986,7 +1013,10 @@ describe('NodeSessionBrowserLauncher', () => {
     // Assert
     should(alive(chromePid)).be.false();
     should(WORKERS.terminated(WORKERS.started() - 1)).be.true();
-    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+      'sessionId',
+      'again',
+    );
   });
 
   it('should reap Chrome before releasing the lease when the launch itself fails', async () => {
@@ -1017,7 +1047,10 @@ describe('NodeSessionBrowserLauncher', () => {
 
     // Assert
     should(alive(chromePid)).be.false();
-    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+      'sessionId',
+      'again',
+    );
   });
 
   it('should keep the profile leased when the worker could not be confirmed dead', async () => {
@@ -1054,7 +1087,7 @@ describe('NodeSessionBrowserLauncher', () => {
     // Assert — Chrome is still reaped, because an unkillable worker is no reason to leave a browser
     // up, and the profile stays leased to the session whose worker could not be accounted for.
     should(alive(chromePid)).be.false();
-    await should(new BrowserProfileStore(root).acquire({ sessionId: 'again' })).be.rejectedWith(
+    await should(new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).be.rejectedWith(
       /leased by session agent-browser/u,
     );
   });
@@ -1134,7 +1167,10 @@ exec node -e "require('http').createServer((q, s) => { s.end('{}'); process.stde
     await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith(
       /^Chrome exited with code 7 before its worker could attach: Failed to move to new namespace$/u,
     );
-    should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+      'sessionId',
+      'again',
+    );
   });
 
   it('should say why Chrome did not start when it exits before exposing its debugging port', async () => {
@@ -1205,7 +1241,10 @@ exit 7
 
       // Assert: the launch failure is the one reported, and the throwing signal did not keep the lease.
       should(alive(chromePid)).be.false();
-      should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+      should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+        'sessionId',
+        'again',
+      );
     });
 
     it('should launch and close normally when the Chrome stderr pipe breaks', async () => {
@@ -1231,7 +1270,10 @@ exit 7
       await browser.close();
 
       // Assert
-      should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+      should(await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' })).have.property(
+        'sessionId',
+        'again',
+      );
     });
   });
 });
@@ -1283,7 +1325,7 @@ describe('shared browser limits at the actual child launch seams', () => {
     await browser.close();
     should(alive(chromePid)).be.false();
     should(WORKERS.terminated(WORKERS.started() - 1)).be.true();
-    const next = await new BrowserProfileStore(root).acquire({ sessionId: 'again' });
+    const next = await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' });
     await next.release();
   });
 
@@ -1307,7 +1349,7 @@ describe('shared browser limits at the actual child launch seams', () => {
       },
     );
     await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith('scope refused');
-    const next = await new BrowserProfileStore(root).acquire({ sessionId: 'again' });
+    const next = await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' });
     await next.release();
   });
 });
