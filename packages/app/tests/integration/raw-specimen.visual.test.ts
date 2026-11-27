@@ -26,11 +26,19 @@ const shotsDir = process.env.FY_RAW_SPECIMEN_SHOTS_DIR ?? '';
  * name (Gelasio for Times, JetBrains Mono for Courier: both OFL, both already bundled) so the shots show what a desktop shows.
  * The page under test is untouched: the stylesheet still names only system faces.
  */
-const fontsDir = resolve(packageRoot, '../../src/assets/fonts');
+const fontsDir = resolve(packageRoot, '../../src/theme/packs/font');
 const STAND_INS = [
-  { family: 'Times New Roman', weight: '100 900', file: join(fontsDir, 'gelasio-latin-wght-normal.woff2') },
-  { family: 'Courier New', weight: '400', file: join(fontsDir, 'jetbrains-mono-latin-400-normal.woff2') },
-  { family: 'Courier New', weight: '700', file: join(fontsDir, 'jetbrains-mono-latin-700-normal.woff2') },
+  { family: 'Times New Roman', weight: '100 900', file: join(fontsDir, 'gelasio/gelasio-latin-wght-normal.woff2') },
+  {
+    family: 'Courier New',
+    weight: '400',
+    file: join(fontsDir, 'jetbrains-mono/jetbrains-mono-latin-400-normal.woff2'),
+  },
+  {
+    family: 'Courier New',
+    weight: '700',
+    file: join(fontsDir, 'jetbrains-mono/jetbrains-mono-latin-700-normal.woff2'),
+  },
 ].map((entry, index) => ({ ...entry, url: `/stand-in-${index}.woff2` }));
 const standInCss = STAND_INS.map(
   entry =>

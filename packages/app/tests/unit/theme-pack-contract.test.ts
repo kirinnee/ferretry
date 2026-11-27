@@ -122,6 +122,14 @@ describe('a style pack and a font pack', () => {
     expect(FontPackSchema.safeParse({ ...font, family: "Inter'; x" }).success).toBe(false);
     expect(FontPackSchema.safeParse({ ...font, range: 'cyrillic' }).success).toBe(false);
   });
+
+  it('takes a weight or a range of weights from 1 to 1000, as CSS does', () => {
+    const accepts = (weight: string) =>
+      FontPackSchema.safeParse({ ...font, faces: [{ ...font.faces[0], weight }] }).success;
+    for (const weight of ['1', '400', '950', '1000', '200 1000', '1 1000']) expect(accepts(weight)).toBe(true);
+    for (const weight of ['0', '1001', '2000', '200 1001', '0 900', '', 'bold', '400 ', '400  700'])
+      expect(accepts(weight)).toBe(false);
+  });
 });
 
 describe('the token partition: a pack writes only what its kind owns', () => {
