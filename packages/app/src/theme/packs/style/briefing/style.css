@@ -412,3 +412,11 @@
 [data-swatch][data-style='briefing'] :is(.fy-page h1, .fy-page h2) {
   font-family: var(--font-display);
 }
+
+/* Briefing's halo (`--focus-shadow`: a 4px `--ring` band) is a hard shadow outside the field; it sits inside now, under the outline. */
+:is(:root[data-style='briefing'], [data-swatch][data-style='briefing'])
+:is(select, input, textarea, .fy-sb__trigger).kt-input:where(
+  :not([data-swatch]:not([data-style='briefing']) *)
+):focus-visible {
+  box-shadow: inset 0 0 0 calc(var(--focus-width) + 4px) var(--ring);
+}

@@ -2116,23 +2116,6 @@ body {
   outline-width: var(--focus-width);
   outline-offset: calc(-1 * var(--focus-width));
 }
-/* Gen Z's ring is three bands (surface, accent, ink) so it reads on any fill; drawn outside it is a 5px shadow spread. The same
-   three bands now sit inside the field: the outline is the ink band at the edge, then the surface, then the accent. */
-:is(:root[data-style='genz'], [data-swatch][data-style='genz'])
-:is(select, input, textarea, .fy-sb__trigger).kt-input:where(
-  :not([data-swatch]:not([data-style='genz']) *)
-):focus-visible {
-  box-shadow:
-    inset 0 0 0 calc(var(--focus-width) + 2px) var(--surface),
-    inset 0 0 0 calc(var(--focus-width) + 5px) var(--focus-color);
-}
-/* Briefing's halo (`--focus-shadow`: a 4px `--ring` band) is a hard shadow outside the field; it sits inside now, under the outline. */
-:is(:root[data-style='briefing'], [data-swatch][data-style='briefing'])
-:is(select, input, textarea, .fy-sb__trigger).kt-input:where(
-  :not([data-swatch]:not([data-style='briefing']) *)
-):focus-visible {
-  box-shadow: inset 0 0 0 calc(var(--focus-width) + 4px) var(--ring);
-}
 .kt-composer :is(input, textarea):focus,
 .kt-composer :is(input, textarea):focus-visible {
   border-color: transparent;
@@ -2617,52 +2600,6 @@ body {
   border: var(--stroke) solid var(--task-tone-border);
   border-radius: var(--radius-control);
   background: var(--task-tone-bg);
-}
-
-/* ============================================================================
-   THEME-SCOPED DECORATION — the ONLY theme selectors in the codebase.
-
-   This is mechanism "TS" from the contract: a family adds decoration that no
-   other family has, and it cannot be expressed as a scalar token. Components
-   stay identical; the CSS knows. Nothing here is required for the UI to
-   function, so a family that drops out costs one deletion.
-   ============================================================================ */
-
-/* ---- Mission Control: HUD corner brackets ------------------------------
-   Opt-in via `data-hud` on a panel. Drawn as an inset pseudo-element rather
-   than as a border so it never affects layout, and deliberately NOT clip-path,
-   so a bracketed panel can still host a popover. */
-:root[data-style='mission'] .kt-panel[data-hud]::before,
-:root[data-style='mission'] .kt-panel[data-hud]::after {
-  content: '';
-  position: absolute;
-  width: var(--bracket-size);
-  height: var(--bracket-size);
-  pointer-events: none;
-}
-:root[data-style='mission'] .kt-panel[data-hud] {
-  position: relative;
-}
-:root[data-style='mission'] .kt-panel[data-hud]::before {
-  top: -1px;
-  left: -1px;
-  border-top: var(--stroke-heavy) solid var(--accent);
-  border-left: var(--stroke-heavy) solid var(--accent);
-}
-:root[data-style='mission'] .kt-panel[data-hud]::after {
-  right: -1px;
-  bottom: -1px;
-  border-right: var(--stroke-heavy) solid var(--accent);
-  border-bottom: var(--stroke-heavy) solid var(--accent);
-}
-
-/* ---- Minimal Swiss: one crisp ring on every field -----------------------
-   A field's only keyboard mark elsewhere is a 1px border-colour change (the shared rule above). Swiss draws the same
-   2px line the buttons get, drawn inside the edge, so the ring is identical on every control. Pointer focus draws nothing. */
-:root[data-style='swiss'] .kt-input:focus-visible,
-:root[data-style='swiss'] .kt-composer:focus-within {
-  outline: var(--focus-width) solid var(--focus-color);
-  outline-offset: calc(-1 * var(--focus-width));
 }
 
 /* Portrait gate — shown only when the platform reports a phone-sized screen turned
