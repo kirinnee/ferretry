@@ -16,10 +16,15 @@
  * The loader reads pack files with a synchronous `require` so `generateGlobal` stays synchronous, and only `zod` (a runtime
  * dependency) and Bun are needed, because the generator also runs in the Nix build without devDependencies.
  */
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { FontPackSchema, PalettePackSchema, StylePackSchema } from '../../../packages/app/src/theme/pack-contract.ts';
+import {
+  FontPackSchema,
+  isStyleToken,
+  PalettePackSchema,
+  StylePackSchema,
+} from '../../../packages/app/src/theme/pack-contract.ts';
 import { entryList } from './entry-lines.ts';
 import { ident, importPath } from './folder-registry.ts';
 
@@ -102,6 +107,13 @@ function loadKind<T extends { readonly id: string }>(
   return loaded;
 }
 
+/** The custom properties a stylesheet declares (not the ones it reads with `var()`), without their dashes. */
+const declaredProperties = (css: string): string[] => [
+  ...new Set(
+    [...css.replace(/\/\*[\s\S]*?\*\//gu, '').matchAll(/(?<![\w-])--([\w-]+)\s*:/gu)].map(match => match[1] as string),
+  ),
+];
+
 /** Unique ids; exactly one `default` once the kind has any pack. */
 function checkIds(
   kind: PackKind,
@@ -134,10 +146,12 @@ const glowCss = (glow: { w: number; h: number; x: number; y: number; colour: str
 
 /** One block of declarations: the palette's tokens, then its mesh as `--surface-mesh`. */
 function declarations(
-  tokens: Readonly<Record<string, string>>,
+  tokens: Readonly<Record<string, string | readonly number[]>>,
   glows: readonly Parameters<typeof glowCss>[0][],
 ): string[] {
-  const lines = Object.entries(tokens).map(([name, value]) => `  --${name}: ${value};`);
+  const lines = Object.entries(tokens).map(
+    ([name, value]) => `  --${name}: ${typeof value === 'string' ? value : value.join(' ')};`,
+  );
   if (glows.length > 0) lines.push(`  --surface-mesh:\n${glows.map(glow => `    ${glowCss(glow)}`).join(',\n')};`);
   return lines;
 }
@@ -194,8 +208,14 @@ export function themePackFiles(root: string): ReadonlyMap<string, string> {
   for (const { rel, abs, pack } of fonts)
     for (const face of pack.faces)
       if (!existsSync(join(abs, '..', face.file))) problems.push(`${rel}: faces: ${face.file} does not exist`);
-  for (const { rel, abs } of styles)
-    if (!existsSync(join(abs, '..', 'style.css'))) problems.push(`${rel}: style.css does not exist beside it`);
+  for (const { rel, abs } of styles) {
+    const css = join(abs, '..', 'style.css');
+    if (!existsSync(css)) problems.push(`${rel}: style.css does not exist beside it`);
+    else
+      for (const name of declaredProperties(readFileSync(css, 'utf8')))
+        if (!isStyleToken(name))
+          problems.push(`${rel.replace(/style\.ts$/u, 'style.css')}: --${name}: not a style-owned token`);
+  }
   if (problems.length > 0)
     throw new Error(`theme packs are not valid:\n${problems.map(line => `  - ${line}`).join('\n')}`);
 

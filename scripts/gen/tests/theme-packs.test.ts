@@ -138,6 +138,30 @@ describe('theme pack generation', () => {
   });
 });
 
+describe('the accent channel triplet', () => {
+  test('is written with spaces, and the tints that read it pass through', () => {
+    const css =
+      themePackFiles(
+        tree({
+          ...GOOD,
+          'palette/dawn/palette.ts': data(
+            palette('dawn', {
+              light: { 'accent-rgb': [79, 82, 214], 'texture-ink': 'rgb(var(--accent-rgb) / 0.05)' },
+            }),
+          ),
+        }),
+      ).get(THEME_PACKS_CSS) ?? '';
+    expect(css).toContain('  --accent-rgb: 79 82 214;\n  --texture-ink: rgb(var(--accent-rgb) / 0.05);');
+  });
+
+  test('a triplet on another key, or out of range, fails with the pack path', () => {
+    for (const light of [{ accent: [1, 2, 3] }, { 'accent-rgb': [256, 0, 0] }, { 'accent-rgb': [1, 2, 3, 4] }])
+      expect(fail({ ...GOOD, 'palette/dawn/palette.ts': data(palette('dawn', { light })) })).toContain(
+        `${PACKS}/palette/dawn/palette.ts: light`,
+      );
+  });
+});
+
 describe('a broken pack fails generation and names the pack path', () => {
   test('a folder that is not the pack id', () => {
     const message = fail({ ...GOOD, 'palette/dusk/palette.ts': data(palette('dawn', { order: 6 })) });
@@ -208,6 +232,33 @@ describe('a broken pack fails generation and names the pack path', () => {
     expect(fail({ ...GOOD, 'palette/dawn/palette.ts': data(palette('dawn', { extra: 1 })) })).toContain(
       `${PACKS}/palette/dawn/palette.ts`,
     );
+  });
+
+  test('a palette that declares a style-owned token, or reads one', () => {
+    const declares = fail({
+      ...GOOD,
+      'palette/dawn/palette.ts': data(palette('dawn', { light: { 'motion-fast': 'var(--accent)' } })),
+    });
+    expect(declares).toContain(`${PACKS}/palette/dawn/palette.ts: light`);
+    const reads = fail({
+      ...GOOD,
+      'palette/dawn/palette.ts': data(palette('dawn', { dark: { ring: 'var(--motion-slow)' } })),
+    });
+    expect(reads).toContain(`${PACKS}/palette/dawn/palette.ts: dark.ring: reads a token a palette does not own`);
+  });
+
+  test('a style.css that declares a palette-owned or unowned token, but may read a palette token', () => {
+    const css = (text: string) => ({ ...GOOD, 'style/studio/style.css': text });
+    expect(fail(css("[data-style='studio'] { --accent: #fff; --radius-xs: 2px; }"))).toContain(
+      `${PACKS}/style/studio/style.css: --accent: not a style-owned token`,
+    );
+    expect(fail(css("[data-style='studio'] { --accent-rgb: 1 2 3; }"))).toContain(
+      '--accent-rgb: not a style-owned token',
+    );
+    expect(fail(css("[data-style='studio'] { --made-up: 1px; }"))).toContain('--made-up: not a style-owned token');
+    expect(() =>
+      themePackFiles(tree(css("[data-style='studio'] { /* --accent: x */ --stroke: 1px solid var(--accent); }"))),
+    ).not.toThrow();
   });
 
   test('a folder with no pack file, and a pack file that does not load', () => {
