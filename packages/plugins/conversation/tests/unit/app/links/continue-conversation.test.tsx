@@ -32,7 +32,7 @@ const machine = (routes: { list?: Handler; preview?: Handler }): FakeClient =>
   );
 
 const ROWS: readonly LinkableConversation[] = [
-  conversation('shop-cart', { latest: 'and now the tests' }),
+  conversation('shop-cart', { latest: 'and now the tests', source: { kind: 'pool', row: 'a'.repeat(64) } }),
   conversation('api-codex', { harness: 'codex', project: '/work/api', model: undefined }),
   conversation('notes-kept', { project: '/work/notes', keptBy: 'notes-ferret' }),
 ];
@@ -282,6 +282,7 @@ describe('ContinueConversation continuing', () => {
         key: SHOP,
         harness: 'claude-code',
         conversation: 'shop-cart',
+        source: { kind: 'pool', row: 'a'.repeat(64) },
         folder: '/work/shop',
         title: 'Fix the shop-cart page',
       },

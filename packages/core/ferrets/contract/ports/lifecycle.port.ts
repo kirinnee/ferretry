@@ -2,6 +2,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import { z } from 'zod';
 import type { LaunchOrigin } from '../launch-origin.ts';
+import type { ConversationSource } from '../kinds/conversation-stage.ts';
 import { CompactAtSchema } from '../view/compact-at.ts';
 import {
   FerretCardIdSchema,
@@ -148,6 +149,7 @@ export interface StartRequest {
   readonly prompt?: string;
   /** Start bound to an existing harness conversation (§6.2). */
   readonly harnessConversation?: string;
+  readonly conversationSource?: ConversationSource;
   readonly by: 'owner' | 'ferret' | 'pack' | 'board' | 'warden';
   /**
    * `fy start --detach` (v4's meaning): answer as soon as the ferret is recorded (`starting`); the launch carries on in the

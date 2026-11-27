@@ -11,6 +11,8 @@
 
 import {
   type HarnessKey,
+  type ConversationSource,
+  ConversationSourceSchema,
   HarnessKeySchema,
   RuntimeNameSchema,
   StartOptionsSchema,
@@ -37,6 +39,7 @@ export interface NewFerretDraft {
   prompt: string;
   /** A past conversation to resume (picked from the Continue list): the harness's own id, sent as `harnessConversation`. */
   harnessConversation?: string;
+  conversationSource?: ConversationSource;
   /** The harness that conversation belongs to, sent as `harness` so the daemon refuses a runtime of another harness. */
   harness?: HarnessKey;
 }
@@ -69,6 +72,7 @@ const StartBodySchema = z.strictObject({
   folder: z.string().min(1).max(4_096),
   prompt: z.string().max(200_000).optional(),
   harnessConversation: z.string().min(1).max(256).optional(),
+  conversationSource: ConversationSourceSchema.optional(),
   harness: HarnessKeySchema.optional(),
 });
 export type StartBody = z.infer<typeof StartBodySchema>;
@@ -90,6 +94,7 @@ export function buildStartBody(draft: NewFerretDraft): StartBody {
     ...(label === undefined ? {} : { label }),
     ...(prompt === undefined ? {} : { prompt }),
     ...(draft.harnessConversation === undefined ? {} : { harnessConversation: draft.harnessConversation }),
+    ...(draft.conversationSource === undefined ? {} : { conversationSource: draft.conversationSource }),
     ...(draft.harness === undefined ? {} : { harness: draft.harness }),
   });
 }
