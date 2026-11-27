@@ -4,7 +4,8 @@
  * two git-ignored files the app reads, so a pack is added by adding a folder and no list is edited:
  *
  *   packages/app/src/generated/theme-packs.ts    `STYLE_PACKS`, `PALETTE_PACKS`, `FONT_PACKS` (sorted by `order`, then id)
- *                                                and the `as const` id lists, so app code keeps exact union types
+ *                                                and the `as const` id lists, so app code keeps exact union types, plus
+ *                                                `FONT_FILE_URLS`: the built URL of every font file, keyed `<font id>/<file>`
  *   packages/app/src/generated/theme-packs.css   the `@import` of every `style.css`, the `@font-face` of every font, every
  *                                                palette's data as selector blocks, and the default palette's dark block as
  *                                                the unqualified dark baseline
@@ -242,11 +243,23 @@ export function themePackFiles(root: string): ReadonlyMap<string, string> {
       '',
     ];
   };
+  const fontFiles = sorted.font.flatMap(entry =>
+    entry.pack.faces.map(face => {
+      const file = face.file.slice(2);
+      return {
+        key: `${entry.pack.id}/${file}`,
+        name: ident('fontfile', `${entry.pack.id}-${file}`),
+        abs: join(entry.abs, '..', file),
+      };
+    }),
+  );
   const ts = [
     HEADER,
+    '/// <reference path="../theme/woff2.d.ts" />',
     ...(['palette', 'style', 'font'] as const).flatMap(kind =>
       sorted[kind].map(entry => `import ${ident(kind, entry.pack.id)} from '${importPath(tsOut, entry.abs)}';`),
     ),
+    ...fontFiles.map(file => `import ${file.name} from '${importPath(tsOut, file.abs)}';`),
     '',
     ...list('style', 'STYLE_PACKS', 'Every style pack (theme/packs/style/<id>/style.ts), by `order` then id.'),
     ...list(
@@ -255,6 +268,11 @@ export function themePackFiles(root: string): ReadonlyMap<string, string> {
       'Every palette pack (theme/packs/palette/<id>/palette.ts), by `order` then id.',
     ),
     ...list('font', 'FONT_PACKS', 'Every font pack (theme/packs/font/<id>/font.ts), by id.'),
+    ...entryList(
+      '/** The built URL of every font file, keyed `<font id>/<file>` (the file as its pack names it, without `./`). */\nexport const FONT_FILE_URLS: Readonly<Record<string, string>> = {',
+      fontFiles.map(file => `${JSON.stringify(file.key)}: ${file.name}`),
+      '};',
+    ),
   ];
 
   const defaultPalette = sorted.palette.find(entry => entry.pack.default === true)?.pack;

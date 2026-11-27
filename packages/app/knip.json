@@ -2,6 +2,7 @@
   "entry": [
     "src/main.tsx",
     "src/worker/service-worker.ts",
+    "src/theme/packs/*/*/*.ts",
     "scripts/**/*.ts",
     "tests/**/*.test.{ts,tsx}",
     "tests/**/fixtures/**/*.{ts,tsx}"
@@ -11,6 +12,7 @@
   "allowed": {
     "entry:src/main.tsx": "the browser entry point the app shell build bundles from index.html; nothing imports it.",
     "entry:src/worker/service-worker.ts": "the service worker is compiled by packages/app/scripts/build-release.ts from this path and registered by URL; nothing imports it.",
+    "entry:src/theme/packs/*/*/*.ts": "a theme pack (font.ts, later style.ts and palette.ts) is imported only by the git-ignored generated/theme-packs.ts, which knip does not read; the registry generator, not an import, makes a pack reachable.",
     "entry:scripts/**/*.ts": "the app shell build scripts (build-release, build-fy-render-libs) are run by path from package.json scripts; nothing imports them.",
     "ignore:tests/support/dom-leak-guard.ts": "a bun test preload named by path in bunfig.unit.toml; nothing imports it."
   }

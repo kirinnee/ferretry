@@ -1,4 +1,4 @@
-@import './theme-fonts.css';
+@import '../generated/theme-packs.css';
 @import './themes.css';
 @import './highlight.css';
 @import './shell.css';

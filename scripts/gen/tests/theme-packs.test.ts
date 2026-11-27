@@ -107,6 +107,34 @@ describe('theme pack generation', () => {
     expect(css.indexOf("[data-palette='ink'][data-mode='light']")).toBeLessThan(css.indexOf("[data-palette='dawn']"));
   });
 
+  test('every font file is imported once and listed by `<font id>/<file>`, so the app can name its built URL', () => {
+    const ts =
+      themePackFiles(
+        tree({
+          ...GOOD,
+          'font/inter/font.ts': data(
+            font('inter', {
+              faces: [
+                { file: './inter.woff2', weight: '100 500', style: 'normal' },
+                { file: './inter-bold.woff2', weight: '600 900', style: 'normal' },
+              ],
+            }),
+          ),
+          'font/inter/inter-bold.woff2': 'wOF2',
+        }),
+      ).get(THEME_PACKS_TS) ?? '';
+    expect(ts).toContain('/// <reference path="../theme/woff2.d.ts" />');
+    expect(ts).toContain("import fontfile_inter_inter_woff2 from '../theme/packs/font/inter/inter.woff2';");
+    expect(ts).toContain("import fontfile_inter_inter_bold_woff2 from '../theme/packs/font/inter/inter-bold.woff2';");
+    expect(ts).toContain(
+      'export const FONT_FILE_URLS: Readonly<Record<string, string>> = {\n  "inter/inter.woff2": fontfile_inter_inter_woff2,\n  "inter/inter-bold.woff2": fontfile_inter_inter_bold_woff2,\n};',
+    );
+  });
+
+  test('no fonts lists no files', () => {
+    expect(themePackFiles(tree({})).get(THEME_PACKS_TS)).toContain('= {\n};');
+  });
+
   test('order is the `order` field, then the id', () => {
     const files = themePackFiles(
       tree({
