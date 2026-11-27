@@ -82,6 +82,28 @@ const STATES: readonly {
   check: (page: Page) => Promise<void>;
 }[] = [
   {
+    name: 'move-row',
+    query: 'repos=2&worktrees=move',
+    waitFor: '[data-project-worktree-move]',
+    check: async page => {
+      expect(await page.locator('[data-project-worktree-move]').count()).toBe(1);
+      expect(await page.locator('[data-project-worktree-no-move]').count()).toBe(3);
+    },
+  },
+  {
+    name: 'move-sheet',
+    query: 'repos=2&worktrees=move',
+    act: async page => {
+      await page.locator('[data-project-worktree-move]').click();
+    },
+    waitFor: '[data-project-worktree-move-sheet]',
+    check: async page => {
+      expect(await page.locator('[role="dialog"]').innerText()).toContain('/work/trees/site-nav');
+      expect(await page.locator('[role="dialog"]').innerText()).toContain('/home/fake/.ferretry-worktrees/');
+      expect(await page.locator('[data-project-worktree="/work/trees/site-nav"]').count()).toBe(1);
+    },
+  },
+  {
     name: 'list',
     query: 'repos=2',
     waitFor: '[data-project-worktree-state="ready"] >> nth=1',
@@ -162,15 +184,17 @@ for (const look of LOOKS)
               await state.act?.(page);
               await page.waitForSelector(state.waitFor);
               await page.waitForTimeout(400);
-              await page.locator('[data-project-worktrees]').scrollIntoViewIfNeeded();
+              if (state.name !== 'move-sheet') await page.locator('[data-project-worktrees]').scrollIntoViewIfNeeded();
               if (shotsDir !== '') {
                 await page.screenshot({
                   path: join(shotsDir, `${look.style}-${viewport.name}-${scheme}-${state.name}.png`),
                   fullPage: true,
                 });
-                await page.locator('[data-project-worktrees]').screenshot({
-                  path: join(shotsDir, `${look.style}-${viewport.name}-${scheme}-${state.name}-panel.png`),
-                });
+                await page
+                  .locator(state.name === 'move-sheet' ? '[role="dialog"]' : '[data-project-worktrees]')
+                  .screenshot({
+                    path: join(shotsDir, `${look.style}-${viewport.name}-${scheme}-${state.name}-panel.png`),
+                  });
               }
               await state.check(page);
               const misses = await roundSafeMisses(page);

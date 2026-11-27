@@ -29,6 +29,7 @@ const processes: IDaemonProcessPort = {
   spawnDetached: async () => await Promise.reject(new Error('unused')),
   signal: () => false,
   alive: () => false,
+  identify: async () => undefined,
   holdsOpen: async () => await Promise.resolve(undefined),
 };
 const incarnations = {

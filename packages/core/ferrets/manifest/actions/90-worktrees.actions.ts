@@ -5,6 +5,14 @@ import { fragment } from '../kit.ts';
 
 export default fragment({
   routes: [
+    route('POST /v1/worktrees/move', {
+      minimum: 'operator',
+      caller: 'any',
+      capability: { capability: CAPABILITIES.filesystem, axis: 'configure' },
+      noStore: true,
+      audit: { skip: 'moving a checkout preserves its files and branch; the registry retains its ownership' },
+      guard: { none: 'answers the old and new checkout paths, no file contents' },
+    }),
     route('POST /v1/worktrees/adopt', {
       minimum: 'operator',
       caller: 'any',

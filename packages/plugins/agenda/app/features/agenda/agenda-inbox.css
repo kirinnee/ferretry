@@ -1192,6 +1192,10 @@ a.fy-inbox-row:focus-visible {
   padding-right: 16px;
   padding-left: 16px;
 }
+/* A refusal said over the open item sits where the card does: 8px in from the screen's edges, not flush with them. */
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__failures {
+  margin: 8px 8px 0;
+}
 /* The open card keeps a margin from the panel's edges, on a phone and on a wide screen alike: its border and corners
    are drawn, and it never touches the edge, the composer or the bar above it. The margin is on the deck, so the
    cards peeking out behind it keep the same edges. */

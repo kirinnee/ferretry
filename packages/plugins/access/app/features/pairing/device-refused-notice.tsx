@@ -14,7 +14,7 @@ export interface DeviceRefusedNoticeProps {
   /** The machine's name as this browser shows it. */
   readonly machineName: string;
   /** A replacement is a different recovery from a revoked or idle-expired browser. */
-  readonly reason?: 'replaced' | 'refused';
+  readonly reason?: 'replaced' | 'refused' | 'unreachable';
   /** Opens the pairing step of the setup guide. */
   readonly onPairAgain: () => void;
 }
@@ -33,7 +33,9 @@ export function DeviceRefusedNotice({ machineName, reason, onPairAgain }: Device
       <p role="alert" className="m-0 text-cell leading-base text-fg">
         {reason === 'replaced'
           ? 'Ferretry on this machine was reinstalled or replaced. Pair this browser with it again.'
-          : DEVICE_NOT_ACCEPTED_SENTENCE}
+          : reason === 'unreachable'
+            ? 'This browser has not been able to reach this machine for a while. If Ferretry was reinstalled there, pair this browser with it again.'
+            : DEVICE_NOT_ACCEPTED_SENTENCE}
       </p>
       <button
         type="button"

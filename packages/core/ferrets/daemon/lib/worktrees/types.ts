@@ -74,6 +74,7 @@ export interface WorktreeListEntry {
 export interface ManagedWorktree {
   readonly origin?: 'managed' | 'adopted';
   readonly adoptionIdentity?: WorktreeAdoptionIdentity;
+  readonly pendingMove?: { readonly destination: string; readonly identity: WorktreeAdoptionIdentity };
   /** Written before quarantine; recovery can remove only this directory incarnation. */
   readonly removalIdentity?: WorktreeRemovalIdentity;
   readonly version: 1;
