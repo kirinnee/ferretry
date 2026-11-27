@@ -7,7 +7,9 @@
  *
  * Scope, stated so nobody trusts it for more: only blocks whose whole selector is `:root` plus `data-style` / `data-palette`
  * / `data-mode` attributes count (that is every block that sets a token). At-rules (`@media`) are skipped, so this is the
- * desktop, no-preference baseline. `color-mix` is resolved in sRGB, as `fy-render-theme.ts` resolves it.
+ * desktop, no-preference baseline (a `@media` override is the browser matrix's to hold, U9, not this static pass).
+ * `color-mix` is resolved in sRGB, as `fy-render-theme.ts` resolves it. A colour this file cannot parse is a FAILURE to
+ * measure, never a pass: callers report it.
  */
 import { luminance, contrastRatio } from './theme-matrix.ts';
 
@@ -89,6 +91,10 @@ export function tokenMap(sources: ThemeSources, choice: ThemeChoice): ReadonlyMa
 export type Unresolved = { readonly ok: false; readonly reason: string };
 export type Resolved = { readonly ok: true; readonly value: string } | Unresolved;
 
+/** The CSS-wide keywords: as a custom property's value they compute to the guaranteed-invalid value, i.e. an empty token. */
+const CSS_WIDE = new Set(['initial', 'inherit', 'unset', 'revert', 'revert-layer']);
+const isCssWide = (value: string): boolean => CSS_WIDE.has(value.trim().toLowerCase());
+
 /** A reference chain must end in a literal within this many hops. */
 export const MAX_HOPS = 8;
 
@@ -116,6 +122,8 @@ function substitute(map: ReadonlyMap<string, string>, value: string, trail: read
     if (trail.includes(name)) throw new Dangling(`a cycle: ${[...trail, name].map(each => `--${each}`).join(' → ')}`);
     const target = map.get(name);
     if (target !== undefined) {
+      if (isCssWide(target))
+        throw new Dangling(`--${name} is the CSS-wide keyword "${target.trim()}", which computes to nothing`);
       if (trail.length >= MAX_HOPS) throw new Dangling(`a chain longer than ${MAX_HOPS} hops at --${name}`);
       out += substitute(map, target, [...trail, name]);
     } else if (fallback !== undefined) out += substitute(map, fallback, trail);
@@ -128,9 +136,14 @@ function substitute(map: ReadonlyMap<string, string>, value: string, trail: read
 export function resolveToken(map: ReadonlyMap<string, string>, name: string): Resolved {
   const own = map.get(name);
   if (own === undefined) return { ok: false, reason: `--${name} is not set` };
+  if (isCssWide(own))
+    return { ok: false, reason: `--${name} is the CSS-wide keyword "${own.trim()}", which computes to nothing` };
   try {
     const value = substitute(map, own, [name]).trim();
-    return value === '' ? { ok: false, reason: `--${name} is empty` } : { ok: true, value };
+    if (value === '') return { ok: false, reason: `--${name} is empty` };
+    if (isCssWide(value))
+      return { ok: false, reason: `--${name} resolves to the CSS-wide keyword "${value}", which computes to nothing` };
+    return { ok: true, value };
   } catch (error) {
     if (error instanceof Dangling) return { ok: false, reason: `--${name}: ${error.message}` };
     throw error;
@@ -169,10 +182,48 @@ const channelValue = (text: string): number =>
 const alphaValue = (text: string): number =>
   text.endsWith('%') ? Number.parseFloat(text) / 100 : Number.parseFloat(text);
 
-/** A literal CSS colour (hex, `rgb()`/`rgba()`, `transparent`, or `color-mix(in srgb, …)` of those), else `undefined`. */
+/** The named colours the themes may reach for; any other name is unmeasurable and reported as such. */
+const NAMED: Readonly<Record<string, readonly [number, number, number]>> = {
+  black: [0, 0, 0],
+  blue: [0, 0, 255],
+  cyan: [0, 255, 255],
+  gray: [128, 128, 128],
+  green: [0, 128, 0],
+  grey: [128, 128, 128],
+  magenta: [255, 0, 255],
+  orange: [255, 165, 0],
+  purple: [128, 0, 128],
+  red: [255, 0, 0],
+  white: [255, 255, 255],
+  yellow: [255, 255, 0],
+};
+
+/** A hue as degrees; unitless is degrees, as in CSS. */
+function hueValue(text: string): number {
+  const number = Number.parseFloat(text);
+  if (text.endsWith('grad')) return number * 0.9;
+  if (text.endsWith('rad')) return (number * 180) / Math.PI;
+  if (text.endsWith('turn')) return number * 360;
+  return number;
+}
+
+/** sRGB 0-255 channels for a hue (degrees), saturation and lightness (0-1). */
+function hslToRgb(hue: number, saturation: number, lightness: number): [number, number, number] {
+  const h = ((hue % 360) + 360) % 360;
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const channel = (n: number): number => {
+    const k = (n + h / 30) % 12;
+    return (lightness - (chroma / 2) * Math.max(-1, Math.min(k - 3, 9 - k, 1))) * 255;
+  };
+  return [channel(0), channel(8), channel(4)];
+}
+
+/** A literal CSS colour (hex, `rgb()`/`rgba()`, `transparent`, or `hsl()`/`hsla()`, a few named colours, or `color-mix(in srgb, …)` of those), else `undefined`. */
 function parseColour(raw: string): Rgba | undefined {
   const text = raw.trim().toLowerCase();
   if (text === 'transparent') return { a: 0, b: 0, g: 0, r: 0 };
+  const named = NAMED[text];
+  if (named !== undefined) return { a: 1, b: named[2], g: named[1], r: named[0] };
   const hex = /^#([0-9a-f]{3,8})$/u.exec(text)?.[1];
   if (hex !== undefined) {
     const full = hex.length <= 4 ? [...hex].map(each => each + each).join('') : hex;
@@ -187,6 +238,20 @@ function parseColour(raw: string): Rgba | undefined {
     const [r, g, b] = parts.slice(0, 3).map(channelValue) as [number, number, number];
     const a = parts[3] === undefined ? 1 : alphaValue(parts[3]);
     return [r, g, b, a].every(Number.isFinite) ? { a: clamp(a, 0, 1), b, g, r } : undefined;
+  }
+  const hsl = /^hsla?\((.*)\)$/u.exec(text);
+  if (hsl !== null) {
+    const parts = (hsl[1] as string).split(/[\s,/]+/u).filter(each => each !== '');
+    if (parts.length < 3 || parts.length > 4) return undefined;
+    const [hue, sat, light] = parts as [string, string, string];
+    if (!sat.endsWith('%') || !light.endsWith('%')) return undefined;
+    const a = parts[3] === undefined ? 1 : alphaValue(parts[3]);
+    const s = Number.parseFloat(sat) / 100;
+    const l = Number.parseFloat(light) / 100;
+    const h = hueValue(hue);
+    if (![h, s, l, a].every(Number.isFinite)) return undefined;
+    const [r, g, b] = hslToRgb(h, clamp(s, 0, 1), clamp(l, 0, 1));
+    return { a: clamp(a, 0, 1), b, g, r };
   }
   const mix = /^color-mix\((.*)\)$/u.exec(text);
   if (mix !== null) {

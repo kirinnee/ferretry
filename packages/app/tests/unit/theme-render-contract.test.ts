@@ -11,6 +11,11 @@
  * PINNED in `KNOWN` by its exact identity with the reason, and the observed set is compared with the pinned set BOTH ways: a miss
  * nobody pinned fails, and a pin whose miss is gone fails, so the ledger neither grows silently nor goes stale.
  *
+ * Scope, stated so nobody trusts it for more: this is a STATIC pass. Blocks inside `@media` (and any other at-rule) are skipped by the
+ * resolver, so it holds the desktop, no-preference baseline; what a media query overrides is the browser matrix's to hold (U9). A
+ * value the resolver cannot turn into something measurable (a CSS-wide keyword, a colour syntax it does not read) is a FAILURE, never
+ * a skip.
+ *
  * Size: 16 styles × 12 palettes × 2 modes = 384 combinations resolve 95 tokens each, and 24 palette × mode pairs are measured
  * (a style never changes a colour, so a ratio is a property of the palette and the mode).
  */
@@ -70,10 +75,16 @@ function contrastMisses(sources: ThemeSources, palette: string, mode: ThemeMode)
   const map = tokenMap(sources, { mode, palette, style: 'studio' });
   const at = `styles/palette/${palette}.css × ${mode}`;
   const page = resolveColour(map, 'bg');
+  if (!page.ok) out.push(`${at} | bg | cannot be measured: ${page.reason}`);
   for (const pair of renderContrastPairs(palette === HIGH_CONTRAST)) {
     const ink = resolveColour(map, pair.ink);
     const ground = resolveColour(map, pair.ground);
-    if (!ink.ok || !ground.ok || !page.ok) continue; // an unresolved token is reported by `problems`
+    const unmeasurable = [ink, ground].find(each => !each.ok);
+    if (unmeasurable !== undefined && !unmeasurable.ok) {
+      out.push(`${at} | ${pair.ink} on ${pair.ground} | cannot be measured: ${unmeasurable.reason}`);
+      continue;
+    }
+    if (!ink.ok || !ground.ok || !page.ok) continue; // already reported above
     const ratio = ratioOf(ink.colour, ground.colour, page.colour);
     if (ratio < pair.floor)
       out.push(`${at} | ${pair.ink} on ${pair.ground} | ${ratio.toFixed(2)}:1, needs ${pair.floor}:1`);
@@ -81,8 +92,28 @@ function contrastMisses(sources: ThemeSources, palette: string, mode: ThemeMode)
   return out;
 }
 
-/** Misses that exist on base and are pinned, `identity -> why`. Empty means the contract holds today. */
-const KNOWN: Readonly<Record<string, string>> = {};
+/**
+ * Misses that exist on base and are pinned, `identity -> why`. A pin is an identity, not a tolerance: it goes stale the day
+ * the miss is fixed and then fails (`pins nothing that no longer misses`).
+ *
+ * `--md-link-weight: inherit` (base-style.css, retro.css, raw.css) is a CSS-wide keyword, which a custom property computes to
+ * nothing; the link still reads the inherited weight because `font-weight: var(--x)` falls back to inherit, so nothing is
+ * visibly wrong, but the token is not a value a renderer can read. The fix is the styles' (a number, or `normal`), not this test's.
+ */
+const INHERIT_STYLES = ['raw', 'retro', 'studio'] as const;
+const INHERIT_WHY = '--md-link-weight is the CSS-wide keyword "inherit", which computes to nothing';
+const KNOWN: Readonly<Record<string, string>> = Object.fromEntries(
+  INHERIT_STYLES.flatMap(style =>
+    PALETTES.flatMap(palette =>
+      MODES.map(mode => [
+        `styles/style/${style}.css × styles/palette/${palette.id}.css × ${mode} | md-link-weight | ${INHERIT_WHY}`,
+        'a CSS-wide keyword computes to nothing; the style owns the fix',
+      ]),
+    ),
+  ),
+);
+/** What a fixture found that nobody pinned. */
+const unpinned = (lines: readonly string[]): readonly string[] => lines.filter(line => !(line in KNOWN));
 
 describe('the resolver', () => {
   const sources = (palette: string, style = ''): ThemeSources => ({ baseStyle: '', basePalette: '', palette, style });
@@ -173,7 +204,12 @@ describe('every style × palette × mode resolves the contract', () => {
   });
 
   it('leaves no token dangling and no keyword outside its set', () => {
-    expect(observed.filter(line => !(line in KNOWN))).toEqual([]);
+    expect(unpinned(observed)).toEqual([]);
+  });
+
+  it('pins nothing that no longer misses', () => {
+    const seen = new Set(observed);
+    expect(Object.keys(KNOWN).filter(key => key.includes('| md-link-weight |') && !seen.has(key))).toEqual([]);
   });
 });
 
@@ -188,7 +224,7 @@ describe('every palette × mode meets the contract contrast', () => {
 
   it('pins nothing that no longer misses', () => {
     const seen = new Set([...observed]);
-    expect(Object.keys(KNOWN).filter(key => !seen.has(key))).toEqual([]);
+    expect(Object.keys(KNOWN).filter(key => !key.includes('| md-link-weight |') && !seen.has(key))).toEqual([]);
   });
 });
 
@@ -200,7 +236,7 @@ describe('a removed token fails, naming the pack file and the token', () => {
     const broken = { ...sources, basePalette: without(sources.basePalette), palette: without(sources.palette) };
     const found = problems(broken, 'studio', 'geist', 'light');
     expect(found.some(line => line.includes('styles/palette/geist.css') && line.includes('| accent |'))).toBe(true);
-    expect(problems(sources, 'studio', 'geist', 'light')).toEqual([]);
+    expect(unpinned(problems(sources, 'studio', 'geist', 'light'))).toEqual([]);
   });
 
   it('reports a style that lost a prose slot, and a keyword outside its set', () => {
@@ -215,5 +251,75 @@ describe('a removed token fails, naming the pack file and the token', () => {
     const found = problems(broken, 'mission', 'studio', 'dark');
     expect(found.some(line => line.includes('| md-quote-bar |'))).toBe(true);
     expect(found.some(line => line.includes('| hm-shape | "wobbly"'))).toBe(true);
+  });
+});
+
+describe('a value the browser would not compute fails', () => {
+  const palette = (css: string): ThemeSources => ({
+    baseStyle: '',
+    basePalette: '',
+    palette: `:root[data-palette='p'] { ${css} }`,
+    style: '',
+  });
+  const choice = { mode: 'dark', palette: 'p', style: 's' } as const;
+
+  it.each(['initial', 'inherit', 'unset', 'revert', 'revert-layer', 'INHERIT'])(
+    'rejects the CSS-wide keyword %s as an unresolved token, directly and through a var()',
+    keyword => {
+      const map = tokenMap(palette(`--hm-radius: ${keyword}; --via: var(--hm-radius);`), choice);
+      expect(resolveToken(map, 'hm-radius')).toMatchObject({ ok: false, reason: expect.stringContaining('keyword') });
+      expect(resolveToken(map, 'via')).toMatchObject({ ok: false, reason: expect.stringContaining('keyword') });
+    },
+  );
+
+  it('reports a style whose contract token is a CSS-wide keyword, in the combination it breaks', () => {
+    const sources = sourcesOf('mission', 'studio');
+    const broken = { ...sources, style: `${sources.style}\n:root[data-style='mission'] { --hm-radius: initial; }` };
+    expect(problems(broken, 'mission', 'studio', 'dark').some(line => line.includes('| hm-radius |'))).toBe(true);
+    expect(unpinned(problems(sources, 'mission', 'studio', 'dark'))).toEqual([]);
+  });
+
+  it('reads hsl(), hsla() and named colours, in space and comma syntax', () => {
+    const map = tokenMap(
+      palette(
+        '--a: hsl(0 0% 100%); --b: hsla(120, 100%, 25%, 0.5); --c: hsl(240deg 100% 50% / 50%); --d: white; --e: hsl(0.5turn 100% 50%);',
+      ),
+      choice,
+    );
+    expect(resolveColour(map, 'a')).toEqual({ colour: { a: 1, b: 255, g: 255, r: 255 }, ok: true });
+    expect(resolveColour(map, 'b')).toEqual({ colour: { a: 0.5, b: 0, g: 127.5, r: 0 }, ok: true });
+    expect(resolveColour(map, 'c')).toEqual({ colour: { a: 0.5, b: 255, g: 0, r: 0 }, ok: true });
+    expect(resolveColour(map, 'd')).toEqual({ colour: { a: 1, b: 255, g: 255, r: 255 }, ok: true });
+    expect(resolveColour(map, 'e')).toEqual({ colour: { a: 1, b: 255, g: 255, r: 0 }, ok: true });
+  });
+
+  it('measures a colour written as hsl(): white on white is a contrast miss, not a pass', () => {
+    const sources = sourcesOf('studio', 'geist');
+    const broken = {
+      ...sources,
+      palette: `${sources.palette}\n:root[data-palette='geist'][data-mode='light'] { --fg: hsl(0 0% 100%); --bg: #ffffff; --surface: #ffffff; }`,
+    };
+    const found = contrastMisses(broken, 'geist', 'light');
+    expect(found.some(line => line.includes('| fg on surface |'))).toBe(true);
+    expect(contrastMisses(sources, 'geist', 'light')).toEqual([]);
+  });
+
+  it('fails a pair it cannot measure instead of skipping it', () => {
+    const sources = sourcesOf('studio', 'geist');
+    const broken = {
+      ...sources,
+      palette: `${sources.palette}\n:root[data-palette='geist'][data-mode='light'] { --fg: oklch(1 0 0); }`,
+    };
+    const found = contrastMisses(broken, 'geist', 'light');
+    expect(found.some(line => line.includes('| fg on surface |') && line.includes('cannot be measured'))).toBe(true);
+    const noPage = {
+      ...sources,
+      palette: `${sources.palette}\n:root[data-palette='geist'][data-mode='light'] { --bg: lab(100 0 0); }`,
+    };
+    expect(
+      contrastMisses(noPage, 'geist', 'light').some(
+        line => line.includes('| bg |') && line.includes('cannot be measured'),
+      ),
+    ).toBe(true);
   });
 });
