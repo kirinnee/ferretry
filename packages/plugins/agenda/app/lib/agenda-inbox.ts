@@ -673,7 +673,6 @@ export class DeferredAgendaActions {
     this.receipts.update(state => ({
       ...state,
       pending: [...state.pending.filter(pending => pending.key !== card.key), entry],
-      failed: state.failed.filter(failed => failed.key !== card.key),
     }));
   }
 
@@ -705,6 +704,9 @@ export class DeferredAgendaActions {
       ...state,
       pending: state.pending.filter(pending => pending.id !== id),
       sending: [...state.sending, entry],
+      // The refusal this answer is a second try at is over once it is really sent, and not before: an Undo before then
+      // never ran the try, so the task comes back with the refusal it had.
+      failed: state.failed.filter(failed => failed.key !== entry.key),
     }));
     void this.commit(entry.card, entry.action).then(
       () => this.#settle(id, null),
