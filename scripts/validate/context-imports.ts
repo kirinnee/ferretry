@@ -216,6 +216,12 @@ export function refusal(edge: ImportEdge): string | undefined {
       'tests/unit/daemon/composed-daemon.test.ts',
       'tests/unit/daemon/generic-runtime.test.ts',
       'tests/unit/daemon/import-fresh-home.test.ts',
+      'tests/unit/lib/account-import.test.ts',
+      'tests/unit/lib/account-import-skip.test.ts',
+      'tests/unit/lib/account-import-retry.test.ts',
+      'tests/unit/lib/account-import-login-env.test.ts',
+      'tests/unit/lib/account-import-branches.test.ts',
+      'tests/unit/daemon/setup-service.test.ts',
     ].includes(edge.from.slice(edge.fromPkg.dir.length + 1)) &&
     to === 'daemon' &&
     ['@ferretry/plugin-claude-code', '@ferretry/plugin-codex'].includes(toPkg.name) &&

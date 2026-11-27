@@ -1,13 +1,18 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { chmod, mkdir, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { err, ok } from '@ferretry/std';
+import { bindDirectory } from '../../../../../kernel/host/bound-directory.ts';
+import { nodeFs } from '../../../../../kernel/host/adapters/node-fs.ts';
+import { emptyChildEnvironment, fenced, T0 } from '../../../../contract/testing/index.ts';
 import type { CreatedWorktree, ProjectRepository, RepoWorktreeListResponse } from '../../../../contract/index.ts';
 import type { WorktreeSessionFact } from '../../../../daemon/lib/worktrees/service.ts';
 import { worktreeRouteWorld } from '../../../support/daemon/worktree-world.ts';
-import { cleanupTempDirectories, setupGit } from '../support/repository.ts';
-import { world as ferretWorld } from '../../../support/daemon/deliver-turns-world.ts';
+import { cleanupTempDirectories, setupGit, tempDirectory } from '../support/repository.ts';
+import { waitFor } from '../support/wait-for.ts';
+import { IDS, world as ferretWorld } from '../../../support/daemon/deliver-turns-world.ts';
 import { PERSON_ORIGIN } from '../../../../contract/index.ts';
-import type { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
+import { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
 import { WorktreesFile } from '../../../../contract/index.ts';
 import type { ManagedWorktree } from '../../../../daemon/lib/worktrees/types.ts';
 
@@ -80,6 +85,152 @@ function changeRecord(w: Awaited<ReturnType<typeof fixture>>, change: (record: M
 }
 
 describe('ask-first project worktree move through the daemon handlers and real Git', () => {
+  for (const kind of ['start', 'resume'] as const)
+    test(`destination ${kind} is refused after Git renames and until reconciliation settles`, async () => {
+      const fleet = await ferretWorld();
+      const home = await tempDirectory('project-move-bound-home');
+      const disk = nodeFs(() => 'fixture');
+      let next = 0;
+      const service = new FerretsService(fleet.registry, fleet.tokens, {
+        now: () => T0,
+        newId: () => IDS[next++]! as never,
+        newName: () => `destination-${next}`,
+        save: async () => {},
+        saveTokens: async () => {},
+        harness: () => fleet.harness,
+        harnessKeys: () => [fleet.harness.key],
+        runner: () => fleet.runner,
+        decide: async () => ({ allow: true }),
+        folder: folder => ok(fenced(folder)),
+        bindFolder: async folder => {
+          const bound = await bindDirectory(disk, home, { files: [], recheckMs: 0 }, folder);
+          if (!bound.ok) return err(bound.error.message);
+          return ok({
+            ...bound.value,
+            verify: async () => {
+              const held = await bound.value.verify();
+              return held.ok ? ok(undefined) : err(held.error.message);
+            },
+          });
+        },
+        changed: () => {},
+        launchParts: () => [],
+        sitrepSources: () => [],
+        instructions: () => [],
+        vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
+        asks: { open: async () => [] },
+        session: fleet.files.port,
+      });
+      const w = await fixture(`project-move-destination-${kind}`, service);
+      const reviewed = await w.offer();
+      const destination = reviewed.destination!;
+      let id: string | undefined;
+      if (kind === 'resume') {
+        // A stopped session may already name this path even though today's destination must be absent.
+        await mkdir(destination, { recursive: true });
+        const started = await service.start({ folder: destination, by: 'owner' }, PERSON_ORIGIN);
+        if (!started.ok) throw new Error(started.error.reason);
+        id = started.value;
+        await service.stop(started.value, 'now');
+        await rm(destination, { recursive: true });
+      }
+      const scratch = await tempDirectory('project-move-rename-barrier');
+      const source = path.join(scratch, 'pause.c');
+      const library = path.join(scratch, 'pause.so');
+      const entered = path.join(scratch, 'renamed');
+      const release = path.join(scratch, 'release');
+      // Pause the REAL Git child after rename(2) succeeds, before Git repairs the admin back-pointer.
+      await Bun.write(
+        source,
+        `
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+static int paused_rename(const char *from, const char *to) {
+#ifdef __APPLE__
+  int result = rename(from, to);
+#else
+  int (*real_rename)(const char *, const char *) = dlsym(RTLD_NEXT, "rename");
+  int result = real_rename(from, to);
+#endif
+  const char *target = getenv("MOVE_FROM");
+  if (result == 0 && target && strcmp(from, target) == 0) {
+    int fd = open(getenv("MOVE_ENTERED"), O_WRONLY | O_CREAT, 0600);
+    if (fd >= 0) close(fd);
+    while (access(getenv("MOVE_RELEASE"), F_OK) != 0) usleep(1000);
+  }
+  return result;
+}
+#ifdef __APPLE__
+__attribute__((used)) static struct { const void *replacement; const void *original; }
+interpose_rename __attribute__((section("__DATA,__interpose"))) = { (void *)paused_rename, (void *)rename };
+#else
+int rename(const char *from, const char *to) { return paused_rename(from, to); }
+#endif
+`,
+      );
+      const mac = process.platform === 'darwin';
+      const compiler = Bun.spawn(
+        ['cc', ...(mac ? ['-dynamiclib'] : ['-shared', '-fPIC']), source, '-o', library, ...(mac ? [] : ['-ldl'])],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
+      const diagnostic = await new Response(compiler.stderr).text();
+      if ((await compiler.exited) !== 0) throw new Error(`rename barrier compilation failed: ${diagnostic}`);
+      const run = w.io.git.runBytes;
+      const reconciling = Promise.withResolvers<void>();
+      const settle = Promise.withResolvers<void>();
+      w.io.git.runBytes = async (program, args, options) => {
+        if (args.includes('move'))
+          return await run(program, args, {
+            ...options,
+            env: {
+              ...options.env,
+              [mac ? 'DYLD_INSERT_LIBRARIES' : 'LD_PRELOAD']: library,
+              MOVE_FROM: w.target,
+              MOVE_ENTERED: entered,
+              MOVE_RELEASE: release,
+            },
+          });
+        if (args.includes('worktree') && args.includes('list') && (await Bun.file(release).exists())) {
+          reconciling.resolve();
+          await settle.promise;
+        }
+        return await run(program, args, options);
+      };
+      const launch = async () =>
+        kind === 'start'
+          ? await service.start({ folder: destination, by: 'owner' }, PERSON_ORIGIN)
+          : await service.resume(id as never, undefined, { origin: PERSON_ORIGIN });
+      const starts = fleet.runner.starts;
+      const moving = w.apply(reviewed);
+      try {
+        await waitFor(() => Bun.file(entered).exists(), 'Git to pause after its checkout rename');
+        const gitDir = (await readFile(path.join(destination, '.git'), 'utf8')).trim().slice('gitdir: '.length);
+        expect((await readFile(path.join(gitDir, 'gitdir'), 'utf8')).trim()).toBe(path.join(w.target, '.git'));
+        expect(await launch()).toMatchObject({ ok: false, error: { code: 'refused' } });
+        expect(fleet.runner.starts).toBe(starts);
+        await Bun.write(release, 'continue');
+        await reconciling.promise;
+        expect(await launch()).toMatchObject({ ok: false, error: { code: 'refused' } });
+        expect(fleet.runner.starts).toBe(starts);
+      } finally {
+        await Bun.write(release, 'continue');
+        settle.resolve();
+        await moving;
+      }
+      expect((await moving).status).toBe(200);
+      expect((await launch()).ok).toBe(true);
+      expect(fleet.runner.starts).toBe(starts + 1);
+      expect(await Bun.file(path.join(destination, 'README.md')).text()).toBe('# fixture\n');
+    });
+
   test('the terminal exclusion stays held through the mutating Git process', async () => {
     let held = false;
     const w = await fixture('project-move-terminal-exclusion', undefined, async (_folder, move) => {

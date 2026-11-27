@@ -141,11 +141,11 @@ export class ProjectWorktreeMoves {
     // Imports authorize reads only. Mutations use exactly the managed create/remove host's existing work/worktrees roots.
     const host = this.#writeHost();
     if (record.commonDir !== recorded.commonDirectory) refuse('that tracked worktree does not belong to this project');
+    const destination = record.pendingMove?.destination ?? this.#destination(host, recorded, record);
     const apply = async () => {
       await this.#authority(host, record);
       if (record.pendingMove !== undefined) return await this.#recover(host, record);
       return await this.#read(host, record, async (reader, held) => {
-        const destination = this.#destination(host, recorded, record);
         const head = await this.#verify(host, record, reader, held);
         if (this.#review(record, held, head, destination) !== request.reviewedIdentity)
           refuse('the reviewed checkout changed; refresh and review it again');
@@ -199,9 +199,12 @@ export class ProjectWorktreeMoves {
       this.needs.withTerminalRemoval === undefined
         ? await apply()
         : await this.needs.withTerminalRemoval(record.path, apply);
-    return this.needs.withFerretMove === undefined
+    // Git makes the destination launchable before it updates its back-pointer. Hold both paths until reconciliation
+    // has settled the registry too; the admission brackets release both on every failure as well.
+    const withMove = this.needs.withFerretMove;
+    return withMove === undefined
       ? await guarded()
-      : await this.needs.withFerretMove(record.path, guarded);
+      : await withMove(record.path, async () => await withMove(destination, guarded));
   }
 
   #rowReason(
