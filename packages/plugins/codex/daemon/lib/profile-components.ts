@@ -10,6 +10,7 @@
  */
 import type { ProfileComponentSource } from '@ferretry/plugin-runtimes/contract';
 import type { HooksItem, SettingsItem } from '../../contract/index.ts';
+import { codexRuntimesKit } from './runtimes-kit/index.ts';
 
 export function codexSettingsSource(
   items: () => ReadonlyMap<string, SettingsItem>,
@@ -17,6 +18,7 @@ export function codexSettingsSource(
 ): ProfileComponentSource {
   return {
     ...(watch === undefined ? {} : { watch }),
+    kit: codexRuntimesKit,
     list: async () => [...items().keys()].toSorted((left, right) => left.localeCompare(right)),
     read: async name => {
       const item = items().get(name);
