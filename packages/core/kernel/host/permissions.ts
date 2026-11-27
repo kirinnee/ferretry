@@ -7,9 +7,10 @@ import { embeddedWorkerFile, isCompiledModule } from './adapters/embedded-worker
 import { serveWorkerGrants, type WorkerGrantSources } from './worker-grants/serve.ts';
 import { WORKER_GRANTS_KEY } from './worker-grants/wire.ts';
 import type { ItemKind, Manifest, PermissionEntry } from '../manifest/types.ts';
-import { hostAllowed, programAmong, programName, WILDCARD } from '../manifest/reach.ts';
+import { DAEMON_PROGRAM, hostAllowed, programAmong, programName, WILDCARD } from '../manifest/reach.ts';
 import type { PinRegistry } from './pins.ts';
 import { type DetachedCall, detachedAsked, detachedNotOffered, detachedRefusal } from './detached.ts';
+import { PLUGIN_CHILD_FLAG } from './plugin-child.ts';
 
 export { hostAllowed, WILDCARD };
 
@@ -99,15 +100,28 @@ export class PermissionError extends Error {
  * program passes, today's rule); an installed item that names an ABSOLUTE path allows exactly that path, never another
  * file of the same name. A `{ resolver }` entry's answers follow the same rule (an absolute answer allows only that
  * path, a bare name its basename), never a wildcard. Shared with the test host so both refuse alike.
+ *
+ * `$daemon` is the daemon's own executable, a program that can run anything its arguments say, so it is granted only as
+ * `<daemon> --plugin-child <program> …` (`plugin-child.ts` then runs only a declared worker program): given the `args`
+ * of a call, any other first argument is refused. A caller that names no arguments asks only whether the program is declared.
  */
 export function spawnPermitted(
   declared: readonly PermissionEntry[],
   items: ItemReachOf,
   program: string,
   resolve: ResolverOf = NO_RESOLVERS,
+  args?: readonly string[],
 ): boolean {
   const named = expand(declared, items, 'programs');
-  return programAmong(named, program) || programAmong(resolverAnswers(declared, resolve), program);
+  if (
+    programAmong(
+      named.filter(entry => entry !== DAEMON_PROGRAM),
+      program,
+    ) ||
+    programAmong(resolverAnswers(declared, resolve), program)
+  )
+    return true;
+  return programAmong(named, program) && (args === undefined || args[0] === PLUGIN_CHILD_FLAG);
 }
 
 /** Whether `hostname` is declared, directly or by an installed item of a declared `{ items }` kind. */
@@ -157,10 +171,10 @@ export function restrictSpawn(
   resolve: ResolverOf = NO_RESOLVERS,
 ): SpawnPort {
   /** Refuses an undeclared program, and a pinned cwd this plugin's roots did not mint; a Linux pin's alias is used. */
-  const check = <O extends SpawnOptions | undefined>(program: string, options: O): O => {
+  const check = <O extends SpawnOptions | undefined>(program: string, args: readonly string[], options: O): O => {
     // A detached start is offered only by `allowDetachedSpawn` around this port; through this one it is refused.
     if (detachedAsked(options)) throw new PermissionError(detachedNotOffered(plugin, program));
-    if (!spawnPermitted(declared, items, program, resolve))
+    if (!spawnPermitted(declared, items, program, resolve, args))
       throw new PermissionError(`${plugin} may not run ${programName(program)}: its manifest does not declare it.`);
     const cwd = options?.cwd;
     if (cwd === undefined || typeof cwd === 'string') return options;
@@ -170,9 +184,9 @@ export function restrictSpawn(
     return (minted.alias === undefined ? options : { ...options, cwd: minted.alias as FencedPath }) as O;
   };
   return {
-    run: async (program, args, options) => await base.run(program, args, check(program, options)),
-    runBytes: async (program, args, options) => await base.runBytes(program, args, check(program, options)),
-    start: (program, args, options) => base.start(program, args, check(program, options)),
+    run: async (program, args, options) => await base.run(program, args, check(program, args, options)),
+    runBytes: async (program, args, options) => await base.runBytes(program, args, check(program, args, options)),
+    start: (program, args, options) => base.start(program, args, check(program, args, options)),
   };
 }
 
@@ -192,11 +206,11 @@ export function allowDetachedSpawn(
   started: (program: string, pid: number) => void = () => undefined,
   resolve: ResolverOf = NO_RESOLVERS,
 ): SpawnPort {
-  const judge = (call: DetachedCall, program: string, options: SpawnOptions): void => {
+  const judge = (call: DetachedCall, program: string, args: readonly string[], options: SpawnOptions): void => {
     const why = detachedRefusal(
       plugin,
       declared,
-      spawnPermitted(spawnDeclared, items, program, resolve),
+      spawnPermitted(spawnDeclared, items, program, resolve, args),
       call,
       program,
       options,
@@ -205,16 +219,16 @@ export function allowDetachedSpawn(
   };
   return {
     run: async (program, args, options) => {
-      if (detachedAsked(options)) judge('run', program, options);
+      if (detachedAsked(options)) judge('run', program, args, options);
       return await restricted.run(program, args, options);
     },
     runBytes: async (program, args, options) => {
-      if (detachedAsked(options)) judge('runBytes', program, options);
+      if (detachedAsked(options)) judge('runBytes', program, args, options);
       return await restricted.runBytes(program, args, options);
     },
     start: (program, args, options) => {
       if (!detachedAsked(options)) return restricted.start(program, args, options);
-      judge('start', program, options);
+      judge('start', program, args, options);
       const handle = base.start(program, args, options);
       started(programName(program), handle.pid);
       return handle;

@@ -1,5 +1,7 @@
 import { describe, expect, spyOn, test } from 'bun:test';
-import { spawnPermitted, NO_ITEMS } from '../../../host/permissions.ts';
+import type { SpawnPort } from '../../../contract/ports.ts';
+import { programName } from '../../../manifest/reach.ts';
+import { NO_ITEMS, PermissionError, restrictSpawn, spawnPermitted } from '../../../host/permissions.ts';
 import { runPluginChild } from '../../../host/plugin-child.ts';
 
 describe("`fyd --plugin-child`: a plugin's child is a program, never a second daemon", () => {
@@ -40,5 +42,55 @@ describe('`$daemon` in permissions.spawn', () => {
   test('a plugin that does not declare it may not run the executable', () => {
     expect(spawnPermitted(['git'], NO_ITEMS, process.execPath)).toBe(false);
     expect(spawnPermitted([], NO_ITEMS, process.execPath)).toBe(false);
+  });
+});
+
+describe('`$daemon` grants the daemon executable only as `--plugin-child <program>`', () => {
+  const declared = ['$daemon'];
+  const calls: { program: string; args: readonly string[] }[] = [];
+  const base: SpawnPort = {
+    run: async (program, args) => {
+      calls.push({ program, args });
+      return { exitCode: 0, signal: null, stdout: '', stderr: '' };
+    },
+    runBytes: async () => {
+      throw new Error('not run here');
+    },
+    start: (program, args) => {
+      calls.push({ program, args });
+      return { pid: 1 } as unknown as ReturnType<SpawnPort['start']>;
+    },
+  };
+
+  test('a plugin holding only `$daemon` cannot run the daemon executable with any other arguments', async () => {
+    calls.length = 0;
+    const port = restrictSpawn('voice', declared, base);
+    for (const args of [[], ['-e', 'process.exit(0)'], ['run', '/tmp/x.ts'], ['x', '--plugin-child', 'speech-host']]) {
+      await expect(port.run(process.execPath, args)).rejects.toThrow(PermissionError);
+      expect(() => port.start(process.execPath, args)).toThrow(PermissionError);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  test('`--plugin-child <program> …` is admitted, and the check names no argument it refused', async () => {
+    calls.length = 0;
+    const port = restrictSpawn('voice', declared, base);
+    await port.run(process.execPath, ['--plugin-child', 'speech-host', 'speech']);
+    port.start(process.execPath, ['--plugin-child', 'speech-host', 'reply']);
+    expect(calls.map(call => call.args[0])).toEqual(['--plugin-child', '--plugin-child']);
+    await port.run(process.execPath, ['-e', 'SECRET_ARG']).catch((error: unknown) => {
+      expect(String(error)).not.toContain('SECRET_ARG');
+    });
+  });
+
+  test('a program granted by name stays free of the argument rule', async () => {
+    calls.length = 0;
+    await restrictSpawn('x', [programName(process.execPath)], base).run(process.execPath, ['-e', '1']);
+    expect(calls).toHaveLength(1);
+  });
+
+  test('existence checks that name no arguments still see the grant', () => {
+    expect(spawnPermitted(declared, NO_ITEMS, process.execPath)).toBe(true);
+    expect(spawnPermitted(declared, NO_ITEMS, process.execPath, undefined, ['-e', '1'])).toBe(false);
   });
 });
