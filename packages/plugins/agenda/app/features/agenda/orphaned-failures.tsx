@@ -5,11 +5,20 @@
  */
 
 import { X } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { undeliveredAction } from '../../lib/agenda-answers.ts';
 import { actionSentence } from '../../lib/agenda-inbox.ts';
-import { refusedAgain, type RetriedAnswers, withoutSettledRetries, withRetriesOf } from '../../lib/refused-again.ts';
+import {
+  refusedAgain,
+  type RetriedAnswer,
+  type RetriedAnswers,
+  withoutSettledRetries,
+  withRetriesOf,
+} from '../../lib/refused-again.ts';
+import type { AgendaListSnapshot } from '@ferretry/core-asks/contract';
+import { daemonSessionKey } from '../../shell.ts';
+import type { DaemonAgendaSnapshot } from '../../lib/agenda-store.ts';
 
 interface Refusal {
   /** Unique among the refusals drawn: the task and the reason, never the send. */
@@ -20,6 +29,12 @@ interface Refusal {
 }
 
 const NO_RETRIES: RetriedAnswers = new Map();
+const NO_BOARDS: DaemonAgendaSnapshot = { snapshots: new Map(), counts: new Map(), statuses: new Map() };
+const NEVER = (): (() => void) => () => undefined; // an inbox with no client has no board to hear from
+
+/** The daemon says it still holds this answer, or has handed it over and not yet seen it arrive. */
+const heldOn = (snapshot: AgendaListSnapshot | undefined, id: string): boolean =>
+  snapshot?.replies?.pending.includes(id) === true || snapshot?.delivery?.sending.includes(id) === true;
 
 /**
  * `shown` names the tasks whose own view already says their refusal; absent, that is every task still on the list. An
@@ -33,9 +48,22 @@ export function OrphanedFailures({
   readonly shown?: readonly string[];
 }) {
   const [retried, setRetried] = useState<RetriedAnswers>(NO_RETRIES);
+  const store = inbox.agendaClient?.store;
+  const subscribe = useCallback((listener: () => void) => store?.subscribe(listener) ?? NEVER(), [store]);
+  const readBoards = useCallback(() => store?.getSnapshot() ?? NO_BOARDS, [store]);
+  const boards = useSyncExternalStore(subscribe, readBoards, readBoards);
+  // The daemon's own board is what says a retry is still held or on its way: the deck lists it no more either way.
+  const holding = ({ daemonId, sessionId, id }: RetriedAnswer): boolean =>
+    heldOn(boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })), id);
   const onDeck = new Set(shown ?? inbox.cards.map(card => card.key));
   const { deferredState } = inbox;
-  const tracked = withoutSettledRetries(withRetriesOf(retried, deferredState), inbox.cards, onDeck, deferredState);
+  const tracked = withoutSettledRetries(
+    withRetriesOf(retried, deferredState),
+    inbox.cards,
+    onDeck,
+    deferredState,
+    holding,
+  );
   if (tracked !== retried) setRetried(tracked);
 
   // An answer given again is held or on its way: it, not the refusal before it, is what the reader is waiting on.

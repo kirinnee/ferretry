@@ -1,8 +1,8 @@
 /**
  * A SECOND REFUSAL OF A RETRIED ANSWER IS SAID ON THE DECK THE READER IS ON, in a real browser, at 390 and 1440, light and
  * dark, at the default and the highest rounding. The reader taps the real Retry on a refused item and moves on to the
- * next; the machine takes the retry, and the next board read opens the first item again with a new reason: the refusal
- * shows on the deck the reader is on, with a way to dismiss it.
+ * next; the machine takes the retry (its board has the item closed and its reply held), and the next board read opens the
+ * first item again with a new reason: the refusal shows on the deck the reader is on, with a way to dismiss it.
  *
  * Set `FY_INBOX_SECOND_REFUSAL_SHOTS_DIR` to keep `<viewport>-<scheme>-<rounding>.png`.
  */
@@ -111,6 +111,9 @@ describe('a second refusal on the deck the reader is on', () => {
             await tab.waitForFunction(
               () => document.querySelector('.fy-attn-deck__top [data-agenda-view="A3"]') !== null,
             );
+            // The machine takes the retry: the board it answers with has the item closed and its reply held. Nothing is said.
+            await tab.evaluate(() => window.secondRefusal.acceptRetry());
+            expect(await tab.$('[data-agenda-failures]'), 'the accepted board says nothing').toBeNull();
             await tab.evaluate(() => window.secondRefusal.readBoardAgain());
             const failures = await tab.waitForSelector('[data-agenda-failures]', { timeout: 5_000 });
             expect(await failures.textContent()).toContain('The machine said no again.');
