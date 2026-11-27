@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync, unlinkSync } from 'node:fs';
 import { chmod, lstat, mkdir, rmdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { assertPlaceholder, moveHome, restoreHome, sameLock } from './cutover-home.ts';
+import { assertPlaceholder, interruptedHome, moveHome, restoreHome, sameLock } from './cutover-home.ts';
 import { exchangePaths } from './recovery-copy.ts';
 
 const socketPath = (dir: string) => join(dir, 'lease.sock');
@@ -197,15 +197,25 @@ if (import.meta.main) {
     } else if (command === 'release' && first !== undefined) await releaseLease(first);
     else if ((command === 'move' || command === 'prepare') && first !== undefined && second !== undefined)
       await changeHome(first, command, third === undefined ? [second] : [second, third]);
-    else if (command === 'restore' && first !== undefined && second !== undefined && third !== undefined) {
+    else if (command === 'interrupted' && first !== undefined && second !== undefined && third !== undefined) {
+      await privateDirectory(first);
+      const pending = interruptedHome(first, second, third);
+      if (pending !== undefined) console.log(pending);
+    } else if (command === 'restore' && first !== undefined && second !== undefined && third !== undefined) {
+      await privateDirectory(first);
       const mode = process.argv[6] ?? '700';
+      const pending = interruptedHome(first, third, second);
       try {
+        if (pending !== undefined) throw new Error('interrupted exchange needs recovery');
         await changeHome(first, 'restore', [second, mode]);
       } catch {
         // A dead keeper cannot help. Reacquire the actual backup lock here before restoring anything.
-        const lock = await takeV4Lock(second);
+        const source = pending ?? second;
+        const lock = await takeV4Lock(source);
         try {
-          restoreHome(first, third, second, parseInt(mode, 8));
+          if (pending !== undefined && interruptedHome(first, third, second) !== pending)
+            throw new Error('interrupted cutover changed during recovery');
+          restoreHome(first, third, source, parseInt(mode, 8), second);
         } finally {
           lock.db.close();
         }

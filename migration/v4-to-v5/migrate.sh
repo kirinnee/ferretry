@@ -596,6 +596,19 @@ backup)
   [ "${owner_yes}" = 1 ] || fail "tell the owner: 'I will move ${H} to ${B}; that folder is the backup and stays untouched until you delete it', then pass --owner-yes"
   has_mark quiet || fail "run quiet first"
   rehearsal_phase_guard "${H}"
+  lease="$(note_get LEASE)"
+  if [ -n "${lease}" ] && { [ -e "${lease}" ] || [ -L "${lease}" ]; }; then
+    interrupted="$(cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts interrupted "${lease}" "${H}" "${B}")" || fail "cannot verify interrupted cutover; all entries kept"
+    if [ -n "${interrupted}" ]; then
+      if [ "$(note_get PANES)" != none ]; then
+        [ -S "${interrupted}/tmux.sock" ] || unreadable "cannot find the interrupted home's tmux socket; all entries kept"
+        quiet_check "${interrupted}/tmux.sock" || fail "interrupted home's panes could not be proven quiet; all entries kept"
+      fi
+      original_mode="$(note_get HOME_MODE)"
+      (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts restore "${lease}" "${B}" "${H}" "${original_mode:-700}") || fail "cannot restore interrupted cutover; all entries kept"
+      fail "interrupted backup restored at ${H}; run preflight again with fresh notes before another backup"
+    fi
+  fi
   if has_mark backed-up && [ -d "${B}" ] && [ -f "${H}" ]; then
     say "✅ already backed up at ${B}"
     exit 0
@@ -1101,6 +1114,11 @@ rollback)
   base="$(note_get BASE)"
   v4_version="$(note_get V4_VERSION)"
   [ "${owner_yes}" = 1 ] || fail "tell the owner what a rollback costs: v4 returns exactly as it was at the backup; anything done in v5 since the start (messages, tasks, asks, new ferrets, new secrets) stays whole in ${H}-v5-failed-${stamp} and is not in v4. With their yes pass --owner-yes"
+  lease="$(note_get LEASE)"
+  interrupted=""
+  if [ -n "${lease}" ] && { [ -e "${lease}" ] || [ -L "${lease}" ]; }; then
+    interrupted="$(cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts interrupted "${lease}" "${H}" "${B}")" || fail "cannot verify interrupted cutover; all entries kept"
+  fi
   mark rolling-back
 
   # 1. Quiet first, then the daemon. The panes of the harnesses run in tmux whether or not any daemon does, so a quiet
@@ -1109,7 +1127,7 @@ rollback)
   want_quiet=1
   if [ "$(note_get PANES)" = none ]; then want_quiet=0; fi
   rb_sock=""
-  for cand in "${H}/state/terminals/tmux.sock" "${B}/tmux.sock" "${H}/tmux.sock"; do
+  for cand in "${H}/state/terminals/tmux.sock" "${B}/tmux.sock" "${H}/tmux.sock" "${interrupted:+${interrupted}/tmux.sock}"; do
     if [ -S "${cand}" ] && [ -z "${rb_sock}" ]; then rb_sock="${cand}"; fi
   done
   rb_quiet() { # $1 when: "before" or "after" the daemon stop
@@ -1117,7 +1135,7 @@ rollback)
     if [ -z "${rb_sock}" ]; then
       # Live panes were expected (the baseline recorded them). A socket that cannot be found does not prove they are gone:
       # the tmux server and the harnesses may run on. Unknown is a stop, never a success.
-      unreadable "no tmux socket was found at ${H} or ${B} (${1}), but the baseline recorded live ferret panes: whether they still write is UNKNOWN, so nothing was moved. Find the tmux server (the owner checks that no ferret pane is alive), then run rollback again"
+      unreadable "no tmux socket was found at ${H} or ${B} or the journalled interrupted home (${1}), but the baseline recorded live ferret panes: whether they still write is UNKNOWN, so nothing was moved. Find the tmux server (the owner checks that no ferret pane is alive), then run rollback again"
     fi
     local qs=0
     quiet_check "${rb_sock}" || qs=$?
@@ -1263,7 +1281,7 @@ rollback)
   fi
 
   # 2. Homes. Only move H aside when the backup exists (otherwise H still IS the v4 home).
-  if [ -d "${B}" ]; then
+  if [ -d "${B}" ] || [ -n "${interrupted}" ]; then
     if [ -d "${H}" ]; then
       failed="${H}-v5-failed-${stamp}"
       [ ! -e "${failed}" ] || failed="${failed}-$$"
