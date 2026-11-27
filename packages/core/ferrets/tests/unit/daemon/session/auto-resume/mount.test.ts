@@ -131,7 +131,7 @@ async function runPass(h: TestHost): Promise<void> {
   const pass = h.runJob(AUTO_RESUME_JOB).finally(() => {
     done = true;
   });
-  for (let step = 0; step < 60 && !done; step += 1) await advance(h, 1_000);
+  for (let step = 0; step < 120 && !done; step += 1) await advance(h, 1_000);
   await pass;
   await h.settle();
 }
@@ -605,6 +605,57 @@ describe('W2-a auto-resume, mounted', () => {
         skipped: { reason: string }[];
       };
       expect(summary.skipped[0]?.reason).toBe(NO_AUTO_RESUME_ANSWER);
+      await h.stop();
+    });
+
+    // D-89: Runtimes still waking at boot hangs its first answer; that is "not yet", not "no", so the pass asks again
+    // a bounded number of times and a ferret the host restart took down is not left stopped for good.
+    for (const ask of ['runtime', 'switch'] as const)
+      test(`W2-a D-89 one ${ask} answer lost to the decide bound is asked again: the ferret is resumed, not left stopped`, async () => {
+        let lost = true;
+        const runtimes = fakeRuntimes(input => {
+          if (input.ask === ask && lost) {
+            lost = false;
+            return new Promise(() => undefined);
+          }
+          return { allow: true };
+        });
+        let { h, runner } = await boot([runtimes.plugin]);
+        const id = await start(h, 'rowan');
+        const launches = runner.starts;
+        h = await hostRestart(h, runner);
+        await runPass(h);
+        expect(lost).toBe(false);
+        expect(runner.starts).toBe(launches + 1);
+        expect((await view(h, id)).state).not.toBe('stopped');
+        expect(types(h, id)).toContain('session.auto_resumed');
+        expect(types(h, id)).not.toContain('session.auto_resume_skipped');
+        await h.stop();
+      });
+
+    test('W2-a D-89 an answer that never comes is asked a bounded number of times, then skipped as before', async () => {
+      const runtimes = fakeRuntimes(input => (input.ask === 'switch' ? { allow: true } : new Promise(() => undefined)));
+      let { h, runner } = await boot([runtimes.plugin]);
+      const id = await start(h, 'sorrel');
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      await runPass(h);
+      expect(runtimes.asked.filter(input => input.ask === 'runtime')).toHaveLength(3);
+      expect(runner.starts).toBe(launches);
+      expect((await view(h, id)).state).toBe('stopped');
+      expect(types(h, id).filter(type => type === 'session.auto_resume_skipped')).toHaveLength(1);
+      await h.stop();
+    });
+
+    test("W2-a D-89 Runtimes' own no is never asked again", async () => {
+      const runtimes = fakeRuntimes(input =>
+        input.ask === 'switch' ? { allow: true } : { allow: false, reason: 'no' },
+      );
+      let { h, runner } = await boot([runtimes.plugin]);
+      await start(h, 'alder');
+      h = await hostRestart(h, runner);
+      await runPass(h);
+      expect(runtimes.asked.filter(input => input.ask === 'runtime')).toHaveLength(1);
       await h.stop();
     });
 

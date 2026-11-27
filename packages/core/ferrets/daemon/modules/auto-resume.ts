@@ -26,6 +26,18 @@ import type { BootPassGate } from '../lib/session/auto-resume/boot-gate.ts';
 /** The job that records how each ferret's terminal fared across the restart and works the owed resumes off (W2-a). */
 export const AUTO_RESUME_JOB = 'ferrets.auto-resume';
 
+/**
+ * How long the pass waits before asking Runtimes again when its answer did not come (a hang past the kernel's bound, a
+ * throw, garbage): at boot Runtimes may still be waking, so a lost answer is "not yet", not "no". Two more asks, then the
+ * pass gives up exactly as it always did (fail closed, the ferret skipped with why). Runtimes' OWN no is never asked again.
+ */
+const UNANSWERED_RETRY_DELAYS_MS: readonly number[] = [3_000, 9_000];
+
+/** Whether the walk ended on a taker that gave no answer of its own (not a no it said): the only case worth asking again. */
+function lostAnswer(answer: DecideAnswer): boolean {
+  return answer.decision.allow === false && answer.answers.at(-1)?.outcome === 'unanswered';
+}
+
 /** What the auto-resume stands on, each through its one owner. */
 export interface AutoResumeDeps extends Omit<BootExitFerrets, 'list'> {
   readonly state: Pick<StatePort, 'read' | 'write' | 'remove'>;
@@ -80,7 +92,19 @@ class NotResumable extends Error {}
  * the history writer. Today recorded the boot exits before serving and ran the pass after; 5.0 does both in one job
  * after the daemon serves, in the same order, so a pass never starts before what it is owed is durable.
  */
-export function buildAutoResume(deps: AutoResumeDeps): AutoResume {
+export function buildAutoResume(rawDeps: AutoResumeDeps): AutoResume {
+  const deps: AutoResumeDeps = {
+    ...rawDeps,
+    decide: async input => {
+      let answer = await rawDeps.decide(input);
+      for (const delay of UNANSWERED_RETRY_DELAYS_MS) {
+        if (!lostAnswer(answer)) break;
+        await rawDeps.sleep(delay);
+        answer = await rawDeps.decide(input);
+      }
+      return answer;
+    },
+  };
   const summary = new StateAutoResumeSummaryStore(deps.state);
   const service = new AutoResumeService(
     {
