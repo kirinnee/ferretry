@@ -4,18 +4,49 @@
  * and a Codex import still answer 200, because the apply left a model whose profile names components that exist (H2).
  */
 import { afterEach, describe, expect, it } from 'bun:test';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
+import {
+  PROFILE_COMPONENTS_KEY,
+  ProfileClaudeSettingsSource,
+  ProfileCodexSettingsSource,
+} from '../../../contract/index.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
-import { type DaemonImplementation } from '@ferretry/kernel/manifest';
+import { type DaemonImplementation, definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLoginEnvImport, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon } from '../../../daemon/index.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
 
 afterEach(cleanupWorlds);
+
+/** Synthetic settings collections carrying the real kits offered by the harness settings sources. */
+function settingsOwners(): DaemonImplementation<any>[] {
+  return (
+    [
+      ['claude-code', ProfileClaudeSettingsSource, 'runtimes.components.settings.claude:components', claudeRuntimesKit],
+      ['codex', ProfileCodexSettingsSource, 'runtimes.components.settings.codex:components', codexRuntimesKit],
+    ] as const
+  ).map(
+    ([id, hook, name, kit]) =>
+      implementDaemon(
+        definePlugin({
+          id,
+          title: id,
+          version: '5.0.0',
+          api: 5,
+          core: false,
+          kinds: [],
+          hooks: { takes: [{ hook, key: PROFILE_COMPONENTS_KEY }] },
+        }),
+        { build: () => ({ hooks: { [name]: { kit, list: async () => [], read: async () => undefined } } }) } as never,
+      ) as DaemonImplementation<any>,
+  );
+}
 
 async function fresh(): Promise<{ host: TestHost; world: FleetWorld }> {
   const world = await fleetWorld();
@@ -33,7 +64,7 @@ async function fresh(): Promise<{ host: TestHost; world: FleetWorld }> {
   const real: RuntimesAssembler = ctx =>
     hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
   const host = await testHost({
-    plugins: [runtimesDaemon(real) as DaemonImplementation<any>],
+    plugins: [...settingsOwners(), runtimesDaemon(real) as DaemonImplementation<any>],
     fakes: {
       ferrets: new FakeFerrets(),
       logins: fakeLogins([]),
