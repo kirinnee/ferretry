@@ -7,9 +7,9 @@ import { cutRollout, rolloutName } from '../../daemon/lib/fork.ts';
 
 const binary = process.env.CODEX_FORK_BINARY;
 
-test.skipIf(binary === undefined)(
-  'a real writer makes two turns, the fork resumes only turn 1 under its new identity and folder',
-  async () => {
+test.skipIf(binary === undefined).each(['R1 settings boundary', 'R2 identity relocation'])(
+  '%s: real writer forks and resumes with independent native state',
+  async regression => {
     if (binary === undefined) throw new Error('CODEX_FORK_BINARY must name the real program to test');
     const home = await mkdtemp(join(tmpdir(), 'codex-fork-loopback-'));
     const work = join(home, 'source');
@@ -115,7 +115,15 @@ responses_websockets_v2 = false
       const first = await run(work, ['SYNTHETIC_FIRST_PROMPT']);
       const sourceId = first.find(event => event.type === 'thread.started')?.thread_id as string;
       expect(sourceId).toMatch(/^[0-9a-f-]{36}$/u);
-      await run(work, ['resume', sourceId, 'SYNTHETIC_SECOND_PROMPT']);
+      const firstFile = (await files()).find(file => file.includes(sourceId));
+      if (firstFile === undefined) throw new Error('the real writer made no first rollout');
+      const firstRecords = (await readFile(firstFile, 'utf8'))
+        .trimEnd()
+        .split('\n')
+        .map(line => JSON.parse(line));
+      const settings = (records: { type: string; payload: { type?: string } }[]) =>
+        records.filter(record => record.type === 'event_msg' && record.payload.type === 'thread_settings_applied');
+      await run(work, ['resume', '-m', 'synthetic-next', sourceId, 'SYNTHETIC_SECOND_PROMPT']);
       const sourceFile = (await files()).find(file => file.includes(sourceId));
       if (sourceFile === undefined) throw new Error('the real writer made no rollout');
       const source = await readFile(sourceFile, 'utf8');
@@ -136,7 +144,6 @@ responses_websockets_v2 = false
           marker: join(home, 'codex-correlation/unreachable'),
         },
       );
-      expect(cut.kind).toBe('cut');
       if (cut.kind !== 'cut') throw new Error(cut.reason);
       expect(cut.text).not.toContain('SYNTHETIC_SECOND_PROMPT');
       const file = join(nativeHome, rolloutName(id, new Date()));
@@ -159,6 +166,22 @@ responses_websockets_v2 = false
           expect(record.payload.cwd).toBe(forkWork);
           if (record.payload.workspace_roots !== undefined) expect(record.payload.workspace_roots).toEqual([forkWork]);
         }
+      }
+      if (regression.startsWith('R1')) {
+        const kept = cut.text
+          .trimEnd()
+          .split('\n')
+          .map(line => JSON.parse(line));
+        expect(settings(records).length).toBeGreaterThan(settings(firstRecords).length);
+        expect(settings(kept).length).toBe(settings(firstRecords).length);
+        expect(cut.text).not.toContain('synthetic-next');
+      } else {
+        expect(cut.text).not.toContain(sourceId);
+        expect(cut.text).not.toContain(work);
+        expect(JSON.stringify(forked)).not.toContain(sourceId);
+        expect(JSON.stringify(forked)).not.toContain(work);
+        expect(request).not.toContain(sourceId);
+        expect(request).not.toContain(work);
       }
       expect(await readFile(sourceFile, 'utf8')).toBe(source);
       expect((await stat(sourceFile)).ino).toBe(before.ino);

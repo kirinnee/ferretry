@@ -29,19 +29,28 @@ export function startsTurn(record: ForkRecord): boolean {
 
 /** A new native task can precede its user response_item. It belongs to the excluded prompt, never to the previous one. */
 export function beforeNextTask(records: readonly ForkRecord[], start: number, end: number): number {
+  let boundary = end;
   for (let index = end - 1; index > start; index--) {
     const record = records[index];
     if (record === undefined) break;
-    if (record.type === 'event_msg' && record.payload.type === 'task_started') return index;
     // Only the new task's setup records may precede the input; do not cut away a previous answer.
     if (
       record.type !== 'turn_context' &&
       record.type !== 'session_meta' &&
-      !(record.type === 'response_item' && ['developer', 'system'].includes(String(record.payload.role)))
+      record.type !== 'world_state' &&
+      !(
+        record.type === 'event_msg' && ['task_started', 'thread_settings_applied'].includes(String(record.payload.type))
+      ) &&
+      !(
+        record.type === 'response_item' &&
+        (['developer', 'system'].includes(String(record.payload.role)) ||
+          (record.payload.role === 'user' && !startsTurn(record)))
+      )
     )
       break;
+    boundary = index;
   }
-  return end;
+  return boundary;
 }
 
 /** A safe cut never leaves half a native task or an unanswered tool call, even at an injected input. */
@@ -96,56 +105,4 @@ export function dependsOnSubagent(records: readonly ForkRecord[]): boolean {
       ['spawn_agent', 'resume_agent', 'send_input', 'wait', 'wait_agent', 'close_agent'].includes(name)
     );
   });
-}
-
-/** Rewrite only structured identity/worktree fields. Quoted ids, tool arguments and old paths in messages stay history. */
-export function forkRecord(
-  record: ForkRecord,
-  from: string,
-  oldFolder: string,
-  id: string,
-  folder: string,
-): ForkRecord {
-  const payload = { ...record.payload };
-  if (payload.session_id === from) payload.session_id = id;
-  if (record.type === 'session_meta') payload.id = id;
-  const workspace = (value: Record<string, unknown>): Record<string, unknown> => {
-    const next = { ...value };
-    if (typeof next.cwd === 'string') next.cwd = folder;
-    const relocated = (path: unknown): unknown =>
-      typeof path === 'string' && oldFolder !== '' && (path === oldFolder || path.startsWith(`${oldFolder}/`))
-        ? `${folder}${path.slice(oldFolder.length)}`
-        : path;
-    for (const field of ['workspace_roots', 'runtime_workspace_roots', 'writable_roots']) {
-      const roots = next[field];
-      if (Array.isArray(roots)) next[field] = roots.map(relocated);
-    }
-    const sandbox = object(next.sandbox_policy);
-    if (sandbox !== undefined) next.sandbox_policy = workspace(sandbox);
-    const profile = object(next.permission_profile);
-    const fileSystem = object(profile?.file_system);
-    if (profile !== undefined && fileSystem !== undefined && Array.isArray(fileSystem.entries)) {
-      next.permission_profile = {
-        ...profile,
-        file_system: {
-          ...fileSystem,
-          entries: fileSystem.entries.map(entry => {
-            const one = object(entry);
-            const path = object(one?.path);
-            return one !== undefined && path !== undefined && (path.type === 'path' || path.type === 'glob_pattern')
-              ? { ...one, path: { ...path, value: relocated(path.value) } }
-              : entry;
-          }),
-        },
-      };
-    }
-    return next;
-  };
-  let rewritten = payload;
-  if (record.type === 'session_meta' || record.type === 'turn_context') rewritten = workspace(payload);
-  if (record.type === 'event_msg' && payload.type === 'thread_settings_applied') {
-    const settings = object(payload.thread_settings);
-    if (settings !== undefined) rewritten.thread_settings = workspace(settings);
-  }
-  return { ...record, ...(record.session_id === from ? { session_id: id } : {}), payload: rewritten };
 }

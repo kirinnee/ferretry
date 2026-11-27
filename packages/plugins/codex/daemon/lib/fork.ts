@@ -1,12 +1,12 @@
 import {
   beforeNextTask,
   dependsOnSubagent,
-  forkRecord,
   incompleteCut,
   object,
   startsTurn,
   type ForkRecord,
 } from './fork-records.ts';
+import { forkIdentity } from './fork-identity.ts';
 
 /** What a fork of a rollout needs to know about the conversation it makes. */
 export interface ForkedRollout {
@@ -92,17 +92,18 @@ export function cutRollout(
   const incomplete = incompleteCut(selected);
   if (incomplete !== undefined) return refused(incomplete);
   const neutral = `${forked.marker.slice(0, forked.marker.lastIndexOf('/'))}/forked`;
-  const kept = selected.map(record =>
-    JSON.stringify(
-      forkRecord(
-        record,
-        header.payload.id as string,
-        typeof header.payload.cwd === 'string' ? header.payload.cwd : '',
-        forked.id,
-        forked.folder,
-      ),
-    ),
-  );
+  const kept: string[] = [];
+  for (const record of selected) {
+    const rewritten = forkIdentity(
+      record,
+      header.payload.id as string,
+      typeof header.payload.cwd === 'string' ? header.payload.cwd : '',
+      forked.id,
+      forked.folder,
+    );
+    if (rewritten.kind === 'refused') return refused(rewritten.reason);
+    kept.push(JSON.stringify(rewritten.record));
+  }
   return {
     kind: 'cut',
     text: `${kept.join('\n').split(forked.marker).join(neutral)}\n`,
