@@ -48,7 +48,7 @@ const clock = { nowMs: () => 0, after: (_delay: unknown, _fn: () => void) => () 
 const SERVER_STARTERS = ['new-session', 'start-server', 'attach-session', 'attach'];
 
 describe('terminals #23 forget-ferret-identity (U1)', () => {
-  test('#23 forget-ferret-identity clears FY_SESSION_TOKEN, the board capability and the id, and never fails boot', async () => {
+  test('#23 forget-ferret-identity clears FY_SESSION_TOKEN, the board capability, the id and the mode, and never fails boot', async () => {
     const asked: string[][] = [];
     const tmux: TmuxCommandPort = {
       execute: async arguments_ => {
@@ -60,8 +60,8 @@ describe('terminals #23 forget-ferret-identity (U1)', () => {
 
     const cleared = await forgetFerretIdentity(tmux);
 
-    expect(cleared).toEqual(['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY']);
-    expect(asked.map(command => command.slice(0, 3))).toEqual(Array(3).fill(['set-environment', '-g', '-u']));
+    expect(cleared).toEqual(['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_MODE']);
+    expect(asked.map(command => command.slice(0, 3))).toEqual(Array(4).fill(['set-environment', '-g', '-u']));
   });
 
   test('#23 forget-ferret-identity with no server running clears nothing and asks only to unset names', async () => {
@@ -123,8 +123,8 @@ describe('terminals #23 forget-ferret-identity (U1)', () => {
       stalled: () => (stalled += 1),
     });
 
-    expect(cleared).toEqual(['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_ID']);
-    expect([armed, disarmed, stalled]).toEqual([3, 3, 0]);
+    expect(cleared).toEqual(['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_ID', 'FY_SESSION_MODE']);
+    expect([armed, disarmed, stalled]).toEqual([4, 4, 0]);
   });
 });
 

@@ -2,7 +2,11 @@
 import { describe, expect, it } from 'bun:test';
 import { instantFromEpochMs } from '@ferretry/std';
 import { rememberLater } from '../../../app/features/setup-flow/client-later.ts';
-import { markProjectSetupShown, unfinishedProjectSetup } from '../../../app/features/setup-flow/project-resume.ts';
+import {
+  forgetProjectDraft,
+  markProjectSetupShown,
+  unfinishedProjectSetup,
+} from '../../../app/features/setup-flow/project-resume.ts';
 import { recordClientStep, type LedgerStorage } from '../../../app/lib/index.ts';
 
 const memory = (): LedgerStorage => {
@@ -11,6 +15,31 @@ const memory = (): LedgerStorage => {
 };
 const at = instantFromEpochMs(1_700_000_000_000);
 const A = `fy_daemon_${'a'.repeat(43)}`;
+
+describe('forgetProjectDraft', () => {
+  it("removes this machine's folder draft only, and a storage that cannot remove or refuses is left alone", () => {
+    const map = new Map([
+      [`fy.projects.setup-folders.${A}`, '{}'],
+      ['fy.projects.setup-folders.other', '{}'],
+    ]);
+    const storage: LedgerStorage = {
+      getItem: key => map.get(key) ?? null,
+      setItem: (key, value) => void map.set(key, value),
+      removeItem: key => void map.delete(key),
+    };
+    forgetProjectDraft(storage, A);
+    expect([...map.keys()]).toEqual(['fy.projects.setup-folders.other']);
+    expect(() => forgetProjectDraft(memory(), A)).not.toThrow();
+    expect(() => forgetProjectDraft(undefined, A)).not.toThrow();
+    const refusing: LedgerStorage = {
+      ...storage,
+      removeItem: () => {
+        throw new Error('blocked');
+      },
+    };
+    expect(() => forgetProjectDraft(refusing, A)).not.toThrow();
+  });
+});
 
 describe('unfinishedProjectSetup', () => {
   it('is nothing for a device that was never shown project setup', () => {
