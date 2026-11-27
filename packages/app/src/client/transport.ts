@@ -8,6 +8,8 @@
  * socket factory at the composition root.
  */
 
+import { DaemonReplacedError } from '../session/session-error.ts';
+
 export interface TransportRequest {
   readonly method: string;
   /** The concrete path, parameters already substituted and encoded. */
@@ -167,16 +169,31 @@ export function isDeviceRefusal(error: unknown): boolean {
 }
 
 /**
+ * The close code the CARRIER WALK ends a session with when a direct or tunnel leg OPENED and its daemon answered `4404`
+ * ("this daemon does not answer for that fingerprint"): somebody is at the address this device paired over and it is not
+ * the daemon it paired. Only the internal error class proves this — a peer's numeric code never does. It is not in
+ * the session wire's table. It is NOT a carrier outage: nothing is retried, and the shell says to pair again
+ * (`docs/relay-protocol.md`, "A replaced daemon").
+ */
+export const DAEMON_REPLACED_CLOSE_CODE = 4405;
+
+/** Whether a transport failure is the walk's proof that the daemon at this address is no longer the one paired. */
+export function isDaemonReplaced(error: unknown): boolean {
+  return error instanceof DaemonReplacedError;
+}
+
+/**
  * The session close codes that mean the CARRIER went away rather than the daemon answering (S12): the rendezvous had
  * no daemon on the route (`4404`), the claim timed out or was lost (`4402`, `4410`), the socket stopped answering
  * heartbeats (`4408`), it is full or the hosted relay is off, over capacity or over its bandwidth (`4429`, `4431`-`4433`),
- * its access lease ended (`4441`), or the rendezvous itself failed (`4500`). A parity test pins each to the session
+ * its access lease ended (`4441`), or the rendezvous itself failed (`4500`). An untrusted wire `4405` is also an outage.
+ * The replacement error class alone carries the local verdict. A parity test pins the other codes to the session
  * wire. Anything else — `4426` (the daemon's own "update this app"), the `4400`-class protocol and integrity codes,
  * `4403` — is an ANSWER or a defect, not an outage. `4440` is in neither list: it is carrier-gone only for a session
  * that was serving ({@link isCarrierGone}).
  */
 const CARRIER_GONE_CLOSE_CODES: ReadonlySet<number> = new Set([
-  4402, 4404, 4408, 4410, 4429, 4431, 4432, 4433, 4441, 4500,
+  4402, 4404, 4405, 4408, 4410, 4429, 4431, 4432, 4433, 4441, 4500,
 ]);
 
 /** The close code a daemon ends a session with once it has concluded (`RELAY_SESSION_CONCLUDED_CLOSE_CODE`; a parity test pins them). */
@@ -191,6 +208,7 @@ export const SESSION_CONCLUDED_CLOSE_CODE = 4440;
  * an outage and keeps its own words.
  */
 export function isCarrierGone(error: unknown): boolean {
+  if (isDaemonReplaced(error)) return false;
   if (!(error instanceof Error)) return false;
   if (error.name === 'RelayRequestNotSentError' || error.name === 'MachineDeadlineError') return true;
   if (error.name !== 'RelaySessionError') return false;
@@ -199,3 +217,9 @@ export function isCarrierGone(error: unknown): boolean {
   if (code === SESSION_CONCLUDED_CLOSE_CODE) return endedWhileServing === true;
   return code < 4000 || CARRIER_GONE_CLOSE_CODES.has(code);
 }
+
+/** The machine code a call carries once the walk proved the daemon at this address is not the one paired ({@link DAEMON_REPLACED_CLOSE_CODE}). */
+export const DAEMON_REPLACED_CODE = 'daemon_replaced';
+/** What a call that died that way says; the shell's stop page says the rest. */
+export const DAEMON_REPLACED_SENTENCE =
+  'The machine at this address is not the one this browser paired with. It may have been reinstalled or replaced, so pair this browser with it again.';

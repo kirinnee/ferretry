@@ -35,6 +35,7 @@ import {
   SESSION_MODE_ENV,
   tomlString,
 } from './account/fixed-layer.ts';
+import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
 import { byHarness, isKind } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 import { shellQuote } from './shell-quote.ts';
@@ -725,4 +726,15 @@ export function renderCommandScript(input: CommandRenderInput): string {
     `exec ${target}${flags === '' ? '' : ` ${flags}`} "$@"`,
     '',
   ].join('\n');
+}
+
+/** What an auto launch of `harness` prepares before the harness starts: Claude re-asserts its first-run keys, Codex trusts the folder. */
+export function autonomousPreparation(
+  harness: string,
+  _kit?: RuntimesHarnessKit,
+): {
+  readonly seedFirstRun: boolean;
+  readonly trustLaunchFolder: boolean;
+} {
+  return { seedFirstRun: isKind(harness, 'claude'), trustLaunchFolder: isKind(harness, 'codex') };
 }

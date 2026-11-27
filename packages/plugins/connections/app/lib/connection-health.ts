@@ -111,6 +111,11 @@ export interface CarrierOutage {
   readonly daemonAbsent: boolean;
   /** At least one relay was tried and NO relay socket ever opened. */
   readonly relaysNeverOpened: boolean;
+  /**
+   * A direct or tunnel leg opened and its daemon answered that it is not the one paired: provably another daemon at this
+   * address, not an outage. Absent otherwise — an asleep machine, a refused connection and a relay's `4404` never set it.
+   */
+  readonly identityReplaced?: true;
 }
 
 /** What the carrier router tells the health model. It never reads anything back. */
@@ -262,6 +267,12 @@ export class DaemonConnectionHealth implements ConnectionHealth, ConnectionHealt
   }
 
   outage(daemonId: DaemonId, outage: CarrierOutage): void {
+    // PROVEN another daemon: no retry changes that, so the loop stops after this one failure and the shell offers to pair
+    // again. Not a 'reconnecting' outage: a machine that will answer when it wakes is never this.
+    if (outage.identityReplaced === true) {
+      this.settled(daemonId);
+      return;
+    }
     const health = this.#health(daemonId);
     const failures = foldFailures(outage.failures);
     const cause = likelyCause(outage, this.environment.isOnline());

@@ -139,9 +139,11 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
       if (taken === undefined) setLink(held => held ?? { arrival: NO_LINK, nonce: 0 });
       else setLink(held => ({ arrival: arrivalOf(location(), taken), nonce: (held?.nonce ?? 0) + 1 }));
     }, [fragment.arrival, take, location]);
-    // `/pair?refused=<machine>`: that machine no longer accepts this browser (it was removed, or went unused too long).
-    // A machine id is not a secret; the code never rides the query.
-    const [refusedBy, setRefusedBy] = useState<string | null>(() => new URL(location()).searchParams.get('refused'));
+    // The query names a non-secret machine and WHY it needs pairing; a code never rides it.
+    const [recovery] = useState(() => new URL(location()).searchParams);
+    const [refusedBy, setRefusedBy] = useState<string | null>(
+      () => recovery.get('replaced') ?? recovery.get('refused'),
+    );
     const scanHost = useMemo(() => (environment.scanHost ?? (() => browserQrScan(environment.loadDecoder)))(), []);
     const snapshot = useSyncExternalStore(ports.daemons.subscribe, ports.daemons.snapshot);
     // Each row is named by the same helper every other list uses, so same-named twins read apart here too.
@@ -169,6 +171,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
       <>
         {refused === undefined ? null : (
           <DeviceRefusedNotice
+            reason={recovery.has('replaced') ? 'replaced' : 'refused'}
             machineName={distinctDaemonName(refused, snapshot.daemons)}
             onPairAgain={() => setRefusedBy(null)}
           />

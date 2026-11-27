@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { DaemonReplacedError } from '../../../src/session/session-error.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { RelaySessionError } from '../../../src/session/session-client.ts';
 import { RELAY_CLOSE_CODES } from '../../../src/session/wire/index.ts';
@@ -58,6 +59,17 @@ describe('which end state a machine is in', () => {
       },
     });
     expect(stopOf(runtime, 'd1')).toEqual({ kind: 'refused', machine: 'laptop' });
+    expect(runtime.daemons.get('d1')).toBeDefined();
+  });
+
+  test('C-80 a session the walk ended with 4405 is "replaced", the pairing is untouched, and it is not "refused"', async () => {
+    const runtime = await runtimeOf({
+      everything: () => {
+        throw new DaemonReplacedError('replaced');
+      },
+    });
+    expect(stopOf(runtime, 'd1')).toEqual({ kind: 'replaced', machine: 'laptop' });
+    expect(runtime.isReplaced('d1')).toBe(true);
     expect(runtime.daemons.get('d1')).toBeDefined();
   });
 
@@ -159,6 +171,15 @@ describe('the words of each page', () => {
     expect(stop.why).toContain('removed');
     expect(stop.why).toContain('unused for too long');
     expect(stop.primary).toEqual({ action: 'pair-again', label: 'Pair again' });
+  });
+
+  test('the replaced page says the machine was reinstalled or replaced, offers Pair again, and shows no number in its headline', () => {
+    const stop = describeStop({ kind: 'replaced', machine: 'laptop' });
+    expect(stop.headline).toBe('laptop was reinstalled or replaced');
+    expect(stop.why).toContain('not the same laptop any more');
+    expect(stop.primary).toEqual({ action: 'pair-again', label: 'Pair again' });
+    expect(stop.headline).not.toMatch(/\d/u);
+    expect(stop.why).not.toContain('removed');
   });
 
   test('the no-key sentence fits all three causes: key gone, key unreadable, no route to the machine', () => {

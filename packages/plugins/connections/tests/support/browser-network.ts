@@ -30,7 +30,7 @@ export type ScriptedHost =
     }
   | { readonly kind: 'dead' }
   | { readonly kind: 'silent' }
-  | { readonly kind: 'absent'; readonly code: number; readonly reason?: string }
+  | { readonly kind: 'absent'; readonly code: number; readonly reason?: string; readonly closeOnly?: boolean }
   /** Opens like a rendezvous, says `ready`, answers each frame with `answer`'s reply, and hangs up on one it cannot. */
   | { readonly kind: 'impostor'; readonly answer: (bytes: Uint8Array) => Promise<Uint8Array | undefined> };
 
@@ -104,7 +104,7 @@ export class BrowserNetwork {
       socket.onopen?.();
       if (script.kind === 'absent') {
         // The real Worker explains FIRST (`refusalUpgrade`: a control `error` frame on the rendezvous id), then closes.
-        if (script.code >= 4000) {
+        if (script.code >= 4000 && script.closeOnly !== true) {
           deliver(
             encodeFrame({
               kind: FRAME_KINDS.control,
