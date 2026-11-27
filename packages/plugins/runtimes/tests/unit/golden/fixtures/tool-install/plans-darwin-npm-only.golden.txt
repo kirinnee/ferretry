@@ -1,0 +1,34 @@
+[
+  {
+    "harness": "claude"
+    "installed": false
+    "plan":
+      "args":
+        [
+          "install"
+          "-g"
+          "@anthropic-ai/claude-code"
+        ]
+      "command": "npm install -g @anthropic-ai/claude-code"
+      "executable": "/opt/x/npm"
+      "harness": "claude"
+      "kind": "runnable"
+      "manager": "npm"
+  }
+  {
+    "harness": "codex"
+    "installed": false
+    "plan":
+      "args":
+        [
+          "install"
+          "-g"
+          "@openai/codex"
+        ]
+      "command": "npm install -g @openai/codex"
+      "executable": "/opt/x/npm"
+      "harness": "codex"
+      "kind": "runnable"
+      "manager": "npm"
+  }
+]

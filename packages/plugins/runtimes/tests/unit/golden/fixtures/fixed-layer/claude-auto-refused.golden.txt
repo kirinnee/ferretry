@@ -1,0 +1,4 @@
+"ok": false
+"refusal":
+  "kind": "claude-auto-mode-unsupported"
+  "message": "Claude Code on this machine does not accept Auto mode (--permission-mode auto), so Ferretry won't launch this agent runtime. Update Claude Code, or switch this machine's Agent permissions to Skip all permission checks."

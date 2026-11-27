@@ -1,0 +1,55 @@
+"everything on PATH":
+  "calls":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+      "some-mcp-server"
+    ]
+  "found":
+    "apt-get": "/usr/bin/apt-get"
+    "brew": "/usr/bin/brew"
+    "claude": "/usr/bin/claude"
+    "codex": "/usr/bin/codex"
+    "npm": "/usr/bin/npm"
+    "some-mcp-server": "/usr/bin/some-mcp-server"
+"harnesses only in the install folders":
+  "calls":
+    [
+      "claude"
+      "claude in /home/person/.local/bin:/home/person/.npm-global/bin:/home/person/.bun/bin:/home/person/.nix-profile/bin:/home/person/.local/state/nix/profile/bin:/usr/local/bin"
+      "codex"
+      "codex in /home/person/.local/bin:/home/person/.npm-global/bin:/home/person/.bun/bin:/home/person/.nix-profile/bin:/home/person/.local/state/nix/profile/bin:/usr/local/bin"
+      "npm"
+      "brew"
+      "apt-get"
+      "some-mcp-server"
+    ]
+  "found":
+    "apt-get": null
+    "brew": null
+    "claude": "/install/claude"
+    "codex": "/install/codex"
+    "npm": null
+    "some-mcp-server": null
+"nothing found":
+  "calls":
+    [
+      "claude"
+      "claude in /home/person/.local/bin:/home/person/.npm-global/bin:/home/person/.bun/bin:/home/person/.nix-profile/bin:/home/person/.local/state/nix/profile/bin:/usr/local/bin"
+      "codex"
+      "codex in /home/person/.local/bin:/home/person/.npm-global/bin:/home/person/.bun/bin:/home/person/.nix-profile/bin:/home/person/.local/state/nix/profile/bin:/usr/local/bin"
+      "npm"
+      "brew"
+      "apt-get"
+      "some-mcp-server"
+    ]
+  "found":
+    "apt-get": null
+    "brew": null
+    "claude": null
+    "codex": null
+    "npm": null
+    "some-mcp-server": null

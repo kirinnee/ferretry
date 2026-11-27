@@ -1,0 +1,12 @@
+"frontmatter":
+  [
+    "name"
+    "allowed-tools"
+    "model"
+  ]
+"sse":
+  "https://a.example.test/SSE/": true
+  "https://a.example.test/mcp": false
+  "https://a.example.test/sse": true
+  "https://a.example.test/sse/x": false
+"thirdKey": "threw": "opencode is not supported here"

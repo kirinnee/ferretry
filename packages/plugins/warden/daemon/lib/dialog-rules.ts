@@ -19,6 +19,7 @@
  */
 import type { FormKey } from '@ferretry/core-ferrets/contract';
 import { type DialogRule, isGrantLabel } from '../../contract/dialog-rules.ts';
+import type { ClearFrame } from './dialog-clear.ts';
 import type { ClearableDialogWords } from './dialog-words.ts';
 
 /** How many of the frame's last lines a screen may sit in. */
@@ -40,6 +41,7 @@ export function ruleFor(dialog: ClearableDialogWords, rules: readonly DialogRule
     rule =>
       rule.kind === dialog.kind &&
       dialog.harness === rule.harness &&
+      (rule.rows !== 'none' || dialog.options.length === 0) &&
       matches(rule.title, dialog.title) &&
       matches(rule.body, (dialog.body ?? '').split('\n')[0] ?? ''),
   );
@@ -54,9 +56,19 @@ const tail = (frame: string): readonly string[] =>
     .filter(line => line !== '')
     .slice(-FRAME_WINDOW_LINES);
 
-/** Whether the live frame still shows what the rule names: its title line and its fixed printed phrase. */
-export function frameShows(rule: DialogRule, dialog: ClearableDialogWords, frame: string): boolean {
-  const lines = tail(frame);
+/**
+ * Whether the live frame still shows what the rule names. A rule with no rows (a notice) is read from the RUNNER's own
+ * reading of this very frame (`frame.dialog`: title, row count, footer) and nowhere else: the Warden keeps no screen
+ * parse of its own, so it can never see a notice where the reader sees a dialog with rows.
+ */
+export function frameShows(rule: DialogRule, dialog: ClearableDialogWords, frame: ClearFrame): boolean {
+  if (rule.rows === 'none') {
+    const read = frame.dialog;
+    return (
+      read !== undefined && read.options === 0 && matches(rule.title, read.title) && matches(rule.text, read.footer)
+    );
+  }
+  const lines = tail(frame.visible);
   if (rule.text !== undefined && !lines.some(line => matches(rule.text, line))) return false;
   if (rule.text === undefined && !lines.some(line => line.includes(dialog.title.slice(0, 40).trim()))) return false;
   return true;

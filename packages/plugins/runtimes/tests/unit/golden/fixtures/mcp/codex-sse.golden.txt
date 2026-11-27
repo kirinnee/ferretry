@@ -1,0 +1,1 @@
+"golden": "url": "https://feed.example.test/sse"

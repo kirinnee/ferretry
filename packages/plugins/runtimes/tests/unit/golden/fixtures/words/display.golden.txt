@@ -1,0 +1,19 @@
+"models":
+  [
+    "Golden 1"
+    "other"
+  ]
+"profiles":
+  "claude-default": "Your Claude setup"
+  "claude-default-2": "Your Claude setup (2)"
+  "codex-starter": "Codex starter"
+  "ferretry-claude-code": "Ferretry standard for Claude"
+  "ferretry-claude-pinned-opus-4": "Ferretry standard for Claude, pinned to opus-4"
+  "ferretry-codex": "Ferretry standard for Codex"
+  "mine": "mine"
+"terminal":
+  [
+    "Uses your terminal sign-in"
+    null
+    null
+  ]

@@ -17,6 +17,9 @@
  *      prompt), because the recorded words can name a screen that has since been replaced by another kind;
  *   2. plans the keys. No plan (a row that grants, a cursor it cannot read, no such row) leaves the dialog to the notice;
  *   3. moves the cursor, reads again and checks it is on the row — and only then confirms. Esc needs no cursor;
+ *      EVERY key is guarded in the write path itself: the port re-reads the pane immediately before it types and sends the
+ *      key only if that frame still passes the same test as step 1 (a Claude composer swapped in after the look must not
+ *      get an Esc, which interrupts its work). A frame that no longer passes is a key not sent, and the notice's;
  *   4. writes ONE journal line (ferret, harness, kind, rule id): no agenda card, no pane text.
  *
  * The same dialog on the same ferret is never keyed twice. If the next look still sees it ON SCREEN, the keys failed and
@@ -47,6 +50,8 @@ export interface ClearFrame {
   readonly visible: string;
   /** The runner's own reader says which kind blocks the frame (its closed code), or that nothing does. */
   readonly blocking: 'permission' | 'dialog' | false;
+  /** What the runner's reader read of THIS frame (title, row count, footer) when it is a dialog: the only parse a notice rule trusts. */
+  readonly dialog?: { readonly title: string; readonly options: number; readonly footer: string } | undefined;
 }
 
 /**
@@ -66,8 +71,11 @@ export interface DialogClearPorts {
   words(sessionId: string): Promise<ClearableDialogWords | undefined>;
   /** The ferret's live frame, or `undefined` when it cannot be read (gone, held, no pane). */
   frame(sessionId: string): Promise<ClearFrame | undefined>;
-  /** Presses one key; `false` when nothing was pressed. */
-  key(sessionId: string, key: FormKey): Promise<boolean>;
+  /**
+   * Presses one key; `false` when nothing was pressed. The port reads the live frame immediately before it types and
+   * presses ONLY if `stillOn` accepts that frame, so the screen a rule was planned for is the one the key lands on.
+   */
+  key(sessionId: string, key: FormKey, stillOn: (frame: ClearFrame) => boolean): Promise<boolean>;
   /** Types a message to the ferret as its next turn. Never awaited, never fails the clear: it may wait for the pane. */
   nudge(sessionId: string, text: string): void;
   sleep(ms: number): Promise<void>;
@@ -119,7 +127,7 @@ export class WardenDialogClear {
           const frame = await this.ports.frame(sessionId);
           const reported = memory[sessionId]?.[1] === FAILED;
           next[sessionId] = reported ? [dialog.id, FAILED] : [dialog.id];
-          if (frame !== undefined && blocksAs(rule, dialog, frame) && frameShows(rule, dialog, frame.visible)) {
+          if (frame !== undefined && blocksAs(rule, dialog, frame) && frameShows(rule, dialog, frame)) {
             if (!reported) {
               next[sessionId] = [dialog.id, FAILED];
               this.ports.record('fleet.warden_dialog_clear_failed', {
@@ -155,8 +163,8 @@ export class WardenDialogClear {
     rule: DialogRule,
   ): Promise<'sent' | 'failed' | 'stale'> {
     const frame = await this.ports.frame(sessionId);
-    if (frame === undefined || !blocksAs(rule, dialog, frame) || !frameShows(rule, dialog, frame.visible))
-      return 'stale';
+    if (frame === undefined || !blocksAs(rule, dialog, frame) || !frameShows(rule, dialog, frame)) return 'stale';
+    const stillOn = (live: ClearFrame): boolean => blocksAs(rule, dialog, live) && frameShows(rule, dialog, live);
     const plan = planKeys(rule, dialog, frame.visible);
     if (typeof plan === 'string') {
       this.ports.record('fleet.warden_dialog_clear_skipped', {
@@ -167,7 +175,7 @@ export class WardenDialogClear {
       });
       return 'failed';
     }
-    for (const move of plan.moves) if (!(await this.ports.key(sessionId, move))) return 'failed';
+    for (const move of plan.moves) if (!(await this.ports.key(sessionId, move, stillOn))) return 'failed';
     if (plan.row !== undefined) {
       await this.ports.sleep(CURSOR_SETTLE_MS);
       const after = await this.ports.frame(sessionId);
@@ -175,7 +183,9 @@ export class WardenDialogClear {
       if (after === undefined || !blocksAs(rule, dialog, after) || cursorRow(after.visible, dialog) !== plan.row)
         return 'failed';
     }
-    if (!(await this.ports.key(sessionId, plan.confirm))) return 'failed';
+    const onRow = (live: ClearFrame): boolean =>
+      stillOn(live) && (plan.row === undefined || cursorRow(live.visible, dialog) === plan.row);
+    if (!(await this.ports.key(sessionId, plan.confirm, onRow))) return 'failed';
     const nudge = this.ports.nudgeOf?.(rule.id);
     if (nudge !== undefined) this.ports.nudge(sessionId, nudge);
     this.ports.record('fleet.warden_dialog_autocleared', {

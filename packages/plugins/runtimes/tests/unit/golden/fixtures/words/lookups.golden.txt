@@ -1,0 +1,103 @@
+"sentence": "opencode is not supported here"
+"surfaceKeys":
+  [
+    "claude-code"
+    "codex"
+  ]
+"words":
+  "":
+    "byHarness": "threw": " is not supported here"
+    "isKindClaude": false
+    "isKindCodex": false
+    "isSupportedKind": false
+    "kindOfKey": "threw": " is not supported here"
+    "schema":
+      [
+        " is not supported here"
+      ]
+    "supportedKindOfKey": null
+    "surfaceName": ""
+    "surfaceSupported": false
+    "surfaceWord": ""
+    "surfaceWords": null
+  "Claude":
+    "byHarness": "threw": "Claude is not supported here"
+    "isKindClaude": false
+    "isKindCodex": false
+    "isSupportedKind": false
+    "kindOfKey": "threw": "Claude is not supported here"
+    "schema":
+      [
+        "Claude is not supported here"
+      ]
+    "supportedKindOfKey": null
+    "surfaceName": "Claude"
+    "surfaceSupported": false
+    "surfaceWord": "Claude"
+    "surfaceWords": null
+  "claude":
+    "byHarness": "value": "the Claude case"
+    "isKindClaude": true
+    "isKindCodex": false
+    "isSupportedKind": true
+    "kindOfKey": "threw": "claude is not supported here"
+    "schema": "accepted"
+    "supportedKindOfKey": null
+    "surfaceName": "claude"
+    "surfaceSupported": false
+    "surfaceWord": "claude"
+    "surfaceWords": null
+  "claude-code":
+    "byHarness": "value": "the Claude case"
+    "isKindClaude": true
+    "isKindCodex": false
+    "isSupportedKind": false
+    "kindOfKey": "value": "claude"
+    "schema":
+      [
+        "claude-code is not supported here"
+      ]
+    "supportedKindOfKey": "claude"
+    "surfaceName": "Claude Code"
+    "surfaceSupported": true
+    "surfaceWord": "Claude"
+    "surfaceWords":
+      "catalogHalf": "claude"
+      "commandWord": "claude"
+      "hostFolder": ".claude"
+      "name": "Claude Code"
+      "picker": "allowlist"
+      "short": "Claude"
+  "codex":
+    "byHarness": "value": "the Codex case"
+    "isKindClaude": false
+    "isKindCodex": true
+    "isSupportedKind": true
+    "kindOfKey": "value": "codex"
+    "schema": "accepted"
+    "supportedKindOfKey": "codex"
+    "surfaceName": "Codex"
+    "surfaceSupported": true
+    "surfaceWord": "Codex"
+    "surfaceWords":
+      "catalogHalf": "codex"
+      "commandWord": "codex"
+      "hostFolder": ".codex"
+      "name": "Codex"
+      "picker": "two-step"
+      "short": "Codex"
+  "opencode":
+    "byHarness": "threw": "opencode is not supported here"
+    "isKindClaude": false
+    "isKindCodex": false
+    "isSupportedKind": false
+    "kindOfKey": "threw": "opencode is not supported here"
+    "schema":
+      [
+        "opencode is not supported here"
+      ]
+    "supportedKindOfKey": null
+    "surfaceName": "opencode"
+    "surfaceSupported": false
+    "surfaceWord": "opencode"
+    "surfaceWords": null

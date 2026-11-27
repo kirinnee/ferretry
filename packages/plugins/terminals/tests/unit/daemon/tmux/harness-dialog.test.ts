@@ -12,6 +12,7 @@ import {
   dialogCursorMoves,
   paneBlockingDialog,
   parseHarnessDialog,
+  readDialogFrame,
 } from '../../../../daemon/lib/tmux/harness-dialog.ts';
 
 /**
@@ -274,6 +275,95 @@ const EXPECTED: Readonly<Record<string, Shape>> = {
     // Opening restricted changes no saved trust, so neither row grants any.
     options: [opt(1, 'Open restricted'), opt(2, 'Back to Agent Command Center')],
     escape: 'back',
+    selected: 1,
+  },
+  'claude-2.1.327-directory-trust': {
+    harness: 'claude',
+    kind: 'directory-trust',
+    title: 'Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open',
+    body: [
+      "source project, or work from your team). If not, take a moment to review what's in this folder first.",
+      "Claude Code'll be able to read, edit, and execute files here.",
+      'Security guide',
+    ].join('\n'),
+    options: [opt(1, 'No, exit'), opt(2, 'Yes, I trust this folder', true)],
+    escape: 'cancel',
+    selected: 1,
+  },
+  'claude-2.1.327-api-key': {
+    harness: 'claude',
+    kind: 'other',
+    title: 'Detected a custom API key in your environment',
+    body: 'ANTHROPIC_API_KEY: sk-ant-...FAKEFAKEFAKEFAKEFAKE\nDo you want to use this API key?',
+    options: [opt(1, 'Yes'), opt(2, 'No (recommended)')],
+    escape: 'cancel',
+    selected: 2,
+  },
+  'claude-2.1.327-bypass-warning': {
+    harness: 'claude',
+    kind: 'other',
+    title: 'WARNING: Claude Code running in Bypass Permissions mode',
+    body: [
+      'In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially',
+      'dangerous commands.',
+      'This mode should only be used in a sandboxed container/VM that has restricted internet access and can',
+      'easily be restored if damaged.',
+      'By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.',
+      'https://code.claude.com/docs/en/security',
+    ].join('\n'),
+    options: [opt(1, 'No, exit'), opt(2, 'Yes, I accept')],
+    escape: 'cancel',
+    selected: 1,
+  },
+  // A notice with no rows (drawn by `--chrome`): nothing to select, answered by Esc alone.
+  'claude-2.1.327-chrome-notice': {
+    harness: 'claude',
+    kind: 'other',
+    title: 'Claude in Chrome',
+    body: [
+      'Claude can use Chrome through its extension: open sites, fill forms, take screenshots, record GIFs, and',
+      'read console logs and network requests.',
+      'Requires the Chrome extension. Get started at https://claude.ai/chrome',
+      'Site-level permissions are inherited from the Chrome extension. Manage permissions in the Chrome extension',
+      'settings to control which sites Claude can browse, click, and type on.',
+      'For more info, use /chrome or visit https://code.claude.com/docs/en/chrome',
+    ].join('\n'),
+    options: [],
+    escape: 'close',
+  },
+  'codex-0.170.0-sign-in': {
+    harness: 'codex',
+    kind: 'sign-in',
+    title: SIGN_IN_TITLE,
+    body: 'Choose how you want to use Codex.',
+    options: [
+      opt(1, 'Sign in with ChatGPT', false, 'Usage included with Plus, Pro, Business, and Enterprise plans'),
+      opt(2, 'Sign in with Device Code', false, 'Sign in from another device with a one-time code'),
+      opt(3, 'Sign in another way', false, 'Use an API key or another provider'),
+    ],
+    selected: 1,
+  },
+  'codex-0.170.0-directory-trust': {
+    harness: 'codex',
+    kind: 'directory-trust',
+    title: 'Folder access',
+    body: [
+      '/home/dev/project',
+      'Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. Folder',
+      'settings can run code automatically, even without a model request. Continue only if you trust these files.',
+      'Your trust decision will be saved.',
+    ].join('\n'),
+    options: [opt(1, 'Trust and continue', true), opt(2, 'Back to Agent Command Center')],
+    escape: 'back',
+    selected: 1,
+  },
+  'codex-0.170.0-hooks-review': {
+    harness: 'codex',
+    kind: 'hooks-review',
+    title: 'Hooks need review',
+    body: HOOKS_BODY('1 hook is new or changed.'),
+    options: HOOKS_OPTIONS,
+    escape: 'skip',
     selected: 1,
   },
 };
@@ -955,5 +1045,78 @@ describe('the usage-limit dialog', () => {
 
     // Assert
     should(dialog?.kind).not.equal('usage-limit');
+  });
+});
+
+describe('parseHarnessDialog — a notice with no rows to choose (Claude in Chrome, 2.1.327)', () => {
+  const EDITOR_FRAME = [RULE, '  Edit settings', '', '  ❯', '', '  Enter to continue · Esc to close'].join('\n');
+  const HELP_FRAME = [
+    RULE,
+    '  Keyboard help',
+    '',
+    '  Press / for commands.',
+    '❯',
+    '',
+    '  Enter to continue · Esc to close',
+  ].join('\n');
+  const SPOOF_FRAME = [
+    RULE,
+    '  Claude in Chrome',
+    '',
+    '  Some prose.',
+    '  ❯',
+    '',
+    '  Enter to continue · Esc to close',
+  ].join('\n');
+
+  it('reads nothing from an editor or help frame that only borrows the footer (a bare composer chevron is no notice)', () => {
+    should([EDITOR_FRAME, HELP_FRAME, SPOOF_FRAME].map(frame => parseHarnessDialog(frame))).deepEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+  it('reads it with no options and Esc as the way out, and the idle composer as nothing', () => {
+    const idle = ['● Done.', '', RULE, '❯ ', RULE, '  Enter to continue · Esc to close'].join('\n');
+
+    should(parseHarnessDialog(fixture('claude-2.1.327-chrome-notice'))).containEql({
+      kind: 'other',
+      title: 'Claude in Chrome',
+      options: [],
+      escape: 'close',
+    });
+    should(parseHarnessDialog(idle)).be.undefined();
+  });
+});
+
+describe('the reading a caller acts on for one frame (readDialogFrame)', () => {
+  const FOOTER = '  Enter to continue · Esc to close';
+  // A separator inside a selected row's details: a line scan loses the row; the reader keeps it.
+  const trap = [
+    RULE,
+    '  Other dialog',
+    '',
+    '  ❯ 1. Keep this dialog open',
+    '       ---',
+    '       Claude in Chrome',
+    '',
+    FOOTER,
+  ].join('\n');
+
+  it('gives the title, the row count and the footer line of the very frame', () => {
+    should(readDialogFrame(trap)).eql({
+      title: 'Other dialog',
+      options: 1,
+      footer: 'Enter to continue · Esc to close',
+    });
+    should(readDialogFrame(fixture('claude-2.1.327-chrome-notice'))).eql({
+      title: 'Claude in Chrome',
+      options: 0,
+      footer: 'Enter to continue · Esc to close',
+    });
+  });
+
+  it('reads nothing from a frame that is no dialog', () => {
+    should(readDialogFrame(['● Done.', '', RULE, '❯ ', RULE, '  esc to interrupt'].join('\n'))).be.undefined();
   });
 });

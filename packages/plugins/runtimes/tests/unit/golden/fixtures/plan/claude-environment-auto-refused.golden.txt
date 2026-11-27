@@ -1,0 +1,321 @@
+"ids":
+  "runtimes":
+    "claude-golden":
+      "formerNames": []
+      "id": "00000000-0000-4000-8000-00000000000a"
+  "version": 1
+"manifest":
+  "accounts":
+    [
+      {
+        "autoRefusal": "Claude Code on this machine does not accept Auto mode (--permission-mode auto), so Ferretry won't launch this agent runtime. Update Claude Code, or switch this machine's Agent permissions to Skip all permission checks."
+        "available": true
+        "defaultModel": "claude-opus-5-5"
+        "displayName": "claude-golden"
+        "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+        "id": "00000000-0000-4000-8000-00000000000a"
+        "kind": "claude"
+        "launchEnv": "ANTHROPIC_BASE_URL": "https://llm.example.test"
+        "mode": "auto"
+        "models":
+          [
+            {
+              "available": true
+              "id": "claude-opus-5-5"
+            }
+            {
+              "available": true
+              "id": "claude-sonnet-5-5"
+            }
+          ]
+        "secretEnv":
+          "ANTHROPIC_API_KEY": "${secret:GOLDEN_KEY}"
+          "FILES_TOKEN": "${secret:GOLDEN_FILES}"
+          "FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN": "${secret:MCP_NOTES_7866F28AAAFD7E54_ACCESS}"
+        "unavailableReason": null
+        "wrapper": "/fy/fleet/bin/claude-golden"
+      }
+    ]
+  "generatedAt": "2026-10-13T08:00:00.000Z"
+  "runtimes":
+    [
+      {
+        "credential": "claude-environment"
+        "defaultModel": "claude-opus-5-5"
+        "harness": "claude"
+        "id": "00000000-0000-4000-8000-00000000000a"
+        "models":
+          [
+            {
+              "available": true
+              "id": "claude-opus-5-5"
+            }
+            {
+              "available": true
+              "id": "claude-sonnet-5-5"
+            }
+          ]
+        "name": "claude-golden"
+        "profile": "default"
+        "wrapper": "/fy/fleet/bin/claude-golden"
+      }
+    ]
+  "version": 1
+"manifestPath": "/fy/fleet/manifest.json"
+"operations":
+  [
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/bin"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes"
+    }
+    {
+      "content":
+        <<<
+          {
+            "version": 1,
+            "runtimes": {
+              "claude-golden": {
+                "id": "00000000-0000-4000-8000-00000000000a",
+                "formerNames": []
+              }
+            }
+          }
+
+        >>>
+      "kind": "file"
+      "mode": 384
+      "path": "/fy/fleet/ids.json"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy"
+    }
+    {
+      "keep":
+        [
+          "materialised.json"
+        ]
+      "kind": "prune-directory"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy"
+      "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+      "recordedAs": ".fy"
+    }
+    {
+      "keep": []
+      "kind": "prune-directory"
+      "only":
+        [
+          "hooks"
+        ]
+      "ownLinksUnder": "/fy/fleet/assets"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+      "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+    }
+    {
+      "kind": "symlink"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/CLAUDE.md"
+      "source": "/fy/fleet/assets/components/instructions/main.md"
+      "unlessUnrecorded":
+        "key": "CLAUDE.md"
+        "ownLinksUnder": "/fy/fleet/assets"
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills"
+    }
+    {
+      "kind": "symlink"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills/review"
+      "source": "/fy/fleet/assets/skills/review"
+      "unlessUnrecorded":
+        "key": "skills/review"
+        "ownLinksUnder": "/fy/fleet/assets"
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+    }
+    {
+      "keep":
+        [
+          "review"
+        ]
+      "kind": "prune-directory"
+      "ownLinksUnder": "/fy/fleet/assets/skills"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills"
+      "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+      "recordedAs": "skills"
+    }
+    {
+      "format": "json"
+      "kind": "settings"
+      "layers":
+        [
+          {
+            "from": "inline"
+            "settings":
+              "statusLine":
+                "command": "'fy' statusline"
+                "type": "command"
+          }
+        ]
+      "mode": 384
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json"
+      "preserveExisting": true
+    }
+    {
+      "format": "json"
+      "kind": "settings"
+      "layers":
+        [
+          {
+            "from": "inline"
+            "settings":
+              "mcpServers":
+                "docs":
+                  "type": "http"
+                  "url": "https://docs.example.test/mcp"
+                "feed":
+                  "type": "sse"
+                  "url": "https://feed.example.test/sse"
+                "files":
+                  "args":
+                    [
+                      "server-files"
+                      "--root"
+                      "/srv/files"
+                    ]
+                  "command": "npx"
+                  "env":
+                    "FILES_MODE": "read"
+                    "FILES_TOKEN": "${FILES_TOKEN}"
+                  "type": "stdio"
+                "notes":
+                  "headers": "Authorization": "Bearer ${FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN}"
+                  "type": "http"
+                  "url": "https://notes.example.test/mcp"
+          }
+        ]
+      "mode": 384
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json"
+      "preserveExisting": true
+      "priorMembers": "mcpServers": {}
+      "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+      "replaceKeys":
+        [
+          "mcpServers"
+        ]
+    }
+    {
+      "content":
+        <<<
+          {"version":1,"entries":["CLAUDE.md","skills/review"]}
+
+        >>>
+      "kind": "file"
+      "mode": 384
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+      "recordsMaterialised": true
+    }
+    {
+      "content":
+        <<<
+          #!/bin/sh
+          # ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten
+          # runtime claude-golden 00000000-0000-4000-8000-00000000000a (claude)
+
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then printf '%s\n' 'ferretry: ANTHROPIC_API_KEY is not set — this account takes it from Ferretry'\''s secret store (secret GOLDEN_KEY). Launch it through the daemon, or run: fy secret set GOLDEN_KEY' >&2; exit 1; fi
+          if [ -z "${FILES_TOKEN:-}" ]; then printf '%s\n' 'ferretry: FILES_TOKEN is not set — this account takes it from Ferretry'\''s secret store (secret GOLDEN_FILES). Launch it through the daemon, or run: fy secret set GOLDEN_FILES' >&2; exit 1; fi
+          if [ -z "${FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN:-}" ]; then printf '%s\n' 'ferretry: FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN is not set — this account takes it from Ferretry'\''s secret store (secret MCP_NOTES_7866F28AAAFD7E54_ACCESS). Launch it through the daemon, or run: fy secret set MCP_NOTES_7866F28AAAFD7E54_ACCESS' >&2; exit 1; fi
+
+          export CLAUDE_CONFIG_DIR='/fy/fleet/homes/00000000-0000-4000-8000-00000000000a'
+          export ANTHROPIC_BASE_URL='https://llm.example.test'
+          export FY_CREDENTIAL='claude-environment'
+          export FY_HOME='/fy'
+          export FY_RUNTIME='claude-golden'
+
+          # A ferret started in auto mode cannot be launched on this machine; the interactive launch below is unaffected.
+          if [ "${FY_SESSION_MODE:-}" = auto ]; then
+            echo 'ferretry: claude-golden cannot start an auto ferret: Claude Code on this machine does not accept Auto mode (--permission-mode auto), so Ferretry won'\''t launch this agent runtime. Update Claude Code, or switch this machine'\''s Agent permissions to Skip all permission checks.' >&2
+            exit 1
+          fi
+
+          # One live writer per conversation: claim the one these arguments resume before handing this pid to
+          # the harness. Only a refusal (exit 75: another session is writing it) stops the launch; any other failure warns and launches anyway.
+          _fy_claim=0
+          for _fy_arg in "$@"; do
+            case "$_fy_arg" in --resume|--resume=*|-r|--session-id|--session-id=*) _fy_claim=1 ;; esac
+          done
+          if [ "$_fy_claim" = 1 ]; then
+            if command -v '/opt/ferretry/bin/fy' >/dev/null 2>&1; then
+              '/opt/ferretry/bin/fy' history claim --harness claude --pid $$ --from-arguments -- "$@"
+              _fy_status=$?
+              if [ "$_fy_status" -eq 75 ]; then exit 75; fi
+              if [ "$_fy_status" -ne 0 ]; then
+                if [ -n "${FY_SESSION_ID:-}" ]; then
+                  echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so not launching: this session must hold its conversation before it writes" >&2
+                  exit 75
+                fi
+                echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so launching anyway" >&2
+              fi
+            else
+              if [ -n "${FY_SESSION_ID:-}" ]; then
+                echo "ferretry: fy was not found, so this session could not check whether another session is writing this conversation; not launching" >&2
+                exit 75
+              fi
+              echo "ferretry: fy was not found, so this launch did not check whether another session is writing this conversation; launching anyway" >&2
+            fi
+          fi
+
+          exec '/opt/harness/bin/claude' '--model' 'claude-opus-5-5' "$@"
+
+        >>>
+      "kind": "file"
+      "mode": 493
+      "path": "/fy/fleet/bin/claude-golden"
+    }
+    {
+      "keep":
+        [
+          "claude-golden"
+        ]
+      "kind": "prune"
+      "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten"
+      "path": "/fy/fleet/bin"
+    }
+  ]
+"sharedHistoryRequests":
+  [
+    {
+      "homes":
+        [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a"
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      "kind": "claude"
+      "poolRoot": "/fy/fleet/shared"
+    }
+    {
+      "homes": []
+      "kind": "codex"
+      "poolRoot": "/fy/fleet/shared"
+    }
+  ]

@@ -1,0 +1,99 @@
+"plan":
+  "components": []
+  "credentials": {}
+  "duplicates": []
+  "files": []
+  "imported": []
+  "loginEnvs": []
+  "notes":
+    [
+      {
+        "harness": "claude"
+        "text": "Claude Code isn't installed · Install later in Settings."
+      }
+      {
+        "harness": "codex"
+        "text": "Codex isn't installed · Install later in Settings."
+      }
+    ]
+  "preview":
+    "harnesses":
+      [
+        {
+          "account":
+            "reason": "Logins has no unambiguous host sign-in fact for this harness"
+            "state": "unknown"
+          "codexProfiles": []
+          "harness": "claude"
+          "installed": false
+          "mcpServers": []
+          "missingCommands": []
+          "problems": []
+          "projectInstructions": []
+          "secretKeys": []
+          "skills": []
+        }
+        {
+          "account":
+            "reason": "Logins has no unambiguous host sign-in fact for this harness"
+            "state": "unknown"
+          "codexProfiles": []
+          "harness": "codex"
+          "installed": false
+          "mcpServers": []
+          "missingCommands": []
+          "problems": []
+          "projectInstructions": []
+          "secretKeys": []
+          "skills": []
+        }
+      ]
+  "profiles": {}
+  "record":
+    "components": {}
+    "version": 1
+  "runtimes": {}
+  "secrets": []
+  "starters": {}
+  "updates": []
+  "warnings": {}
+"scans":
+  [
+    {
+      "harness": "claude"
+      "instructions":
+        "kind": "absent"
+        "source": "/host/home/.claude/CLAUDE.md"
+      "login":
+        "reason": "Logins has no unambiguous host sign-in fact for this harness"
+        "state": "unknown"
+      "mcp":
+        "kind": "absent"
+        "source": "/host/home/.claude.json"
+      "missingCommands": []
+      "problems": []
+      "projectInstructions": []
+      "settings":
+        "kind": "absent"
+        "source": "/host/home/.claude/settings.json"
+      "skills": []
+    }
+    {
+      "harness": "codex"
+      "hooks":
+        "kind": "absent"
+        "source": "/host/home/.codex/hooks.json"
+      "instructions":
+        "kind": "absent"
+        "source": "/host/home/.codex/AGENTS.md"
+      "login":
+        "reason": "Logins has no unambiguous host sign-in fact for this harness"
+        "state": "unknown"
+      "missingCommands": []
+      "problems": []
+      "settings":
+        "kind": "absent"
+        "source": "/host/home/.codex/config.toml"
+      "skills": []
+    }
+  ]
