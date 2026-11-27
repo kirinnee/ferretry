@@ -175,6 +175,7 @@ describe('BrowserLoginWindowService', () => {
     const events: string[] = [];
     const profile = new FakeProfile();
     const subject = new BrowserLoginWindowService({
+      configured: () => true,
       profile,
       runtime: runtime(events),
       closeAgentBrowsers: async () => {
@@ -211,6 +212,7 @@ describe('BrowserLoginWindowService', () => {
     const environments: Readonly<Record<string, string | undefined>>[] = [];
     const base = runtime([]);
     const subject = new BrowserLoginWindowService({
+      configured: () => true,
       profile: new FakeProfile(),
       runtime: {
         ...base,
@@ -239,8 +241,17 @@ describe('BrowserLoginWindowService', () => {
     const events: string[] = [];
     const profile = new FakeProfile();
     const failedRuntime = runtime(events, 'linux', true);
-    const failed = new BrowserLoginWindowService({ profile, runtime: failedRuntime, password: () => 'abcdefgh' });
-    const unsupported = new BrowserLoginWindowService({ profile: new FakeProfile(), runtime: runtime([], 'darwin') });
+    const failed = new BrowserLoginWindowService({
+      configured: () => true,
+      profile,
+      runtime: failedRuntime,
+      password: () => 'abcdefgh',
+    });
+    const unsupported = new BrowserLoginWindowService({
+      configured: () => true,
+      profile: new FakeProfile(),
+      runtime: runtime([], 'darwin'),
+    });
 
     // Act + Assert
     await should(unsupported.start()).be.rejectedWith(BrowserControlError);
@@ -269,6 +280,7 @@ describe('BrowserLoginWindowService', () => {
     const openingChrome = pause();
     const closingVnc = pause();
     const subject = new BrowserLoginWindowService({
+      configured: () => true,
       profile,
       runtime: runtime(events, 'linux', false, { openingChrome, closingVnc }),
       password: () => 'abcdefgh',
@@ -301,6 +313,7 @@ describe('BrowserLoginWindowService', () => {
     // Arrange
     const events: string[] = [];
     const subject = new BrowserLoginWindowService({
+      configured: () => true,
       profile: new FakeProfile(),
       runtime: runtime(events, 'linux', true),
       password: () => 'abcdefgh',
@@ -321,6 +334,7 @@ describe('BrowserLoginWindowService', () => {
     const events: string[] = [];
     const profile = new MarkerFailingProfile();
     const subject = new BrowserLoginWindowService({
+      configured: () => true,
       profile,
       runtime: runtime(events),
       password: () => 'abcdefgh',
@@ -339,7 +353,11 @@ describe('BrowserLoginWindowService', () => {
 
   it('should report an unreadable profile as not primed instead of failing the status', async () => {
     // Arrange
-    const subject = new BrowserLoginWindowService({ profile: new UnreadableProfile(), runtime: runtime([]) });
+    const subject = new BrowserLoginWindowService({
+      configured: () => true,
+      profile: new UnreadableProfile(),
+      runtime: runtime([]),
+    });
 
     // Act
     const status = onTheWire(await subject.status());
@@ -417,6 +435,7 @@ describe('BrowserLoginWindowService, one window per identity', () => {
     const events: string[] = [];
     const profiles = new IdentityProfiles();
     const subject = new BrowserLoginWindowService({
+      configured: () => true,
       profile: profiles,
       runtime: identityRuntime(events),
       closeAgentBrowsers: async identity => {
@@ -454,6 +473,7 @@ describe('BrowserLoginWindowService, one window per identity', () => {
     const events: string[] = [];
     const profiles = new IdentityProfiles();
     const subject = new BrowserLoginWindowService({
+      configured: () => true,
       profile: profiles,
       runtime: identityRuntime(events),
       closeAgentBrowsers: async identity => {
@@ -467,5 +487,46 @@ describe('BrowserLoginWindowService, one window per identity', () => {
     // Assert
     should(events).containEql('agents-closed:agent');
     should(profiles.held.has('agent')).equal(true);
+  });
+
+  it('should refuse a window for an identity the configuration does not name, even one whose profile is still on disk', async () => {
+    // Arrange — `old` was retired from the configuration, but its profile folder (the fake profile store) still has it
+    const events: string[] = [];
+    const profiles = new IdentityProfiles();
+    const subject = new BrowserLoginWindowService({
+      configured: identity => identity === 'a',
+      profile: profiles,
+      runtime: identityRuntime(events),
+      closeAgentBrowsers: async identity => {
+        events.push(`agents-closed:${identity}`);
+      },
+    });
+
+    // Act
+    const refusals = await Promise.all(
+      [
+        async () => await subject.start({ identity: 'old' }),
+        async () => await subject.status('old'),
+        async () => await subject.confirm('old'),
+        async () => await subject.stop({ identity: 'old' }),
+      ].map(
+        async call =>
+          await call().then(
+            () => undefined,
+            (error: unknown) => error,
+          ),
+      ),
+    );
+
+    // Assert — each is a bad request in plain words, and nothing was closed, leased or spawned
+    for (const refusal of refusals) {
+      should(refusal).be.instanceOf(BrowserControlError);
+      should(refusal).match({ code: 'bad_request' });
+      should((refusal as Error).message).containEql('old');
+    }
+    should(events).deepEqual([]);
+    should(profiles.held.size).equal(0);
+    should(onTheWire(await subject.status('a')).state).equal('closed');
+    should(onTheWire(await subject.status()).state).equal('closed');
   });
 });

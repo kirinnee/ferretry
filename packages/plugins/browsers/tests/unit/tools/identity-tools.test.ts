@@ -38,6 +38,7 @@ async function world() {
   };
   const browser = new IdentityBrowsers({
     maxRunning: () => 4,
+    configured: () => true,
     make: (identity, quota) =>
       new BrowserSessionService(
         { get: async id => (id === 's1' ? {} : undefined) },

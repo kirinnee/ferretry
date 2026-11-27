@@ -100,9 +100,9 @@ export function heldViewerHost(
         },
       };
     },
-    dispatchHumanInput: async (sessionId, input, viewerId) => {
+    dispatchHumanInput: async (sessionId, input, viewerId, page) => {
       if (!mayType) throw new ViewerInputRefused();
-      await host.dispatchHumanInput(sessionId, input, { id: viewerId, caller });
+      await host.dispatchHumanInput(sessionId, input, { id: viewerId, caller }, page);
     },
   };
 }

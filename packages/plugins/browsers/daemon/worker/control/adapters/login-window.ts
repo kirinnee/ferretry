@@ -54,6 +54,8 @@ export interface BrowserLoginWindowOptions {
   readonly runtime: BrowserLoginRuntime;
   /** Closes the named identity's agent browser (and no other identity's) before its window takes its profile. */
   readonly closeAgentBrowsers?: (identity: string) => Promise<void>;
+  /** Whether `browsers.yaml` names this identity, read at every call: a retired one, whose profile may still be on disk, gets no window. The built-in `agent` needs no entry. */
+  readonly configured: (identity: string) => boolean;
   readonly password?: () => string;
 }
 
@@ -92,6 +94,11 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
   private of(identity: string): IdentityLoginWindow {
     let window = this.windows.get(identity);
     if (window === undefined) {
+      if (identity !== DEFAULT_BROWSER_IDENTITY && !this.options.configured(identity))
+        throw new BrowserControlError(
+          'bad_request',
+          `there is no browser identity named ${identity}; add it under identities in browsers.yaml first`,
+        );
       window = new IdentityLoginWindow(this.options, identity);
       this.windows.set(identity, window);
     }

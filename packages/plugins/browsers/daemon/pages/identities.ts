@@ -36,6 +36,8 @@ export interface IdentityBrowsersOptions {
   readonly make: (identity: string, quota: BrowserPageQuota) => BrowserSessionService;
   /** How many identities may have a Chrome at once, read at every start. */
   readonly maxRunning: () => number;
+  /** Whether `browsers.yaml` names this identity, read at every open: a retired one, whose profile may still be on disk, is not. The built-in `agent` needs no entry. */
+  readonly configured: (identity: string) => boolean;
 }
 
 /**
@@ -107,9 +109,19 @@ export class IdentityBrowsers implements BrowserSubsystem {
     };
   }
 
-  async dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewer: ViewerRef): Promise<void> {
+  async dispatchHumanInput(
+    sessionId: string,
+    input: BrowserInputEvent,
+    viewer: ViewerRef,
+    page?: string,
+  ): Promise<void> {
     const identity = this.screenOf(viewer) ?? DEFAULT_BROWSER_IDENTITY;
-    await this.serviceOf(identity).dispatchHumanInput(sessionId, input, this.viewerIn(identity, viewer) ?? viewer);
+    await this.serviceOf(identity).dispatchHumanInput(
+      sessionId,
+      input,
+      this.viewerIn(identity, viewer) ?? viewer,
+      page,
+    );
   }
 
   async act(
@@ -394,11 +406,16 @@ export class IdentityBrowsers implements BrowserSubsystem {
     await move;
   }
 
-  /** A named identity must be a key `browsers.yaml` could hold; anything else is refused where it is named. */
+  /** A named identity must be a key `browsers.yaml` could hold AND one it does hold (or the built-in); anything else is refused where it is named, before any Chrome or profile is touched. */
   private named(identity: string | undefined): string | undefined {
     if (identity === undefined) return undefined;
     if (!BrowserIdentityKeySchema.safeParse(identity).success)
       throw new BrowserSessionError('not_found', `there is no browser identity named ${identity}`);
+    if (identity !== DEFAULT_BROWSER_IDENTITY && !this.options.configured(identity))
+      throw new BrowserSessionError(
+        'not_found',
+        `there is no browser identity named ${identity}; add it under identities in browsers.yaml first`,
+      );
     return identity;
   }
 

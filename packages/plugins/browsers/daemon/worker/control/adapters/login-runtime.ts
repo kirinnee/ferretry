@@ -247,11 +247,13 @@ export interface XvfbDisplayOptions extends BrowserLoginTiming {
  * (atomically, so a server that re-reads it on reset never sees a half-written file). The file is
  * removed on `close()`.
  *
- * The display is created ONCE and lives until the daemon stops, not until the window closes. The
- * runtime contract has no release hook, so a display torn down per window would either leak on every
- * failed open — `display()` succeeds before the spawns that can throw — or need a refcount nothing
- * in the contract can express. One long-lived virtual screen with nothing on it is the cheaper and
- * more honest of the two, and the composition root registers `close` beside every other acquisition.
+ * The machine's own display (the built-in `agent` identity's window) is created ONCE and lives until the
+ * daemon stops, not until the window closes: it has no per-window release, so one torn down per window
+ * would either leak on every failed open — `display()` succeeds before the spawns that can throw — or
+ * need a refcount nothing can express. One long-lived virtual screen with nothing on it is the cheaper
+ * and more honest of the two, and the composition root registers `close` beside every other acquisition.
+ * Any other identity's window takes a private display of its own, and the runtime's `releaseDisplay` hook
+ * gives it back when that window closes (see `releaseDisplay` below).
  */
 export class XvfbDisplay implements BrowserDisplayPort {
   private readonly timing: ReturnType<typeof resolveTiming>;

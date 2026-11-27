@@ -131,7 +131,11 @@ class FakeSocket implements RemoteBrowserSocket {
   }
 
   inputs(): BrowserInputEvent[] {
-    return this.sent.map(entry => JSON.parse(entry) as BrowserInputEvent);
+    // Each carries the page it is meant for (`pageId`); these tests are about what was typed, not where.
+    return this.sent.map(entry => {
+      const { pageId: _page, ...input } = JSON.parse(entry) as BrowserInputEvent & { pageId?: string };
+      return input as BrowserInputEvent;
+    });
   }
 
   close(code?: number, reason?: string): void {
@@ -760,8 +764,14 @@ describe('RemoteBrowserPane text entry', () => {
     run(() => {
       socket.readyState = 1;
       socket.emit('open', new Event('open'));
+      // Input is sent over a painted frame only, naming its page.
+      socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
     });
-    const field = renderer.root.findByType('textarea');
+    // The pane's own text seam, not the viewer's keyboard sink that the painted frame brings with it.
+    const field = renderer.root
+      .findAllByType('textarea')
+      .find(node => node.props.className !== 'fy-remote-browser-sink');
+    if (field === undefined) throw new Error('the pane has no text seam');
     return { renderer, transport, socket, field };
   };
 
@@ -974,6 +984,8 @@ describe('RemoteBrowserPane clipboard', () => {
         transport={transport}
         schedule={pollSeam().schedule}
         socketFactory={stream.factory}
+        createObjectUrl={() => 'blob:frame'}
+        revokeObjectUrl={() => undefined}
         {...extra}
       />,
       nodeMock,
@@ -984,6 +996,8 @@ describe('RemoteBrowserPane clipboard', () => {
       run(() => {
         socket.readyState = 1;
         socket.emit('open', new Event('open'));
+        // Input is sent over a painted frame only, naming its page.
+        socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
       });
     return { renderer, socket };
   };

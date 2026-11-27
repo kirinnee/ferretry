@@ -32,9 +32,17 @@ class FakeSocket implements RemoteBrowserSocket {
     this.sent.push(data);
   }
 
-  /** The protocol input events this socket received, in order. */
+  /** The protocol input events this socket received, in order (without the page each one names: see {@link pages}). */
   inputs(): BrowserInputEvent[] {
-    return this.sent.map(entry => JSON.parse(entry) as BrowserInputEvent);
+    return this.sent.map(entry => {
+      const { pageId: _page, ...input } = JSON.parse(entry) as BrowserInputEvent & { pageId?: string };
+      return input as BrowserInputEvent;
+    });
+  }
+
+  /** The page each input said it was meant for, in order. */
+  pages(): (string | undefined)[] {
+    return this.sent.map(entry => (JSON.parse(entry) as { pageId?: string }).pageId);
   }
 
   close(code?: number, reason?: string): void {
@@ -581,6 +589,65 @@ const keyEvent = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('RemoteBrowserViewer input', () => {
+  it('says which page the person was looking at with every input, so the daemon can drop what is for another page', () => {
+    const { socket, canvas } = interactive();
+    run(() => canvas.props.onPointerDown(pointerEvent()));
+    run(() => canvas.props.onPointerUp(pointerEvent({ buttons: 0 })));
+    run(() => canvas.props.onPointerMove(pointerEvent({ buttons: 0 })));
+    expect(socket.pages()).toEqual(['page-a', 'page-a', 'page-a']);
+  });
+
+  it('sends nothing over page A once the session moved to page B, until page B has painted, and then names page B', () => {
+    // Arrange — a screen painting page A, with a handler the person is already holding
+    const sockets: FakeSocket[] = [];
+    const socketFactory = () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const measureFrame = () => frameRect;
+    const now = () => 1_000;
+    const createObjectUrl = () => 'blob:frame';
+    const revokeObjectUrl = () => undefined;
+    const scope = daemonSessionScope(daemonA, 'session-a');
+    const tree = (pageId: string) => (
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={scope}
+        status={running('session-a', pageId)}
+        interactive
+        measureFrame={measureFrame}
+        now={now}
+        socketFactory={socketFactory}
+        createObjectUrl={createObjectUrl}
+        revokeObjectUrl={revokeObjectUrl}
+      />
+    );
+    const renderer = render(tree('page-a'));
+    const socket = sockets[0];
+    if (socket === undefined) throw new Error('no socket was opened');
+    run(() => {
+      socket.readyState = 1;
+      socket.emit('open', new Event('open'));
+      socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
+    });
+    const held = renderer.root.find(node => node.props.className === 'fy-remote-browser-input').props;
+    run(() => held.onPointerMove(pointerEvent({ buttons: 0 })));
+
+    // Act — the status moves to page B; a late handler fires over the cleared frame; then B's first frame arrives
+    run(() => renderer.update(tree('page-b')));
+    run(() => held.onPointerMove(pointerEvent({ buttons: 0 })));
+    const between = socket.pages();
+    run(() => socket.emit('message', new MessageEvent('message', { data: frame('page-b') })));
+    const fresh = renderer.root.find(node => node.props.className === 'fy-remote-browser-input').props;
+    run(() => fresh.onPointerMove(pointerEvent({ buttons: 0 })));
+
+    // Assert — nothing was sent in the gap, one stream the whole time, and the first input after B painted names B
+    expect(between).toEqual(['page-a']);
+    expect(socket.pages()).toEqual(['page-a', 'page-b']);
+    expect(sockets).toHaveLength(1);
+  });
+
   it('maps a click into the daemon-negotiated viewport, not the on-screen box', () => {
     const { socket, canvas, activity } = interactive();
     run(() => canvas.props.onPointerDown(pointerEvent()));

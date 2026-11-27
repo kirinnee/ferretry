@@ -14,6 +14,7 @@ const FERRETS = { get: async (id: string) => (id === 'f1' ? { name: id } : undef
 /** The daemon half as `build` composes it, with one fake Chrome per identity: what the launcher is asked for is the identity. */
 async function built() {
   const chromes = new Map<string, Tabs>();
+  const launched: string[] = [];
   const chromeOf = (identity: string): Tabs => {
     let tabs = chromes.get(identity);
     if (tabs === undefined) {
@@ -27,7 +28,12 @@ async function built() {
   const half = implementDaemon(daemon.manifest, {
     build: ctx =>
       buildBrowsers(ctx, {
-        launcher: { launch: async (_viewport, identity) => chromeOf(identity ?? 'agent').automation },
+        launcher: {
+          launch: async (_viewport, identity) => {
+            launched.push(identity ?? 'agent');
+            return chromeOf(identity ?? 'agent').automation;
+          },
+        },
         identities,
       }),
   });
@@ -40,8 +46,10 @@ async function built() {
     fakes: { vault: new FakeVault(), gate: new FakeGate() },
     gate,
     secrets: [],
+    // `a` and `b` are configured; `old` is a retired identity whose profile folder may still be on disk.
+    config: { 'browsers.yaml': { identities: { a: {}, b: {} } } },
   });
-  return { host, chromeOf };
+  return { host, chromeOf, launched };
 }
 
 describe('the browsers daemon half, per identity', () => {
@@ -88,6 +96,45 @@ describe('the browsers daemon half, per identity', () => {
     should(listed).containEql('in-b');
     should(listed).not.containEql('in-a');
     should(closedB).equal(false);
+  });
+
+  it('should refuse browser_open for an identity the configuration does not name, before any Chrome starts', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+
+    // Act
+    const opened = await host.tool('browser_open', { name: 'x', identity: 'old' }, { as: ferret('f1') });
+    const listed = JSON.stringify(await host.tool('browser_list', {}, { as: ferret('f1') }));
+
+    // Assert
+    should(opened.isError).be.true();
+    should(JSON.stringify(opened)).containEql('old');
+    should(world.launched).deepEqual([]);
+    should(listed).not.containEql('"identity":"old"');
+  });
+
+  it('should refuse every login route for an identity the configuration does not name', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+
+    // Act
+    const read = await host.request('GET', '/v1/browser/login', { query: { identity: 'old' } });
+    const started = await host.request('POST', '/v1/browser/login', {
+      query: { identity: 'old' },
+      body: { action: 'start' },
+    });
+    const confirmed = await host.request('POST', '/v1/browser/login', {
+      query: { identity: 'old' },
+      body: { action: 'confirm' },
+    });
+
+    // Assert — a refusal in words, and the built-in identity's window is still answered
+    for (const answered of [read, started, confirmed]) should(answered.status).equal(400);
+    should(JSON.stringify(read.body)).containEql('no browser identity named old');
+    should((await host.request('GET', '/v1/browser/login', { query: { identity: 'a' } })).status).equal(200);
+    should((await host.request('GET', '/v1/browser/login')).status).equal(200);
   });
 
   it('should refuse a login window for something that is no identity key', async () => {

@@ -256,6 +256,7 @@ export function buildBrowsers(
         quota,
       ),
     maxRunning: () => config()?.maxRunning ?? DEFAULT_MAX_RUNNING_IDENTITIES,
+    configured: identity => config()?.identities?.[identity] !== undefined,
   });
   // Which pages hold a sealed value, and whether a clipboard capture is running: told by Accounts (secure copy's reach), asked by the tools.
   const sealed = new SealedPages({ after: (delay, action) => kernel.clock.after(milliseconds(delay), action) });
@@ -309,6 +310,7 @@ export function buildBrowsers(
     runtime: loginRuntime,
     // Only the identity being signed in has its agent browser closed: every other identity's pages stay live.
     closeAgentBrowsers: async identity => await pages.closeIdentity(identity),
+    configured: identity => config()?.identities?.[identity] !== undefined,
   });
 
   // ── the proxy test and state ─────────────────────────────────────────────────────────────────────────────────

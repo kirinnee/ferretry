@@ -152,10 +152,15 @@ window session costs more, which is why `maxRunning` exists.
 opens in `agent` — never in whichever identity the session happened to use last. `browser_list` and `browser_tabs` show each
 page's identity, and every other tool drives a page in the Chrome that holds it. The browser panel puts an identity chip on each
 page once any page is outside `agent`, and showing a page of another identity moves that screen's live display to that
-identity's Chrome (one screen, one stream, whichever browser the page is in).
+identity's Chrome (one screen, one stream, whichever browser the page is in). **Only a configured identity can be named**: a key
+that `identities:` does not hold (a retired one, whose profile folder may still be on disk, included) is refused in plain words
+by `browser_open`, by the sign-in window and by its routes, before any Chrome or profile is touched; the built-in `agent` needs no
+entry. A person's input is bound to the page their screen was painting: the screen says which page each key or click was meant
+for, and the daemon drops what is not for the page the screen is attached to now, so a click meant for one identity's page can
+never land on another's while the screen is being moved.
 
 **The sign-in window is per identity.** `GET|POST /v1/browser/login?identity=<key>` (`agent` when absent; a key that is no
-identity is a 400) opens a window on that identity's own profile and, for any identity but `agent`, on a private screen of its
+identity, or one `identities:` does not hold, is a 400) opens a window on that identity's own profile and, for any identity but `agent`, on a private screen of its
 own. It closes **only that identity's** agent browser first: every other identity's pages stay live, and two identities can be
 signed in at once, each with its own VNC listener and password.
 

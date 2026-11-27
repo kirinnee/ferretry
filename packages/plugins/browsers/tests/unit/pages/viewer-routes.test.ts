@@ -187,7 +187,7 @@ describe('B1 the whole-browser routes and the viewer socket, one page per screen
 
     // Act — one more screen asks, and the person types into the first.
     const refused = await host.socket(STREAM);
-    screen.handler?.fromClient(JSON.stringify({ kind: 'insertText', text: 'secret' }));
+    screen.handler?.fromClient(JSON.stringify({ kind: 'insertText', text: 'secret', pageId: second }));
     await drain(host);
 
     // Assert — the extra screen was refused outright, every attached one is still there, and the text went to the
