@@ -89,6 +89,7 @@ const SPLIT_TITLES: Readonly<Record<OverviewSplit, string>> = {
   runtime: 'By runtime',
   machine: 'By machine',
   project: 'By project',
+  purpose: 'By purpose',
 };
 
 const ORDER_LABELS: Readonly<Record<TopSessionOrder, string>> = {
@@ -440,7 +441,7 @@ function OverviewSections({
               })}
               format={value => formatMetric(metric, value)}
               unknownWord={UNKNOWN_WORDS[metric]}
-              limit={5}
+              limit={split === 'purpose' ? 6 : 5}
             />
           </section>
         ))}

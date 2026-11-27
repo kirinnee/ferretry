@@ -188,6 +188,14 @@ export const FerretTitleSchema = z.string().trim().min(1).max(120);
  */
 export const FerretTitleSourceSchema = z.enum(['owner', 'auto']);
 
+/**
+ * What a ferret is FOR, said when it is started: the small fixed list Usage groups spend by. Unset is a fact too — a ferret
+ * started before the field, or by someone who named none — and is read as "Unlabelled", never guessed from a transcript.
+ */
+export const FERRET_PURPOSES = ['comms', 'review', 'planning', 'implementation', 'other'] as const;
+export const FerretPurposeSchema = z.enum(FERRET_PURPOSES);
+export type FerretPurpose = z.infer<typeof FerretPurposeSchema>;
+
 // ─── quota (today's `protocol/src/lib/session.ts` QuotaSchema, unchanged) ──────────────────────────────────────────
 
 const NonNegativeFiniteSchema = z.number().finite().nonnegative();
@@ -244,6 +252,8 @@ export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handl
   notice: z.string().min(1).max(4096).optional(),
   /** The ownership label given to start, independent of pack membership. */
   label: z.string().min(1).optional(),
+  /** What it was started for (`fy new --purpose`); absent when none was named. */
+  purpose: FerretPurposeSchema.optional(),
   transcript: TranscriptViewSchema.optional(),
   model: z.string().min(1).optional(),
   /**

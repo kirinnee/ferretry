@@ -13,7 +13,8 @@
     "./testing/linear-time": "./testing/linear-time.ts",
     "./pairing-screen": "./src/pairing-screen.ts",
     "./live-window": "./src/live-window.ts",
-    "./qr": "./src/qr.ts"
+    "./qr": "./src/qr.ts",
+    "./sealing": "./src/sealing/index.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {

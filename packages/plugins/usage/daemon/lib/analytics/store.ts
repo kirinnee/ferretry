@@ -18,9 +18,13 @@ import type { AnalyticsUsageRefusal } from './turn-fold.ts';
  * version it does not recognise and rebuilds it. A migration here would be a second, hand-maintained
  * definition of a shape that one re-ingestion pass reproduces exactly.
  *
- * It is `4` because the row gained ACTIVE time (`active_duration_ms`), folded from transcript record
- * timestamps. Every stored row must be re-folded to answer it, which is exactly what the version-driven
- * drop-and-rebuild does; the version is also in every ingest signature, so no stale row survives.
+ * It is `4` because the row gained ACTIVE time (`active_duration_ms`), folded from transcript record timestamps.
+ * Every stored row must be re-folded to answer it, which is exactly what the version-driven drop-and-rebuild does; the
+ * version is also in every ingest signature, so no stale row survives.
+ *
+ * The ferret's PURPOSE (`purpose`, read from its start options) did NOT move the version: it is a nullable column, so
+ * an existing index gains it in place and keeps its rows, which read as Unlabelled. A ferret that named no purpose signs
+ * exactly as it did before the column, so nothing already stored is read again.
  */
 export const ANALYTICS_INDEX_SCHEMA_VERSION = 4;
 
@@ -199,6 +203,7 @@ export interface AnalyticsSignedEvidence {
   readonly label?: string | null;
   readonly cwd?: string | null;
   readonly parent?: string | null;
+  readonly purpose?: string | null;
   readonly startedAt?: string | null;
   readonly turns?: number | null;
   readonly contextEndPercent?: number | null;
@@ -237,5 +242,7 @@ export function analyticsIngestSignature(evidence: AnalyticsSignedEvidence, pric
     evidence.startedAt,
     evidence.turns,
     evidence.contextEndPercent,
+    // Only a NAMED purpose is signed, so a row stored before the field existed keeps its signature.
+    ...(evidence.purpose == null ? [] : [evidence.purpose]),
   ]);
 }

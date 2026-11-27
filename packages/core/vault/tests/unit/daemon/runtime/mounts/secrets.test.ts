@@ -11,9 +11,9 @@ import {
 import should from 'should';
 import { MAX_SECRET_VALUE_LENGTH } from '../../../../../contract/index.ts';
 import manifest from '../../../../../manifest.ts';
-import { WebCryptoCloneCrypto } from '../../../../../daemon/adapters/secrets/webcrypto-clone-crypto.ts';
+import { WebCryptoCloneCrypto } from '@ferretry/std/sealing';
 import { MAX_REQUEST_BODY_BYTES } from '../../../../../daemon/lib/api/body.ts';
-import type { DaemonIdentity } from '../../../../../daemon/lib/secrets/clone-crypto.ts';
+import type { DaemonIdentity } from '@ferretry/std/sealing';
 import { secretRouteHandlers } from '../../../../../daemon/lib/runtime/mounts/secrets.ts';
 import { ChildEnvironments } from '../../../../../daemon/lib/secrets/child-environments.ts';
 import { NO_REFERENCES } from '../../../../../daemon/lib/secrets/view.ts';
