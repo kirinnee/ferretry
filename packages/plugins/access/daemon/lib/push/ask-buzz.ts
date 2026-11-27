@@ -12,8 +12,11 @@ export interface AskBuzzLedger {
 
 export interface AskBuzzerOptions {
   readonly ledger: AskBuzzLedger;
-  /** Sends one push to every live enrolment; resolves how many devices it reached. */
-  readonly buzz: (words: BuzzWords) => Promise<number>;
+  /**
+   * Sends one push to every live enrolment; resolves how many devices it reached. `cancelled` says the ask closed meanwhile:
+   * the sender must read it right before it dispatches, AFTER its own enrolment lookup, and send nothing when it is true.
+   */
+  readonly buzz: (words: BuzzWords, cancelled: () => boolean) => Promise<number>;
   readonly now: () => Instant;
   /** Where a failed buzz is said. Buzzing stays total. */
   readonly warn?: (message: string) => void;
@@ -30,6 +33,8 @@ export interface AskBuzzerOptions {
  */
 export class AskBuzzer {
   readonly #inFlight = new Map<string, Promise<boolean>>();
+  /** Keys whose ask closed while a buzz for them was still running: that buzz must not send, and must leave no key. */
+  readonly #settled = new Set<string>();
 
   constructor(private readonly options: AskBuzzerOptions) {}
 
@@ -40,15 +45,27 @@ export class AskBuzzer {
     const key = askBuzzKey(ask.ferret, ask.id);
     const running = this.#inFlight.get(key);
     if (running !== undefined) return running.then(() => false);
-    const run = this.#make(key, kind, ask).finally(() => this.#inFlight.delete(key));
+    const run = this.#make(key, kind, ask).finally(() => {
+      this.#inFlight.delete(key);
+      this.#settled.delete(key);
+    });
     this.#inFlight.set(key, run);
     return run;
   }
 
-  /** An ask closed or was answered: its key is no longer kept. Total. */
+  /**
+   * An ask closed or was answered: its key is no longer kept, and a buzz for it still looking up is cancelled. A running buzz
+   * is awaited first, so the forget cannot run ahead of its append and leave the key behind. Total.
+   */
   async settle(ferret: string, ask: string): Promise<void> {
+    const key = askBuzzKey(ferret, ask);
     try {
-      await this.options.ledger.forget(askBuzzKey(ferret, ask));
+      const running = this.#inFlight.get(key);
+      if (running !== undefined) {
+        this.#settled.add(key);
+        await running;
+      }
+      await this.options.ledger.forget(key);
     } catch (error) {
       this.options.warn?.(
         `an ask's buzz record could not be dropped: ${error instanceof Error ? error.message : String(error)}`,
@@ -58,9 +75,10 @@ export class AskBuzzer {
 
   async #make(key: string, kind: AskBuzzRecord['kind'], ask: BuzzableAsk): Promise<boolean> {
     try {
-      if (await this.options.ledger.has(key)) return false;
+      if ((await this.options.ledger.has(key)) || this.#settled.has(key)) return false;
       await this.options.ledger.append({ format: 1, key, at: this.options.now(), kind });
-      return (await this.options.buzz(askBuzzWords(ask))) > 0;
+      if (this.#settled.has(key)) return false;
+      return (await this.options.buzz(askBuzzWords(ask), () => this.#settled.has(key))) > 0;
     } catch (error) {
       this.options.warn?.(`an ask's buzz could not be made: ${error instanceof Error ? error.message : String(error)}`);
       return false;
