@@ -32,7 +32,7 @@ type Seal = { readonly present: false } | { readonly present: true; readonly fin
 
 /** How many entries a tree seal describes before it refuses to claim knowledge. A bound on work, not on memory. */
 const MAX_SEAL_ENTRIES = 200_000;
-/** How large a file may be before its seal rests on size and time rather than content. */
+/** Larger files have no seal: size and time alone cannot prove their bytes are ours. */
 const MAX_DIGEST_BYTES = 4 * 1024 * 1024;
 const PERMISSION_BITS = 0o7777;
 
@@ -42,6 +42,8 @@ interface JournalEntryBase {
   folder?: string;
   /** Set once the operation that claimed this path has finished writing it. */
   seal?: Seal;
+  /** Private replacement evidence; promoted to `seal` only after the operation successfully publishes it. */
+  copySeal?: Seal;
 }
 
 type JournalEntry = JournalEntryBase &
@@ -136,8 +138,15 @@ export class FileMutationJournal implements MutationJournal {
         continue;
       }
       await this.#sameFolder(entry);
-      entry.seal = await this.#identify(entry.path);
+      entry.seal = entry.copySeal ?? (await this.#identify(entry.path));
     }
+  }
+
+  async sealCopy(target: string, staged: string): Promise<void> {
+    const entry = this.#entries.findLast(candidate => candidate.path === target);
+    if (entry === undefined) throw new Error(`no capture for ${target}`);
+    await this.#sameFolder(entry);
+    entry.copySeal = await this.#identify(staged);
   }
 
   /** What `target` holds. A tree is summarised by everything beneath it; a file by its bytes too. */
@@ -145,10 +154,9 @@ export class FileMutationJournal implements MutationJournal {
     const found = await this.disk.lstat(target);
     if (found === undefined) return { present: false };
     if (found.kind === 'file') {
-      const digest =
-        found.size > MAX_DIGEST_BYTES
-          ? `unhashed:${found.size}`
-          : new Bun.CryptoHasher('sha256').update(await this.disk.readBytes(target, MAX_DIGEST_BYTES)).digest('hex');
+      const bytes = await this.disk.readBytes(target, MAX_DIGEST_BYTES + 1);
+      if (bytes.length > MAX_DIGEST_BYTES) return { present: true, fingerprint: undefined };
+      const digest = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
       return { present: true, fingerprint: `${fingerprintOf('', found)}:${digest}` };
     }
     if (found.kind !== 'directory') return { present: true, fingerprint: fingerprintOf('', found) };
@@ -172,6 +180,11 @@ export class FileMutationJournal implements MutationJournal {
       walk.visited += 1;
       const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
       hasher.update(`${fingerprintOf(relative, entry)}\n`);
+      if (entry.kind === 'file') {
+        const bytes = await this.disk.readBytes(`${directory}/${entry.name}`, MAX_DIGEST_BYTES + 1);
+        if (bytes.length > MAX_DIGEST_BYTES) return true;
+        hasher.update(new Bun.CryptoHasher('sha256').update(bytes).digest('hex'));
+      }
       if (entry.kind === 'directory' && (await this.#summarise(`${directory}/${entry.name}`, relative, hasher, walk)))
         return true;
     }
