@@ -20,6 +20,10 @@ import type { GitWorkingDirectory, WorktreeDirectoryPinner, WorktreeFileSystem }
  * - any other path (the repository a checkout is made from) must be inside a ferret's own folder, and goes to that
  *   ferret's `work` root (outside the daemon's fence, no link followed out of it).
  *
+ * - for a LISTING asked about a registered project (`registered`), the folders that project's own record names: the
+ *   daemon looked them up in its project registry by the project's id, and they go to a READ-ONLY `imports` root scoped
+ *   to each folder. A caller's path never becomes one of them.
+ *
  * A path no root reaches is refused in words, never reached by name. That is the one place this is narrower than
  * today's daemon, which could name any folder: a checkout is made only from a repository a ferret works in.
  */
@@ -34,6 +38,14 @@ export interface KernelWorktreeHostInputs {
   readonly worktrees: RootHandle;
   readonly work: (ferret: FerretId) => RootHandle;
   readonly ferrets: () => readonly FerretFolder[];
+  /**
+   * Folders a registered project's record names, with a read-only root scoped to ONE of them. Only the daemon's own
+   * registry lookup fills `folders`; nothing a client sent does.
+   */
+  readonly registered?: {
+    readonly folders: readonly string[];
+    readonly root: (folder: string) => RootHandle;
+  };
   readonly spawn: {
     runBytes(
       program: string,
@@ -74,8 +86,11 @@ export function createKernelWorktreeHostIo(input: KernelWorktreeHostInputs): Ker
     if (!path.isAbsolute(target)) throw new Error(`a managed-worktree path must be absolute: ${target}`);
     const candidates: RootHandle[] = [];
     if (within(managedRoot, target)) candidates.push(input.worktrees);
-    else
+    else {
       for (const ferret of input.ferrets()) if (within(ferret.folder, target)) candidates.push(input.work(ferret.id));
+      for (const folder of input.registered?.folders ?? [])
+        if (within(folder, target)) candidates.push(input.registered!.root(folder));
+    }
     for (const root of candidates) {
       const resolved = root.resolve(target);
       if (resolved.ok) return { root, fenced: resolved.value };

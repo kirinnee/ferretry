@@ -198,13 +198,14 @@ export function refusal(edge: ImportEdge): string | undefined {
     return undefined;
 
   // SEVENTH EXEMPTION: E-276's import goldens and threading proof must use the REAL harness kits, just as the settings
-  // sources supply them. Only these three Runtimes tests may import exactly the two kit entry points; no other half.
+  // sources supply them. Only these four Runtimes tests may import exactly the two kit entry points; no other half.
   if (
     from === 'tests' &&
     edge.fromPkg.name === '@ferretry/plugin-runtimes' &&
     [
       'tests/unit/golden/host-import.golden.test.ts',
       'tests/unit/golden/setup-import.golden.test.ts',
+      'tests/unit/golden/consumers.golden.test.ts',
       'tests/unit/lib/import-kit-threading.test.ts',
     ].includes(edge.from.slice(edge.fromPkg.dir.length + 1)) &&
     to === 'daemon' &&
