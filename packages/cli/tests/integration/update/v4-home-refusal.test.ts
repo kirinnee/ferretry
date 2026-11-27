@@ -4,7 +4,7 @@
  * writes no unit and no plist, starts no service manager command, and leaves the home byte-for-byte as it was.
  * The service manager is a pair of fake `systemctl`/`launchctl` scripts on PATH that record every call.
  */
-import { afterEach, describe, it } from 'bun:test';
+import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,7 +17,16 @@ import { capturedIo } from '../../unit/fakes.ts';
 import { snapshotTree, writeV4Home } from '../support/v4-home.ts';
 
 const dirs: string[] = [];
+const realFetch = globalThis.fetch;
+// No daemon answers in this fixture: the health probe reads the host's loopback, so a daemon already running on the
+// machine running the test would answer for a home that is not its own and turn the refusal into an ownership error.
+beforeEach(() => {
+  globalThis.fetch = (async () => {
+    throw new Error('no daemon answers in this fixture');
+  }) as unknown as typeof fetch;
+});
 afterEach(async () => {
+  globalThis.fetch = realFetch;
   await Promise.all(dirs.splice(0).map(async dir => await rm(dir, { recursive: true, force: true })));
 });
 

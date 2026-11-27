@@ -8,7 +8,10 @@ import {
   InAppBrowserWorkspace,
 } from '../../../../app/features/browser/in-app-browser.tsx';
 import type { BrowserDestination } from '../../../../app/features/browser/in-app-browser-model.ts';
-import { interact, mount, must, pressKey } from '@ferretry/app/testing';
+import { ensureDom, interact, mount, must, pressKey } from '@ferretry/app/testing';
+
+// This file reads `document` in its own hooks, so it owns its DOM (a lone run has none until the first mount).
+ensureDom();
 
 const remote: BrowserDestination = {
   href: 'https://docs.example.test/getting-started',
