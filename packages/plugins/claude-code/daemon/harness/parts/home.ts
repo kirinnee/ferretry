@@ -9,7 +9,7 @@ import { type ClaudeCore, claudeHome, fenced, type Serves } from './core.ts';
 import { launchInputs } from './launch-settings.ts';
 
 /** Links the home's history entries to the pool (idempotent), logs what was kept aside and the one sentence if any stayed unpooled. */
-async function poolHistory(core: ClaudeCore, ferret: FerretId): Promise<void> {
+export async function poolHistory(core: ClaudeCore, ferret: FerretId): Promise<void> {
   const pooled = await poolHomeHistory({
     roots: core.deps.roots,
     ferret,
@@ -27,7 +27,7 @@ async function poolHistory(core: ClaudeCore, ferret: FerretId): Promise<void> {
  * narrowed by the kernel through the checked `agent-homes` folder, refused when a link or a file is at its name. The
  * scoped handle then re-proves on every read and write that no link from FY_HOME down rebases it (S42).
  */
-async function ensureHome(core: ClaudeCore, spec: LaunchSpec): Promise<RootHandle> {
+export async function ensureHome(core: ClaudeCore, spec: LaunchSpec): Promise<RootHandle> {
   const home = claudeHome(core, spec.ferret);
   if (fenced(home.resolve('')) !== spec.home)
     throw new Error('the launch home does not match the ferret agent-homes subfolder');
