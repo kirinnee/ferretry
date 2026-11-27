@@ -23,8 +23,17 @@ export class RelaySessionError extends Error {
   }
 }
 
+/** An internal carrier-walk verdict. Wire close/control codes can only create ordinary session errors. */
+export class DaemonReplacedError extends RelaySessionError {
+  constructor(message: string, endedWhileServing = false, neverSent = false) {
+    super(message, 4405, endedWhileServing, neverSent);
+  }
+}
+
 /** The same failure, for a request that provably never left: same code, same words, `neverSent` set. */
 export function neverSentCopy(failure: RelaySessionError): RelaySessionError {
+  if (failure instanceof DaemonReplacedError)
+    return new DaemonReplacedError(failure.message, failure.endedWhileServing, true);
   return new RelaySessionError(failure.message, failure.code, failure.endedWhileServing, true);
 }
 

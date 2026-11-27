@@ -645,6 +645,38 @@ describe('the reservation is an upper bound, so the spend gates cannot be underc
     expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(1);
   });
 
+  test('a completed render that cannot be delivered (a permanent download failure) is still settled first: the overrun is in the ledger and the job result, and the cap then refuses', async () => {
+    const w = await world({ limits: { dailyUsd: 2 } });
+    const job = jobOf((await avatar(w)).text);
+    w.fake.finish('hv1', { duration: 30 });
+    w.fake.cdn = 'wrong-type';
+    const failed = await status(w, job);
+    expect(failed.isError).toBe(true);
+    expect(failed.text).toContain('Do NOT retry');
+    // 30 s is $2.415: the reservation plus one OVERRUN line for the rest, never the reservation alone
+    expect(net(w)).toBe(30 * PER_SECOND);
+    expect(ledgerLines(w).filter(line => line.overrun === true)).toHaveLength(1);
+    expect(ledgerLines(w).at(-1)).toMatchObject({ overrun: true, microUsd: 23 * PER_SECOND });
+    // the job's end keeps it and the result says so, now and when asked again
+    expect(jobLines(w).at(-1)).toMatchObject({
+      kind: 'finished',
+      outcome: 'counted',
+      seconds: 30,
+      settledMicroUsd: 30 * PER_SECOND,
+      overrunMicroUsd: 23 * PER_SECOND,
+    });
+    expect(failed.text).toContain('overrun');
+    const again = await status(w, job);
+    expect(again.isError).toBe(true);
+    expect(again.text).toContain('overrun');
+    expect(ledgerLines(w).filter(line => line.overrun === true)).toHaveLength(1);
+    // and it counts toward the cap: $2.415 spent of $2, so a second paid call is refused and nothing is sent
+    const next = await avatar(w, { script: 'a different short script' });
+    expect(next.isError).toBe(true);
+    expect(next.text).toContain('daily limit');
+    expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(1);
+  });
+
   test('a video with no reported length stays at the reservation', async () => {
     const w = await world();
     const job = jobOf((await avatar(w)).text);

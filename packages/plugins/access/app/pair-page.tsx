@@ -57,6 +57,13 @@ export interface PairPageEnvironment {
   readonly passkeyClient?: FirstPasskeyClientFactory;
   /** The offer's test seams (credentials, origin, browser support, clock). */
   readonly passkeyOffer?: PairingScreenProps['passkeyOffer'];
+  /**
+   * How a finished pairing leaves the page: a real document load of the address, not a router move. The document a pairing
+   * link opened is a pairing screen for as long as it lives (an agent's browser refuses to show it, docs/pairing.md), so
+   * the page the person lands on after a pairing is a new document. The browser's own `location.assign` unless a suite
+   * hands another.
+   */
+  readonly openDocument?: (href: string) => void;
 }
 
 /** The camera, or `null` where this browser has no QR decoder of its own to offer (the paste path stays). */
@@ -118,6 +125,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
   const store = environment.store ?? accessKeyStore(ports);
   const claims = accessClaims(ports, { store });
   const passkeyClient = environment.passkeyClient ?? pairedPasskeyClient();
+  const openDocument = environment.openDocument ?? ((href: string) => window.location.assign(href));
   return function PairPage({ navigate, location }: DaemonlessScreenProps) {
     // The code is taken once per arrival, never re-read from an address the shell already emptied, so a plain render
     // cannot resurrect a code the reader declined. Each new arrival restarts the screen (the new key) for that link.
@@ -131,9 +139,11 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
       if (taken === undefined) setLink(held => held ?? { arrival: NO_LINK, nonce: 0 });
       else setLink(held => ({ arrival: arrivalOf(location(), taken), nonce: (held?.nonce ?? 0) + 1 }));
     }, [fragment.arrival, take, location]);
-    // `/pair?refused=<machine>`: that machine no longer accepts this browser (it was removed, or went unused too long).
-    // A machine id is not a secret; the code never rides the query.
-    const [refusedBy, setRefusedBy] = useState<string | null>(() => new URL(location()).searchParams.get('refused'));
+    // The query names a non-secret machine and WHY it needs pairing; a code never rides it.
+    const [recovery] = useState(() => new URL(location()).searchParams);
+    const [refusedBy, setRefusedBy] = useState<string | null>(
+      () => recovery.get('replaced') ?? recovery.get('refused'),
+    );
     const scanHost = useMemo(() => (environment.scanHost ?? (() => browserQrScan(environment.loadDecoder)))(), []);
     const snapshot = useSyncExternalStore(ports.daemons.subscribe, ports.daemons.snapshot);
     // Each row is named by the same helper every other list uses, so same-named twins read apart here too.
@@ -161,6 +171,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
       <>
         {refused === undefined ? null : (
           <DeviceRefusedNotice
+            reason={recovery.has('replaced') ? 'replaced' : 'refused'}
             machineName={distinctDaemonName(refused, snapshot.daemons)}
             onPairAgain={() => setRefusedBy(null)}
           />
@@ -179,7 +190,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           // a Settings link), else the machine this tab works on. A cold first visit has neither, and draws no Back.
           {...(backTo === undefined ? {} : { onClose: () => navigate(backTo) })}
           onContinue={() => {
-            if (landing.current !== undefined) navigate(landing.current);
+            if (landing.current !== undefined) openDocument(landing.current);
           }}
           onPair={async (seed, deviceName, machineName) => {
             const paired = await exchangePairing({ ports, claims, store }, seed, deviceName, machineName);

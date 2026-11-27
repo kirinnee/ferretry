@@ -30,7 +30,7 @@ export function MachineStopPage({ daemon, facts }: { readonly daemon: string | u
   const main = (): void => {
     switch (stop.primary.action) {
       case 'pair-again':
-        if (daemon !== undefined) navigate(pairAgainHref(daemon));
+        if (daemon !== undefined) navigate(pairAgainHref(daemon, stop.kind === 'replaced' ? 'replaced' : 'refused'));
         return;
       case 'reload':
         window.location.reload();

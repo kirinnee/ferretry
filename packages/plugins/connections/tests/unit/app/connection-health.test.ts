@@ -622,6 +622,36 @@ describe('DaemonConnectionHealth settled', () => {
   });
 });
 
+describe('DaemonConnectionHealth replaced identity (C-80)', () => {
+  it('a proven replaced identity starts no loop: no state, no timer, and nothing is ever re-dialled', () => {
+    const w = world();
+    const health = new DaemonConnectionHealth(w.environment, w.attempt);
+    health.outage(laptop, outage({ daemonAbsent: true, identityReplaced: true }));
+    expect(health.state(laptop)).toEqual({ kind: 'unknown' });
+    expect(w.pending()).toEqual([]);
+    expect(w.calls).toHaveLength(0);
+    expect(health.reconnecting()).toEqual([]);
+  });
+
+  it('ends an outage already running, cancelling its retry', () => {
+    const w = world();
+    const health = new DaemonConnectionHealth(w.environment, w.attempt);
+    health.outage(laptop, outage({ daemonAbsent: true }));
+    const timers = w.pending();
+    health.outage(laptop, outage({ daemonAbsent: true, identityReplaced: true }));
+    expect(health.state(laptop)).toEqual({ kind: 'unknown' });
+    expect(timers.every(timer => timer.cancelled)).toBe(true);
+  });
+
+  it('the same outage without the proof keeps retrying', () => {
+    const w = world();
+    const health = new DaemonConnectionHealth(w.environment, w.attempt);
+    health.outage(laptop, outage({ daemonAbsent: true }));
+    expect(health.state(laptop).kind).toBe('reconnecting');
+    expect(w.retryTimers()).toHaveLength(1);
+  });
+});
+
 describe('DaemonConnectionHealth clearDaemon', () => {
   it('stops the loop, resets to unknown and tells subscribers', () => {
     const w = world();

@@ -201,7 +201,7 @@ const costLineOf = (job: Submitted, finished?: Finished): string =>
     : `${job.label} · ${usdWords(finished.settledMicroUsd)} (${Math.ceil(finished.seconds)} s made; ${usdWords(job.microUsd)} was held${overrunWords(finished)})`;
 
 /** An overrun, said out loud wherever the cost is shown: it was spent already, so it is recorded and flagged, never asked. */
-const overrunWords = (finished: Finished): string =>
+const overrunWords = (finished: Pick<Finished, 'overrunMicroUsd'>): string =>
   finished.overrunMicroUsd === undefined
     ? ''
     : `; an overrun of ${usdWords(finished.overrunMicroUsd)}: HeyGen billed past the upper bound, recorded and counted toward today’s limit`;
@@ -364,7 +364,10 @@ async function endCounted(deps: AvatarVideoDeps, submitted: Submitted, sentence:
 }
 
 /** What was paid, in a sentence: the settled cost when HeyGen reported the length, else what the reservation held. */
-const paidOf = (job: Submitted, finished?: Finished): string =>
+const paidOf = (
+  job: Submitted,
+  finished?: Pick<Finished, 'settledMicroUsd' | 'seconds' | 'overrunMicroUsd'>,
+): string =>
   finished?.settledMicroUsd === undefined || finished.seconds === undefined
     ? job.paid
     : `${usdWords(finished.settledMicroUsd)} for ${Math.ceil(finished.seconds)} s at the listed price; ${usdWords(job.microUsd)} was held and the difference was settled${overrunWords(finished)}`;
@@ -377,7 +380,16 @@ const answerFinished = (submitted: Submitted, finished: Finished): ToolAnswer =>
           ...pasteOf(submitted, finished.where, costLineOf(submitted, finished)),
         ].join('\n'),
       }
-    : refusal(`Job ${submitted.job} ended without a video: ${finished.sentence ?? 'it was not made'}`);
+    : refusal(
+        `Job ${submitted.job} ended without a video: ${finished.sentence ?? 'it was not made'}${settledWords(submitted, finished)}`,
+      );
+
+/** A video HeyGen made but that could not be delivered still cost what it cost: said with the settled cost (and any overrun). */
+const settledWords = (
+  job: Submitted,
+  finished: Pick<Finished, 'settledMicroUsd' | 'seconds' | 'overrunMicroUsd'>,
+): string =>
+  finished.settledMicroUsd === undefined || finished.seconds === undefined ? '' : ` Billed: ${paidOf(job, finished)}.`;
 
 /** A made video ready to be fetched: what the check found, handed on to the fetch that runs outside the shared queue. */
 interface ToFetch {
@@ -435,30 +447,10 @@ function avatarVideoStatus(deps: AvatarVideoDeps) {
       const placed = await slots.run(async () => {
         const got = await download(deps.fetch, checked.url, VIDEO_TYPES, 'video', VIDEO_DOWNLOAD, HEYGEN_STORE);
         return await deps.serial(async (): Promise<ToolAnswer> => {
-          if ('why' in got) {
-            // A refused host or a file that is the wrong kind is the same on every retry: closed as counted. Anything else is read again, free.
-            if (got.hostRefused === true || got.permanent === true)
-              return await endCounted(
-                deps,
-                submitted,
-                `The video was made and paid for (${submitted.paid}), but it could not be fetched: ${got.why}. Do NOT retry: a retry would be refused the same way, and generate_avatar_video again would be charged again. Tell the owner.`,
-              );
-            return {
-              text: `The video for job ${submitted.job} was made and paid for (${submitted.paid}), but ${got.why}. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
-              isError: true,
-            };
-          }
-          const name = `create-avatar-${submitted.job.slice(4)}.${VIDEO_EXTENSION[got.type] ?? 'mp4'}`;
-          const where = await deps.deliver(ferret, name, got.bytes);
-          if (where === undefined)
-            return {
-              text: `The video for job ${submitted.job} was made and paid for (${submitted.paid}), but it could not be saved for you yet. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
-              isError: true,
-            };
-          // Settled to the real length BEFORE the end is written: the ledger line is idempotent, so an end that fails to
-          // save is retried without a second refund, and the job file only ever says what the ledger holds. A settlement
-          // that cannot be written leaves the job OPEN (never closed unsettled: a closed job is never settled again), so
-          // the next check retries it.
+          // HeyGen said the render completed, so what it cost is known whatever becomes of the delivery: settled FIRST (a refund,
+          // or an OVERRUN line that counts toward the daily cap), so a failed fetch can never drop spend from the ledger. The
+          // ledger line is idempotent, so a retry never writes it twice; one that cannot be written leaves the job OPEN (never
+          // closed unsettled: a closed job is never settled again), so the next check retries it.
           const settlement = await settle(deps, submitted, checked.seconds).then(
             settled => ({ settled }),
             () => undefined,
@@ -466,6 +458,32 @@ function avatarVideoStatus(deps: AvatarVideoDeps) {
           if (settlement === undefined)
             return {
               text: `The video for job ${submitted.job} was made and paid for (${submitted.paid}), but its final cost could not be written to the ledger yet. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
+              isError: true,
+            };
+          if ('why' in got) {
+            // A refused host or a file that is the wrong kind is the same on every retry: closed as counted. Anything else is read again, free.
+            if (got.hostRefused === true || got.permanent === true) {
+              const sentence = `The video was made and paid for, but it could not be fetched: ${got.why}.`;
+              const notClosed = await closeJob(deps, submitted, {
+                outcome: 'counted',
+                sentence,
+                ...settlement.settled,
+              });
+              if (notClosed !== undefined) return notClosed;
+              return refusal(
+                `Not made: ${sentence} It cost ${settlement.settled === undefined ? submitted.paid : paidOf(submitted, settlement.settled)}. Do NOT retry: a retry would be refused the same way, and generate_avatar_video again would be charged again. Tell the owner.`,
+              );
+            }
+            return {
+              text: `The video for job ${submitted.job} was made and paid for (${settlement.settled === undefined ? submitted.paid : paidOf(submitted, settlement.settled)}), but ${got.why}. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
+              isError: true,
+            };
+          }
+          const name = `create-avatar-${submitted.job.slice(4)}.${VIDEO_EXTENSION[got.type] ?? 'mp4'}`;
+          const where = await deps.deliver(ferret, name, got.bytes);
+          if (where === undefined)
+            return {
+              text: `The video for job ${submitted.job} was made and paid for (${settlement.settled === undefined ? submitted.paid : paidOf(submitted, settlement.settled)}), but it could not be saved for you yet. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
               isError: true,
             };
           const notClosed = await closeJob(deps, submitted, { outcome: 'delivered', where, ...settlement.settled });
