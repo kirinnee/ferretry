@@ -397,6 +397,16 @@ describe('fy start', () => {
     expect(() => buildStartRequest({ mode: 'interactive', card: 'F0' }, { cwd: '/w' })).toThrow('&F21');
   });
 
+  test('W-09 --purpose is sent as typed (any case) when it is on the fixed list, and refused by name otherwise', () => {
+    expect(buildStartRequest({ mode: 'interactive', purpose: ' Review ' }, { cwd: '/w' })).toMatchObject({
+      purpose: 'review',
+    });
+    expect('purpose' in buildStartRequest({ mode: 'interactive' }, { cwd: '/w' })).toBe(false);
+    expect(() => buildStartRequest({ mode: 'interactive', purpose: 'chores' }, { cwd: '/w' })).toThrow(
+      '--purpose must be one of comms, review, planning, implementation, other, got "chores"',
+    );
+  });
+
   test('V-0443 an auto start needs a prompt; an interactive one may start bare; with no folder it says how', () => {
     expect(() => buildStartRequest({ mode: 'auto' }, { cwd: '/w' })).toThrow(SessionCommandError);
     expect(buildStartRequest({ mode: 'interactive' }, { cwd: '/w' })).toEqual({ folder: '/w', mode: 'interactive' });

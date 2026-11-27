@@ -5,6 +5,7 @@ import type { LaunchOrigin } from '../launch-origin.ts';
 import { CompactAtSchema } from '../view/compact-at.ts';
 import {
   FerretCardIdSchema,
+  FerretPurposeSchema,
   type FerretRole,
   type FerretSummary,
   FerretTitleSchema,
@@ -75,6 +76,8 @@ export const StartOptionsSchema = z.strictObject({
   title: FerretTitleSchema.optional(),
   /** An ownership label (`start --label`). */
   label: z.string().min(1).optional(),
+  /** What the ferret is for (`new --purpose`): the fixed list Usage groups spend by; a lead may pass it to its helpers. */
+  purpose: FerretPurposeSchema.optional(),
   /** An EXISTING card the new ferret works on (`start --card`, `new --card`): assigned to it, no second card made. */
   card: FerretCardIdSchema.optional(),
   /** The model, as the runtime lists it (alias or full id). */

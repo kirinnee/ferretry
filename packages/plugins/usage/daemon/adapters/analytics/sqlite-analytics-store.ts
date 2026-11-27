@@ -45,6 +45,7 @@ const ANALYTICS_STORED_RATE_UNIT_SCHEMA = z.literal('million_tokens');
 interface SessionRow {
   readonly id: string;
   readonly agent: string | null;
+  readonly purpose: string | null;
   readonly model: string | null;
   readonly context_window: number | null;
   readonly harness: string | null;
@@ -263,6 +264,7 @@ function storedFromRow(row: SessionRow): AnalyticsStoredSession {
       cwd: row.cwd,
       parent: row.parent,
       tree: row.tree,
+      purpose: row.purpose,
       day: row.day,
       week: row.week,
       createdAt: row.created_at,
@@ -449,6 +451,8 @@ function configure(database: SqliteHandle): void {
         rate_output INTEGER,
         signature TEXT NOT NULL,
         ingested_at TEXT NOT NULL,
+        -- Last, because an index written before it existed gains it at the end (see openAnalyticsIndexStore).
+        purpose TEXT,
         -- A refused token total and a stored token count are mutually exclusive by SCHEMA, not by
         -- convention: the one thing this table must never hold is a session reported as having spent
         -- nothing when its evidence could not be read.
@@ -462,12 +466,28 @@ function configure(database: SqliteHandle): void {
 }
 
 /**
+ * An index written before `purpose` existed keeps every row: a nullable column is added in place and the old rows
+ * read as Unlabelled. Only an index of THIS version that lacks nothing but `purpose` is extended; any other shape is
+ * still discarded by `decideAnalyticsIndexSchema`.
+ */
+function addPurposeColumn(database: SqliteHandle): void {
+  const found = database.query<{ user_version: number }>('PRAGMA user_version')[0]?.user_version ?? 0;
+  const withoutPurpose = COLUMNS.filter(column => column !== 'purpose');
+  if (
+    found === ANALYTICS_INDEX_SCHEMA_VERSION &&
+    sameNames(columnNames(database, 'analytics_sessions'), withoutPurpose)
+  )
+    database.run('ALTER TABLE analytics_sessions ADD COLUMN purpose TEXT');
+}
+
+/**
  * Opens the insights index on the kernel's handle: keeps it when its version and columns are this build's, otherwise
  * drops the tables and starts again. `rebuildRequired` says so, so the daemon owes a full pass rather than an
  * incremental one (a table that merely holds no finished ferret yet is not the same thing).
  */
 export function openAnalyticsIndexStore(database: SqliteHandle): OpenedAnalyticsIndexStore {
   const hasTables = tableNames(database).length > 0;
+  addPurposeColumn(database);
   const decision = decideAnalyticsIndexSchema({
     foundVersion: database.query<{ user_version: number }>('PRAGMA user_version')[0]?.user_version ?? 0,
     hasTables,
