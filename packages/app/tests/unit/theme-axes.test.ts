@@ -1,6 +1,6 @@
 /**
  * THE THREE THEME AXES (style · palette · mode) AND THE ONE RULE THAT KEEPS THEM APART: a STYLE file holds no colour
- * value and a PALETTE file holds no non-colour token. `styles/themes.css` names where every token lives; this suite is the
+ * value and a PALETTE pack (`theme/packs/palette/<id>/palette.ts`) holds no non-colour token. `styles/themes.css` names where every token lives; this suite is the
  * thing that fails when a token wanders, when the catalogue and the files disagree, or when a stored pre-split
  * `family`, a removed palette or the removed `contrast` style stops reading as the look the migration names.
  */
@@ -27,10 +27,16 @@ import {
   swatchAttributes,
   type PaletteId,
 } from '../../src/theme/catalog.ts';
-import { PALETTE_NAMES } from '../../src/theme/palette-names.ts';
+import { PALETTE_PACKS } from '../../src/generated/theme-packs.ts';
 import { applyThemeAxes, ThemePreferenceStore } from '../../src/theme/preferences.ts';
 import { applyWindowColour } from '../../src/shell/context.tsx';
-import { readCssWithImports, readStyleFile, themeStylesDir } from '../../src/testing/theme-css.ts';
+import {
+  readCssWithImports,
+  readPaletteCss,
+  readStyleFile,
+  readThemeCss,
+  themeStylesDir,
+} from '../../src/testing/theme-css.ts';
 
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');
 const declared = (css: string): Set<string> =>
@@ -89,9 +95,9 @@ describe('style files are non-colour only', () => {
   }
 });
 
-describe('palette files are colour only', () => {
+describe('palette packs are colour only', () => {
   for (const palette of PALETTE_IDS) {
-    const css = readStyleFile(`palette/${palette}.css`);
+    const css = readPaletteCss(palette);
     it(`${palette}: no token that is not a colour role, and no \`color-scheme\``, () => {
       const stray = [...declared(css)].filter(name => !basePalette.has(name));
       expect(stray).toEqual([]);
@@ -114,9 +120,10 @@ describe('palette files are colour only', () => {
 });
 
 describe('the catalogue, the files and themes.css agree', () => {
-  it('has a style file and a palette file per id, and nothing else', () => {
+  it('has a style file per id and a palette pack folder per id, and nothing else', () => {
     expect(files('style')).toEqual(STYLE_IDS.map(id => `${id}.css`).sort());
-    expect(files('palette')).toEqual(PALETTE_IDS.map(id => `${id}.css`).sort());
+    expect(readdirSync(join(themeStylesDir, '../theme/packs/palette')).sort()).toEqual([...PALETTE_IDS].sort());
+    expect(PALETTE_PACKS.map(pack => pack.id)).toEqual([...PALETTE_IDS]);
   });
 
   it('imports every file themes.css lists, floors last', () => {
@@ -124,15 +131,17 @@ describe('the catalogue, the files and themes.css agree', () => {
       match => match[1] as string,
     );
     for (const id of STYLE_IDS) expect(imports).toContain(`./style/${id}.css`);
-    for (const id of PALETTE_IDS) expect(imports).toContain(`./palette/${id}.css`);
     expect(imports.at(-1)).toBe('./tokens/floors.css');
-    expect(imports.indexOf('./tokens/floors.css')).toBeGreaterThan(
-      imports.indexOf(`./palette/${PALETTE_IDS.at(-1)}.css`),
-    );
+    // Every palette arrives through the ONE generated stylesheet, which `index.css` imports once, before themes.css (palette
+    // selectors out-rank the bases, so the order never decides a colour); themes.css itself must not import it a second time.
+    expect(imports).not.toContain('../generated/theme-packs.css');
+    const index = [...readStyleFile('index.css').matchAll(/^@import '([^']+)';/gmu)].map(match => match[1] as string);
+    expect(index.filter(each => each === '../generated/theme-packs.css')).toHaveLength(1);
+    expect(index.indexOf('../generated/theme-packs.css')).toBeLessThan(index.indexOf('./themes.css'));
     // The resolved text really contains each block, so a typo in an import path cannot hide.
     const css = readCssWithImports(join(themeStylesDir, 'themes.css'));
     for (const id of STYLE_IDS) expect(css).toContain(`[data-style='${id}']`);
-    for (const id of PALETTE_IDS) expect(css).toContain(`[data-palette='${id}']`);
+    for (const id of PALETTE_IDS) expect(readThemeCss()).toContain(`[data-palette='${id}']`);
   });
 
   it('lists the same ids in the catalogue as in the Layouts contract, in the same order', () => {
@@ -146,7 +155,7 @@ describe('the catalogue, the files and themes.css agree', () => {
     expect(STYLE_IDS as readonly string[]).not.toContain('contrast');
   });
 
-  it('has 12 palettes, each with its own proper name from the one map, and none a plain colour word', () => {
+  it('has 12 palettes, each with its own proper name from its pack, and none a plain colour word', () => {
     expect(PALETTES.map(entry => entry.label)).toEqual([
       'Inkwell',
       'Skyline',
@@ -161,8 +170,8 @@ describe('the catalogue, the files and themes.css agree', () => {
       'Briefing',
       'High contrast',
     ]);
-    // The ONE map: the catalogue reads every label from it, so a rename is an edit to that file alone.
-    expect(PALETTES.map(entry => [entry.id, entry.label])).toEqual(Object.entries(PALETTE_NAMES));
+    // The pack is the one owner of its name: the catalogue reads every label from it, so a rename is an edit to that pack alone.
+    expect(PALETTES.map(entry => [entry.id, entry.label])).toEqual(PALETTE_PACKS.map(pack => [pack.id, pack.label]));
     expect(new Set(PALETTES.map(entry => entry.label)).size).toBe(PALETTES.length);
     const COLOUR_WORDS = [
       'indigo',

@@ -11,8 +11,9 @@
  * The cross-style matrix (T3) renders them; this is the part that needs no renderer.
  */
 import { describe, expect, it } from 'bun:test';
-import { PALETTES, STYLES } from '../../src/theme/catalog.ts';
-import { readStyleFile } from '../../src/testing/theme-css.ts';
+import { PALETTE_PACKS } from '../../src/generated/theme-packs.ts';
+import { DEFAULT_PALETTE, PALETTE_IDS, PALETTES, STYLES } from '../../src/theme/catalog.ts';
+import { readPaletteCss, readStyleFile } from '../../src/testing/theme-css.ts';
 
 const NEW_PALETTES = ['vaporwave', 'hacker', 'vintage', 'mesh', 'aurora', 'afterglow', 'briefing'] as const;
 const STYLE_DEFAULTS = ['vaporwave', 'hacker', 'vintage'] as const;
@@ -23,7 +24,7 @@ const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g
 
 /** The declarations of the one block `[data-palette='<id>'][data-mode='<mode>']`, by token name. */
 function block(palette: string, mode: string): Record<string, string> {
-  const css = withoutComments(readStyleFile(`palette/${palette}.css`));
+  const css = withoutComments(readPaletteCss(palette));
   const rule = new RegExp(
     `:root\\[data-palette='${palette}'\\]\\[data-mode='${mode}'\\]\\s*,[^{]*\\{([^}]*)\\}`,
     'u',
@@ -204,5 +205,59 @@ describe('the mesh token is `none` unless a gradient palette sets it (index.css 
     expect(withoutComments(readStyleFile('index.css'))).toContain(
       'background-image: var(--bg-pattern), var(--body-wash), var(--surface-mesh);',
     );
+  });
+});
+
+describe('palettes are packs: one folder each, discovered, nothing listed by hand (G2 U3)', () => {
+  /** The `--surface-mesh` strings the four gradient palettes drew BEFORE they became data, copied from the base stylesheet. */
+  const TODAYS_MESH: Readonly<Record<string, Readonly<Record<'light' | 'dark', string>>>> = {
+    mesh: {
+      light:
+        'radial-gradient(70% 60% at 8% 6%, rgba(167, 139, 250, 0.6), transparent 72%), radial-gradient(65% 55% at 92% 14%, rgba(251, 146, 190, 0.5), transparent 72%), radial-gradient(70% 60% at 80% 94%, rgba(125, 211, 252, 0.55), transparent 72%), radial-gradient(55% 50% at 14% 88%, rgba(253, 224, 140, 0.4), transparent 72%)',
+      dark: 'radial-gradient(70% 60% at 8% 6%, rgba(124, 58, 237, 0.62), transparent 72%), radial-gradient(65% 55% at 92% 14%, rgba(236, 72, 153, 0.46), transparent 72%), radial-gradient(70% 60% at 80% 94%, rgba(14, 165, 233, 0.5), transparent 72%), radial-gradient(55% 50% at 14% 88%, rgba(99, 102, 241, 0.42), transparent 72%)',
+    },
+    aurora: {
+      light:
+        'radial-gradient(70% 60% at 8% 6%, rgba(45, 212, 191, 0.5), transparent 72%), radial-gradient(65% 55% at 92% 14%, rgba(74, 222, 128, 0.4), transparent 72%), radial-gradient(70% 60% at 80% 94%, rgba(96, 165, 250, 0.5), transparent 72%), radial-gradient(55% 50% at 14% 88%, rgba(167, 243, 208, 0.45), transparent 72%)',
+      dark: 'radial-gradient(70% 60% at 8% 6%, rgba(13, 148, 136, 0.55), transparent 72%), radial-gradient(65% 55% at 92% 14%, rgba(22, 163, 74, 0.38), transparent 72%), radial-gradient(70% 60% at 80% 94%, rgba(37, 99, 235, 0.5), transparent 72%), radial-gradient(55% 50% at 14% 88%, rgba(6, 182, 212, 0.38), transparent 72%)',
+    },
+    afterglow: {
+      light:
+        'radial-gradient(70% 60% at 8% 6%, rgba(253, 186, 116, 0.6), transparent 72%), radial-gradient(65% 55% at 92% 14%, rgba(251, 146, 160, 0.5), transparent 72%), radial-gradient(70% 60% at 80% 94%, rgba(244, 114, 182, 0.4), transparent 72%), radial-gradient(55% 50% at 14% 88%, rgba(253, 224, 140, 0.5), transparent 72%)',
+      dark: 'radial-gradient(70% 60% at 8% 6%, rgba(234, 88, 12, 0.5), transparent 72%), radial-gradient(65% 55% at 92% 14%, rgba(225, 29, 72, 0.42), transparent 72%), radial-gradient(70% 60% at 80% 94%, rgba(219, 39, 119, 0.4), transparent 72%), radial-gradient(55% 50% at 14% 88%, rgba(217, 119, 6, 0.42), transparent 72%)',
+    },
+    briefing: {
+      light:
+        'radial-gradient(60% 50% at 94% 4%, rgba(85, 95, 255, 0.11), transparent 70%), radial-gradient(50% 42% at 4% 98%, rgba(249, 25, 116, 0.09), transparent 70%), radial-gradient(45% 40% at 6% 6%, rgba(85, 95, 255, 0.05), transparent 70%), radial-gradient(45% 40% at 96% 96%, rgba(249, 25, 116, 0.06), transparent 70%)',
+      dark: 'radial-gradient(60% 50% at 94% 4%, rgba(85, 95, 255, 0.26), transparent 70%), radial-gradient(55% 46% at 4% 98%, rgba(249, 25, 116, 0.2), transparent 70%), radial-gradient(45% 40% at 6% 6%, rgba(85, 95, 255, 0.1), transparent 70%), radial-gradient(50% 42% at 96% 96%, rgba(249, 25, 116, 0.12), transparent 70%)',
+    },
+  };
+
+  it('discovers every palette from its folder, in picker order, with exactly one default', () => {
+    expect(PALETTE_PACKS.map(pack => pack.id)).toEqual([...PALETTE_IDS]);
+    const orders = PALETTE_PACKS.map(pack => pack.order);
+    expect(orders).toEqual([...orders].sort((a, b) => a - b));
+    expect(new Set(orders).size).toBe(orders.length);
+    expect(PALETTE_PACKS.filter(pack => 'default' in pack).map(pack => pack.id)).toEqual(['studio']);
+    expect(DEFAULT_PALETTE).toBe('studio');
+    expect(PALETTES.map(entry => entry.label)).toEqual(PALETTE_PACKS.map(pack => pack.label));
+  });
+
+  it('emits today’s gradient mesh strings exactly, for every gradient palette in both modes', () => {
+    for (const id of GRADIENT_PALETTES)
+      for (const mode of MODES) {
+        const mesh = block(id, mode)['--surface-mesh'];
+        expect(mesh?.replace(/\s+/gu, ' '), `${id} ${mode}`).toBe(TODAYS_MESH[id]?.[mode]);
+      }
+  });
+
+  it('states in each dark block every token the default palette’s dark block sets, so the unqualified dark baseline changes none', () => {
+    const baseline = Object.keys(PALETTE_PACKS.find(pack => 'default' in pack)?.dark ?? {});
+    expect(baseline.length).toBeGreaterThan(50);
+    for (const pack of PALETTE_PACKS)
+      expect(
+        baseline.filter(name => !(name in pack.dark)),
+        `${pack.id} dark`,
+      ).toEqual([]);
   });
 });
