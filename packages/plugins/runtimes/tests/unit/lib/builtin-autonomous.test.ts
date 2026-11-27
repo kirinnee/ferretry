@@ -110,7 +110,7 @@ describe('the built-in autonomous profiles', () => {
 
   it('should sit UNDER an imported setup, so the owner’s own words come last and win', () => {
     // Arrange — a machine with no files and nothing found: the Starter names the built-in profile as its oldest layer.
-    const plan = planImport([], { digest: text => text, starters: TEST_STARTERS });
+    const plan = planImport([], { kits: undefined, digest: text => text, starters: TEST_STARTERS });
 
     // Act — an empty plan has nothing to merge; a Claude host with nothing in it makes the Starter.
     expect(plan.profiles).toEqual({});

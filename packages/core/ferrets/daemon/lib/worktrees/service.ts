@@ -256,7 +256,7 @@ export class ManagedWorktreeService {
   ) {}
 
   async list(): Promise<WorktreeListResponse> {
-    return await this.#runLifecycle(async () => await this.#list());
+    return await this.runExclusive(async () => await this.#list());
   }
 
   /**
@@ -266,7 +266,7 @@ export class ManagedWorktreeService {
    * registry is settled, which is every ordinary read.
    */
   async records(): Promise<readonly ManagedWorktreeSummary[]> {
-    return await this.#runLifecycle(async () => {
+    return await this.runExclusive(async () => {
       const state = await this.#settled();
       const rows: ManagedWorktreeSummary[] = state.worktrees.map(managed => ({
         ...(managed.origin === undefined ? {} : { origin: managed.origin }),
@@ -321,7 +321,7 @@ export class ManagedWorktreeService {
     currentWorkingDirectory?: string,
     readOnly = false,
   ): Promise<WorktreeRemovalDecision> {
-    return await this.#runLifecycle(async () => await this.#checkRemoval(path, currentWorkingDirectory, readOnly));
+    return await this.runExclusive(async () => await this.#checkRemoval(path, currentWorkingDirectory, readOnly));
   }
 
   async #checkRemoval(
@@ -353,7 +353,7 @@ export class ManagedWorktreeService {
    * was already gone, and every retry then refused with `missing_worktree` forever.
    */
   async remove(request: WorktreeRemovalRequest): Promise<RemovedWorktree> {
-    return await this.#runLifecycle(async () => await this.#remove(request));
+    return await this.runExclusive(async () => await this.#remove(request));
   }
 
   async #remove(request: WorktreeRemovalRequest): Promise<RemovedWorktree> {
@@ -433,11 +433,11 @@ export class ManagedWorktreeService {
    * unremovable, and holding a branch.
    */
   async create(request: CreateWorktreeRequest): Promise<CreatedWorktree> {
-    return await this.#runLifecycle(async () => await this.#create(request));
+    return await this.runExclusive(async () => await this.#create(request));
   }
 
   async adopt(path: string): Promise<CreatedWorktree> {
-    return await this.#runLifecycle(async () => {
+    return await this.runExclusive(async () => {
       this.#managedRoot();
       const state = await this.#settled();
       const existing = state.worktrees.find(row => row.path === path && row.removedAt === undefined);
@@ -566,7 +566,7 @@ export class ManagedWorktreeService {
     }
   }
 
-  async #runLifecycle<Result>(operation: () => Promise<Result>): Promise<Result> {
+  async runExclusive<Result>(operation: () => Promise<Result>): Promise<Result> {
     const current = this.lifecycle.catch(() => undefined).then(operation);
     this.lifecycle = current;
     return await current;

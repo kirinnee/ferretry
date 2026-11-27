@@ -7,6 +7,9 @@ import {
   AdoptWorktreeRequestSchema,
   type RepoWorktreeListResponse,
   RepoWorktreeListResponseSchema,
+  MoveProjectWorktreeRequestSchema,
+  MovedProjectWorktreeSchema,
+  type WorktreeMoveOffer,
 } from '@ferretry/core-ferrets/contract';
 import type { ProjectInfo } from '../../../contract/index.ts';
 import type { ProjectsClient } from '../../lib/client.ts';
@@ -62,14 +65,34 @@ export const worktreeSources = (project: ProjectInfo): readonly WorktreeSource[]
 export const readRepoWorktrees = async (
   client: ProjectsClient,
   source: WorktreeSource,
+  project?: string,
 ): Promise<RepoWorktreeListResponse> =>
   RepoWorktreeListResponseSchema.parse(
     await client.call(LIST_ROUTE, {
-      query: source.project === undefined ? { commonDir: source.commonDir } : { project: source.project },
+      query:
+        source.project === undefined
+          ? { commonDir: source.commonDir, ...(project === undefined ? {} : { moveProject: project }) }
+          : { project: source.project },
     }),
   );
 
 /** Takes the checkout over where it stands: Ferrets never moves it. */
 export const adoptWorktree = async (client: ProjectsClient, path: string): Promise<void> => {
   await client.call(ADOPT_ROUTE, { body: AdoptWorktreeRequestSchema.parse({ path }) });
+};
+
+export const moveWorktree = async (
+  client: ProjectsClient,
+  project: string,
+  offer: WorktreeMoveOffer,
+): Promise<void> => {
+  MovedProjectWorktreeSchema.parse(
+    await client.call('POST /v1/worktrees/move', {
+      body: MoveProjectWorktreeRequestSchema.parse({
+        project,
+        worktreeId: offer.worktreeId,
+        reviewedIdentity: offer.reviewedIdentity,
+      }),
+    }),
+  );
 };
