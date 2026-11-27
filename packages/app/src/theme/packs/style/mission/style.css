@@ -258,3 +258,31 @@
   stroke-dasharray: 12 12;
   stroke-dashoffset: -12;
 }
+
+/* ---- Mission Control: HUD corner brackets ------------------------------
+   Opt-in via `data-hud` on a panel. Drawn as an inset pseudo-element rather
+   than as a border so it never affects layout, and deliberately NOT clip-path,
+   so a bracketed panel can still host a popover. */
+:root[data-style='mission'] .kt-panel[data-hud]::before,
+:root[data-style='mission'] .kt-panel[data-hud]::after {
+  content: '';
+  position: absolute;
+  width: var(--bracket-size);
+  height: var(--bracket-size);
+  pointer-events: none;
+}
+:root[data-style='mission'] .kt-panel[data-hud] {
+  position: relative;
+}
+:root[data-style='mission'] .kt-panel[data-hud]::before {
+  top: -1px;
+  left: -1px;
+  border-top: var(--stroke-heavy) solid var(--accent);
+  border-left: var(--stroke-heavy) solid var(--accent);
+}
+:root[data-style='mission'] .kt-panel[data-hud]::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: var(--stroke-heavy) solid var(--accent);
+  border-bottom: var(--stroke-heavy) solid var(--accent);
+}

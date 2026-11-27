@@ -558,3 +558,14 @@
     rotate: none;
   }
 }
+
+/* Gen Z's ring is three bands (surface, accent, ink) so it reads on any fill; drawn outside it is a 5px shadow spread. The same
+   three bands now sit inside the field: the outline is the ink band at the edge, then the surface, then the accent. */
+:is(:root[data-style='genz'], [data-swatch][data-style='genz'])
+:is(select, input, textarea, .fy-sb__trigger).kt-input:where(
+  :not([data-swatch]:not([data-style='genz']) *)
+):focus-visible {
+  box-shadow:
+    inset 0 0 0 calc(var(--focus-width) + 2px) var(--surface),
+    inset 0 0 0 calc(var(--focus-width) + 5px) var(--focus-color);
+}
