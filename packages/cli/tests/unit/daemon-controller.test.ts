@@ -42,8 +42,13 @@ interface Options {
   readonly pinFails?: string;
   /** How many stop attempts (a signal, a manager stop or kill) the daemon ignores before it goes down. */
   readonly ignoreStops?: number;
-  /** The daemon finishes exiting while a stop waits on it: its lock is released and its listener closed by the next look. */
-  readonly exitsWhileStopping?: boolean;
+  /**
+   * The lock is released BETWEEN two reads of it during an escalation: the first read still sees the daemon (and it
+   * exits straight after), the second finds the lock free and the listener closed.
+   */
+  readonly releasesLockBetweenReads?: boolean;
+  /** The daemon exits cleanly and its pid number is at once another, unrelated process (listener closed, lock free). */
+  readonly pidReused?: boolean;
   /** What the service manager says, call by call, over what the daemon would imply; `always` once the queue is spent. */
   readonly manager?: {
     readonly queue?: readonly ManagerSays[];
@@ -80,10 +85,19 @@ async function harness(options: Options = {}) {
       : { protocol: options.protocol ?? 1, version: options.runningVersion ?? '5.0.0', pid: 4321 };
   let ignored = options.ignoreStops ?? 0;
   let signalled = false;
+  let lockReads = 0;
+  let reused = false;
+  /** Which process each signal reached: `pid@start identity`. */
+  const reached: string[] = [];
+  const identityOf = (pid: number): string | undefined =>
+    current?.pid === pid ? `start-of-${String(pid)}` : reused ? `stranger-on-${String(pid)}` : undefined;
   const managerQueue = [...(options.manager?.queue ?? [])];
   const stopOnce = (): void => {
     if (ignored > 0) ignored -= 1;
-    else current = undefined;
+    else {
+      current = undefined;
+      reused = options.pidReused === true;
+    }
   };
   const processes: IDaemonProcessPort = {
     run: async argv => {
@@ -116,16 +130,23 @@ async function harness(options: Options = {}) {
     },
     signal: (pid, signal) => {
       trail.push(`signal:${String(pid)}:${signal}`);
+      reached.push(`${String(pid)}@${identityOf(pid) ?? 'nothing'}`);
       signalled = true;
       stopOnce();
       return true;
     },
-    alive: () => current !== undefined,
-    holdsOpen: async () => {
-      if (options.exitsWhileStopping === true && signalled) {
+    alive: pid => identityOf(pid) !== undefined,
+    identify: async pid => identityOf(pid),
+    holdsOpen: async pid => {
+      if (options.releasesLockBetweenReads === true && signalled) {
+        lockReads += 1;
+        if (lockReads > 1 || current === undefined) return false;
+        // The first read answers true; the daemon has finished exiting before the next one.
+        const held = current.pid === pid;
         current = undefined;
-        return false;
+        return held;
       }
+      if (reused) return false;
       return 'holdsOpen' in options ? options.holdsOpen : true;
     },
   };
@@ -260,6 +281,7 @@ async function harness(options: Options = {}) {
     controller,
     layout,
     trail,
+    reached,
     out,
     prompt,
     locks,
@@ -712,12 +734,28 @@ describe('what the controller says when the host will not cooperate', () => {
     expect(h.out.text).toContain('ok: fyd stopped');
   });
 
-  test('E-404 a daemon that exits while the stop waits is a clean stop: no refusal, no kill, ok', async () => {
-    const h = await harness({ ignoreStops: 1, exitsWhileStopping: true });
+  test('E-404 a daemon that exits between the two lock reads of an escalation is a clean stop, not an ownership error', async () => {
+    const h = await harness({ ignoreStops: 1, releasesLockBetweenReads: true });
     await h.controller.stop();
-    expect(h.trail.filter(line => line.startsWith('signal'))).toEqual(['signal:4321:SIGTERM']);
     expect(h.out.text).toContain('ok: fyd stopped');
     expect(h.out.text).not.toContain('does not hold');
+    expect(h.health()).toBeUndefined();
+  });
+
+  test('V-B17 a pid reused by an unrelated process after the daemon exits is "the daemon is gone": exit clean, nothing else signalled', async () => {
+    const h = await harness({ pidReused: true });
+    await h.controller.stop();
+    expect(h.out.text).toContain('ok: fyd stopped');
+    expect(h.out.text).not.toContain('escalating');
+    // The one signal reached the original daemon, never the stranger that took its number.
+    expect(h.reached).toEqual(['4321@start-of-4321']);
+  });
+
+  test('V-B17 a daemon that ignores the first stop and then exits as its pid is reused is still never escalated onto the stranger', async () => {
+    const h = await harness({ ignoreStops: 1, pidReused: true });
+    await h.controller.stop();
+    expect(h.out.text).toContain('ok: fyd stopped');
+    expect(h.reached.every(reach => reach.endsWith('@start-of-4321'))).toBe(true);
   });
 
   test('V-0244 a daemon that never stops is reported as not stopped, with where to look, and no success', async () => {

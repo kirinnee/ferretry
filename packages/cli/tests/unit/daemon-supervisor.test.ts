@@ -29,7 +29,13 @@ function world(platform: string) {
   const signals: { pid: number; signal: string }[] = [];
   const disk = new Map<string, string>();
   const replies: ((argv: readonly string[]) => Outcome | undefined)[] = [];
-  const state = { holds: true as boolean | undefined, alive: true };
+  const state = {
+    holds: true as boolean | undefined,
+    alive: true,
+    /** What `identify` answers, read by read; the last answer repeats. */
+    identities: ['start-A'] as (string | undefined)[],
+    holdsReads: 0,
+  };
   const processes: IDaemonProcessPort = {
     run: async argv => {
       ran.push([...argv]);
@@ -45,7 +51,11 @@ function world(platform: string) {
       return true;
     },
     alive: () => state.alive,
-    holdsOpen: async () => state.holds,
+    identify: async () => (state.identities.length > 1 ? state.identities.shift() : state.identities[0]),
+    holdsOpen: async () => {
+      state.holdsReads += 1;
+      return state.holds;
+    },
   };
   const files: IServiceFilePort = {
     exists: async path => disk.has(path),
@@ -259,5 +269,44 @@ describe('the direct supervisor', () => {
     w.state.holds = undefined;
     await should(supervisor.assertServes(6)).be.rejectedWith(/neither \/proc nor lsof/u);
     should(w.signals).have.length(2);
+  });
+
+  // V-B17 MUST 1: every signal is tied to the identity seen before the stop began.
+  it('signals nothing when the pid now has another start identity, or none (the daemon exited and its number was reused)', async () => {
+    const w = world('freebsd');
+    const supervisor = direct(w);
+
+    w.state.identities = ['start-B'];
+    await supervisor.stop({ pidHint: 5, identity: 'start-A', escalate: false });
+    await supervisor.stop({ pidHint: 5, identity: 'start-A', escalate: true });
+    w.state.identities = [undefined];
+    await supervisor.stop({ pidHint: 5, identity: 'start-A', escalate: true });
+    should(w.signals).deepEqual([]);
+
+    w.state.identities = ['start-A'];
+    await supervisor.stop({ pidHint: 5, identity: 'start-A', escalate: true });
+    should(w.signals).deepEqual([{ pid: 5, signal: 'SIGKILL' }]);
+  });
+
+  // V-B17 MUST 2: an escalation decides on ONE look. The lock is released as the daemon exits, so a second look at it
+  // reads a clean exit as a stranger and refuses the stop (E-404).
+  it('decides an escalation from the identity alone: a lock released meanwhile is no ownership error', async () => {
+    const w = world('freebsd');
+    const supervisor = direct(w);
+    w.state.holds = false;
+
+    await supervisor.stop({ pidHint: 5, identity: 'start-A', escalate: true });
+
+    should(w.state.holdsReads).equal(0);
+    should(w.signals).deepEqual([{ pid: 5, signal: 'SIGKILL' }]);
+  });
+
+  it('says a handle whose pid is alive under another identity has exited', async () => {
+    const w = world('freebsd');
+    const supervisor = direct(w);
+    w.state.identities = ['start-B'];
+
+    should((await supervisor.inspect({ pid: 9, identity: 'start-A' })).state).equal('failed');
+    should((await supervisor.inspect({ pid: 9, identity: 'start-B' })).state).equal('running');
   });
 });
