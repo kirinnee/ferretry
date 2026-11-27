@@ -6,7 +6,7 @@
  * `RegisterProjectRequestSchema` accepts; the schema is the last word, so the clone address is judged by the contract's
  * own rule and not a second opinion written here.
  */
-import { type RegisterProjectRequest, RegisterProjectRequestSchema } from '../../../contract/index.ts';
+import { cloneFolderName, type RegisterProjectRequest, RegisterProjectRequestSchema } from '../../../contract/index.ts';
 import { baseName } from '../../lib/folders.ts';
 
 export const CREATE_STEPS = ['folder', 'name', 'accounts', 'keys', 'done'] as const;
@@ -36,15 +36,6 @@ export const emptyCreateDraft: CreateDraft = Object.freeze({
   url: '',
   name: '',
 });
-
-/** The folder `git clone` makes for an address: its last segment without `.git` (`…/you/project.git` → `project`). */
-export const cloneFolderName = (url: string): string | null => {
-  const text = url.trim();
-  // The address's PATH names the repository: `https://github.com/` has none, and its host is not a folder name.
-  const path = URL.canParse(text) ? new URL(text).pathname : '';
-  const name = (path.split('/').filter(Boolean).pop() ?? '').replace(/\.git$/u, '');
-  return name === '' ? null : name;
-};
 
 /** The folder the project will be (the chosen one, or the clone's destination inside it). */
 export const projectFolder = (draft: CreateDraft): string | null => {

@@ -12,6 +12,7 @@ import {
   PROJECT_ACCOUNTS_AUDIT,
   PROJECT_FOLDER_CREATED_AUDIT,
   PROJECT_REGISTERED_AUDIT,
+  PROJECT_REPO_CLONED_AUDIT,
   PROJECT_REMOVED_AUDIT,
   ProjectRegistered,
   ProjectRemoved,
@@ -111,6 +112,17 @@ export default definePlugin({
         audit: { skip: 'a read of repository folder names and remote addresses inside a registered project' },
         guard: {
           none: 'folder names and remote addresses (never with a password); no file content, no pane, page or vault text',
+        },
+      }),
+      // NEW in F-101: clone another repository into a project that already exists. A person's act that writes the disk.
+      route('POST /v1/projects/:id/repos', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: filesystemConfigure,
+        noStore: true,
+        audit: { record: PROJECT_REPO_CLONED_AUDIT },
+        guard: {
+          none: 'answers repository folder names and remote addresses (never with a password); no pane, page or vault text',
         },
       }),
       // NEW in &F6061 U5: the project's file finder, names only. A person's read of a registered folder, like the repos scan:

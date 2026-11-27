@@ -8,7 +8,9 @@ import type {
   StartRefusal,
   UpdateResult,
 } from '@ferretry/core-ferrets/contract';
-import type { ChildEnvironment, FerretId } from '@ferretry/kernel/contract';
+import type { ChildEnvironment, ConfigFileDef, FerretId } from '@ferretry/kernel/contract';
+import { CLAUDE_CODE_CONFIG, type HarnessConfig } from '../../../contract/index.ts';
+import { autoPermissionModeRefusal } from '../../adapters/update-ports.ts';
 import { err, ok, type Result } from '@ferretry/std';
 import { isConversationId } from '../../lib/harness/claude-path.ts';
 import { API_KEY_SEED_SHELL } from '../../lib/harness/api-key-seed.ts';
@@ -18,7 +20,9 @@ import { type ClaudeCore, claudeHome, fenced, type Serves } from './core.ts';
 import { prepareHomeFrom, requirePrivateChain } from './home.ts';
 import { launchInputs, recordLaunchSettings } from './launch-settings.ts';
 
-export const lifecyclePart = (core: ClaudeCore): Serves<'discover' | 'resume' | 'start' | 'stop' | 'update'> => {
+export const lifecyclePart = (
+  core: ClaudeCore,
+): Serves<'autoLaunchRefusal' | 'discover' | 'resume' | 'start' | 'stop' | 'update'> => {
   async function discover(): Promise<HarnessInstall | HarnessMissing> {
     const location = await core.deps.location.locate();
     if (location.outcome === 'absent')
@@ -88,6 +92,14 @@ export const lifecyclePart = (core: ClaudeCore): Serves<'discover' | 'resume' | 
 
   return {
     discover,
+
+    async autoLaunchRefusal() {
+      const config = core.deps.config.file(CLAUDE_CODE_CONFIG as ConfigFileDef<HarnessConfig>);
+      if (config?.permissionMode !== 'auto') return undefined;
+      const location = await core.deps.location.locate();
+      if (location.outcome !== 'located') throw new Error('Claude Code could not be found');
+      return await autoPermissionModeRefusal(core.deps.spawn, location.path);
+    },
 
     async update(): Promise<UpdateResult> {
       try {
