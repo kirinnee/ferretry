@@ -1,4 +1,4 @@
-import { type CallContext, jsonResponse } from '@ferretry/kernel/contract';
+import { ApiError, type CallContext, jsonResponse } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import {
   type FerretId,
@@ -29,19 +29,7 @@ import type { FeatureContribution, FerretsContext, FerretsFeature } from './type
 const JOB_BACKSTOP_EVERY_MS = 15_000;
 
 function register(f: FerretsContext): FeatureContribution | undefined {
-  const {
-    daemon: ctx,
-    kernel,
-    hooks,
-    registry,
-    service,
-    sessionStore,
-    sessionFiles,
-    storeLoaded,
-    pathFerret,
-    mayAct,
-    late,
-  } = f;
+  const { daemon: ctx, kernel, hooks, registry, service, sessionStore, storeLoaded, pathFerret, mayAct, late } = f;
   // THE FERRET'S PANE, through its own runner by the registry's handle (c58-37): never a tmux session name. Both answers are
   // three-valued: a ferret with no handle has no pane (proved gone), a runner that cannot identify or read one is a blind
   // spot the gate refuses on.
@@ -156,8 +144,6 @@ function register(f: FerretsContext): FeatureContribution | undefined {
           },
         },
       },
-      environment: sessionFiles.environment,
-      createLifecycle: sessionFiles.createLifecycle,
       // The relaunch-settings read (W2-c, RULING #27 Q9): the ferret's own harness compares what it launched under with
       // its settings now; Ferrets reads no harness file. The caller check is `mayAct` below, as for every move route.
       launch: relaunchSettings({
@@ -176,7 +162,6 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   const MOVE_ACTING_ROUTES: readonly string[] = [
     'POST /v1/ferrets/:ferretId/move',
     'POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs',
-    'POST /v1/ferrets/:ferretId/fork',
     'POST /v1/ferrets/:ferretId/handover',
     'GET /v1/ferrets/:ferretId/handover',
     'POST /v1/ferrets/:ferretId/handover/cancel',
@@ -231,7 +216,13 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     },
   });
 
-  return { routes: moveRoutes };
+  // THE FORK ROUTE is Conversation's (it owns the message selection, the attachments and the form); until that route lands
+  // the declared one answers 503 as the unbound fork always did. The cut and the start it will call are `forks.feature.ts`.
+  const forkRoute = async (call: CallContext) => {
+    mayAct(call, await pathFerret(call));
+    throw new ApiError(503, 'Fork is not wired yet in this version of Ferretry.', 'plugin_unavailable');
+  };
+  return { routes: { ...moveRoutes, 'POST /v1/ferrets/:ferretId/fork': forkRoute } };
 }
 
 export default { id: 'moves', register } satisfies FerretsFeature;

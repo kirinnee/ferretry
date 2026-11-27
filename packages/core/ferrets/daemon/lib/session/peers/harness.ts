@@ -22,7 +22,6 @@ export type {
   CodexPickerDrivePort,
   CodexRuntimeCatalogCache,
   HarnessQuirkService,
-  HarnessRuntimeSwitchContext,
   HarnessRuntimeSwitchRequest,
   PickerSleeper,
   RuntimeSwitchPlan,

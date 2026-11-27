@@ -1,10 +1,9 @@
 import { CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_HISTORY_POOL } from '@ferretry/plugin-claude-code/contract';
 import { CODEX_AGENT_HOMES, CODEX_HISTORY_POOL } from '@ferretry/plugin-codex/contract';
-import type { TranscriptProvenance } from '@ferretry/core-ferrets/contract';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { StepContext } from '../steps/index.ts';
-import type { RuntimeIds } from '../v4/ferrets.ts';
+import type { RuntimeIds, TranscriptProvenance } from '../v4/ferrets.ts';
 import { rebaseV4Path } from '../v4/rebase.ts';
 
 export function agentHomesRoot(harness: 'claude' | 'codex') {
