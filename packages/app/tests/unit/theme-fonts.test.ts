@@ -68,6 +68,12 @@ const EXPECTED = {
     textBytes: 38632,
     codeBytes: 28812,
   },
+  accessible: {
+    text: ['public-sans|wght-normal'],
+    code: ['jetbrains-mono|400-normal', 'jetbrains-mono|700-normal'],
+    textBytes: 26832,
+    codeBytes: 43076,
+  },
   swiss: {
     text: ['hanken-grotesk|wght-normal'],
     code: ['jetbrains-mono|400-normal', 'jetbrains-mono|700-normal'],
