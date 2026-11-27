@@ -10,7 +10,7 @@ composition	contract/state.ts	-	-	the declared state files (barrel of the genera
 composition	contract/testing/index.ts	-	-	the Ferrets fake every consumer test uses
 composition	daemon/index.ts	-	-	implementDaemon shell: the composition root of the Ferrets daemon
 composition	daemon/lib/ferrets/service.ts	-	-	the lifecycle class; H5 U4/U6 slice it, a lifecycle change still edits it
-oversize	daemon/lib/ferrets/service.ts	2970	2026-11-30	lifecycle class; H5 U4/U6 are slicing it, 10 of 80 merges edit it
+oversize	daemon/lib/ferrets/service.ts	2982	2026-11-30	lifecycle class; H5 U4/U6 are slicing it, 10 of 80 merges edit it
 oversize	daemon/lib/names/pool.ts	10022	2026-12-16	the name pool: 10,000 names of data, never split; move to a data file
 composition	daemon/modules/session-files.ts	-	-	the session file layout shared by every slice
 oversize	daemon/modules/turn-watch.ts	400	2026-12-16	the turn watch's host wiring; FX5 and FX6 (one bug) edited it back to back, 6 of 80 merges
