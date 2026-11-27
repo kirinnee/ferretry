@@ -78,7 +78,7 @@
 
   /* ═══ the component contract (r11 T11): what carries Lucid in every slot — a gel desktop ═══ */
   /* BACKGROUND: a brushed pinstripe, one fine line every 4px in the page ink (the contract's `scan` tile), never a gradient wash; no grain. */
-  --bg-pattern-ink: color-mix(in srgb, var(--fg) 5%, transparent);
+  --bg-pattern-ink: color-mix(in srgb, var(--fg) 12%, transparent);
   --bg-pattern: var(--bg-pattern-scan);
   --bg-pattern-size: 4px;
   --bg-pattern-alpha: 100%;
@@ -143,6 +143,7 @@
 
 :root[data-style='lucid'][data-mode='dark'],
 [data-swatch][data-style='lucid'][data-mode='dark'] {
+  --panel-bg: color-mix(in srgb, var(--fg) 6%, var(--surface));
   --shadow-md: 0 1px 3px var(--shadow-md-1), 0 12px 30px var(--shadow-md-2);
   /* Lit from above: a light line along a panel's top edge. */
   --rule-inset: inset 0 1px 0 color-mix(in srgb, var(--fg) 12%, transparent);
@@ -191,8 +192,8 @@
   .kt-btn:not([data-variant='primary'], [data-variant='ghost'], [data-variant='danger'], :disabled) {
   box-shadow:
     var(--shadow-control),
-    inset 0 1px 0 color-mix(in srgb, var(--fg) 22%, transparent),
-    inset 0 -16px 0 0 color-mix(in srgb, var(--bg) 40%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 34%, transparent),
+    inset 0 -16px 0 0 color-mix(in srgb, var(--bg) 62%, transparent),
     inset 0 -17px 0 0 color-mix(in srgb, var(--fg) 10%, transparent);
 }
 
@@ -236,8 +237,9 @@
 /* ---- the field is a deep recessed well: a shadow falling in from the top edge ---- */
 :root[data-style='lucid'] .kt-input:not([data-swatch] *),
 [data-swatch][data-style='lucid'] .kt-input {
+  background-color: var(--ground);
   box-shadow:
-    inset 0 3px 5px var(--shadow-md-1),
+    inset 0 4px 7px var(--shadow-md-1),
     inset 0 0 0 1px color-mix(in srgb, var(--fg) 6%, transparent),
     0 1px 0 color-mix(in srgb, var(--surface) 80%, transparent);
 }
@@ -245,7 +247,7 @@
 /* ---- a panel's title strip is the window's glossy bar: a tinted solid with a lit top line ---- */
 :root[data-style='lucid'] .kt-panel__header:not([data-swatch] *),
 [data-swatch][data-style='lucid'] .kt-panel__header {
-  background-color: color-mix(in srgb, var(--fg) 5%, var(--surface-2));
+  background-color: color-mix(in srgb, var(--fg) 18%, var(--surface-2));
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg) 8%, transparent);
   border-top-left-radius: calc(var(--radius-panel) - 1px);
   border-top-right-radius: calc(var(--radius-panel) - 1px);
@@ -381,4 +383,10 @@
 :root[data-style='lucid'] .fy-settings-nav :is(.fy-tab, .fy-tab-group__title):focus-visible:not([data-swatch] *),
 [data-swatch][data-style='lucid'] .fy-settings-nav :is(.fy-tab, .fy-tab-group__title):focus-visible {
   outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* ---- in the dark a panel is a lit sheet of glass, a step off the page, where Studio's card is the page's own surface ---- */
+:root[data-style='lucid'][data-mode='dark'] .kt-panel:not(.kt-panel--flat, [data-swatch] *),
+[data-swatch][data-style='lucid'][data-mode='dark'] .kt-panel:not(.kt-panel--flat) {
+  background-color: var(--panel-bg);
 }

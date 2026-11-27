@@ -1,0 +1,215 @@
+/* ============================================================================
+   STYLE — ACCESSIBLE. A look built for the reader, not for a mood: the type is big and plain, every control is a 44px target,
+   every edge is a 2px line, and there is nothing to read through (no shadow, no texture, no gradient, no spring). HOW it draws,
+   never WHICH colours: any palette fits, and its default is High contrast. It earns its row by structure, which survives a
+   greyscale screenshot and a low-vision magnifier:
+
+     1. BIG, PLAIN TYPE. One humanist sans (Public Sans, OFL, bundled), 17px body with a 1.6 line, sentence case everywhere
+        (no capitals, no tracking, no italic), weights 500 and 700 only, so a letter is never thin.
+     2. 44px TARGETS. Every control and row is at least 44px tall with 20px of side padding and 12px between neighbours, the
+        WCAG 2.2 target size with room to spare.
+     3. EVERY EDGE IS A 2px LINE in the strong border colour (the 3:1 control edge), on controls, fields and panels alike: a box
+        is found by its outline, never by a tint or a shadow. A modest 8px corner keeps it calm.
+     4. NOTHING TO READ THROUGH. No shadow, no texture, no grain, no gradient, no transparency effects: text sits on a flat fill.
+     5. LINKS ARE UNDERLINED and bold, so a link is never told apart by colour alone.
+     6. A 4px FOCUS RING with a 2px gap, the same on every control, drawn outside the edge so it is never cut.
+     7. QUIET MOTION. A change takes 80ms on a plain ease, nothing overshoots, and the busy mark is a slow, thick, steady ring.
+   ============================================================================ */
+:root[data-style='accessible'],
+[data-swatch][data-style='accessible'] {
+  --font-display: 'Public Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-body: 'Public Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-size-base: 17px;
+  --leading-base: 1.6;
+  --leading-tight: 1.3;
+  --tracking-display: 0;
+  --tracking-body: 0;
+  --tracking-label: 0;
+  --label-transform: none;
+  --label-variant: normal;
+  --label-size: 15px;
+  --label-weight: 700;
+  --display-transform: none;
+  --text-2xs: 14px;
+  --text-xs: 15px;
+  --text-sm: 15.5px;
+  --text-base: 17px;
+  --text-md: 18.5px;
+  --text-lg: 22px;
+  --text-display: 2.3rem;
+  --text-input-desktop: 17px;
+  --weight-normal: 500;
+  --weight-medium: 700;
+  --weight-strong: 700;
+  --weight-display: 700;
+  --md-font-size: 17px;
+  --md-leading: 1.65;
+  --code-font-size: 15px;
+  --chrome-font-size: 15px;
+  --prose-measure: 68ch;
+
+  /* A calm 8px corner on everything: an outline is easier to follow round a small curve than round a pill. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-control: 8px;
+  --radius-panel: 8px;
+  --radius-badge: 6px;
+  --radius-tab: 8px;
+  --radius-input: 8px;
+  --bubble-radius: 8px;
+  --menu-radius: 8px;
+
+  /* Every edge is 2px in the strong border colour. */
+  --border-width: 2px;
+  --border-width-heavy: 3px;
+  --stroke-control: 2px;
+  --stroke-panel: 2px;
+  --divider-width: 2px;
+  --divider-color: var(--border-strong);
+  --bubble-stroke: 2px;
+  --bubble-border: var(--border-strong);
+  --card-border: var(--border-strong);
+  --tab-underline-width: 4px;
+
+  /* Flat: nothing to read through. */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-control: none;
+  /* `.kt-panel` lists `--shadow-panel, --rule-inset`: a bare `none` there voids the whole declaration (and the rule with it). */
+  --shadow-panel: 0 0 0 0 transparent;
+  --shadow-popover: none;
+  --shadow-active: none;
+  --bubble-shadow: none;
+  --card-shadow: none;
+  --press-translate: 0px;
+  --rail-active: none;
+  --nav-sel-shadow: none;
+  --control-transform: none;
+  --glow-alpha: 0;
+
+  /* 44px targets with room between them. */
+  --control-h-desktop: 44px;
+  --control-h-sm-desktop: 44px;
+  --row-min-h-desktop: 48px;
+  --menu-item-h: 44px;
+  --pad-control-x-want: 20px;
+  --pad-badge-x: 10px;
+  --pad-panel-want: 20px;
+  --pad-row-y: 12px;
+  --pad-cell-x: 14px;
+  --gap-xs: 8px;
+  --gap-sm: 12px;
+  --gap-md: 16px;
+
+  /* Quiet motion. */
+  --motion-fast: 80ms;
+  --motion-base: 80ms;
+  --motion-slow: 160ms;
+  --motion-pop: 80ms;
+  --ease-standard: ease;
+  --ease-emphasis: ease;
+  --ease-spring: ease;
+  --select-pop: 1;
+  --focus-width: 4px;
+  --focus-offset: 2px;
+  --focus-line: solid;
+
+  /* ═══ the component contract: what carries Accessible in every slot ═══ */
+  /* BACKGROUND: a flat page. */
+  --body-wash: none;
+  --bg-pattern: none;
+  --grain-alpha: 0;
+  --panel-texture: none;
+  --panel-bg: var(--surface);
+  /* MARKDOWN: plain and large. A bold title over a 2px rule, a code block in a full 2px frame, a quote set apart by an indent and a
+     fill (no side bar), a table of 2px rules, bold UNDERLINED links. */
+  --md-h1-size: 1.6em;
+  --md-h1-weight: 700;
+  --md-h1-case: none;
+  --md-h1-rule: 2px solid var(--border-strong);
+  --md-h1-rule-pad: 0.25em;
+  --md-h2-size: 1.3em;
+  --md-h2-weight: 700;
+  --md-h2-case: none;
+  --md-h2-rule: none;
+  --md-code-border: 2px solid var(--border-strong);
+  --md-code-bar: var(--md-code-border);
+  --md-code-radius: 8px;
+  --md-code-shadow: none;
+  --md-quote-bar: none;
+  --md-quote-pad: 1.2em;
+  --md-quote-bg: var(--surface-2);
+  --md-quote-radius: 8px;
+  --md-quote-font-style: normal;
+  --md-cell-border-x: 2px solid var(--border-strong);
+  --md-cell-border-y: 2px solid var(--border-strong);
+  --md-th-bg: var(--surface-2);
+  --md-th-case: none;
+  --md-th-weight: 700;
+  --md-zebra: transparent;
+  --md-link-decoration: underline;
+  --md-link-weight: 700;
+  --md-link-bg: transparent;
+  --md-link-pad: 0;
+  --md-link-radius: 0px;
+  --md-stack-radius: 8px;
+  --md-stack-frame: var(--stroke) solid var(--border-strong);
+  --md-ul-marker: disc;
+  --md-ol-marker: decimal;
+  --md-list-marker-color: var(--fg);
+  /* SPINNER: a slow, thick, steady ring. */
+  --spinner-ring: inline;
+  --spinner-parts: none;
+  --spinner-stroke: 3.5;
+  --spinner-speed: 1.8s;
+  --spinner-timing: linear;
+  --spinner-parts-speed: 1.8s;
+  --spinner-parts-timing: linear;
+  --motion-loading-ring: 1.8s;
+  --motion-loading-run: 1.8s;
+  --motion-loading-shimmer: 2.4s;
+  --ease-loading-ring: linear;
+  --ease-loading-run: linear;
+  /* HYPERMEDIA: flat, a 2px stroke, a ruled header band. */
+  --hm-shape: flat;
+  --hm-edge: straight;
+  --hm-radius: 8px;
+  --hm-stroke: 2px;
+  --hm-font: var(--font-body);
+  --hm-node-fill-alpha: 0;
+  --hm-header: band;
+  /* SURFACES: a line, not a shadow. */
+  --panel-edge: line;
+  --panel-edge-line: solid;
+}
+
+@media (max-width: 640px) {
+  :root[data-style='accessible'] {
+    --text-2xs: 14px;
+    --text-xs: 15px;
+    --text-sm: 16px;
+    --text-base: 17px;
+    --text-md: 18.5px;
+    --text-lg: 22px;
+    --text-display: 2rem;
+    --label-size: 15px;
+  }
+}
+
+/* A link in running text is underlined and bold, never colour alone. */
+:root[data-style='accessible'] a:not([class], [data-swatch] *),
+[data-swatch][data-style='accessible'] a:not([class]) {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+/* One ring on every field, the same 4px line the buttons get. */
+:root[data-style='accessible'] .kt-input:focus-visible,
+:root[data-style='accessible'] .kt-composer:focus-within {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
