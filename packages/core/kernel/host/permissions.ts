@@ -161,7 +161,7 @@ export async function refusedPermission(
   return true;
 }
 
-/** Only programs the manifest declared in `permissions.spawn` (§3.7); refused before anything starts. */
+/** Only declared programs (§3.7); authorization and forwarding use the same kernel-owned, frozen argv snapshot. */
 export function restrictSpawn(
   plugin: string,
   declared: readonly PermissionEntry[],
@@ -184,9 +184,18 @@ export function restrictSpawn(
     return (minted.alias === undefined ? options : { ...options, cwd: minted.alias as FencedPath }) as O;
   };
   return {
-    run: async (program, args, options) => await base.run(program, args, check(program, args, options)),
-    runBytes: async (program, args, options) => await base.runBytes(program, args, check(program, args, options)),
-    start: (program, args, options) => base.start(program, args, check(program, args, options)),
+    run: async (program, args, options) => {
+      const argv = Object.freeze([...args]);
+      return await base.run(program, argv, check(program, argv, options));
+    },
+    runBytes: async (program, args, options) => {
+      const argv = Object.freeze([...args]);
+      return await base.runBytes(program, argv, check(program, argv, options));
+    },
+    start: (program, args, options) => {
+      const argv = Object.freeze([...args]);
+      return base.start(program, argv, check(program, argv, options));
+    },
   };
 }
 
@@ -228,8 +237,9 @@ export function allowDetachedSpawn(
     },
     start: (program, args, options) => {
       if (!detachedAsked(options)) return restricted.start(program, args, options);
-      judge('start', program, args, options);
-      const handle = base.start(program, args, options);
+      const argv = Object.freeze([...args]);
+      judge('start', program, argv, options);
+      const handle = base.start(program, argv, options);
       started(programName(program), handle.pid);
       return handle;
     },
