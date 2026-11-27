@@ -70,6 +70,7 @@ function harness(platform: 'linux' | 'darwin', options: HarnessOptions = {}) {
       return true;
     },
     alive: () => current !== undefined,
+    identify: async () => (current === undefined ? undefined : 'start-A'),
     holdsOpen: async (_pid, path) => {
       expect(path).toBe('/fake/fy/run/daemon.lock');
       return serves;

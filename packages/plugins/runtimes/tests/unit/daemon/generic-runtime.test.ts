@@ -1,4 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
+import { definePlugin, implementDaemon, type DaemonImplementation } from '@ferretry/kernel/manifest';
 import type {
   HarnessFacts,
   HarnessRuntimeDescriptor,
@@ -20,6 +23,9 @@ import {
 } from '@ferretry/plugin-logins/contract/testing';
 import {
   RuntimesPort,
+  PROFILE_COMPONENTS_KEY,
+  ProfileClaudeSettingsSource,
+  ProfileCodexSettingsSource,
   RuntimeIdSchema,
   RUNTIMES_CONFIG,
   RUNTIME_ITEMS,
@@ -35,6 +41,30 @@ afterEach(async () => {
   for (const host of hosts.splice(0)) await host.stop();
   await cleanupWorlds();
 });
+
+/** Synthetic settings collections carrying the real kits offered by the harness settings sources. */
+function settingsOwners(): DaemonImplementation<any>[] {
+  return (
+    [
+      ['claude-code', ProfileClaudeSettingsSource, 'runtimes.components.settings.claude:components', claudeRuntimesKit],
+      ['codex', ProfileCodexSettingsSource, 'runtimes.components.settings.codex:components', codexRuntimesKit],
+    ] as const
+  ).map(
+    ([id, hook, name, kit]) =>
+      implementDaemon(
+        definePlugin({
+          id,
+          title: id,
+          version: '5.0.0',
+          api: 5,
+          core: false,
+          kinds: [],
+          hooks: { takes: [{ hook, key: PROFILE_COMPONENTS_KEY }] },
+        }),
+        { build: () => ({ hooks: { [name]: { kit, list: async () => [], read: async () => undefined } } }) } as never,
+      ) as DaemonImplementation<any>,
+  );
+}
 
 async function fixture(
   options: {
@@ -115,6 +145,7 @@ async function fixture(
   });
   const host = await testHost({
     plugins: [
+      ...settingsOwners(),
       {
         ...daemon,
         build(ctx) {
