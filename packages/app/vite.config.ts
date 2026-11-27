@@ -80,6 +80,7 @@ export default defineConfig({
   plugins: [
     // Durian Hypermedia's source build, its stylesheet and one chart.js / dompurify (plugins/conversation/app/vite-durian.ts).
     durianBuild.plugin,
+    durianBuild.devWorkerUrlPlugin,
     leafletTrustedTypes,
     entityDecoderTrustedTypes,
     {
@@ -110,6 +111,14 @@ export default defineConfig({
     plugins: () => [...voiceBuild.worker.plugins(), durianBuild.plugin, durianBuild.workerPlugin],
   },
   resolve: { alias: voiceBuild.alias },
+  // Dev workers share the dependency optimizer with the page. Vite's worker.plugins is a production build hook;
+  // the optimizer must also choose the decoder's table build before micromark is bundled into a shared dev chunk.
+  optimizeDeps: {
+    // These pure worker entrypoints re-export a few values from contract barrels. Bundling them also drops the
+    // barrels' unused host-only modules; unbundled dev ESM eagerly evaluates every re-export (including node:crypto).
+    include: ['@ferretry/app/fy-render', '@ferretry/app/references/grammar'],
+    rolldownOptions: { plugins: [durianBuild.workerPlugin] },
+  },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
