@@ -45,7 +45,7 @@ export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps,
           'POST /v1/projects': registerRoute(registry),
           'DELETE /v1/projects/:id': removeRoute(registry),
           ...foldersRoutes(kernel, machine),
-          ...reposRoutes(kernel, registry, repoScan, id => files.refresh.registered(id)),
+          ...reposRoutes(kernel, registry, machine, repoScan, id => files.refresh.registered(id)),
           ...files.routes,
         },
         // No watcher (D5): a ferret that stops working in a project, a project registered again or removed refreshes its index.

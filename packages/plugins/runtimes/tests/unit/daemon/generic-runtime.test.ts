@@ -3,6 +3,7 @@ import type {
   HarnessFacts,
   HarnessRuntimeDescriptor,
   HarnessRuntimeModels,
+  RuntimeStartSource,
   StartDecideInput,
 } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
@@ -107,6 +108,7 @@ async function fixture(
   const world = await fleetWorld();
   let kernel: KernelPorts | undefined;
   let base: RuntimesAssembly | undefined;
+  let source: RuntimeStartSource | undefined;
   const daemon = runtimesDaemon(ctx => {
     base = hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
     return base;
@@ -126,7 +128,9 @@ async function fixture(
                   : ctx.kernel.config.fileState(def, name),
             },
           };
-          return daemon.build!({ ...ctx, kernel } as Parameters<NonNullable<typeof daemon.build>>[0]);
+          const half = daemon.build!({ ...ctx, kernel } as Parameters<NonNullable<typeof daemon.build>>[0]);
+          source = half.hooks?.['runtime.start:runtimes'] as RuntimeStartSource;
+          return half;
         },
       },
     ],
@@ -194,6 +198,7 @@ async function fixture(
     proposal,
     apply,
     base,
+    source,
     models: (value: HarnessRuntimeModels) => {
       models = value;
     },
@@ -749,6 +754,7 @@ test('install failure and missing install capability are typed, with no package 
 
 test('the start source forwards a native runtime default model and turns a refused read into a typed refusal', async () => {
   const f = await fixture();
+  expect(await f.source?.resolve('custom', undefined, 'auto')).toMatchObject({ ok: true, model: 'provider/model' });
   const custom = RuntimeIdSchema.parse('custom');
   const answer = { ok: true as const, harness: 'fourth', login: 'key' };
   const source = f.generic.start({ resolve: async () => answer, login: async () => ({ ok: true }) });

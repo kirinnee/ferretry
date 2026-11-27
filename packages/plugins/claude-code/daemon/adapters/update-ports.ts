@@ -215,6 +215,21 @@ export function factsSource(spawn: SpawnPort, host: ReturnType<typeof hostFacts>
   };
 }
 
+/** Whether the actual launch binary advertises the exact Auto choice, with the same isolation as the update probe. */
+export async function autoPermissionModeRefusal(spawn: SpawnPort, path: string): Promise<string | undefined> {
+  const result = await spawn.run(path, ['--help'], {
+    timeout: milliseconds(PROBE_TIMEOUT_MS),
+    env: PROBE_ENVIRONMENT,
+  });
+  if (result.exitCode !== 0) throw new Error('Claude Code Auto mode support could not be checked');
+  const option = result.stdout.match(/--permission-mode\b[^\n]*(?:\n(?!\s*--)[^\n]*)*/u)?.[0];
+  const choices = option?.match(/\bchoices:\s*([^)]*)/u)?.[1];
+  if (choices === undefined) throw new Error('Claude Code did not report its permission modes');
+  return /(?:^|[\s,"'])auto(?=$|[\s,"'])/u.test(choices)
+    ? undefined
+    : 'Claude Code on this machine does not accept Auto mode (--permission-mode auto). Update Claude Code, or switch Agent permissions to Skip all permission checks.';
+}
+
 /** Asking the binary about itself, isolated by {@link PROBE_ENVIRONMENT}. */
 export function probe(spawn: SpawnPort): Probe {
   const run = spawnRun(spawn, PROBE_ENVIRONMENT);

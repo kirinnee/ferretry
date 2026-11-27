@@ -1,6 +1,15 @@
 import { useAppHook, usePluginOffered, useRouter } from '@ferretry/app';
 import { Loading, RouteLink } from '@ferretry/app/ui';
-import { ArrowLeft, Bot, FolderTree, GitPullRequest, KanbanSquare, LayoutList, UserRound } from 'lucide-react';
+import {
+  ArrowLeft,
+  Bot,
+  FolderTree,
+  GitBranch,
+  GitPullRequest,
+  KanbanSquare,
+  LayoutList,
+  UserRound,
+} from 'lucide-react';
 import { createElement, type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   isProjectsInsights,
@@ -14,6 +23,7 @@ import { activeProjectFerrets, type FerretRow, projectFerrets, readFerrets } fro
 import { ferretPath, projectLanesPath, projectsPath } from '../lib/paths.ts';
 import { startFerretHref } from '../lib/start-href.ts';
 import { ProjectAccountLinks } from '../features/create-project/account-links.tsx';
+import { ProjectRepos } from '../features/clone-repo/project-repos.tsx';
 import { ProjectBoardSwitch } from './project-board-switch.tsx';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import { ProjectFiles } from './project-files.tsx';
@@ -78,7 +88,7 @@ function ProjectDetailView({
   const boardOffered = usePluginOffered(daemon, 'board');
   const provided = useAppHook(daemon, PROJECTS_INSIGHTS_HOOK);
   const insights = isProjectsInsights(provided) ? provided : undefined;
-  // A saved link changes the project record, so the registry is read again and the list re-renders from the daemon's word.
+  // A saved link or a clone changes the project record, so the registry is read again and the list re-renders from the daemon's word.
   const onAccountsSaved = (): void => {
     void projectsStoreFor(client)
       .refresh()
@@ -132,6 +142,9 @@ function ProjectDetailView({
             {project.lastActivity && (
               <p className="m-0 text-meta text-muted">Project activity: {project.lastActivity}</p>
             )}
+          </Section>
+          <Section icon={<GitBranch className="text-muted" size={16} aria-hidden="true" />} title="Repositories">
+            <ProjectRepos key={project.id} client={client} project={project} onCloned={onAccountsSaved} />
           </Section>
           <Section icon={<UserRound className="text-muted" size={16} aria-hidden="true" />} title="GitHub accounts">
             {/* Keyed by project: same-daemon navigation reuses this tree, and an open editor's draft must not follow

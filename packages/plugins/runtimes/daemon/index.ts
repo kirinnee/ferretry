@@ -660,6 +660,13 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
                 logins: ctx.needs.logins,
                 // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.
                 catalog: facts.catalog,
+                autoRefusal: async (runtime, harness) => {
+                  // Only a harness offering an Auto check requires the published refusal to be verified too.
+                  if (ctx.needs.ferrets.harnessFacts(harness)?.checksAutoLaunch !== true) return undefined;
+                  const found = await launchFacts.facts(runtime);
+                  if (found === undefined) throw new Error('the published runtime could not be checked');
+                  return found.autoRefusal;
+                },
               }),
             ),
           },

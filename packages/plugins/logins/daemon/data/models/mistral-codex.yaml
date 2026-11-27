@@ -1,0 +1,24 @@
+# Mistral AI models for Codex (Mistral's Responses API, https://api.mistral.ai/v1). The OpenCode list is mistral.yaml.
+label: Mistral (Codex)
+docs: https://docs.mistral.ai/models
+verified: '2026-11-27'
+unverified:
+  - "Mistral's Responses API is stateless, so Codex features that resume a response on the server do not work."
+  - "Mistral does not rank its models for coding, so the tiers follow size; a person's own file can re-rank them."
+  - 'Mistral Medium 3.5 (`mistral-medium-latest`) is left out: its model page says it is deprecated since 2026-10-31 and retires 2027-04-30, and points to Mistral Large 4.'
+  - "Ids, aliases and context sizes are the ones Mistral's model pages and its Responses API page show; no Codex run against Mistral was made."
+customIds: true
+codex:
+  models:
+    - id: mistral-large-4
+      label: Mistral Large 4
+      tier: best
+      context: 1048576
+      efforts: [low, medium, high]
+      defaultEffort: high
+      default: true
+    - id: mistral-small-2603
+      label: Mistral Small 4
+      tier: fast
+      context: 262144
+      reasoning: true
