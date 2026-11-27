@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { deviceStanding } from '@ferretry/core-gate/contract/testing';
-import type { CallStanding } from '@ferretry/kernel/contract';
+import { ApiError, type CallContext, type CallStanding } from '@ferretry/kernel/contract';
 import { err, ok } from '@ferretry/std';
 import {
   AGENT_ORIGIN,
@@ -10,6 +10,7 @@ import {
   PERSON_ORIGIN,
 } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
+import { conversationCopyRefusal } from '../../../../daemon/lib/route-security/conversation-copy.ts';
 import { additivesFixture } from './additives-fixture.ts';
 import { fakeLaunchRoots, fakeStageOwner, host } from './route-fixture.ts';
 
@@ -152,5 +153,39 @@ describe('E-255 copying computer history from a governed device needs a step-up 
     });
     expect(started.status).toBe(201);
     expect(asked).toEqual([CONVERSATION]);
+  });
+});
+
+describe('E-255 the copy gate fails closed where it cannot judge', () => {
+  const callOf = (standing: object): CallContext => standing as unknown as CallContext;
+  const refusal = (work: () => void): ApiError => {
+    try {
+      work();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      return error as ApiError;
+    }
+    throw new Error('the copy gate let the call through');
+  };
+
+  test('no carrier presentation, or no grants to read, is 503 and never a pass', () => {
+    const named = { harnessConversation: CONVERSATION };
+    const blind = refusal(() => conversationCopyRefusal(callOf({}), named));
+    expect([blind.status, blind.code]).toEqual([503, 'launch_gate_unavailable']);
+    const ungoverned = refusal(() => conversationCopyRefusal(callOf({ presentation: { local: false } }), named));
+    expect([ungoverned.status, ungoverned.code]).toEqual([503, 'launch_gate_unavailable']);
+  });
+
+  test('a device the grants refuse is 403 with the grant code and no step-up demand', () => {
+    const call = callOf({
+      presentation: { local: false },
+      governance: { governed: true, decide: () => ({ allowed: false, refusal: 'not-granted' }) },
+    });
+    const refused = refusal(() => conversationCopyRefusal(call, { harnessConversation: CONVERSATION }));
+    expect([refused.status, refused.code, refused.extra]).toEqual([403, 'grant_not_granted', undefined]);
+  });
+
+  test('a start naming no conversation is never judged', () => {
+    conversationCopyRefusal(callOf({}), {});
   });
 });
