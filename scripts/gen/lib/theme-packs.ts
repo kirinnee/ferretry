@@ -6,8 +6,9 @@
  *   packages/app/src/generated/theme-packs.ts    `STYLE_PACKS`, `PALETTE_PACKS`, `FONT_PACKS` (sorted by `order`, then id)
  *                                                and the `as const` id lists, so app code keeps exact union types, plus
  *                                                `FONT_FILE_URLS`: the built URL of every font file, keyed `<font id>/<file>`
- *   packages/app/public/generated/theme-ids.js   `window.fyThemeIds = { style, palette }`: the style and palette ids as a classic script,
- *                                                the one list `public/pre-paint.js` (which cannot import) reads before first paint
+ *   packages/app/public/generated/theme-ids.js   `window.fyThemeIds = { style, palette, legacy }`: the style and palette ids as a classic script,
+ *                                                plus the Layouts contract's table of OLD ids (`legacy`), the one list
+ *                                                `public/pre-paint.js` (which cannot import) reads before first paint
  *   packages/app/src/generated/theme-packs.css   the `@import` of every `style.css`, the `@font-face` of every font, every
  *                                                palette's data as selector blocks, and the default palette's dark block as
  *                                                the unqualified dark baseline
@@ -22,6 +23,12 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import {
+  FAMILY_STYLE_OF_PALETTE,
+  REMOVED_PALETTE_IDS,
+  REMOVED_STYLE_IDS,
+  THEME_FAMILY_IDS,
+} from '../../../packages/plugins/layouts/contract/wire.ts';
 import {
   FontPackSchema,
   isStyleToken,
@@ -310,7 +317,7 @@ export function themePackFiles(root: string): ReadonlyMap<string, string> {
     [THEME_PACKS_CSS, css],
     [
       THEME_IDS_JS,
-      `${HEADER}window.fyThemeIds = ${JSON.stringify({ style: sorted.style.map(entry => entry.pack.id), palette: sorted.palette.map(entry => entry.pack.id) })};\n`,
+      `${HEADER}window.fyThemeIds = ${JSON.stringify({ style: sorted.style.map(entry => entry.pack.id), palette: sorted.palette.map(entry => entry.pack.id), legacy: { palette: REMOVED_PALETTE_IDS, style: REMOVED_STYLE_IDS, family: THEME_FAMILY_IDS, familyStyle: FAMILY_STYLE_OF_PALETTE } })};\n`,
     ],
   ]);
 }

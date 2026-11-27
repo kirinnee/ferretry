@@ -60,7 +60,7 @@ describe('layouts contract', () => {
 });
 
 test('the theme contract refuses unknown names and values outside the app token grammar', () => {
-  const theme = { id: 'dusk', label: 'Dusk', base: 'neo' };
+  const theme = { id: 'dusk', label: 'Dusk', style: 'neo' };
   for (const mode of ['light', 'dark']) {
     for (const tokens of [
       { accent: 'red' },
@@ -79,14 +79,17 @@ test('the theme contract refuses unknown names and values outside the app token 
   }
 });
 
-test('a stored style-only `contrast` theme keeps High contrast: the removed style reads as Studio in the contrast palette', () => {
+test('a theme item names a style and a palette by any well-formed pack id, and ignores a top-level key it does not name', () => {
   const item = { id: 'dusk', label: 'Dusk' };
-  expect(ThemeSchema.parse({ ...item, style: 'contrast' })).toMatchObject({ style: 'studio', palette: 'contrast' });
-  // a palette the item names itself still wins; a theme with no style is untouched
-  expect(ThemeSchema.parse({ ...item, style: 'contrast', palette: 'neo' })).toMatchObject({
-    style: 'studio',
-    palette: 'neo',
+  expect(
+    ThemeSchema.parse({ ...item, style: 'some-new-style', palette: 'some-new-palette', base: 'phosphor' }),
+  ).toEqual({
+    ...item,
+    style: 'some-new-style',
+    palette: 'some-new-palette',
+    light: {},
+    dark: {},
   });
-  expect(ThemeSchema.parse({ ...item, style: 'neo' }).palette).toBeUndefined();
-  expect(ThemeSchema.parse(item).palette).toBeUndefined();
+  expect(ThemeSchema.safeParse({ ...item, style: 'Not An Id' }).success).toBe(false);
+  expect(ThemeSchema.safeParse({ ...item, light: { bg: 'url(x)' } }).success).toBe(false);
 });

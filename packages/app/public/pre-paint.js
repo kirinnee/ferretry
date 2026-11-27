@@ -10,8 +10,9 @@
 
    IT KEEPS NO LIST OF STYLE OR PALETTE IDS OF ITS OWN: the packs are folders (`src/theme/packs/`), and a list here would be
    a second place to edit for every new one. The generator writes the ids those folders make to `generated/theme-ids.js`
-   (`window.fyThemeIds`, a classic script that `app/index.html` loads first), and this file reads that. A stored id that is
-   not in it (a retired id, a typo, a script that did not load) paints the default, exactly as React resolves it, so the
+   (`window.fyThemeIds`, a classic script that `app/index.html` loads first), and this file reads that, including its
+   `legacy` table of OLD ids (the Layouts contract's, written there by the generator), read as `preferences.ts` reads them. A
+   stored id that is in neither (a typo, a script that did not load) paints the default, exactly as React resolves it, so the
    first frame is already the look React then publishes. The stored record is never touched.
 
    It is a classic, same-origin, parser-blocking script (no `type="module"`, no `defer`) so it satisfies
@@ -20,6 +21,13 @@
 (function () {
   var KEY = 'fy:app:theme';
   var IDS = window.fyThemeIds || { style: [], palette: [] };
+  var OLD = IDS.legacy || { palette: {}, style: {}, family: [], familyStyle: {} };
+  function own(table, key) {
+    return typeof key === 'string' && Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+  }
+  function renamed(id) {
+    return own(OLD.palette, id) || id;
+  }
   var MODES = ['system', 'light', 'dark'];
   var TEXT_SCALES = { default: 1, large: 1.125, larger: 1.25 };
 
@@ -33,8 +41,17 @@
     var record = raw ? JSON.parse(raw) : null;
     var value = record && record.format === 1 ? record.value : null;
     // Each field falls back on its own, so one bad value never resets the others (as `ThemePreferenceSchema`).
-    if (value && IDS.style.indexOf(value.style) >= 0) style = value.style;
-    if (value && IDS.palette.indexOf(value.palette) >= 0) palette = value.palette;
+    // A pre-split `family` first, then an old style id (which may bring a palette that wins), then the stored ids.
+    var family = value && OLD.family.indexOf(value.family) >= 0 ? renamed(value.family) : null;
+    if (family && IDS.palette.indexOf(family) >= 0) {
+      palette = family;
+      if (IDS.style.indexOf(own(OLD.familyStyle, family)) >= 0) style = OLD.familyStyle[family];
+    }
+    var old = value ? own(OLD.style, value.style) : undefined;
+    var storedStyle = old ? old.style : value && value.style;
+    var storedPalette = old && old.palette ? old.palette : value && renamed(value.palette);
+    if (IDS.style.indexOf(storedStyle) >= 0) style = storedStyle;
+    if (IDS.palette.indexOf(storedPalette) >= 0) palette = storedPalette;
     if (value && MODES.indexOf(value.mode) >= 0) mode = value.mode;
     if (value && Object.prototype.hasOwnProperty.call(TEXT_SCALES, value.textScale)) textScale = value.textScale;
   } catch (error) {

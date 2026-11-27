@@ -97,7 +97,9 @@ describe('theme pack generation', () => {
     const css = files.get(THEME_PACKS_CSS) ?? '';
     // @import first, then fonts, the default palette's dark baseline, then every palette in order.
     // The ids script pre-paint reads: the same ids, in the same order, as the lists above.
-    expect(files.get(THEME_IDS_JS)).toContain('window.fyThemeIds = {"style":["studio"],"palette":["ink","dawn"]};');
+    expect(files.get(THEME_IDS_JS)).toContain(
+      'window.fyThemeIds = {"style":["studio"],"palette":["ink","dawn"],"legacy":{',
+    );
     expect(css.indexOf("@import '../theme/packs/style/studio/style.css';")).toBeLessThan(css.indexOf('@font-face'));
     expect(css).toContain("font-family: 'Inter';");
     expect(css).toContain("src: url('../theme/packs/font/inter/inter.woff2') format('woff2');");

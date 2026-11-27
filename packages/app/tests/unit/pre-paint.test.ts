@@ -20,6 +20,12 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  FAMILY_STYLE_OF_PALETTE,
+  REMOVED_PALETTE_IDS,
+  REMOVED_STYLE_IDS,
+  THEME_FAMILY_IDS,
+} from '@ferretry/plugin-layouts/contract';
 import { DEFAULT_PALETTE, DEFAULT_STYLE, PALETTES, STYLES } from '../../src/theme/catalog.ts';
 import { memoryStore } from '../../src/storage/records.ts';
 import {
@@ -36,7 +42,16 @@ const parseThemePreference = (raw: string | null) =>
 const record = (value: unknown, format: unknown = 1): string => JSON.stringify({ format, value });
 
 /** What `public/generated/theme-ids.js` hands the script: the ids of the pack folders (the generator writes it from them). */
-const THEME_IDS = { style: STYLES.map(entry => entry.id), palette: PALETTES.map(entry => entry.id) };
+const THEME_IDS = {
+  style: STYLES.map(entry => entry.id),
+  palette: PALETTES.map(entry => entry.id),
+  legacy: {
+    palette: REMOVED_PALETTE_IDS,
+    style: REMOVED_STYLE_IDS,
+    family: THEME_FAMILY_IDS,
+    familyStyle: FAMILY_STYLE_OF_PALETTE,
+  },
+};
 const source = readFileSync(join(import.meta.dir, '../../public/pre-paint.js'), 'utf8');
 
 interface Published {
@@ -97,13 +112,17 @@ const STORED_VALUES: readonly (string | null)[] = [
   '   ',
   // The record shape (style + palette), including per-field fallback for bad fields.
   record({ style: 'neo', palette: 'geist', mode: 'dark', textScale: 'large' }),
-  // A style or palette that is not a pack (not even shaped like an id, or a well-formed one no folder makes) reads as the default on both sides.
+  // An OLD id (the Layouts contract's table) reads as the pack it became on both sides.
   record({ style: 'contrast', palette: 'blueprint', mode: 'dark', textScale: 'default' }),
+  record({ style: 'aqua', palette: 'phosphor', mode: 'light', textScale: 'default' }),
+  ...THEME_FAMILY_IDS.map(family => record({ family, mode: 'dark', textScale: 'large' })),
+  record({ family: 'phosphor', style: 'neo', palette: 'mission', mode: 'dark', textScale: 'default' }),
+  // A style or palette that is not a pack (not even shaped like an id, or a well-formed one no folder makes) reads as the default on both sides.
   record({ style: 'geist', palette: 'No Such', mode: 'light', textScale: 'default' }),
   record({ style: 'NOPE', palette: 7, mode: 'dark', textScale: 'default' }),
   record({ style: 'x'.repeat(40), palette: '../x', mode: 'system', textScale: 'larger' }),
-  // A pre-split `family` is just an unknown key now: ignored.
-  record({ family: 'mission', mode: 'dark', textScale: 'large' }),
+  // A `family` that is no pre-split family id is an unknown key: ignored.
+  record({ family: 'hacker', mode: 'dark', textScale: 'large' }),
   // A `keepPalette` the painter has no use for must not disturb it.
   record({ style: 'neo', palette: 'geist', keepPalette: true, mode: 'dark', textScale: 'default' }),
   record({ family: 'nope', mode: 'dark', textScale: 'huge' }),

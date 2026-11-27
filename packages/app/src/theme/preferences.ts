@@ -14,7 +14,9 @@
  *
  * STORAGE. The record is `{ format: 1, value: { style, palette, keepPalette, mode, textScale } }` (`storage/records.ts`
  * knows one format; an absent `keepPalette` reads as false). A style or palette id with no pack, whatever the reason, reads
- * as the default one; it is NOT rewritten, so the stored record stays until the person's next explicit change.
+ * as the default one; it is NOT rewritten, so the stored record stays until the person's next explicit change. The one
+ * exception is the Layouts contract's data-only table of OLD ids (`REMOVED_PALETTE_IDS`, `REMOVED_STYLE_IDS`, the pre-split
+ * `family`): an id in it reads as the pack it was renamed to, on READ only.
  *
  * STYLE → PALETTE. Picking a style also sets that style's `defaultPalette`, unless `keepPalette` is on ("Don't change my
  * colours when I change style"). Picking a palette never touches the style, and turns `keepPalette` on: a style's default
@@ -24,9 +26,15 @@
  * PRE-PAINT AGREEMENT. `public/pre-paint.js` resolves the same preference before first paint, so there is no flash
  * of the wrong theme. It and this module MUST agree on the key, the record shape, the modes, the text scales and the
  * attribute shape. It keeps NO list of style or palette ids (nothing that runs that early can know the packs): it
- * paints any stored id of the pack-id shape, an id with no pack matches no pack selector so the base tokens (and the
- * default palette's dark baseline) paint, and this module then publishes the default in its place.
+ * resolves a stored id against the generated id lists (and the same old-id table, which the generator writes into the same
+ * file), so the first frame is the look this module then publishes.
  */
+import {
+  FAMILY_STYLE_OF_PALETTE,
+  REMOVED_PALETTE_IDS,
+  REMOVED_STYLE_IDS,
+  THEME_FAMILY_IDS,
+} from '@ferretry/plugin-layouts/contract';
 import { z } from 'zod';
 import { APP_STORAGE } from '../storage/names.ts';
 import { type KeyValueStore, readRecord, writeRecord } from '../storage/records.ts';
@@ -87,12 +95,47 @@ const isMode = (value: unknown): value is ThemeMode =>
 const isTextScale = (value: unknown): value is TextScale =>
   typeof value === 'string' && (TEXT_SCALES as readonly string[]).includes(value);
 
+const has = (table: object, key: unknown): boolean => typeof key === 'string' && Object.hasOwn(table, key);
+const renamedPalette = (id: unknown): unknown =>
+  has(REMOVED_PALETTE_IDS, id) ? REMOVED_PALETTE_IDS[id as keyof typeof REMOVED_PALETTE_IDS] : id;
+
+/**
+ * The look a stored record names. Order, as the first-paint script does it: a pre-split `family` (a palette, and the style
+ * that palette read as), then an old style id (which may bring a palette that wins), then the stored style and palette, each
+ * renamed through the old-id table when it is in it. Whatever has no pack reads as the default.
+ */
+const lookOf = (value: {
+  readonly family?: unknown;
+  readonly style?: unknown;
+  readonly palette?: unknown;
+}): { readonly style: StyleId; readonly palette: PaletteId } => {
+  let style: StyleId = DEFAULT_STYLE;
+  let palette: PaletteId = DEFAULT_PALETTE;
+  const family = (THEME_FAMILY_IDS as readonly unknown[]).includes(value.family)
+    ? renamedPalette(value.family)
+    : undefined;
+  if (isPaletteId(family)) {
+    palette = family;
+    const familyStyle = FAMILY_STYLE_OF_PALETTE[family as keyof typeof FAMILY_STYLE_OF_PALETTE];
+    if (isStyleId(familyStyle)) style = familyStyle;
+  }
+  const removed = has(REMOVED_STYLE_IDS, value.style)
+    ? (REMOVED_STYLE_IDS[value.style as keyof typeof REMOVED_STYLE_IDS] as { style: string; palette?: string })
+    : undefined;
+  const storedStyle = removed?.style ?? value.style;
+  if (isStyleId(storedStyle)) style = storedStyle;
+  const storedPalette = removed?.palette ?? renamedPalette(value.palette);
+  if (isPaletteId(storedPalette)) palette = storedPalette;
+  return { style, palette };
+};
+
 /**
  * The stored preference (inside `{ format: 1, value }`). Each field falls back on its own: a style or palette with no
- * pack reads as the default one, and nothing else is looked up.
+ * pack reads as the default one (an OLD id reads as the pack it was renamed to), and nothing else is looked up.
  */
 export const ThemePreferenceSchema = z
   .looseObject({
+    family: z.unknown().optional(),
     style: z.unknown().optional(),
     palette: z.unknown().optional(),
     keepPalette: z.unknown().optional(),
@@ -101,8 +144,7 @@ export const ThemePreferenceSchema = z
   })
   .transform(
     (value): ThemePreference => ({
-      style: isStyleId(value.style) ? value.style : DEFAULT_STYLE,
-      palette: isPaletteId(value.palette) ? value.palette : DEFAULT_PALETTE,
+      ...lookOf(value),
       keepPalette: value.keepPalette === true,
       mode: value.mode,
       textScale: value.textScale,

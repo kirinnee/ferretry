@@ -70,11 +70,11 @@ describe('layouts service', () => {
   });
 
   test('fy theme use refuses a theme that is not installed and switches to one that is', async () => {
-    const { service, tree } = make({ 'themes/dusk': { id: 'dusk', label: 'Dusk', base: 'neo', light: {}, dark: {} } });
+    const { service, tree } = make({ 'themes/dusk': { id: 'dusk', label: 'Dusk', style: 'neo', light: {}, dark: {} } });
     expect((await service.useTheme('nope')).ok).toBe(false);
     expect((await service.useTheme('dusk')).ok).toBe(true);
     expect(tree.documents.get('layout.yaml')).toEqual({ theme: 'dusk' });
-    expect(service.current().theme.base).toBe('neo');
+    expect(service.current().theme.style).toBe('neo');
     expect(service.themes()).toEqual({
       themes: [
         { id: 'dusk', origin: 'saved' },
@@ -239,7 +239,7 @@ test('selecting a saved theme the app cannot read is refused before changing the
     // Even if a port hands the service an unchecked item, selection still checks the wire contract.
     const port: import('@ferretry/kernel/contract').ConfigPort = {
       ...tree.port,
-      collection: () => new Map([['dusk', { id: 'dusk', label: 'Dusk', base: 'neo', light, dark: {} }]]) as never,
+      collection: () => new Map([['dusk', { id: 'dusk', label: 'Dusk', style: 'neo', light, dark: {} }]]) as never,
     };
     const service = createLayoutsService(port);
     // biome-ignore lint/correctness/useHookAtTopLevel: `useTheme` is the Layouts service's own method (select a saved theme), not a React hook
