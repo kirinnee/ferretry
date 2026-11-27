@@ -51,11 +51,15 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
           cwd: typeof options?.cwd === 'string' ? options.cwd : options?.cwd?.describe,
           stdout: 'pipe',
           stderr: 'pipe',
-          stdin:
-            options?.stdin === undefined
-              ? 'ignore'
-              : new Blob([typeof options.stdin === 'string' ? options.stdin : new Uint8Array(options.stdin)]),
+          stdin: options?.stdin === undefined ? 'ignore' : 'pipe',
         });
+        if (options?.stdin !== undefined) {
+          const sink = child.stdin as unknown as { write(data: Uint8Array): unknown; end(): unknown };
+          sink.write(
+            typeof options.stdin === 'string' ? new TextEncoder().encode(options.stdin) : new Uint8Array(options.stdin),
+          );
+          sink.end();
+        }
         const out = new Uint8Array(await new Response(child.stdout).arrayBuffer());
         const exitCode = await child.exited;
         const cap = options?.maxStdoutBytes ?? 1024 * 1024;
