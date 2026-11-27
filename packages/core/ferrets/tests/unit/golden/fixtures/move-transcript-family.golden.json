@@ -1,0 +1,53 @@
+{
+  "harness=claude": {
+    "inspected": [
+      {
+        "chat": [],
+        "harness": "claude"
+      }
+    ],
+    "outcome": "stopped in the preflight",
+    "tails": [
+      {
+        "harness": "claude"
+      }
+    ]
+  },
+  "harness=claude-code": {
+    "inspected": [
+      {
+        "chat": [],
+        "harness": "claude-code"
+      }
+    ],
+    "outcome": "stopped in the preflight",
+    "tails": [
+      {
+        "harness": "claude"
+      }
+    ]
+  },
+  "harness=codex": {
+    "inspected": [
+      {
+        "chat": [],
+        "harness": "codex"
+      }
+    ],
+    "outcome": "stopped in the preflight",
+    "tails": [
+      {
+        "harness": "codex"
+      }
+    ]
+  },
+  "harness=fake-third": {
+    "inspected": [],
+    "outcome": {
+      "code": "harness_mismatch",
+      "mentionsHarness": true,
+      "status": 409
+    },
+    "tails": []
+  }
+}

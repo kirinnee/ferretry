@@ -1,0 +1,64 @@
+{
+  "key=<empty>": {
+    "kind": "unreadable"
+  },
+  "key=<undefined>": {
+    "kind": "unresolved"
+  },
+  "key=claude": {
+    "kind": "unreadable"
+  },
+  "key=claude-code": {
+    "events": [
+      {
+        "harness": "claude",
+        "kind": "message",
+        "role": "user",
+        "text": ""
+      },
+      {
+        "format": "thinking",
+        "harness": "claude",
+        "kind": "reasoning",
+        "role": "assistant",
+        "text": "",
+        "timestamp": "2026-11-08T10:00:00.000Z"
+      },
+      {
+        "harness": "claude",
+        "kind": "turn",
+        "role": "system",
+        "state": "completed"
+      }
+    ],
+    "kind": "read"
+  },
+  "key=codex": {
+    "events": [
+      {
+        "harness": "codex",
+        "kind": "message",
+        "role": "user",
+        "text": ""
+      },
+      {
+        "format": "thinking",
+        "harness": "codex",
+        "kind": "reasoning",
+        "role": "assistant",
+        "text": "",
+        "timestamp": "2026-11-08T10:00:00.000Z"
+      },
+      {
+        "harness": "codex",
+        "kind": "turn",
+        "role": "system",
+        "state": "completed"
+      }
+    ],
+    "kind": "read"
+  },
+  "key=fake-third": {
+    "kind": "unreadable"
+  }
+}

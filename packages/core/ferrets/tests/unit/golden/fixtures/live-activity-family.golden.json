@@ -1,0 +1,20 @@
+{
+  "claude-tail": [
+    {
+      "harness": "claude",
+      "model": null
+    }
+  ],
+  "codex-tail": [
+    {
+      "harness": "codex",
+      "model": null
+    }
+  ],
+  "empty-tail": [
+    {
+      "harness": "claude",
+      "model": null
+    }
+  ]
+}
