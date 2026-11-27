@@ -350,8 +350,10 @@ describe('McpServer — a slow plugin inventory never stalls tool discovery', ()
       'generate_music',
       'generate_video',
       'generation_status',
+      'generate_avatar_video',
+      'avatar_video_status',
     ])
       should(names).not.containEql(tool);
-    should(names).have.length(MCP_TOOLS.length - 9);
+    should(names).have.length(MCP_TOOLS.length - 11);
   });
 });

@@ -187,6 +187,7 @@ const SWEEP: readonly Entry[] = [
   ['conversation', 'message-token.key', false],
   ['create', 'ledger.jsonl', false],
   ['create', 'jobs.jsonl', false],
+  ['create', 'avatar-jobs.jsonl', false],
   ['accounts', 'login-secrets.json', false],
   ['accounts', 'accounts.json', false],
   ['accounts', 'identity-links.json', false],

@@ -3,11 +3,14 @@ import { FerretsPort } from '@ferretry/core-ferrets/contract';
 import { cap } from '@ferretry/core-gate/contract';
 import { definePlugin, tool } from '@ferretry/kernel/manifest';
 import {
+  AVATAR_JOBS,
+  AvatarVideoStatusInputSchema,
   CREATE_AUDIT,
   CREATE_SPEND_SOURCE,
   CREATE_WORDS,
   CreateConfigDef,
   CreateSpendRefSchema,
+  GenerateAvatarVideoInputSchema,
   GenerateImageInputSchema,
   GenerateMusicInputSchema,
   GenerateSfxInputSchema,
@@ -24,6 +27,7 @@ import {
  * daily cap and the ask over a limit, with `generate_image`, `generate_sfx` and `generate_music` through fal and
  * `generate_speech` through ElevenLabs, and `generate_video` + `generation_status` through fal's queue (a clip takes
  * minutes: it is paid for when queued, kept on disk as a job, and fetched by the second call).
+ * `generate_avatar_video` + `avatar_video_status` make a HeyGen talking-avatar video the same way (priced from a table, two calls).
  *
  * THE KEYS. `FAL_KEY` and `ELEVENLABS_API_KEY` are Vault secrets named only by this plugin's own `create.yaml`
  * (`fal.key`, `elevenlabs.key`, added by the owner), and the kernel places each on the request
@@ -109,16 +113,36 @@ export default definePlugin({
         summary:
           'Check a queued video job from generate_video. While it is being made, it says so; when it is ready it saves the clip and answers the lines that show it in chat. Checking never charges; a job fal fails with no output is refunded.',
       }),
+      tool('generate_avatar_video', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        audit: CREATE_AUDIT,
+        guard: CREATE_GUARD,
+        input: GenerateAvatarVideoInputSchema,
+        summary:
+          'Queue one talking-avatar video with HeyGen, reading a script in one of the owner’s own avatars and voices. It is priced before it is sent and paid for when queued, under the same daily limit as every creative tool; over the owner’s one-call limit it asks them first. It answers a job id: fetch the video a few minutes later with avatar_video_status.',
+      }),
+      tool('avatar_video_status', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        audit: CREATE_AUDIT,
+        guard: CREATE_GUARD,
+        input: AvatarVideoStatusInputSchema,
+        summary:
+          'Check a queued avatar video from generate_avatar_video. While it is being made, it says so; when it is ready it saves the video and answers the lines that show it in chat. Checking never charges.',
+      }),
     ],
   },
 
   data: {
-    state: [SPEND_LEDGER, VIDEO_JOBS],
+    state: [SPEND_LEDGER, VIDEO_JOBS, AVATAR_JOBS],
     config: [CreateConfigDef],
   },
 
   // What was spent is the owner's to read, never a ferret's to edit.
-  privacy: { private: ['ledger.jsonl', 'jobs.jsonl'] },
+  privacy: { private: ['ledger.jsonl', 'jobs.jsonl', 'avatar-jobs.jsonl'] },
 
   hooks: {
     takes: [{ hook: AskSources, key: CREATE_SPEND_SOURCE as SourceKey, schema: CreateSpendRefSchema }],
@@ -126,7 +150,16 @@ export default definePlugin({
 
   permissions: {
     // A key is only ever placed on the exact hosts; the CDN is a wildcard, which the kernel never lets a key reach.
-    network: ['fal.run', 'queue.fal.run', 'api.fal.ai', 'api.elevenlabs.io', '*.fal.media'],
-    secrets: ['FAL_KEY', 'ELEVENLABS_API_KEY'],
+    network: [
+      'fal.run',
+      'queue.fal.run',
+      'api.fal.ai',
+      'api.elevenlabs.io',
+      'api.heygen.com',
+      '*.fal.media',
+      '*.heygen.ai',
+      '*.heygen.com',
+    ],
+    secrets: ['FAL_KEY', 'ELEVENLABS_API_KEY', 'HEYGEN_API_KEY'],
   },
 });
