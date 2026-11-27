@@ -1380,10 +1380,11 @@ asleep retries it forever, so one case is proved and every other stays an outage
   A relay's `4404` ("no daemon holds this rendezvous"), a socket that never opened, a timeout and every other
   close prove nothing: an asleep or restarting machine says the same, so they keep the backoff and never offer
   to pair again.
-- **What follows** is the walk ending the session with `4405`, a code NO PEER SENDS — it is the walk's own
-  verdict, so it is not in the close-code table — and the reconnect loop stopping after that one failure. The
-  shell reads `4405` as its own end state, not as a carrier outage and not as `4403` (this browser was removed): one
+- **What follows** is the walk ending the session with an INTERNAL replacement verdict (reported locally as
+  `4405`, outside the wire close-code table), and the reconnect loop stopping after that one failure. The
+  shell reads the internal verdict as its own end state, not as a carrier outage and not as `4403` (this browser was removed): one
   page says the machine was reinstalled or replaced and offers to pair again. Nothing is deleted.
+  A peer's close or control message carrying `4405` cannot populate that verdict and keeps the backoff.
 - **What it cannot prove:** a pairing that only ever reaches the machine through the hosted relay has no direct or
   tunnel answer to read, so it stays on the backoff. The `4404` is sent to any unauthenticated caller, exactly as
   the `404` was, and a host on the path can forge it — the cost is a stopped retry and an offer to pair again, never

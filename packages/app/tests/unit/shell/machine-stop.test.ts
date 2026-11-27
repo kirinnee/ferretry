@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { DAEMON_REPLACED_CLOSE_CODE } from '../../../src/client/transport.ts';
+import { DaemonReplacedError } from '../../../src/session/session-error.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { RelaySessionError } from '../../../src/session/session-client.ts';
 import { RELAY_CLOSE_CODES } from '../../../src/session/wire/index.ts';
@@ -65,7 +65,7 @@ describe('which end state a machine is in', () => {
   test('C-80 a session the walk ended with 4405 is "replaced", the pairing is untouched, and it is not "refused"', async () => {
     const runtime = await runtimeOf({
       everything: () => {
-        throw new RelaySessionError('replaced', DAEMON_REPLACED_CLOSE_CODE);
+        throw new DaemonReplacedError('replaced');
       },
     });
     expect(stopOf(runtime, 'd1')).toEqual({ kind: 'replaced', machine: 'laptop' });

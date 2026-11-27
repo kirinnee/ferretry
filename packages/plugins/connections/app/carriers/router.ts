@@ -299,9 +299,9 @@ const replacedProof = (seen: readonly LegFailure[]): boolean =>
       failure.code === RELAY_CLOSE_CODES.daemonAbsent,
   );
 
-/** The close a walk with that proof ends its session with; the shell reads it as "pair again". */
 const REPLACED_CLOSE = {
   code: DAEMON_REPLACED_CLOSE_CODE,
+  identityReplaced: true,
   reason: 'the daemon at this address is not the one this device paired with',
 } as const;
 

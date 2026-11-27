@@ -8,6 +8,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { DAEMON_REPLACED_CLOSE_CODE, RELAY_CLOSE_CODES } from '@ferretry/app';
+import { DaemonClient } from '@ferretry/app/testing';
 import { DaemonConnectionHealth } from '../../../app/lib/connection-health.ts';
 import type { ScriptedHost } from '../../support/browser-network.ts';
 import { rig } from '../../support/router-rig.ts';
@@ -77,6 +78,27 @@ const world = async (hosts: Record<string, ScriptedHost>, carriers: readonly unk
 };
 
 describe('C-80 a replaced daemon identity at the paired address', () => {
+  for (const closeOnly of [true, false])
+    test(`a relay ${closeOnly ? 'close' : 'control message'} carrying 4405 keeps the backoff, never replaced`, async () => {
+      const w = await world({ [RELAY_HOST]: { kind: 'absent', code: 4405, closeOnly } }, [
+        { kind: 'relay', url: RELAY },
+      ]);
+      const transport = await w.r.connect();
+      try {
+        if (transport === undefined) throw new Error('no transport');
+        const refused: string[] = [];
+        const client = new DaemonClient({ transport, surfaces: [] });
+        client.onRefused(reason => refused.push(reason));
+        await client.start();
+        expect(refused).toEqual([]);
+        expect(w.health.state(w.r.fx.daemonId).kind).toBe('reconnecting');
+        expect(w.held.pending().length).toBeGreaterThan(0);
+      } finally {
+        transport?.close?.();
+        w.r.fx.layer.close();
+      }
+    });
+
   test('one failure, no loop: the walk ends 4405, the loop stops, and the old identity is dialled once', async () => {
     const w = await world(
       {
@@ -113,6 +135,23 @@ describe('C-80 a replaced daemon identity at the paired address', () => {
       expect(ended.code).toBe(DAEMON_REPLACED_CLOSE_CODE);
       expect(w.held.pending()).toEqual([]);
     } finally {
+      w.r.fx.layer.close();
+    }
+  });
+
+  test('the opened direct 4404 proof reaches the client as an internal replacement verdict', async () => {
+    const w = await world({ [DIRECT_HOST]: { kind: 'absent', code: 4404 } }, [{ kind: 'direct', url: DIRECT }]);
+    const transport = await w.r.connect();
+    try {
+      if (transport === undefined) throw new Error('no transport');
+      const refused: string[] = [];
+      const client = new DaemonClient({ transport, surfaces: [] });
+      client.onRefused(reason => refused.push(reason));
+      await client.start();
+      expect(refused).toEqual(['replaced']);
+      expect(w.held.pending()).toEqual([]);
+    } finally {
+      transport?.close?.();
       w.r.fx.layer.close();
     }
   });

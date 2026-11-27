@@ -40,15 +40,14 @@ import {
  * proved against the fingerprint the pairing pinned before anything is sent, and the device proves its grant by
  * signing each session's transcript with its non-extractable key: nothing on the wire replays.
  *
- * WHICH CARRIER is Connections' choice (direct, WebRTC, tunnel, relay; §4.8): it hands the shell a {@link CarrierDial}
- * that opens one socket to wherever it decided. The shell never names an address and holds no global network
- * function; the socket factory is injected at the composition root.
+ * Connections chooses the carrier (§4.8) through a {@link CarrierDial}; the socket factory is injected at composition.
  */
 
 export interface CarrierSocketEvents {
   readonly onBinary: (bytes: Uint8Array) => void;
   readonly onText: (text: string) => void;
-  readonly onClose: (code: number, reason: string) => void;
+  /** `identityReplaced` is the walk's local proof, never a field read from a peer. */
+  readonly onClose: (code: number, reason: string, identityReplaced?: true) => void;
   /** This socket carries one live stream (an event or terminal stream), not request sessions. */
   readonly stream?: boolean;
 }
@@ -214,7 +213,7 @@ function openSession(
   const socket = dial({
     onBinary: bytes => void session?.receiveBinary(bytes),
     onText: text => session?.receiveText(text),
-    onClose: (code, reason) => session?.carrierClosed(code, reason),
+    onClose: (code, reason, replaced) => session?.carrierClosed(code, reason, replaced),
     ...(mode.kind === 'stream' ? { stream: true } : {}),
   });
   session = new RelayClientSession({
