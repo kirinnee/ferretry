@@ -12,6 +12,7 @@ import {
   dialogCursorMoves,
   paneBlockingDialog,
   parseHarnessDialog,
+  readDialogFrame,
 } from '../../../../daemon/lib/tmux/harness-dialog.ts';
 
 /**
@@ -1085,5 +1086,37 @@ describe('parseHarnessDialog — a notice with no rows to choose (Claude in Chro
       escape: 'close',
     });
     should(parseHarnessDialog(idle)).be.undefined();
+  });
+});
+
+describe('the reading a caller acts on for one frame (readDialogFrame)', () => {
+  const FOOTER = '  Enter to continue · Esc to close';
+  // A separator inside a selected row's details: a line scan loses the row; the reader keeps it.
+  const trap = [
+    RULE,
+    '  Other dialog',
+    '',
+    '  ❯ 1. Keep this dialog open',
+    '       ---',
+    '       Claude in Chrome',
+    '',
+    FOOTER,
+  ].join('\n');
+
+  it('gives the title, the row count and the footer line of the very frame', () => {
+    should(readDialogFrame(trap)).eql({
+      title: 'Other dialog',
+      options: 1,
+      footer: 'Enter to continue · Esc to close',
+    });
+    should(readDialogFrame(fixture('claude-2.1.327-chrome-notice'))).eql({
+      title: 'Claude in Chrome',
+      options: 0,
+      footer: 'Enter to continue · Esc to close',
+    });
+  });
+
+  it('reads nothing from a frame that is no dialog', () => {
+    should(readDialogFrame(['● Done.', '', RULE, '❯ ', RULE, '  esc to interrupt'].join('\n'))).be.undefined();
   });
 });
