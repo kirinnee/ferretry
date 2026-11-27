@@ -31,6 +31,8 @@
   "LITELLM_*",
   "MINIMAX_*",
   "MINIMAX_API_KEY",
+  "MISTRAL_*",
+  "MISTRAL_API_KEY",
   "MOONSHOT_*",
   "OLLAMA_*",
   "OPENAI_API_KEY",
