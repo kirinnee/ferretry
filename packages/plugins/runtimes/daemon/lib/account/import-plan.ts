@@ -5,7 +5,7 @@
  */
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { harnessNamed, keepScope, ownMcpItem } from './import-scope.ts';
-import { supportedKinds } from '../harness-kind.ts';
+import { supportedKinds, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { NO_STARTERS } from '../models/catalog.ts';
 import {
@@ -121,6 +121,23 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
     secretKeys: [...entry.secretKeys, ...entry.gatedKeys],
     problems: [...entry.problems],
   };
+}
+
+/**
+ * {@link planImport}, with a harness whose plugin gave no import kit refused in the typed refusal of the route that asked
+ * (a 409): that is a plugin absent or partial, not a fault of this machine, so it is never an internal error.
+ */
+export function planImportRefusing(
+  refuse: (sentence: string) => Error,
+  scans: readonly HostHarnessScan[],
+  options: ImportOptions,
+): ImportPlan {
+  try {
+    return planImport(scans, options);
+  } catch (error) {
+    if (error instanceof UnsupportedHarnessError) throw refuse(error.message);
+    throw error;
+  }
 }
 
 /**
