@@ -6,6 +6,7 @@ import { fixture } from './fixture.ts';
 const TESTS = [
   'tests/unit/golden/host-import.golden.test.ts',
   'tests/unit/golden/setup-import.golden.test.ts',
+  'tests/unit/golden/consumers.golden.test.ts',
   'tests/unit/lib/import-kit-threading.test.ts',
 ];
 const imports = (prefix: string) =>
@@ -32,7 +33,7 @@ const f = fixture([
 ]);
 afterAll(() => f.dispose());
 
-test('only the three named Runtimes integration proofs may import the two real kit entry points', async () => {
+test('only the named Runtimes integration proofs may import the two real kit entry points', async () => {
   const findings = await check.run(contextFor(f.root, { base: 'file:/nonexistent/ports-pending.json' }));
   const found = findings.map(finding => `${finding.where}: ${finding.message}`).join('\n');
   for (const path of TESTS) expect(found).not.toContain(`runtimes/${path}:`);

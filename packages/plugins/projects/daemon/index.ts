@@ -1,6 +1,6 @@
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { ProjectRegistered, ProjectRemoved } from '../contract/index.ts';
+import { type ProjectId, ProjectRegistered, ProjectRemoved } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { kernelFolders } from './adapters/folders.ts';
 import { kernelStore } from './adapters/store.ts';
@@ -56,7 +56,16 @@ export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps,
         },
         // The folders a governed device may start a ferret in as an ordinary act (Ferrets reads this, never the registry).
         hooks: {
-          'launch.roots:projects': { roots: async () => (await registry.list()).map(project => project.path) },
+          'launch.roots:projects': {
+            roots: async () => (await registry.list()).map(project => project.path),
+            // The repository list is asked by project id; the directory is the one registration recorded, never a caller's.
+            repository: async project => {
+              const found = await registry.find(project as ProjectId);
+              return found?.git === undefined
+                ? undefined
+                : { folder: found.path, commonDirectory: found.git.commonDirectory };
+            },
+          },
           // A ferret started in a repository nobody registered: it becomes a project (a known one is left as it is).
           'ferret.started': async started => await discoverProject(started, machine, registry),
         },

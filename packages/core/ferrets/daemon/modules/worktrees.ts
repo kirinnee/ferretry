@@ -18,7 +18,8 @@ import {
 import { RepoWorktreeLister } from '../lib/worktrees/repo-list.ts';
 import type { WorktreeDirectoryPinner, WorktreeFileSystem } from '../lib/worktrees/ports.ts';
 import { GitRepoWorktreeRows } from '../adapters/worktrees/repo-git.ts';
-import type { RepoWorktreeListResponse } from '../../contract/index.ts';
+import type { ProjectRepository, RepoWorktreeListResponse } from '../../contract/index.ts';
+import path from 'node:path';
 import type { RepoWorktreeAccess } from '../adapters/worktrees/repo-access.ts';
 import { InPlaceWorktrees } from '../adapters/worktrees/in-place.ts';
 
@@ -51,6 +52,16 @@ export interface WorktreesNeeds {
   readonly clock: Clock;
   readonly io?: WorktreeHostIo;
   /**
+   * The host IO that may ALSO read these folders (read-only): the ones a registered project's own record names. Only the
+   * repository listing asked about a project uses it.
+   */
+  readonly ioFor?: (folders: readonly string[]) => WorktreeHostIo | undefined;
+  /**
+   * The repository a REGISTERED project records, looked up by id in the daemon's own project registry (`undefined`: no such
+   * project, or Projects is not running). A client names the project; it never names the directory.
+   */
+  readonly projectRepository?: (project: string) => Promise<ProjectRepository | undefined>;
+  /**
    * Which ferrets are standing in which folders (from Ferrets' registry). `undefined` when unreadable, which the
    * domain turns into an un-forceable refusal.
    */
@@ -74,6 +85,8 @@ export interface BuiltWorktrees {
   readonly managedRoot: string | undefined;
   /** Every worktree of the repository whose common directory this is (the repository listing). */
   readonly listRepo: (commonDirectory: string) => Promise<RepoWorktreeListResponse>;
+  /** Every worktree of the repository a registered project records; an unknown project is refused. */
+  readonly listProjectRepo: (project: string) => Promise<RepoWorktreeListResponse>;
   readonly routes: { readonly [K in WorktreeRouteKey]: RouteHandler };
 }
 
@@ -133,9 +146,13 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
       : async (folder, token, planned) => await inPlace.adoptExisting(folder, token, planned),
   );
   // The repository listing reads the managed list's own inspection, the registry and the fleet, and writes nothing.
-  const listRepo = async (commonDirectory: string): Promise<RepoWorktreeListResponse> => {
-    if (io === undefined || runner === undefined)
+  const listFrom = async (
+    host: WorktreeHostIo | undefined,
+    commonDirectory: string,
+  ): Promise<RepoWorktreeListResponse> => {
+    if (host === undefined || runner === undefined)
       throw new WorktreeError('no_managed_root', 'this daemon hosts no managed worktrees');
+    const io = host;
     const reader = new GitRepoWorktreeRows(new KernelGitRunner(io.git, { killOnOutputLimit: true }), io.repoAccess);
     const lister = new RepoWorktreeLister({
       rows: async (directory, signal) => await reader.rows(directory, signal),
@@ -169,6 +186,18 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
       await reader.close();
     }
   };
+  const listRepo = async (commonDirectory: string): Promise<RepoWorktreeListResponse> =>
+    await listFrom(io, commonDirectory);
+  const listProjectRepo = async (project: string): Promise<RepoWorktreeListResponse> => {
+    const recorded = await needs.projectRepository?.(project);
+    if (recorded === undefined || needs.ioFor === undefined)
+      throw new WorktreeError('invalid_common_directory', 'no registered project has that id');
+    // What the registration recorded, nothing the caller sent: the project's folder, the common directory, and the main
+    // checkout beside it (the directory above a `.git` folder).
+    const folders = [recorded.folder, recorded.commonDirectory];
+    if (path.basename(recorded.commonDirectory) === '.git') folders.push(path.dirname(recorded.commonDirectory));
+    return await listFrom(needs.ioFor(folders), recorded.commonDirectory);
+  };
   const subsystem: WorktreeSubsystem = {
     list: async () => await service.list(),
     checkRemoval: async (path, cwd) => await service.checkRemoval(path, cwd),
@@ -176,6 +205,14 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     create: async request => await service.create(request),
     adopt: async request => await service.adopt(request.path),
     listRepo,
+    listProjectRepo,
   };
-  return { service, gateway, managedRoot: io?.managedRoot, listRepo, routes: worktreeRoutes(subsystem) };
+  return {
+    service,
+    gateway,
+    managedRoot: io?.managedRoot,
+    listRepo,
+    listProjectRepo,
+    routes: worktreeRoutes(subsystem),
+  };
 }
