@@ -26,7 +26,35 @@ export type Relocated =
 const refused = (reason: string): Relocated => ({ kind: 'refused', reason });
 
 /** The marker every launch declares inside its own home (`codexCorrelationArguments`): an absolute path the source owns. */
-const SOURCE_MARKER = /((?:\/[^\s"'\\<>]+)+)\/codex-correlation\/unreachable/gu;
+const MARKER = '/codex-correlation/unreachable';
+
+/**
+ * The homes the source ran in, read from the records themselves: a home is whatever precedes the marker in a field that IS
+ * the marker (the writer's workspace roots). A home is never guessed out of running text, so a name with spaces is whole.
+ */
+function sourceHomes(lines: readonly string[]): string[] {
+  const homes = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (typeof value === 'string') {
+      if (value.startsWith('/') && value.endsWith(MARKER) && !value.includes('\n'))
+        homes.add(value.slice(0, value.length - MARKER.length));
+      return;
+    }
+    if (Array.isArray(value)) value.forEach(visit);
+    else Object.values(asObject(value) ?? {}).forEach(visit);
+  };
+  for (const line of lines) {
+    try {
+      visit(JSON.parse(line));
+    } catch {
+      /* a line that is not a record is refused below */
+    }
+  }
+  return [...homes];
+}
+
+/** The text a string takes inside a JSON line. */
+const escaped = (text: string): string => JSON.stringify(text).slice(1, -1);
 
 /**
  * A whole rollout, written on another machine, as the text of the rollout the NEW ferret resumes. Pure: nothing is read
@@ -39,14 +67,17 @@ export function relocateRollout(
   source: string,
   into: { readonly folder: string; readonly home: string; readonly id?: string },
 ): Relocated {
-  const oldHomes = [...new Set([...source.matchAll(SOURCE_MARKER)].map(found => found[1] as string))];
   const lines = source.split('\n');
   // The unflushed last line (no newline yet) is not part of the conversation: no reader takes it.
   lines.pop();
+  const oldHomes = sourceHomes(lines);
+  const neutral = `${into.home}/codex-correlation/relocated`;
+  const moveMarker = (line: string): string =>
+    oldHomes.reduce((text, home) => text.split(escaped(`${home}${MARKER}`)).join(escaped(neutral)), line);
   const records: RolloutRecord[] = [];
   for (const [index, line] of lines.entries()) {
     try {
-      const value = asObject(JSON.parse(line.replace(SOURCE_MARKER, `${into.home}/codex-correlation/relocated`)));
+      const value = asObject(JSON.parse(moveMarker(line)));
       if (typeof value?.type !== 'string' || asObject(value.payload) === undefined) throw new Error('not a record');
       records.push(value as RolloutRecord);
     } catch {

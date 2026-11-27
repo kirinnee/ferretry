@@ -145,6 +145,14 @@ export async function relocationWorld(options: { pooled?: boolean } = {}) {
       fs: state.createNodeHostFs(),
     }),
     log: { warn: () => undefined },
+    // The real `realpath` program, the way the daemon's spawn port runs a program the manifest declares.
+    spawn: {
+      run: async (program: string, args: readonly string[]) => {
+        const child = Bun.spawn([program, ...args], { stdout: 'pipe', stderr: 'pipe' });
+        const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+        return { exitCode, stdout, stderr: '' };
+      },
+    },
     clock: {
       after: () => () => undefined,
       now: () => instantFromEpochMs(Date.parse('2026-11-16T12:00:00Z')),

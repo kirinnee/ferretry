@@ -192,14 +192,6 @@ describe('what a move must not leave behind', () => {
       },
     ],
     [
-      'a native worktree field',
-      {
-        type: 'turn_context',
-        session_id: SOURCE_ID,
-        payload: { cwd: SOURCE_FOLDER, worktree: { original_cwd: `${SOURCE_FOLDER}/../orig` } },
-      },
-    ],
-    [
       'a path in a name outside the world state',
       { type: 'event_msg', payload: { type: 'mystery', files: { [`${SOURCE_FOLDER}/x`]: 1 } } },
     ],
@@ -243,5 +235,123 @@ describe('a rollout path', () => {
     expect(renamed).toBe(rolloutPath(id));
     expect(rolloutPathId(renamed)).toBe(id);
     expect(rolloutFolder(renamed)).toBe('sessions/2026/11/16');
+  });
+});
+
+describe('a native path that points outside the worktree and the home', () => {
+  const OUTSIDE = '/local/original-checkout';
+  const refusedFor = (record: unknown, where = OUTSIDE) =>
+    expect(relocateRollout(source([JSON.stringify(record)]), { folder: TARGET_FOLDER, home: TARGET_HOME })).toEqual({
+      kind: 'refused',
+      reason: expect.stringContaining(where),
+    });
+  const movedFor = (record: unknown) =>
+    moved(relocateRollout(source([JSON.stringify(record)]), { folder: TARGET_FOLDER, home: TARGET_HOME }));
+  const exec = (workdir: string) => ({
+    type: 'response_item',
+    payload: {
+      type: 'function_call',
+      name: 'exec_command',
+      call_id: 'call_exec',
+      arguments: JSON.stringify({ cmd: 'pwd', workdir }),
+    },
+  });
+  const turnContext = (original: string) => ({
+    type: 'turn_context',
+    session_id: SOURCE_ID,
+    payload: { cwd: SOURCE_FOLDER, worktree: { original_cwd: original } },
+  });
+  const userMessage = (image: string) => ({
+    type: 'event_msg',
+    session_id: SOURCE_ID,
+    payload: { type: 'user_message', message: 'SYNTHETIC_QUESTION', local_images: [image], images: [] },
+  });
+  const completed = (image: string) => ({
+    type: 'event_msg',
+    session_id: SOURCE_ID,
+    payload: {
+      type: 'item_completed',
+      thread_id: SOURCE_ID,
+      item: {
+        type: 'UserMessage',
+        id: 'item-1',
+        content: [
+          { type: 'local_image', path: image },
+          { type: 'text', text: 'SYNTHETIC_QUESTION', text_elements: [] },
+        ],
+      },
+    },
+  });
+  const tagged = (image: string) => ({
+    type: 'response_item',
+    payload: {
+      type: 'message',
+      role: 'user',
+      content: [
+        { type: 'input_text', text: `<image name=[Image #1] path="${image}">` },
+        { type: 'input_text', text: 'image content omitted because it could not be processed' },
+        { type: 'input_text', text: '</image>' },
+      ],
+    },
+  });
+
+  test.each([
+    ['a command’s working folder', exec],
+    ['the original checkout of a worktree', turnContext],
+    ['an attached image (the older writer’s list)', userMessage],
+    ['an attached image (the newer writer’s item)', completed],
+    ['an attached image (the words the model was shown)', tagged],
+  ])('%s outside the worktree refuses the move, naming it', (_label, build) => {
+    refusedFor(build(OUTSIDE));
+  });
+
+  test.each([
+    ['a command’s working folder', exec],
+    ['the original checkout of a worktree', turnContext],
+    ['an attached image (the older writer’s list)', userMessage],
+    ['an attached image (the newer writer’s item)', completed],
+    ['an attached image (the words the model was shown)', tagged],
+  ])('%s that climbs out of the worktree refuses the move', (_label, build) => {
+    refusedFor(build(`${SOURCE_FOLDER}/../orig`), `${SOURCE_FOLDER}/../orig`);
+  });
+
+  test.each([
+    ['a command’s working folder', exec],
+    ['the original checkout of a worktree', turnContext],
+    ['an attached image (the older writer’s list)', userMessage],
+    ['an attached image (the newer writer’s item)', completed],
+    ['an attached image (the words the model was shown)', tagged],
+  ])('%s inside the worktree is moved, and the source path is nowhere', (_label, build) => {
+    const result = movedFor(build(`${SOURCE_FOLDER}/src/example.png`));
+    expect(result.text).not.toContain(SOURCE_FOLDER);
+    expect(result.text).toContain(`${TARGET_FOLDER}/src/example.png`);
+  });
+
+  test('a working folder inside the worktree is moved inside the command’s arguments, and nothing else of them changes', () => {
+    const result = movedFor(exec(`${SOURCE_FOLDER}/src`));
+    const call = records(result.text).find(record => record.payload.type === 'function_call');
+    expect(JSON.parse(call?.payload.arguments as string)).toEqual({ cmd: 'pwd', workdir: `${TARGET_FOLDER}/src` });
+  });
+
+  test('a relative working folder is left as it is', () => {
+    const result = movedFor(exec('src'));
+    const call = records(result.text).find(record => record.payload.type === 'function_call');
+    expect(JSON.parse(call?.payload.arguments as string)).toEqual({ cmd: 'pwd', workdir: 'src' });
+  });
+
+  test('a source home with spaces in its name leaves no part of it behind, and the new marker is whole', () => {
+    const home = '/state/my codex homes/f 1';
+    const result = moved(
+      relocateRollout(syntheticRollout({ id: SOURCE_ID, folder: SOURCE_FOLDER, home }), {
+        folder: TARGET_FOLDER,
+        home: TARGET_HOME,
+      }),
+    );
+    expect(result.text).not.toContain('my codex homes');
+    expect(result.text).not.toContain('codex-correlation/unreachable');
+    expect(records(result.text)[0]?.payload.runtime_workspace_roots).toEqual([
+      `${TARGET_HOME}/codex-correlation/relocated`,
+    ]);
+    expect(result.text).toContain(`<root>${TARGET_FOLDER}/src</root>`);
   });
 });

@@ -2,7 +2,9 @@
  * Opt-in real Codex proof of a move to another machine. Two synthetic machines (two temp Ferretry homes) and a REAL Codex
  * binary (`CODEX_RELOCATE_BINARY`): the binary writes a conversation on machine A, the harness packs it, machine B's
  * harness unpacks it into a new ferret's home, and the binary RESUMES it there. Every word and model answer is synthetic;
- * the only server is a loopback stub on one port of the test range; `CODEX_HOME` is always the synthetic home.
+ * the only server is a loopback stub on one port of the test range; `CODEX_HOME` is always the synthetic home. Nothing
+ * leaves the machine: the binary's startup update check is switched off, every proxy variable it reads points at a loopback
+ * sink (a connection the sink sees would have gone out), and the test fails if the sink sees one.
  *
  *   CODEX_RELOCATE_BINARY=/path/to/codex bun test tests/realworld/relocate-resume.test.ts
  */
@@ -14,6 +16,8 @@ import { relocationWorld } from '../support/relocation-world.ts';
 
 const binary = process.env.CODEX_RELOCATE_BINARY;
 const PORT = 7491;
+/** Where every proxy variable points: a connection made to it is one the binary tried to make to the outside. */
+const SINK_PORT = 7492;
 
 test.skipIf(binary === undefined)(
   'a conversation the real writer made on machine A is resumed by the real binary on machine B',
@@ -29,6 +33,19 @@ test.skipIf(binary === undefined)(
     await mkdir(join(realB, 'a', 'b', 'c', 'd', 'e', 'work'), { recursive: true });
     await symlink(realB, join(b.parent, 'link-b'));
     const requests: Record<string, unknown>[] = [];
+    const attempts: string[] = [];
+    const sink = Bun.listen({
+      hostname: '127.0.0.1',
+      port: SINK_PORT,
+      socket: {
+        open: () => undefined,
+        data: (socket, bytes) => {
+          // The first line of a proxied request names where it was going (`CONNECT host:port`, or `GET http://…`).
+          attempts.push(new TextDecoder().decode(bytes).split('\r\n')[0] ?? '');
+          socket.end();
+        },
+      },
+    });
     const message = {
       type: 'message',
       id: 'msg_synthetic',
@@ -73,12 +90,17 @@ test.skipIf(binary === undefined)(
 model_provider = "loopback"
 approval_policy = "never"
 sandbox_mode = "read-only"
+check_for_update_on_startup = false
 [model_providers.loopback]
 name = "Loopback fixture"
 base_url = "http://127.0.0.1:${PORT}/v1"
 wire_api = "responses"
 requires_openai_auth = false
+[analytics]
+enabled = false
 [features]
+plugins = false
+apps = false
 responses_websockets = false
 responses_websockets_v2 = false
 `;
@@ -105,6 +127,9 @@ responses_websockets_v2 = false
             OTEL_SDK_DISABLED: 'true',
             DO_NOT_TRACK: '1',
             NO_PROXY: '127.0.0.1,localhost',
+            HTTP_PROXY: `http://127.0.0.1:${SINK_PORT}`,
+            HTTPS_PROXY: `http://127.0.0.1:${SINK_PORT}`,
+            ALL_PROXY: `http://127.0.0.1:${SINK_PORT}`,
           },
           stdout: 'pipe',
           stderr: 'pipe',
@@ -164,12 +189,15 @@ responses_websockets_v2 = false
       const words = (await b.harness.transcript.read('f2' as FerretId)).map(entry => entry.text ?? '');
       expect(words.join('\n')).toContain('SYNTHETIC_FIRST_PROMPT');
       expect(words.join('\n')).toContain('SYNTHETIC_RELOCATED_CHECK');
+      // Nothing the binary did on either machine tried to leave this one.
+      expect(attempts).toEqual([]);
       // Machine A's own copy is exactly what it was.
       expect(Buffer.from(packed.value.bytes).equals(await readFile(join(a.agent('f1'), packed.value.relPath)))).toBe(
         true,
       );
     } finally {
       await server.stop(true);
+      sink.stop(true);
       await a.cleanup();
       await b.cleanup();
     }

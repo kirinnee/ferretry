@@ -5,7 +5,7 @@
  * written; and the source is never touched.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FerretId } from '@ferretry/kernel/contract';
 import {
@@ -27,6 +27,11 @@ const build = async (options: Parameters<typeof relocationWorld>[0] = {}) => {
   return world;
 };
 const f2 = 'f2' as FerretId;
+/** Every conversation file under a folder: what a move writes (the home's own links and databases are not it). */
+const rolloutFiles = async (folder: string): Promise<string[]> =>
+  (await readdir(folder, { recursive: true }).catch(() => []))
+    .filter(name => /rollout-[^/]*\.jsonl$/u.test(name))
+    .sort();
 const allFiles = async (folder: string): Promise<string[]> =>
   (await readdir(folder, { recursive: true }).catch(() => [])).sort();
 
@@ -42,6 +47,95 @@ const turns = async (world: Awaited<ReturnType<typeof build>>, ferret: FerretId,
   // `data.source` names the file on THIS machine, which differs by machine and is not a turn.
   return read.map(entry => ({ ...entry, data: { ...(entry.data as object), source: undefined } }));
 };
+
+describe('a destination that cannot hold the conversation honestly', () => {
+  const packedFrom = async () => {
+    const a = await build();
+    await a.source();
+    const packed = await a.harness.packConversation?.('f1' as FerretId);
+    if (packed?.ok !== true) throw new Error(JSON.stringify(packed));
+    return packed.value;
+  };
+  /** A ferret whose `sessions` is a link left over from elsewhere: it leads to an empty folder that is not the pool. */
+  const staleLink = async (w: Awaited<ReturnType<typeof build>>) => {
+    const elsewhere = join(w.parent, 'elsewhere');
+    await mkdir(elsewhere, { recursive: true });
+    await mkdir(w.agent('f2'), { recursive: true, mode: 0o700 });
+    await symlink(elsewhere, join(w.agent('f2'), 'sessions'));
+    return elsewhere;
+  };
+
+  test('a sessions link that leads to some other folder is refused with nothing written', async () => {
+    const packed = await packedFrom();
+    const w = await build();
+    const elsewhere = await staleLink(w);
+    const unpacked = await w.harness.unpackConversation?.(w.specOf('f2', TARGET_FOLDER), packed);
+
+    expect(unpacked).toEqual({ ok: false, error: { reason: expect.stringContaining('history pool') } });
+    expect(await rolloutFiles(w.home)).toEqual([]);
+    expect(await allFiles(elsewhere)).toEqual([]);
+  });
+
+  test('a conversation in the pool is not one a ferret with a stale sessions link has', async () => {
+    const w = await build();
+    await w.source();
+    await staleLink(w);
+    expect(await w.harness.hasConversation?.(w.specOf('f1', SOURCE_FOLDER), SOURCE_ID)).toBe(true);
+    expect(await w.harness.hasConversation?.(w.specOf('f2', TARGET_FOLDER), SOURCE_ID)).toBe(false);
+  });
+
+  test('a conversation of that id already filed under another name is refused, and the one there stays the only one', async () => {
+    const packed = await packedFrom();
+    const w = await build();
+    const other = `sessions/2026/11/15/rollout-2026-11-15T01-00-00-${SOURCE_ID}.jsonl`;
+    await mkdir(w.pool('sessions/2026/11/15'), { recursive: true });
+    const held = syntheticRollout({ id: SOURCE_ID, folder: SOURCE_FOLDER, home: w.agent('f1') });
+    await writeFile(w.pool(other), held);
+    const before = await rolloutFiles(w.pool());
+
+    const unpacked = await w.harness.unpackConversation?.(w.specOf('f2', TARGET_FOLDER), packed);
+
+    expect(unpacked).toEqual({ ok: false, error: { reason: expect.stringContaining('already holds') } });
+    expect(await readFile(w.pool(other), 'utf8')).toBe(held);
+    expect(await rolloutFiles(w.pool())).toEqual(before);
+  });
+
+  test('a conversation that points outside its worktree is refused on both sides, with nothing written', async () => {
+    const outside = (id: string, home: string) =>
+      syntheticRollout({
+        id,
+        folder: SOURCE_FOLDER,
+        home,
+        extra: [
+          JSON.stringify({
+            type: 'response_item',
+            payload: {
+              type: 'function_call',
+              name: 'exec_command',
+              call_id: 'c1',
+              arguments: JSON.stringify({ cmd: 'pwd', workdir: '/local/original-checkout' }),
+            },
+          }),
+        ],
+      });
+    const w = await build();
+    await w.source(outside);
+    expect(await w.harness.packConversation?.('f1' as FerretId)).toMatchObject({
+      ok: false,
+      error: { reason: expect.stringContaining('/local/original-checkout') },
+    });
+    const before = await allFiles(w.home);
+    const unpacked = await w.harness.unpackConversation?.(w.specOf('f2', TARGET_FOLDER), {
+      bytes: new TextEncoder().encode(outside(SOURCE_ID, w.agent('f1'))),
+      relPath: rolloutPath(SOURCE_ID),
+    });
+    expect(unpacked).toMatchObject({
+      ok: false,
+      error: { reason: expect.stringContaining('/local/original-checkout') },
+    });
+    expect(await allFiles(w.home)).toEqual(before);
+  });
+});
 
 describe('packing and unpacking a Codex conversation', () => {
   test('pack gives the rollout byte for byte and the path it is filed under, and writes nothing', async () => {

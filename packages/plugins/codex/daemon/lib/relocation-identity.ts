@@ -105,6 +105,41 @@ export function relocateIdentity(record: RolloutRecord, move: Relocation): Rewri
   };
   const rehomed = (value: string): string =>
     move.oldHomes.reduce((text, old) => text.split(old).join(move.home), value);
+  /**
+   * A path the writer recorded as a FACT of the conversation (a command's working folder, an attached image, the checkout a
+   * worktree came from): inside the work folder or the source home it moves with them; anywhere else (or a path that climbs
+   * out with `..`) it would reach the new machine's model as a place that is not there, so the whole move is refused.
+   */
+  const placed = (value: string): string => {
+    if (!value.startsWith('/')) return value;
+    const climbs = value.split('/').includes('..');
+    if (!climbs && under(value)) return relocated(value);
+    const home = move.oldHomes.find(old => value === old || value.startsWith(`${old}/`));
+    if (!climbs && home !== undefined) return rehomed(value);
+    refusal ??= `the ${record.type}${event === undefined ? '' : `/${event}`} record points at ${value}, outside the worktree and the home, so it cannot be moved safely`;
+    return value;
+  };
+  const nativePath = (path: string): boolean =>
+    /(^|\.)worktree\.original_cwd$/u.test(path) ||
+    (event === 'user_message' && /^payload\.local_images\.\d+$/u.test(path)) ||
+    (event === 'item_completed' && /^payload\.item\.content\.\d+\.path$/u.test(path));
+  /** The command arguments of a tool call: only the working folder is a path; the command is words that were said. */
+  const commandArguments = (value: string): string => {
+    try {
+      const call = asObject(JSON.parse(value));
+      if (typeof call?.workdir !== 'string') return value;
+      const workdir = placed(call.workdir);
+      return workdir === call.workdir ? value : JSON.stringify({ ...call, workdir });
+    } catch {
+      return value;
+    }
+  };
+  /** An attached image's tag in the words the model was shown names the file it was read from. */
+  const imageTags = (value: string): string =>
+    value.replace(
+      /(<image\b[^>\n]*?\bpath=")([^"\n]*)(")/gu,
+      (_whole, open: string, file: string, close: string) => `${open}${placed(file)}${close}`,
+    );
   /** A field NAME can carry a path too (the world state keys its instruction files by path). */
   const named = (key: string, path: string): string => {
     const text = record.type === 'world_state' ? rehomed(key) : key;
@@ -117,6 +152,9 @@ export function relocateIdentity(record: RolloutRecord, move: Relocation): Rewri
       if (self.has(path)) return id;
       if (workspacePath(path) || path === worldCwd) return path.endsWith('.cwd') ? folder : relocated(value);
       if (path === worldFilesystem) return environmentXml(value, path);
+      if (nativePath(path)) return placed(value);
+      if (path === 'payload.arguments' && record.type === 'response_item' && record.payload.type === 'function_call')
+        return commandArguments(value);
       if (historyText(path)) {
         // What Codex told the model about the home it ran in (its skills, with their files) is the home's, not words said.
         if (record.type === 'response_item' && record.payload.role === 'developer') return rehomed(value);
@@ -127,6 +165,7 @@ export function relocateIdentity(record: RolloutRecord, move: Relocation): Rewri
           value.trimEnd().endsWith('</environment_context>')
         )
           return environmentXml(value, path);
+        if (record.type === 'response_item' && record.payload.role === 'user') return imageTags(value);
         return value;
       }
       const key = path.split('.').at(-1);

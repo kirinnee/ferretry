@@ -105,12 +105,25 @@ export class CodexRelocation {
     try {
       await this.parts.ensureHome(spec);
       await this.parts.poolHistory(spec.ferret);
+      // A `sessions` link that leads anywhere but this daemon's pool: a write through it would be found by nothing.
+      if ((await rollouts.sessionsLink(spec.ferret)) === 'stale')
+        return refuse(
+          'this ferret’s sessions link does not lead to this machine’s history pool, so nothing was written',
+        );
       const root = await this.target(spec.ferret);
       let moved: Extract<Relocated, { kind: 'moved' }> = kept;
       let path = packed.relPath;
       let place = root.resolve(path);
       if (!place.ok) return refuse('the conversation cannot be placed in this ferret’s home');
-      if ((await root.lstat(place.value)) !== undefined) {
+      // The same id anywhere in the history the ferret resumes from — under whatever file name — is the same conversation.
+      const held = await rollouts.filesOf(spec.ferret, named);
+      if (held === undefined) return refuse('this ferret’s history could not be searched, so nothing was written');
+      const filed = place.value;
+      if (held.some(file => file !== filed))
+        return refuse(
+          'this machine already holds a conversation with that id under another file name, so it was not moved',
+        );
+      if (held.length > 0 || (await root.lstat(place.value)) !== undefined) {
         // This machine already holds a conversation of that id (a ferret moved back here): the move takes a new one.
         const id = crypto.randomUUID();
         const fresh = relocateRollout(source, { folder, home, id });
@@ -124,7 +137,13 @@ export class CodexRelocation {
       if (!directory.ok) return refuse('the conversation cannot be placed in this ferret’s home');
       await root.makeDirectory(directory.value, { mode: 0o700 });
       await root.writeBytes(place.value, new TextEncoder().encode(moved.text), { exclusive: true });
-      if ((await rollouts.has(spec.ferret, moved.id)) !== true) {
+      // The one file Codex will resolve for the id must be the one just written (never an older copy).
+      const resolved = await rollouts.filesOf(spec.ferret, moved.id);
+      if (
+        resolved?.length !== 1 ||
+        resolved[0] !== place.value ||
+        (await rollouts.has(spec.ferret, moved.id)) !== true
+      ) {
         await root.unlink(place.value).catch(() => undefined);
         return refuse(
           'the conversation was written, but Codex would not find it from this ferret’s home, so it was taken back',
