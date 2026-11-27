@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { HooksItem, SettingsItem } from '../../contract/index.ts';
 import { codexHooksSource, codexSettingsSource } from '../../daemon/lib/profile-components.ts';
+import { codexRuntimesKit } from '../../daemon/lib/runtimes-kit/index.ts';
 
 describe('the Codex settings source', () => {
   it('projects an item as the harness and its document, live', async () => {
@@ -50,5 +51,14 @@ describe('the Codex hooks source', () => {
       document: { hooks: { Stop: [{ hooks: [{ type: 'command' }] }] } },
     });
     expect(await source.read('absent')).toBeUndefined();
+  });
+});
+
+describe('the Codex runtimes kit', () => {
+  it('is offered through the settings source, empty, and not through the hooks source', () => {
+    const source = codexSettingsSource(() => new Map());
+    expect(source.kit).toBe(codexRuntimesKit);
+    expect(Object.keys(codexRuntimesKit)).toEqual([]);
+    expect(codexHooksSource(() => new Map()).kit).toBeUndefined();
   });
 });
