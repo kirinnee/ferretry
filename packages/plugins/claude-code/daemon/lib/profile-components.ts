@@ -9,6 +9,7 @@
  */
 import type { ProfileComponentSource } from '@ferretry/plugin-runtimes/contract';
 import type { HooksItem, SettingsItem } from '../../contract/index.ts';
+import { claudeRuntimesKit } from './runtimes-kit/index.ts';
 
 const byName = (left: string, right: string): number => left.localeCompare(right);
 
@@ -18,6 +19,7 @@ export function claudeSettingsSource(
 ): ProfileComponentSource {
   return {
     ...(watch === undefined ? {} : { watch }),
+    kit: claudeRuntimesKit,
     list: async () => [...items().keys()].toSorted(byName),
     read: async name => {
       const item = items().get(name);
