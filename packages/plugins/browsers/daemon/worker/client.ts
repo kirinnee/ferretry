@@ -121,6 +121,9 @@ export const FORWARDED_ENVIRONMENT = [
 /** What tells a worker it drives a stealth identity's Chrome: it then connects through patchright-core (`worker/main.ts`). */
 const STEALTH_WORKER_ENVIRONMENT = { FY_BROWSER_WORKER_STEALTH: '1' } as const;
 
+/** What gives a worker's page ids a prefix of its own, so two identities' Chromes can never mint the same id (`worker/main.ts`). */
+const PAGE_PREFIX_ENVIRONMENT = 'FY_BROWSER_PAGE_PREFIX';
+
 /**
  * Starts the worker PROCESS with these arguments and exactly this environment: `kernel.spawn.start` of the worker
  * program (Node over the source entry, or the compiled worker), bound by the daemon half. A test hands in its own.
@@ -145,6 +148,8 @@ export interface WorkerClientOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   /** A stealth identity's worker drives Chrome without the DevTools `Runtime.enable` leak ({@link STEALTH_WORKER_ENVIRONMENT}). */
   readonly stealth?: boolean;
+  /** Put before every page id this worker mints (a non-default identity's), so page ids are unique across identities. */
+  readonly pagePrefix?: string;
   readonly readyTimeoutMs?: number;
   readonly requestTimeoutMs?: number;
   readonly shutdownTimeoutMs?: number;
@@ -320,6 +325,7 @@ export class BrowserWorkerClient implements BrowserAutomation {
       options.start([options.endpoint, ...(options.stageDirectory === undefined ? [] : [options.stageDirectory])], {
         ...workerEnvironment(options.environment ?? {}),
         ...(options.stealth === true ? STEALTH_WORKER_ENVIRONMENT : {}),
+        ...(options.pagePrefix === undefined ? {} : { [PAGE_PREFIX_ENVIRONMENT]: options.pagePrefix }),
       }),
     );
     const client = new BrowserWorkerClient(child, options);

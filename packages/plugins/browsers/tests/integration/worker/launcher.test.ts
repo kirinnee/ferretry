@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:net';
 import type { BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
 import should from 'should';
 import { BrowserProfileStore } from '../../../daemon/worker/control/adapters/profile-store.ts';
@@ -33,11 +34,33 @@ afterEach(() => {
 });
 const PORTS = launcherPorts({ misbehave: () => misbehave });
 
+let nextTestPort = 0;
+async function freeRangePort(): Promise<number> {
+  for (let step = 0; step < 20; step += 1) {
+    const port = 7480 + (nextTestPort++ % 20);
+    const free = await new Promise<boolean>(resolve => {
+      const server = createServer();
+      server.once('error', () => resolve(false));
+      server.listen(port, '127.0.0.1', () => server.close(() => resolve(true)));
+    });
+    if (free) return port;
+  }
+  throw new Error('no test port available');
+}
+
 /** The shipped launcher gives a Chrome that ignores SIGTERM two seconds before SIGKILL; these cases only need the escalation. */
-const SHORT_SHUTDOWN = { shutdownTimeoutMs: 250, listenerProver: unprovenListenerProver() };
+const SHORT_SHUTDOWN = { shutdownTimeoutMs: 250, listenerProver: unprovenListenerProver(), cdpPort: freeRangePort };
 /** The machine's DevTools transport, named outright where a case is about one of them. */
-const PIPE = { transport: async () => 'pipe' as const, listenerProver: unprovenListenerProver() };
-const PORT = { transport: async () => 'port' as const, listenerProver: unprovenListenerProver() };
+const PIPE = {
+  transport: async () => 'pipe' as const,
+  listenerProver: unprovenListenerProver(),
+  cdpPort: freeRangePort,
+};
+const PORT = {
+  transport: async () => 'port' as const,
+  listenerProver: unprovenListenerProver(),
+  cdpPort: freeRangePort,
+};
 /** Says every listener is the spawned Chrome's, so a test of something else is not judged by this host's sockets. */
 const OWN_LISTENER = { prove: async () => ({ kind: 'proven' as const }), holder: async () => undefined };
 
@@ -61,8 +84,11 @@ const FAKE_CHROME_PROGRAM = `const fs = require('fs');
 if (process.argv.includes('--ignore-term')) process.on('SIGTERM', () => {});
 const port = process.argv.find(argument => argument.startsWith('--port='));
 if (port !== undefined) {
-  require('http').createServer((q, s) => { s.writeHead(200, { 'content-type': 'application/json' }); s.end('{}'); })
-    .listen(Number(port.slice('--port='.length)), '127.0.0.1');
+  const taken = Number(port.slice('--port='.length));
+  const endpoint = 'ws://127.0.0.1:' + taken + '/devtools/browser/' + process.pid;
+  require('http').createServer((q, s) => { s.writeHead(200, { 'content-type': 'application/json' }); s.end(JSON.stringify({webSocketDebuggerUrl:endpoint})); })
+    .on('error', () => setTimeout(() => process.exit(1), 300))
+    .listen(taken, '127.0.0.1', () => process.stderr.write('DevTools listening on ' + endpoint + '\\n'));
   return;
 }
 const replies = fs.createWriteStream('', { fd: 4 });
@@ -155,6 +181,31 @@ function alive(pid: number): boolean {
 }
 
 describe('NodeSessionBrowserLauncher', () => {
+  it('should never attach two parallel launches to the same Chrome when their selected ports collide and ownership is unknown', async () => {
+    const chrome = await fakeChrome();
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-collision-'));
+    roots.push(root);
+    const port = await freeRangePort();
+    const endpoints: string[] = [];
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      INJECTED_WORKER,
+      PORTS,
+      environment(chrome),
+      async options => {
+        endpoints.push(options.endpoint);
+        return { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined } as never;
+      },
+      { ...PORT, cdpPort: async () => port },
+    );
+    const results = await Promise.allSettled([
+      launcher.launch({ width: 800, height: 600 }, 'one'),
+      launcher.launch({ width: 800, height: 600 }, 'two'),
+    ]);
+    for (const result of results) if (result.status === 'fulfilled') opened.push(result.value);
+    should(results.filter(result => result.status === 'fulfilled')).have.length(1);
+    should(endpoints).have.length(1);
+  });
   it('should lease a profile, hand the worker the DevTools port, and release both worker and Chrome', async () => {
     const chrome = await fakeChrome();
     const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
@@ -304,7 +355,7 @@ describe('NodeSessionBrowserLauncher', () => {
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
-    should(calls[0]).match(/^worker:http:\/\/127\.0\.0\.1:\d+$/u);
+    should(calls[0]).match(/^worker:ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/\d+$/u);
     const started = await readFile(`${chrome}.args`, 'utf8');
     should(started).containEql('--remote-debugging-address=127.0.0.1');
     should(started).match(/--remote-debugging-port=\d+/u);
@@ -323,7 +374,7 @@ describe('NodeSessionBrowserLauncher', () => {
       const asked: string[] = [];
       const squatter = Bun.serve({
         hostname: '127.0.0.1',
-        port: 0,
+        port: await freeRangePort(),
         fetch: request => {
           asked.push(new URL(request.url).pathname);
           return Response.json({});
@@ -374,6 +425,7 @@ describe('NodeSessionBrowserLauncher', () => {
       {
         platform: 'linux',
         listenerProver: unprovenListenerProver(),
+        cdpPort: freeRangePort,
         transport: async () => {
           throw new Error('machine.yaml is mid-write');
         },
@@ -407,7 +459,7 @@ describe('NodeSessionBrowserLauncher', () => {
         HOME: process.env.HOME,
       },
       undefined,
-      { listenerProver: unprovenListenerProver() },
+      { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort },
     );
 
     // Act — a real worker process, started and handshaken by the launcher's own client.
@@ -499,7 +551,7 @@ describe('NodeSessionBrowserLauncher', () => {
       // A display IS available: the agent browser is headless anyway, so every window keeps painting.
       { FY_CHROME_BIN: chrome, DISPLAY: ':99', PATH: process.env.PATH, HOME: process.env.HOME },
       async () => worker as never,
-      { listenerProver: unprovenListenerProver() },
+      { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort },
     );
 
     // Act
@@ -517,7 +569,11 @@ describe('NodeSessionBrowserLauncher', () => {
   describe('Browser ports', () => {
     /** A loopback port nobody holds right now, taken the way the launcher's own `freePort` does. */
     async function spare(): Promise<number> {
-      const held = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
+      const held = Bun.listen({
+        hostname: '127.0.0.1',
+        port: await freeRangePort(),
+        socket: { data: () => undefined },
+      });
       const port = held.port;
       held.stop(true);
       return port;
@@ -589,7 +645,9 @@ describe('NodeSessionBrowserLauncher', () => {
           async () => worker as never,
           { ...PORT, ports: fixed, checkFirewall, listenerProver: OWN_LISTENER },
         );
-        opened.push(await launcher.launch({ width: 800, height: 600 }));
+        const browser = await launcher.launch({ width: 800, height: 600 });
+        opened.push(browser);
+        await browser.close();
       };
       await started(async () => {
         asked += 1;
@@ -692,7 +750,16 @@ describe('NodeSessionBrowserLauncher', () => {
         PORTS,
         environment(chrome),
         async () => worker as never,
-        { platform: 'linux', proxy: async () => proxy, listenerProver: unprovenListenerProver() },
+        {
+          platform: 'linux',
+          proxy: async () => proxy,
+          ports: async () => ({
+            kind: 'fixed',
+            ports: { cdp: await freeRangePort(), relay: await freeRangePort(), vnc: await freeRangePort() },
+          }),
+          listenerProver: unprovenListenerProver(),
+          cdpPort: freeRangePort,
+        },
       );
       const browser = await launcher.launch({ width: 800, height: 600 });
       opened.push(browser);
@@ -752,7 +819,7 @@ describe('NodeSessionBrowserLauncher', () => {
         // The host's own DISPLAY is set, and must never be what a real window draws on.
         environment(chrome),
         async () => worker as never,
-        { listenerProver: unprovenListenerProver(), ...modes },
+        { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort, ...modes },
       );
       return { chrome, root, launcher };
     }
@@ -877,7 +944,7 @@ describe('NodeSessionBrowserLauncher', () => {
         HOME: process.env.HOME,
       },
       undefined,
-      { listenerProver: unprovenListenerProver() },
+      { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort },
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
@@ -962,7 +1029,7 @@ describe('NodeSessionBrowserLauncher', () => {
         worker = await BrowserWorkerClient.connect(options);
         return worker;
       },
-      { listenerProver: unprovenListenerProver() },
+      { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort },
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
@@ -1039,7 +1106,7 @@ describe('NodeSessionBrowserLauncher', () => {
         chromePid = await leasedChromePid(root);
         throw new Error('the worker refused to connect');
       },
-      { listenerProver: unprovenListenerProver() },
+      { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort },
     );
 
     // Act
@@ -1075,7 +1142,7 @@ describe('NodeSessionBrowserLauncher', () => {
       PORTS,
       environment(chrome),
       async () => worker as never,
-      { listenerProver: unprovenListenerProver() },
+      { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort },
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
@@ -1115,7 +1182,7 @@ describe('NodeSessionBrowserLauncher', () => {
       PORTS,
       environment(chrome),
       async () => worker as never,
-      { listenerProver: unprovenListenerProver() },
+      { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort },
     );
     const browser = await launcher.launch({ width: 800, height: 600 });
     opened.push(browser);
@@ -1233,7 +1300,7 @@ exit 7
           chromePid = await leasedChromePid(root);
           throw new Error('the worker refused to connect');
         },
-        { listenerProver: unprovenListenerProver() },
+        { listenerProver: OWN_LISTENER, cdpPort: freeRangePort },
       );
 
       // Act
@@ -1261,7 +1328,7 @@ exit 7
         PORTS,
         environment(chrome),
         async () => ({ unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined }) as never,
-        { listenerProver: unprovenListenerProver() },
+        { listenerProver: OWN_LISTENER, cdpPort: freeRangePort },
       );
 
       // Act
@@ -1351,5 +1418,105 @@ describe('shared browser limits at the actual child launch seams', () => {
     await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith('scope refused');
     const next = await new BrowserProfileStore(root).acquire('agent', { sessionId: 'again' });
     await next.release();
+  });
+
+  describe('one identity’s browser', () => {
+    /** A launcher over a recording fake Chrome and an injected worker that records how it was asked to attach. */
+    async function identityLauncher(modes: Omit<SessionBrowserModeOptions, 'listenerProver'>) {
+      const chrome = await fakeChrome({ recordArguments: true });
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-identity-profile-'));
+      roots.push(root);
+      const attached: { readonly pagePrefix?: string }[] = [];
+      const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        PORTS,
+        environment(chrome),
+        async options => {
+          attached.push({ ...(options.pagePrefix === undefined ? {} : { pagePrefix: options.pagePrefix }) });
+          return worker as never;
+        },
+        { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort, ...modes },
+      );
+      return { chrome, root, launcher, attached };
+    }
+    const xvfb = (name: string) => ({
+      taken: 0,
+      closed: 0,
+      async display() {
+        this.taken += 1;
+        return name;
+      },
+      authority: () => undefined,
+      async close() {
+        this.closed += 1;
+      },
+    });
+
+    it('should lease each identity’s own profile, so two identities launch at once and one twice is refused', async () => {
+      // Arrange
+      const { chrome, root, launcher } = await identityLauncher({});
+
+      // Act
+      const work = await launcher.launch({ width: 800, height: 600 }, 'work');
+      opened.push(work);
+      const shop = await launcher.launch({ width: 800, height: 600 }, 'shop');
+      opened.push(shop);
+      const again = await launcher.launch({ width: 800, height: 600 }, 'work').then(
+        () => undefined,
+        (error: unknown) => error as Error,
+      );
+
+      // Assert — each Chrome ran over its own folder, and the same identity is exclusive.
+      should(await readFile(`${chrome}.args`, 'utf8')).match(/--user-data-dir=.*\/data\/(work|shop)/u);
+      should(again?.name).equal('BrowserProfileBusyError');
+      await new BrowserProfileStore(root).acquire('agent', { sessionId: 'free' }).then(lease => lease.release());
+    });
+
+    it('should name the identity to the proxy, the stealth and the engine reads, and prefix its page ids', async () => {
+      // Arrange
+      const asked: string[] = [];
+      const { launcher, attached } = await identityLauncher({
+        proxy: async identity => {
+          asked.push(`proxy:${identity}`);
+          return undefined;
+        },
+        stealth: async (_proxy, identity) => {
+          asked.push(`stealth:${identity}`);
+          return undefined;
+        },
+      });
+
+      // Act
+      opened.push(await launcher.launch({ width: 800, height: 600 }, 'work'));
+      opened.push(await launcher.launch({ width: 800, height: 600 }));
+
+      // Assert — the default identity's page ids are what they always were; another's carry its name.
+      should(asked).deepEqual(['proxy:work', 'stealth:work', 'proxy:agent', 'stealth:agent']);
+      should(attached).deepEqual([{ pagePrefix: 'work-' }, {}]);
+    });
+
+    it('should draw a non-default identity on a display of its own and close it with its Chrome, leaving the shared one alone', async () => {
+      // Arrange
+      const shared = xvfb(':10');
+      const own = xvfb(':11');
+      const { launcher } = await identityLauncher({
+        mode: async () => 'window',
+        platform: 'linux',
+        display: shared,
+        identityDisplay: () => own,
+      });
+
+      // Act
+      const work = await launcher.launch({ width: 800, height: 600 }, 'work');
+      const home = await launcher.launch({ width: 800, height: 600 });
+      await work.close();
+      await home.close();
+
+      // Assert — the identity's X server was taken for it and went with its Chrome; the shared one was used and never closed.
+      should(own).match({ taken: 1, closed: 1 });
+      should(shared).match({ taken: 1, closed: 0 });
+    });
   });
 });

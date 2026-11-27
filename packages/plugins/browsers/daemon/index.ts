@@ -6,6 +6,7 @@ import {
   type BrowsersConfig,
   type BrowserStreamHello,
   CAPTCHA_SECRET_NAME,
+  DEFAULT_MAX_RUNNING_IDENTITIES,
   PageChanged,
   stealthOn,
 } from '../contract/index.ts';
@@ -13,6 +14,7 @@ import manifest from '../manifest.ts';
 import { withAddressRuleKernel, withAddressRuleTools } from './address-rule.ts';
 import { protectionWindows } from './protection/windows.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
+import { IdentityBrowsers } from './pages/identities.ts';
 import { type BrowserStreamOpener, type FerretBrowserGuard, pageRoutes, streamSocket } from './pages/routes.ts';
 import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
 import { BrowserProxyTester, proxyEndpoint, resolveBrowserProxy } from './proxy/index.ts';
@@ -52,9 +54,10 @@ import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts'
 import { stealthLaunchFor } from './worker/control/policy.ts';
 import type { StartWorker } from './worker/client.ts';
 import { NodeSessionBrowserLauncher } from './worker/launcher.ts';
+import { engineFor } from './worker/engine.ts';
 import { workerCommand } from './worker/program.ts';
 
-/** A browser nobody watches or drives stops after this long, so a forgotten one does not hold the one shared profile. */
+/** An identity's browser nobody watches or drives stops after this long, so a forgotten one does not hold its profile. */
 const BROWSER_IDLE_TIMEOUT_MS = 15 * 60_000;
 
 /** `surface.*` event types mapped onto the published `PageChanged` change (a wake-up; the port is the truth). */
@@ -70,8 +73,8 @@ const PAGE_CHANGES: Readonly<
 };
 
 /**
- * Browsers' daemon half (§2.3; today's `bin/modules/browser.ts` and its `fyd.ts` wiring): the machine's ONE agent
- * Chrome and the worker PROCESS that drives it (`kernel.spawn`, as today), the pages each ferret holds, the viewer stream,
+ * Browsers' daemon half (§2.3; today's `bin/modules/browser.ts` and its `fyd.ts` wiring): one Chrome PER IDENTITY (the
+ * built-in `agent` and each key of `identities:`) and the worker PROCESS that drives each (`kernel.spawn`, as today), the pages each ferret holds, the viewer stream,
  * the human sign-in window, the proxy test and state, surface control, and the browser tools. Every page act goes
  * through `kernel.act` with its `Op`; page text, addresses and titles are read under `kernel.redaction` (S16).
  */
@@ -155,15 +158,18 @@ export function buildBrowsers(
         mode: async () => config()?.mode ?? 'headless',
         // GAP: the Vault has no port that hands Browsers a proxy credential (use, never read), so a proxy that
         // names `${secret:…}` credentials refuses the launch rather than going around the proxy.
-        proxy: async () => {
-          const setting = config()?.proxy;
+        // An identity's own proxy first, the machine's otherwise.
+        proxy: async identity => {
+          const current = config();
+          const setting = current?.identities?.[identity]?.proxy ?? current?.proxy;
           return setting === undefined ? undefined : resolveBrowserProxy(setting, new Map());
         },
-        // Stealth (docs/browser-mode.md): the machine switch in EFFECT (a held `on` is not read) is on. The identity here is the
-        // machine's one agent browser; its zone and language come from where its proxy exits, and a direct launch keeps the machine's own.
-        stealth: async proxy => {
+        engine: identity => engineFor(config()?.identities?.[identity]?.engine ?? config()?.engine),
+        // Stealth (docs/browser-mode.md): the machine switch in EFFECT (a held `on` is not read) is on, and this identity has not
+        // opted out. Its zone and language come from where its proxy exits, and a direct launch keeps the machine's own.
+        stealth: async (proxy, identity) => {
           const current = config();
-          if (current === undefined || !stealthOn(current)) return undefined;
+          if (current === undefined || !stealthOn(current, identity)) return undefined;
           if (proxy === undefined) return {};
           return stealthLaunchFor(
             await proxyProbe.locate({
@@ -173,6 +179,13 @@ export function buildBrowsers(
           );
         },
         display,
+        // Any other identity's window browser draws on an X server of its own, taken with it and closed with its Chrome.
+        identityDisplay: () =>
+          new XvfbDisplay({
+            executable: which('Xvfb'),
+            authorityDirectory: profile.displayDirectory,
+            processes,
+          }),
         listenerProver,
         stageDirectory: host.stageDirectory,
         // GAP (card F1931, finding 10): no `ports`, `checkFirewall` or `limits` (today's fyd.ts 8728-8736).
@@ -215,27 +228,35 @@ export function buildBrowsers(
     },
     { now: () => kernel.clock.nowMs() },
   );
-  const pages = new BrowserSessionService(
-    {
-      get: async sessionId => {
-        const ferret = await ctx.uses.ferrets.current()?.get(sessionId as FerretId);
-        return ferret === undefined ? undefined : { name: ferret.name };
-      },
-    },
-    launcher,
-    () => kernel.clock.nowMs(),
-    {
-      timeoutMs: BROWSER_IDLE_TIMEOUT_MS,
-      after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }),
-    },
-    identities,
-    // A page closed, however it closed (a tool, the viewer, the toolbar, the session's end, the browser stopping): what a
-    // person held on it ends, and the workspace is woken.
-    forgetsClosedPages(control, (sessionId, pageId) => {
-      viewerScope.revoke(sessionId, pageId);
-      kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' });
-    }),
-  );
+  // One service per identity (each its own Chrome, idle clock and page list), behind the one surface the rest of Browsers uses.
+  const closedPages = forgetsClosedPages(control, (sessionId, pageId) => {
+    viewerScope.revoke(sessionId, pageId);
+    kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' });
+  });
+  const pages = new IdentityBrowsers({
+    make: (identity, quota) =>
+      new BrowserSessionService(
+        {
+          get: async sessionId => {
+            const ferret = await ctx.uses.ferrets.current()?.get(sessionId as FerretId);
+            return ferret === undefined ? undefined : { name: ferret.name };
+          },
+        },
+        launcher,
+        () => kernel.clock.nowMs(),
+        {
+          timeoutMs: BROWSER_IDLE_TIMEOUT_MS,
+          after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }),
+        },
+        identities,
+        // A page closed, however it closed (a tool, the viewer, the toolbar, the session's end, the browser stopping): what a
+        // person held on it ends, and the workspace is woken.
+        closedPages,
+        identity,
+        quota,
+      ),
+    maxRunning: () => config()?.maxRunning ?? DEFAULT_MAX_RUNNING_IDENTITIES,
+  });
   // Which pages hold a sealed value, and whether a clipboard capture is running: told by Accounts (secure copy's reach), asked by the tools.
   const sealed = new SealedPages({ after: (delay, action) => kernel.clock.after(milliseconds(delay), action) });
   // The ONE gate every agent path to a page's words or pixels asks: the tools, the HTTP action route and the viewer socket.
