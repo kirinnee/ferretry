@@ -181,6 +181,10 @@ export function RemoteBrowserViewer({
   const identityRef = useRef(0);
   const transportRef = useRef<{ readonly identity: ViewerTransport; readonly generation: number } | null>(null);
   const activePageRef = useRef<string | undefined>(undefined);
+  /** The page whose frame is painted right now: what every input says it is meant for. None while nothing is painted. */
+  const paintedPageRef = useRef<string | undefined>(undefined);
+  /** Each frame that has arrived but may not be painted yet, by its object URL: it counts as painted only once the image has loaded it. */
+  const arrivedFramesRef = useRef(new Map<string, string>());
   const frameContainerRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const frameRef = useRef<HTMLCanvasElement | null>(null);
@@ -231,6 +235,7 @@ export function RemoteBrowserViewer({
     setDisplayState('idle');
     setError(null);
     setConfirmable(false);
+    paintedPageRef.current = undefined;
   } else if (renderedPageId !== currentPageId) {
     // A status commit naming page B must never retain page A's already-painted
     // pixels. Doing this during render prevents that stale frame from reaching
@@ -238,6 +243,7 @@ export function RemoteBrowserViewer({
     setRenderedPageId(currentPageId);
     setFrameUrl(null);
     setFrameRevision(0);
+    paintedPageRef.current = undefined;
   }
   // Read by the socket listeners: a message, close or error that a superseded
   // transport delivers between this render and its own teardown must not be
@@ -248,11 +254,17 @@ export function RemoteBrowserViewer({
   const viewport = status?.viewport;
   const canInteract = interactive && running && displayState !== 'idle';
 
-  /** Answers whether the live transport actually accepted the input. */
+  /**
+   * Answers whether the live transport actually accepted the input. Every input names the page whose frame it was made over, so
+   * the daemon can drop what is for a page the screen has just been moved off (another page, or another identity's Chrome)
+   * instead of landing it on the new one; and nothing is sent while no frame is painted, e.g. between a page change and
+   * the first frame of the new page.
+   */
   const sendInput = useCallback((input: BrowserInputEvent): boolean => {
     const socket = socketRef.current;
-    if (socket === null || socket.readyState !== 1) return false;
-    socket.send(JSON.stringify(input));
+    const page = paintedPageRef.current;
+    if (socket === null || socket.readyState !== 1 || page === undefined) return false;
+    socket.send(JSON.stringify({ ...input, pageId: page }));
     return true;
   }, []);
 
@@ -451,8 +463,13 @@ export function RemoteBrowserViewer({
       const previousUrl = previousUrlRef.current;
       previousUrlRef.current = nextUrl;
       previousPageRef.current = livePageId;
+      // Not yet painted: the image still shows the frame before this one until it has loaded this, so input keeps naming that one's page.
+      arrivedFramesRef.current.set(nextUrl, frame.pageId);
       setFrameUrl(nextUrl);
-      if (previousUrl !== null) revokeObjectUrl(previousUrl);
+      if (previousUrl !== null) {
+        arrivedFramesRef.current.delete(previousUrl);
+        revokeObjectUrl(previousUrl);
+      }
       setFrameRevision(value => value + 1);
       setDisplayState('live');
       setError(null);
@@ -682,7 +699,12 @@ export function RemoteBrowserViewer({
             ref={imageRef}
             src={frameUrl}
             alt="Live remote browser frame"
-            onLoad={measureInputSurface}
+            onLoad={event => {
+              // The frame is on screen now, not when it arrived: only from here does input name its page.
+              const painted = arrivedFramesRef.current.get(event.currentTarget.getAttribute('src') ?? '');
+              if (painted !== undefined) paintedPageRef.current = painted;
+              measureInputSurface();
+            }}
             style={
               fit
                 ? { flex: '0 1 auto', minHeight: 0, minWidth: 0 }

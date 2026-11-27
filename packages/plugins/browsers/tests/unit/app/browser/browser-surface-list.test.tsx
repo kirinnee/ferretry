@@ -129,3 +129,30 @@ describe('BrowserSurfaceList', () => {
     );
   });
 });
+
+describe('BrowserSurfaceList, pages of two identities', () => {
+  const AGENT_PAGE = page('PAGE1', { name: 'app', identity: 'agent', ownerSessionId: 'hadi', ownerName: 'Hadi' });
+  const WORK_PAGE = page('PAGE2', { name: 'billing', identity: 'work', ownerSessionId: 'hadi', ownerName: 'Hadi' });
+
+  test('should name the identity on every page once one page is in an identity other than the built-in one', () => {
+    // Act
+    const { renderer } = mount({ status: status([AGENT_PAGE, WORK_PAGE]) });
+
+    // Assert — both chips say which Chrome they are in, so the built-in one is not mistaken for "the same browser"
+    const chips = renderer.root.findAll(node => node.type === 'button' && node.props.className === 'fy-ws-page');
+    expect(chips.map(chip => text(chip))).toEqual(['appagentAGENT', 'billingwork']);
+    expect(
+      chips.map(chip => chip.findAllByProps({ 'data-tone': 'identity' })[0]?.props['data-browser-identity']),
+    ).toEqual(['agent', 'work']);
+  });
+
+  test('should draw no identity chip while every page is in the built-in identity', () => {
+    // Act
+    const { renderer } = mount({
+      status: status([AGENT_PAGE, page('PAGE9', { identity: 'agent', ownerSessionId: 'hadi' })]),
+    });
+
+    // Assert
+    expect(renderer.root.findAllByProps({ 'data-tone': 'identity' })).toHaveLength(0);
+  });
+});

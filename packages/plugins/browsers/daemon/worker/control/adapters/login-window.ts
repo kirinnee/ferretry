@@ -27,9 +27,12 @@ export interface BrowserLoginRuntime {
   readonly environmentSource: Readonly<Record<string, string | undefined>>;
   readonly hostname: string;
   readonly sshUser: string;
-  display(): Promise<string>;
+  /** The screen this identity's window draws on: the machine's own for the built-in identity, a private one for any other. */
+  display(identity?: string): Promise<string>;
   /** The Xauthority file clients of `display()` must present; `undefined` if the display demands none. */
-  authority(): string | undefined;
+  authority(identity?: string): string | undefined;
+  /** Lets go of the screen an identity's window took, once nothing draws on it; the machine's own screen outlives any window. */
+  releaseDisplay?(identity: string): Promise<void>;
   chromeExecutable(): string;
   x11vncExecutable(): string;
   timeoutExecutable(): string;
@@ -49,7 +52,10 @@ export interface BrowserLoginRuntime {
 export interface BrowserLoginWindowOptions {
   readonly profile: BrowserProfilePort;
   readonly runtime: BrowserLoginRuntime;
-  readonly closeAgentBrowsers?: () => Promise<void>;
+  /** Closes the named identity's agent browser (and no other identity's) before its window takes its profile. */
+  readonly closeAgentBrowsers?: (identity: string) => Promise<void>;
+  /** Whether `browsers.yaml` names this identity, read at every call: a retired one, whose profile may still be on disk, gets no window. The built-in `agent` needs no entry. */
+  readonly configured: (identity: string) => boolean;
   readonly password?: () => string;
 }
 
@@ -60,17 +66,64 @@ interface ActiveWindow extends BrowserLoginWindow {
 }
 
 /**
- * Coordinates a direct-child Chrome and a supervised, loopback-only VNC server.
+ * EVERY IDENTITY'S SIGN-IN WINDOW. Each identity has a window of its own (its own Chrome on its own profile and screen, its
+ * own VNC listener and password), made on first need; opening or closing one touches no other identity's window or agent
+ * browser.
+ */
+export class BrowserLoginWindowService implements BrowserLoginLifecycle {
+  private readonly windows = new Map<string, IdentityLoginWindow>();
+
+  constructor(private readonly options: BrowserLoginWindowOptions) {}
+
+  async status(identity: string = DEFAULT_BROWSER_IDENTITY): Promise<BrowserLoginStatus> {
+    return await this.of(identity).status();
+  }
+
+  async start(options: { readonly minutes?: number; readonly identity?: string } = {}): Promise<BrowserLoginStatus> {
+    return await this.of(options.identity ?? DEFAULT_BROWSER_IDENTITY).start(options);
+  }
+
+  async stop(options: { readonly primed?: boolean; readonly identity?: string } = {}): Promise<BrowserLoginStatus> {
+    const identity = options.identity ?? DEFAULT_BROWSER_IDENTITY;
+    // Letting go of a window that is already open launches nothing, so a retired identity's window can still be closed.
+    return await (this.windows.get(identity) ?? this.of(identity)).stop(options);
+  }
+
+  async confirm(identity: string = DEFAULT_BROWSER_IDENTITY): Promise<BrowserLoginStatus> {
+    return await this.of(identity).confirm();
+  }
+
+  private of(identity: string): IdentityLoginWindow {
+    // Asked of the configuration at every call, never cached: an identity retired since its window was first made gets none.
+    if (identity !== DEFAULT_BROWSER_IDENTITY && !this.options.configured(identity))
+      throw new BrowserControlError(
+        'bad_request',
+        `there is no browser identity named ${identity}; add it under identities in browsers.yaml first`,
+      );
+    let window = this.windows.get(identity);
+    if (window === undefined) {
+      window = new IdentityLoginWindow(this.options, identity);
+      this.windows.set(identity, window);
+    }
+    return window;
+  }
+}
+
+/**
+ * One identity's window: a direct-child Chrome and a supervised, loopback-only VNC server.
  * Runtime state is deliberately adapter-local: no credential or window record is
  * written to durable state.
  */
-export class BrowserLoginWindowService implements BrowserLoginLifecycle {
+class IdentityLoginWindow {
   private state: BrowserLoginState = 'closed';
   private active: ActiveWindow | undefined;
   private failure: string | undefined;
   private queue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly options: BrowserLoginWindowOptions) {}
+  constructor(
+    private readonly options: BrowserLoginWindowOptions,
+    private readonly identity: string,
+  ) {}
 
   /**
    * Projects the window's runtime state onto the wire contract one branch at a
@@ -157,15 +210,15 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
     let vnc: BrowserLoginChild | undefined;
     let passwordFile: string | undefined;
     try {
-      await this.options.closeAgentBrowsers?.();
+      await this.options.closeAgentBrowsers?.(this.identity);
       const runtime = this.options.runtime;
       const chromeExecutable = runtime.chromeExecutable();
       const chromeVersion = await runtime.chromeVersion(chromeExecutable);
-      lease = await this.profile.acquire(DEFAULT_BROWSER_IDENTITY, { sessionId: 'human-login', chromeVersion });
-      await this.profile.assertChromeVersionCompatible(DEFAULT_BROWSER_IDENTITY, chromeVersion);
+      lease = await this.profile.acquire(this.identity, { sessionId: 'human-login', chromeVersion });
+      await this.profile.assertChromeVersionCompatible(this.identity, chromeVersion);
       await lease.cleanupStaleChromeLocks();
-      const display = await runtime.display();
-      const authority = runtime.authority();
+      const display = await runtime.display(this.identity);
+      const authority = runtime.authority(this.identity);
       chrome = runtime.spawn(
         browserLoginChromeArguments(chromeExecutable, lease.profile, runtime.platform),
         browserEnvironment(display, runtime.environmentSource, authority),
@@ -239,11 +292,12 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
       await parts.lease.updateChromePid().catch(() => undefined);
       await parts.lease.release().catch(() => undefined);
     }
+    await this.options.runtime.releaseDisplay?.(this.identity).catch(() => undefined);
   }
 
   private async profilePrimed(): Promise<boolean> {
     try {
-      return await this.profile.isPrimed(DEFAULT_BROWSER_IDENTITY);
+      return await this.profile.isPrimed(this.identity);
     } catch {
       return false;
     }
