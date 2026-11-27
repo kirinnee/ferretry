@@ -27,6 +27,7 @@ setDefaultTimeout(120_000);
 
 const packageRoot = import.meta.dir;
 const prePaint = await readFile(resolve(packageRoot, '../../public/pre-paint.js'), 'utf8');
+const themeIds = await readFile(resolve(packageRoot, '../../public/generated/theme-ids.js'), 'utf8');
 
 let browser: Browser;
 let directory = '';
@@ -56,13 +57,15 @@ beforeAll(async () => {
   const js = await readFile(manifest.js, 'utf8');
   const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
   // The pre-paint page: the REAL script, parser-blocking, then ONE inline reader that runs before anything else could.
-  const bare = `<!doctype html><html><head><meta charset="utf-8"><script src="/pre-paint.js"></script><script>window.__first = { style: document.documentElement.getAttribute('data-style'), palette: document.documentElement.getAttribute('data-palette'), mode: document.documentElement.getAttribute('data-mode') };</script></head><body></body></html>`;
+  const bare = `<!doctype html><html><head><meta charset="utf-8"><script src="/generated/theme-ids.js"></script><script src="/pre-paint.js"></script><script>window.__first = { style: document.documentElement.getAttribute('data-style'), palette: document.documentElement.getAttribute('data-palette'), mode: document.documentElement.getAttribute('data-mode') };</script></head><body></body></html>`;
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: request => {
       const path = new URL(request.url).pathname;
       if (path === '/app.js') return new Response(js, { headers: { 'content-type': 'text/javascript' } });
+      if (path === '/generated/theme-ids.js')
+        return new Response(themeIds, { headers: { 'content-type': 'text/javascript' } });
       if (path === '/pre-paint.js') return new Response(prePaint, { headers: { 'content-type': 'text/javascript' } });
       if (path === '/bare') return new Response(bare, { headers: { 'content-type': 'text/html' } });
       return new Response(page, { headers: { 'content-type': 'text/html' } });

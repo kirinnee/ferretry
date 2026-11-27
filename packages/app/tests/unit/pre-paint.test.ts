@@ -35,6 +35,8 @@ const parseThemePreference = (raw: string | null) =>
   new ThemePreferenceStore(memoryStore(raw === null ? {} : { [THEME_PREFERENCES_KEY]: raw })).snapshot();
 const record = (value: unknown, format: unknown = 1): string => JSON.stringify({ format, value });
 
+/** What `public/generated/theme-ids.js` hands the script: the ids of the pack folders (the generator writes it from them). */
+const THEME_IDS = { style: STYLES.map(entry => entry.id), palette: PALETTES.map(entry => entry.id) };
 const source = readFileSync(join(import.meta.dir, '../../public/pre-paint.js'), 'utf8');
 
 interface Published {
@@ -75,7 +77,7 @@ const runBootstrap = (
 
   bootstrap(
     storage,
-    { matchMedia: (query: string) => ({ matches: systemDark && query.includes('dark') }) },
+    { matchMedia: (query: string) => ({ matches: systemDark && query.includes('dark') }), fyThemeIds: THEME_IDS },
     { documentElement },
   );
 
@@ -95,7 +97,8 @@ const STORED_VALUES: readonly (string | null)[] = [
   '   ',
   // The record shape (style + palette), including per-field fallback for bad fields.
   record({ style: 'neo', palette: 'geist', mode: 'dark', textScale: 'large' }),
-  // A style or palette that is not even shaped like a pack id reads as the default on both sides.
+  // A style or palette that is not a pack (not even shaped like an id, or a well-formed one no folder makes) reads as the default on both sides.
+  record({ style: 'contrast', palette: 'blueprint', mode: 'dark', textScale: 'default' }),
   record({ style: 'geist', palette: 'No Such', mode: 'light', textScale: 'default' }),
   record({ style: 'NOPE', palette: 7, mode: 'dark', textScale: 'default' }),
   record({ style: 'x'.repeat(40), palette: '../x', mode: 'system', textScale: 'larger' }),
@@ -138,32 +141,48 @@ describe('the pre-paint bootstrap and the theme module resolve identically', () 
     }
   });
 
-  it('keeps no list of ids: it paints every pack the catalogue lists, and any well-formed id', () => {
-    const ids = (list: { readonly id: string }[]) => list.map(entry => entry.id);
+  it('keeps no list of ids of its own: it paints every pack the catalogue lists, and the default for any other id', () => {
     expect(source).not.toMatch(/var (?:STYLES|PALETTES)\b/u);
-    for (const style of ids([...STYLES])) {
+    for (const { id: style } of STYLES) {
       const { attributes } = runBootstrap(
         record({ style, palette: 'studio', mode: 'light', textScale: 'default' }),
         false,
       );
       expect(attributes['data-style']).toBe(style);
     }
-    for (const palette of ids([...PALETTES])) {
+    for (const { id: palette } of PALETTES) {
       const { attributes } = runBootstrap(
         record({ style: 'studio', palette, mode: 'light', textScale: 'default' }),
         false,
       );
       expect(attributes['data-palette']).toBe(palette);
     }
-    // An id no pack answers to is painted as stored (it matches no pack selector, so the base tokens show) and React
-    // publishes the default in its place: the two only disagree here, and only for the first paint.
-    const { attributes } = runBootstrap(
-      record({ style: 'unknown-style', palette: 'unknown-palette', mode: 'dark', textScale: 'default' }),
-      false,
-    );
-    expect(attributes).toMatchObject({ 'data-style': 'unknown-style', 'data-palette': 'unknown-palette' });
-    const read = parseThemePreference(record({ style: 'unknown-style', palette: 'unknown-palette' }));
+    // An id no pack folder makes (retired, mistyped, or well-formed but never shipped) paints the default, as React does.
+    const unknown = record({ style: 'unknown-style', palette: 'unknown-palette', mode: 'dark', textScale: 'default' });
+    const { attributes } = runBootstrap(unknown, false);
+    expect(attributes).toMatchObject({ 'data-style': DEFAULT_STYLE, 'data-palette': DEFAULT_PALETTE });
+    const read = parseThemePreference(unknown);
     expect({ style: read.style, palette: read.palette }).toEqual({ style: DEFAULT_STYLE, palette: DEFAULT_PALETTE });
+  });
+
+  it('paints the default when the ids script did not load (it never trusts an id it cannot check)', () => {
+    const attributes: Record<string, string> = {};
+    const bootstrap = new Function('localStorage', 'window', 'document', source) as (
+      localStorage: unknown,
+      window: unknown,
+      document: unknown,
+    ) => void;
+    bootstrap(
+      { getItem: () => record({ style: 'neo', palette: 'geist', mode: 'light', textScale: 'default' }) },
+      {},
+      {
+        documentElement: {
+          setAttribute: (name: string, value: string) => (attributes[name] = value),
+          style: { setProperty: () => undefined },
+        },
+      },
+    );
+    expect(attributes).toMatchObject({ 'data-style': DEFAULT_STYLE, 'data-palette': DEFAULT_PALETTE });
   });
 
   it('publishes the text scale and the same factor the module applies', () => {

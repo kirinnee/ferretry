@@ -8,17 +8,18 @@
    `src/` can run this early. `tests/unit/pre-paint.test.ts` executes this script against those modules' own values and
    fails if the two drift.
 
-   IT KEEPS NO LIST OF STYLE OR PALETTE IDS: the packs are folders (`src/theme/packs/`), and a list here would be a second
-   place to edit for every new one. It paints any stored id shaped like a pack id (`PackIdSchema`: `^[a-z][a-z0-9-]{1,31}$`)
-   and the default otherwise. An id with no pack matches no pack selector, so the base tokens paint (Studio, with the
-   default palette's dark block as the dark baseline); React then publishes the default in its place. Nothing is rewritten.
+   IT KEEPS NO LIST OF STYLE OR PALETTE IDS OF ITS OWN: the packs are folders (`src/theme/packs/`), and a list here would be
+   a second place to edit for every new one. The generator writes the ids those folders make to `generated/theme-ids.js`
+   (`window.fyThemeIds`, a classic script that `app/index.html` loads first), and this file reads that. A stored id that is
+   not in it (a retired id, a typo, a script that did not load) paints the default, exactly as React resolves it, so the
+   first frame is already the look React then publishes. The stored record is never touched.
 
    It is a classic, same-origin, parser-blocking script (no `type="module"`, no `defer`) so it satisfies
    `script-src 'self'` and still runs before paint; ES5-shaped and dependency-free because nothing transpiles it. */
 
 (function () {
   var KEY = 'fy:app:theme';
-  var PACK_ID = /^[a-z][a-z0-9-]{1,31}$/;
+  var IDS = window.fyThemeIds || { style: [], palette: [] };
   var MODES = ['system', 'light', 'dark'];
   var TEXT_SCALES = { default: 1, large: 1.125, larger: 1.25 };
 
@@ -32,8 +33,8 @@
     var record = raw ? JSON.parse(raw) : null;
     var value = record && record.format === 1 ? record.value : null;
     // Each field falls back on its own, so one bad value never resets the others (as `ThemePreferenceSchema`).
-    if (value && typeof value.style === 'string' && PACK_ID.test(value.style)) style = value.style;
-    if (value && typeof value.palette === 'string' && PACK_ID.test(value.palette)) palette = value.palette;
+    if (value && IDS.style.indexOf(value.style) >= 0) style = value.style;
+    if (value && IDS.palette.indexOf(value.palette) >= 0) palette = value.palette;
     if (value && MODES.indexOf(value.mode) >= 0) mode = value.mode;
     if (value && Object.prototype.hasOwnProperty.call(TEXT_SCALES, value.textScale)) textScale = value.textScale;
   } catch (error) {
