@@ -36,6 +36,8 @@ export interface IdentityBrowsersOptions {
   readonly make: (identity: string, quota: BrowserPageQuota) => BrowserSessionService;
   /** How many identities may have a Chrome at once, read at every start. */
   readonly maxRunning: () => number;
+  /** Whether `browsers.yaml` names this identity, read at every open: a retired one, whose profile may still be on disk, is not. The built-in `agent` needs no entry. */
+  readonly configured: (identity: string) => boolean;
 }
 
 /**
@@ -58,7 +60,8 @@ export class IdentityBrowsers implements BrowserSubsystem {
   private closing: Promise<void> | undefined;
   /** Identities a start has been asked for and has not answered yet: they count as running from the moment of the ask. */
   private readonly starting = new Map<string, number>();
-  private readonly screens = new Map<string, string>();
+  /** Every live screen, by the id the stream told its client: which identity's Chrome it is on, and the attachment it holds there. */
+  private readonly screens = new Map<string, Screen>();
   /** The identity each session last opened a page in: where a call that names none goes. */
   private readonly last = new Map<string, string>();
   private readonly quota: BrowserPageQuota = {
@@ -70,10 +73,12 @@ export class IdentityBrowsers implements BrowserSubsystem {
 
   async status(sessionId: string, viewer?: ViewerRef): Promise<BrowserStatus> {
     const home = this.homeOf(sessionId, viewer);
-    const main = await this.serviceOf(home).status(sessionId, viewer);
+    const main = tagged(home, await this.serviceOf(home).status(sessionId, this.viewerIn(home, viewer)));
     const others = [...this.services].filter(([identity, service]) => identity !== home && this.running(service));
     if (others.length === 0) return main;
-    const rest = await Promise.all(others.map(async ([, service]) => await service.status(sessionId)));
+    const rest = await Promise.all(
+      others.map(async ([identity, service]) => tagged(identity, await service.status(sessionId))),
+    );
     const pages = [...main.pages, ...rest.flatMap(status => status.pages)];
     return {
       ...main,
@@ -91,21 +96,31 @@ export class IdentityBrowsers implements BrowserSubsystem {
   ): Promise<ViewerAttachment> {
     const identity = this.homeOf(sessionId);
     const attached = await this.serviceOf(identity).attachViewer(sessionId, onFrame, onTerminal, caller);
-    this.screens.set(attached.viewerId, identity);
+    // The id the stream tells its client is the first attachment's, and stays this screen's for life, wherever it moves.
+    const id = attached.viewerId;
+    const screen: Screen = { sessionId, identity, attached, onFrame, onTerminal, caller, moving: Promise.resolve() };
+    this.screens.set(id, screen);
     return {
-      viewerId: attached.viewerId,
+      viewerId: id,
       detach: () => {
-        this.screens.delete(attached.viewerId);
-        attached.detach();
+        this.screens.delete(id);
+        screen.attached.detach();
       },
     };
   }
 
-  async dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewer: ViewerRef): Promise<void> {
-    await this.serviceOf(this.screens.get(viewer.id) ?? DEFAULT_BROWSER_IDENTITY).dispatchHumanInput(
+  async dispatchHumanInput(
+    sessionId: string,
+    input: BrowserInputEvent,
+    viewer: ViewerRef,
+    page?: string,
+  ): Promise<void> {
+    const identity = this.screenOf(viewer) ?? DEFAULT_BROWSER_IDENTITY;
+    await this.serviceOf(identity).dispatchHumanInput(
       sessionId,
       input,
-      viewer,
+      this.viewerIn(identity, viewer) ?? viewer,
+      page,
     );
   }
 
@@ -121,17 +136,25 @@ export class IdentityBrowsers implements BrowserSubsystem {
       return { status: await this.status(sessionId) };
     }
     if (action.action === 'start' || action.action === 'open' || action.action === 'new-page') {
-      const identity = this.named(options.identity) ?? this.homeOf(sessionId, options.viewer);
+      const identity = this.current(this.named(options.identity) ?? this.homeOf(sessionId, options.viewer));
       const acted = await this.admit(identity, async () => {
-        const answered = await this.serviceOf(identity).act(sessionId, action, options, content);
+        const answered = await this.serviceOf(identity).act(
+          sessionId,
+          action,
+          this.optionsIn(identity, options),
+          content,
+        );
         this.last.set(sessionId, identity);
         return answered;
       });
       return acted;
     }
     const pageId = 'pageId' in action && typeof action.pageId === 'string' ? action.pageId : undefined;
-    const identity = this.screenOf(options.viewer) ?? this.holder(sessionId, pageId) ?? this.homeOf(sessionId);
-    return await this.serviceOf(identity).act(sessionId, action, options, content);
+    // A page the act names is in the identity that holds it; an act on "the page this screen shows" is the screen's own identity's.
+    const identity = this.holder(sessionId, pageId) ?? this.screenOf(options.viewer) ?? this.homeOf(sessionId);
+    // Showing a page of another identity moves the screen to that identity's Chrome: one live display, whichever browser the page is in.
+    if (action.action === 'activate-page' && options.viewer !== undefined) await this.follow(options.viewer, identity);
+    return await this.serviceOf(identity).act(sessionId, action, this.optionsIn(identity, options), content);
   }
 
   async clearClipboard(): Promise<boolean> {
@@ -141,7 +164,7 @@ export class IdentityBrowsers implements BrowserSubsystem {
 
   async openPage(sessionId: string, name: string, options: BrowserOpenOptions = {}): Promise<BrowserPageSummary> {
     return await this.withName(sessionId, name, async () => {
-      const identity = this.named(options.identity) ?? this.homeOf(sessionId);
+      const identity = this.current(this.named(options.identity) ?? this.homeOf(sessionId));
       return await this.admit(identity, async () => {
         const opened = await this.serviceOf(identity).openPage(sessionId, name, options);
         this.last.set(sessionId, identity);
@@ -235,6 +258,11 @@ export class IdentityBrowsers implements BrowserSubsystem {
       this.closing = undefined;
     });
     await this.closing;
+  }
+
+  /** Closes ONE identity's Chrome and its pages, leaving every other identity's browser as it was (the login window for that identity). */
+  async closeIdentity(identity: string): Promise<void> {
+    await this.services.get(identity)?.closeAll();
   }
 
   /** Whether any identity's browser runs, since when (the earliest), and the proxy the first of them started with. */
@@ -340,14 +368,59 @@ export class IdentityBrowsers implements BrowserSubsystem {
   }
 
   private screenOf(viewer: ViewerRef | undefined): string | undefined {
-    return viewer === undefined ? undefined : this.screens.get(viewer.id);
+    return viewer === undefined ? undefined : this.screens.get(viewer.id)?.identity;
   }
 
-  /** A named identity must be a key `browsers.yaml` could hold; anything else is refused where it is named. */
+  /** The screen as the identity's own service knows it: its attachment there carries its own id. Absent when the screen is on another identity's Chrome. */
+  private viewerIn(identity: string, viewer: ViewerRef | undefined): ViewerRef | undefined {
+    const screen = viewer === undefined ? undefined : this.screens.get(viewer.id);
+    if (viewer === undefined || screen === undefined) return viewer;
+    return screen.identity === identity ? { ...viewer, id: screen.attached.viewerId } : undefined;
+  }
+
+  private optionsIn(identity: string, options: BrowserActOptions): BrowserActOptions {
+    if (options.viewer === undefined) return options;
+    const { viewer: _screen, ...rest } = options;
+    const own = this.viewerIn(identity, options.viewer);
+    return own === undefined ? rest : { ...rest, viewer: own };
+  }
+
+  /** Moves a screen to another identity's Chrome: attached there first, then let go of where it was, so it never goes dark between. */
+  private async follow(viewer: ViewerRef, identity: string): Promise<void> {
+    const screen = this.screens.get(viewer.id);
+    if (screen === undefined) return;
+    const move = screen.moving.then(async () => {
+      if (screen.identity === identity) return;
+      const next = await this.serviceOf(identity).attachViewer(
+        screen.sessionId,
+        screen.onFrame,
+        screen.onTerminal,
+        screen.caller,
+      );
+      const previous = screen.attached;
+      screen.attached = next;
+      screen.identity = identity;
+      previous.detach();
+    });
+    screen.moving = move.catch(() => undefined);
+    await move;
+  }
+
+  /** A named identity must be a key `browsers.yaml` could hold AND one it does hold (or the built-in); anything else is refused where it is named, before any Chrome or profile is touched. */
   private named(identity: string | undefined): string | undefined {
     if (identity === undefined) return undefined;
     if (!BrowserIdentityKeySchema.safeParse(identity).success)
       throw new BrowserSessionError('not_found', `there is no browser identity named ${identity}`);
+    return this.current(identity);
+  }
+
+  /** The identity as the configuration stands NOW, asked at every open, new page and start and never remembered: one retired since the session last used it is refused, whatever its profile folder still holds. */
+  private current(identity: string): string {
+    if (identity !== DEFAULT_BROWSER_IDENTITY && !this.options.configured(identity))
+      throw new BrowserSessionError(
+        'not_found',
+        `there is no browser identity named ${identity}; add it under identities in browsers.yaml first`,
+      );
     return identity;
   }
 
@@ -358,4 +431,20 @@ export class IdentityBrowsers implements BrowserSubsystem {
   private sum(count: (service: BrowserSessionService) => number): number {
     return [...this.services.values()].reduce((total, service) => total + count(service), 0);
   }
+}
+
+/** A status with each page told which identity's Chrome holds it: the daemon knows, so the page, the panel and the agent's list can say. */
+function tagged(identity: string, status: BrowserStatus): BrowserStatus {
+  return { ...status, pages: status.pages.map(page => ({ ...page, identity })) } as BrowserStatus;
+}
+
+/** One live screen: where it is now, and what it takes to put it on another identity's Chrome. */
+interface Screen {
+  readonly sessionId: string;
+  identity: string;
+  attached: ViewerAttachment;
+  readonly onFrame: (frame: BrowserScreencastFrame) => void;
+  readonly onTerminal: (signal: ViewerTerminalSignal) => void;
+  readonly caller: string;
+  moving: Promise<void>;
 }

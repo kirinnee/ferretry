@@ -468,6 +468,25 @@ describe('the machine agent browser — a person and an agent at once', () => {
     should((await service.status('s1')).viewers).equal(1);
   });
 
+  it('should drop a person’s input that was meant for a page other than the one the screen is attached to', async () => {
+    // Arrange — one screen on the first page; the session then has a second page the screen is moved to
+    const { tabs, service } = harness();
+    await service.act('s1', { action: 'new-page' });
+    const first = activeOf(await service.status('s1'));
+    await service.act('s1', { action: 'new-page' });
+    const second = activeOf(await service.status('s1'));
+    const screen = await attach(service, 's1', () => undefined);
+    await service.act('s1', { action: 'activate-page', pageId: second }, { viewer: screen.viewer });
+
+    // Act — the app still painted the first page and typed over it; then it caught up and typed over the second
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'meant for first' }, screen.viewer, first);
+    await service.dispatchHumanInput('s1', { kind: 'insertText', text: 'meant for second' }, screen.viewer, second);
+
+    // Assert — only what was meant for the page the screen is on landed there
+    should(tabs.inputs).deepEqual([{ pageId: second, input: { kind: 'insertText', text: 'meant for second' } }]);
+    screen.detach();
+  });
+
   it('B1 should give each screen its own page: a tab switch in one screen moves no other screen, its stream or its input', async () => {
     // Arrange — one ferret, two pages, and two screens (a desktop pane and a phone) of the same person.
     const { tabs, service } = harness();
