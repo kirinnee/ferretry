@@ -100,6 +100,75 @@ describe('signalling and probing a process', () => {
     should(processes.alive(child.pid)).be.false();
   });
 
+  it('should see a process that has exited but is not yet reaped as not alive', async () => {
+    // E-404: the grandchild exits at once and its parent (`sleep`, after the exec) never waits, so it stays a zombie:
+    // `kill(pid, 0)` still succeeds for it, yet it holds nothing, least of all the daemon lock.
+    const parent = Bun.spawn(['sh', '-c', 'sh -c "exit 0" & echo $!; exec sleep 30'], { stdout: 'pipe' });
+    try {
+      const reader = parent.stdout.getReader();
+      const zombie = Number.parseInt(new TextDecoder().decode((await reader.read()).value).trim(), 10);
+      await waitFor(
+        async () => (await readFile(`/proc/${String(zombie)}/stat`, 'utf8')).includes(') Z '),
+        'the child to exit',
+      );
+      should(processes.alive(zombie)).be.false();
+    } finally {
+      parent.kill('SIGKILL');
+    }
+  });
+
+  it('should see a zombie as not alive on a host with no /proc too, by asking ps for its state', async () => {
+    // macOS has no /proc: `ps -o stat=` is where an unreaped process shows as `Z`.
+    const dir = await temp();
+    const none = join(dir, 'no-proc');
+    const zombie = await script(dir, 'ps-zombie', 'Z+\n', 0);
+    const running = await script(dir, 'ps-running', 'Ss\n', 0);
+    should(new BunDaemonProcess({ procDirectory: none, ps: zombie }).alive(process.pid)).be.false();
+    should(new BunDaemonProcess({ procDirectory: none, ps: running }).alive(process.pid)).be.true();
+    should(new BunDaemonProcess({ procDirectory: none, ps: join(dir, 'no-ps') }).alive(process.pid)).be.true();
+  });
+
+  it('should tell one process from another by start identity, and say nothing for a gone one or a zombie', async () => {
+    const processes = new BunDaemonProcess();
+    const first = Bun.spawn(['sleep', '30']);
+    const parent = Bun.spawn(['sh', '-c', 'sh -c "exit 0" & echo $!; exec sleep 30'], { stdout: 'pipe' });
+    try {
+      const identity = await processes.identify(first.pid);
+      should(identity).be.a.String().and.not.equal('');
+      should(await processes.identify(first.pid)).equal(identity);
+      should(await processes.identify(process.pid)).not.equal(identity);
+
+      const zombie = Number.parseInt(
+        new TextDecoder().decode((await parent.stdout.getReader().read()).value).trim(),
+        10,
+      );
+      await waitFor(
+        async () => (await readFile(`/proc/${String(zombie)}/stat`, 'utf8')).includes(') Z '),
+        'the child to exit',
+      );
+      should(await processes.identify(zombie)).be.undefined();
+
+      first.kill('SIGKILL');
+      await first.exited;
+      should(await processes.identify(first.pid)).be.undefined();
+    } finally {
+      first.kill('SIGKILL');
+      parent.kill('SIGKILL');
+    }
+  });
+
+  it('should take the start identity from ps where there is no /proc', async () => {
+    const dir = await temp();
+    const path = join(dir, 'ps');
+    await writeFile(
+      path,
+      '#!/bin/sh\ncase "$*" in\n*stat=*) printf "Ss\\n";;\n*lstart=*) printf "Thu Nov 27 10:00:00 2026\\n";;\nesac\n',
+      { mode: 0o755 },
+    );
+    const processes = new BunDaemonProcess({ procDirectory: join(dir, 'no-proc'), ps: path });
+    should(await processes.identify(process.pid)).equal('Thu Nov 27 10:00:00 2026');
+  });
+
   it('should terminate a running child and say so, and say false for one already gone', async () => {
     const child = Bun.spawn(['sleep', '30']);
     should(processes.signal(child.pid, 'SIGTERM')).be.true();
@@ -184,6 +253,7 @@ function runner(answer: (argv: readonly string[]) => CommandOutcome): IDaemonPro
     spawnDetached: async () => await Promise.reject(new Error('unused')),
     signal: () => false,
     alive: () => false,
+    identify: async () => undefined,
     holdsOpen: async () => await Promise.resolve(undefined),
   };
 }
