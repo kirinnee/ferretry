@@ -25,6 +25,7 @@ import {
   PREFERENCE_CHANGED_REASON,
   STALE_WALK_REASON,
   type PairedDaemon,
+  DAEMON_REPLACED_CLOSE_CODE,
   RELAY_CLOSE_CODES,
 } from '@ferretry/app';
 import {
@@ -284,6 +285,26 @@ const legDetail = (failure: LegFailure): string =>
   (failure.code === RELAY_CLOSE_CODES.hostedBandwidth ? hostedAllowanceSentence(failure.reason) : undefined) ??
   `${failure.reason} (${String(failure.code)})`;
 
+/**
+ * THE PROOF THAT THE DAEMON AT THIS ADDRESS IS NOT THE ONE PAIRED: a DIRECT or TUNNEL leg OPENED and the daemon behind it
+ * answered `4404` over the socket ("this daemon does not answer for that fingerprint"). Nothing else counts. A relay's
+ * `4404` says no daemon holds the rendezvous, which an asleep or restarting machine says too; a refused or unopened
+ * connection, a timeout and every other close prove nothing, so those keep the backoff.
+ */
+const replacedProof = (seen: readonly LegFailure[]): boolean =>
+  seen.some(
+    failure =>
+      (failure.method.kind === 'direct' || failure.method.kind === 'tunnel') &&
+      failure.opened &&
+      failure.code === RELAY_CLOSE_CODES.daemonAbsent,
+  );
+
+/** The close a walk with that proof ends its session with; the shell reads it as "pair again". */
+const REPLACED_CLOSE = {
+  code: DAEMON_REPLACED_CLOSE_CODE,
+  reason: 'the daemon at this address is not the one this device paired with',
+} as const;
+
 /** What a walk observed, in the terms the connection model reads (today's `carrierOutage`). */
 const carrierOutage = (seen: readonly LegFailure[]): CarrierOutage => {
   const relays = seen.filter(failure => failure.method.kind === 'relay');
@@ -298,6 +319,7 @@ const carrierOutage = (seen: readonly LegFailure[]): CarrierOutage => {
     })),
     daemonAbsent: seen.some(failure => failure.code === RELAY_CLOSE_CODES.daemonAbsent),
     relaysNeverOpened: relays.length > 0 && relays.every(failure => !failure.opened),
+    ...(replacedProof(seen) ? { identityReplaced: true as const } : {}),
   };
 };
 
@@ -816,6 +838,7 @@ export class CarrierRouter {
       },
       exhausted: (failures: readonly LegFailure[]) => {
         if (!decides) {
+          if (replacedProof(failures)) return REPLACED_CLOSE;
           if (failures.length === 0) return { code: RELAY_CLOSE_CODES.daemonAbsent, reason: CONTROL_UNREACHABLE };
           const last = failures[failures.length - 1] as LegFailure;
           return { code: last.code, reason: last.reason };
@@ -833,6 +856,7 @@ export class CarrierRouter {
         // Nothing carried: an outage even when no leg was dialled (a choice that leaves the walk no carrier, such as
         // "Tunnel only" with no tunnel known) — that device is cut off, and the way out must be offered.
         this.deps.health?.outage(daemonId, carrierOutage(failures));
+        if (replacedProof(failures)) return REPLACED_CLOSE;
         const last = failures[failures.length - 1];
         return { code: last?.code ?? RELAY_CLOSE_CODES.daemonAbsent, reason: chosen.reason };
       },

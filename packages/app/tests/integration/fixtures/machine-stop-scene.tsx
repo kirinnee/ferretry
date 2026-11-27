@@ -5,6 +5,7 @@
  *   ?theme=<family>-<mode>   the mode, and the palette of the default look
  *   ?style=<style id>        another look (its own palette comes with it), so the page can be seen in every style
  *   ?state=refused       the machine closed the session with 4403 (a second machine is paired, so "Use another machine" shows)
+ *   ?state=replaced      the walk proved another daemon answers at the paired address (4405)
  *   ?state=turned-away   the plugin list answered 403 with the machine's own reason
  *   ?state=no-key        the pairing is here but this browser can open no session for it
  *   ?state=unreadable    the plugin list could not be read through the carrier
@@ -14,6 +15,7 @@
  *   ?state=no-key-other / not-paired-other   the same stops with a SECOND, healthy machine (kirin-laptop) paired and selected
  */
 import { createRoot } from 'react-dom/client';
+import { DAEMON_REPLACED_CLOSE_CODE } from '../../../src/client/transport.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
@@ -34,6 +36,7 @@ const root = document.getElementById('root');
 const transport = new FakeTransport(request => {
   const path = request.path.split('?')[0];
   if (state === 'refused') throw new RelaySessionError('unknown device credential', RELAY_CLOSE_CODES.authRejected);
+  if (state === 'replaced') throw new RelaySessionError('replaced', DAEMON_REPLACED_CLOSE_CODE);
   if (path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
   if (path !== '/v1/plugins') return json({ ok: true });
   if (state === 'turned-away')

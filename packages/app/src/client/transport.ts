@@ -167,6 +167,24 @@ export function isDeviceRefusal(error: unknown): boolean {
 }
 
 /**
+ * The close code the CARRIER WALK ends a session with when a direct or tunnel leg OPENED and its daemon answered `4404`
+ * ("this daemon does not answer for that fingerprint"): somebody is at the address this device paired over and it is not
+ * the daemon it paired. No peer sends it — the walk (Connections) concludes it from what it saw, which is why it is not in
+ * the session wire's table. It is NOT a carrier outage: nothing is retried, and the shell says to pair again
+ * (`docs/relay-protocol.md`, "A replaced daemon").
+ */
+export const DAEMON_REPLACED_CLOSE_CODE = 4405;
+
+/** Whether a transport failure is the walk's proof that the daemon at this address is no longer the one paired. */
+export function isDaemonReplaced(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === 'RelaySessionError' &&
+    (error as { readonly code?: unknown }).code === DAEMON_REPLACED_CLOSE_CODE
+  );
+}
+
+/**
  * The session close codes that mean the CARRIER went away rather than the daemon answering (S12): the rendezvous had
  * no daemon on the route (`4404`), the claim timed out or was lost (`4402`, `4410`), the socket stopped answering
  * heartbeats (`4408`), it is full or the hosted relay is off, over capacity or over its bandwidth (`4429`, `4431`-`4433`),
@@ -199,3 +217,9 @@ export function isCarrierGone(error: unknown): boolean {
   if (code === SESSION_CONCLUDED_CLOSE_CODE) return endedWhileServing === true;
   return code < 4000 || CARRIER_GONE_CLOSE_CODES.has(code);
 }
+
+/** The machine code a call carries once the walk proved the daemon at this address is not the one paired ({@link DAEMON_REPLACED_CLOSE_CODE}). */
+export const DAEMON_REPLACED_CODE = 'daemon_replaced';
+/** What a call that died that way says; the shell's stop page says the rest. */
+export const DAEMON_REPLACED_SENTENCE =
+  'The machine at this address is not the one this browser paired with. It may have been reinstalled or replaced, so pair this browser with it again.';
