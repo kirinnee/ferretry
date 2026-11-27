@@ -43,6 +43,7 @@ import {
   type SendSubmit,
 } from './ledger-message.tsx';
 import { RowBodySlot, RowSlot } from './row-slots.tsx';
+import { ForkFromHere } from '../fork/fork-from-here.tsx';
 import { CONVERSATION_ROW_ACTIONS_SLOT } from '../../contract/index.ts';
 import { MessageFooter } from './send-receipt.tsx';
 import { SentMessageRow } from './sent-message.tsx';
@@ -425,7 +426,7 @@ function OwnMessageRow({
         receipt={receipt}
         record={record}
         side="own"
-        trailing={actions?.trigger}
+        trailing={actions?.trigger ?? (sendRow === 'travelling' ? undefined : <ForkFromHere text={entry.text} />)}
       />
       {actions?.panels}
     </article>

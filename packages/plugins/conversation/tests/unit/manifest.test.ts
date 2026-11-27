@@ -5,8 +5,9 @@ describe('conversation manifest', () => {
   const routes = manifest.actions.routes;
   test('declares every route of the conversation mounts, each with a full descriptor', () => {
     // Today's 38, the composer's reference menus (lead decision Q6), and the ferret's hypermedia switch
-    // (GET /v1/ferrets/:ferretId/hypermedia) as the 40th, less the twelve send, queue and composer routes the Mailbox serves.
-    expect(routes).toHaveLength(28);
+    // (GET /v1/ferrets/:ferretId/hypermedia) as the 40th, less the twelve send, queue and composer routes the Mailbox serves,
+    // plus the fork route Ferrets handed over (c58-37 PR11).
+    expect(routes).toHaveLength(29);
     expect(manifest.actions.sockets).toHaveLength(1);
     for (const route of routes) {
       expect(['operator', 'authenticated']).toContain(route.minimum);

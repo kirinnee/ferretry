@@ -15,6 +15,7 @@ export * from './state.ts';
 export * from './wire-channel.ts';
 export * from './wire-compact.ts';
 export * from './wire-draft.ts';
+export * from './wire-fork.ts';
 export * from './wire-link.ts';
 export * from './wire-media.ts';
 export * from './wire-prompt.ts';
