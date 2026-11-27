@@ -21,7 +21,6 @@ export {
   type FerretView as SessionView,
   FerretViewConfigSchema as SessionViewConfigSchema,
   FerretViewSchema as SessionViewSchema,
-  type InteractionMode,
   InteractionModeSchema,
   type LaunchInstructionSection,
   type LaunchInstructionSectionId,
@@ -334,7 +333,6 @@ export { type SessionStatus, SessionStatusSchema } from './session-base.ts';
 /** How a transcript was identified and where it lives: the contract owns both (`contract/records.ts`). */
 export {
   TranscriptIdentitySchema,
-  type TranscriptProvenance,
   TranscriptProvenanceSchema,
 } from '../../../contract/records.ts';
 

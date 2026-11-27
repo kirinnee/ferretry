@@ -122,9 +122,9 @@ export function canServeModel(account: CoreAccount, model: string): boolean {
 // --- lib/core/session-planner.ts --------------------------------------------------------------------------------
 
 /** Where a session's displayed model came from. */
-export type DisplayModelSource = 'harness' | 'requested' | 'account-default' | 'unknown';
+type DisplayModelSource = 'harness' | 'requested' | 'account-default' | 'unknown';
 
-export interface SessionPlanRequest {
+interface SessionPlanRequest {
   /** Stable session identity; the name is derived from it, never the other way round. */
   readonly id: string;
   readonly account: CoreAccount;
@@ -143,7 +143,7 @@ export interface SessionPlanRequest {
   readonly reportedWindow?: number;
 }
 
-export interface SessionPlan {
+interface SessionPlan {
   /** The tmux-safe session name. */
   readonly tmuxName: string;
   /** The title handed to the harness, so its own surfaces agree with the session list. */
@@ -159,7 +159,7 @@ export interface SessionPlan {
 }
 
 /** What planning one session came to. A refusal is a planning outcome, not an exception. */
-export type SessionPlanOutcome =
+type SessionPlanOutcome =
   | { readonly kind: 'planned'; readonly plan: SessionPlan }
   | {
       readonly kind: 'unservable-model';

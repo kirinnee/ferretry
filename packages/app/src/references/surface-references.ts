@@ -1,5 +1,5 @@
 /**
- * Live proof for `%terminal:…` / `%browser:…` references.
+ * Live proof for `%terminal:…` / `%browser:…` references (`%attachment:…` has none yet: docs/reference-standard.md §2).
  *
  * The grammar, the envelope and the tombstone live in `references.ts`; this module
  * owns the one index that turns a surface key into a surface the daemon is
@@ -155,6 +155,8 @@ export const createSurfaceReferenceResolver = (
   const open = { terminal: keysOf(evidence.terminal?.terminals), browser: keysOf(evidence.browser?.pages) };
 
   return lookup => {
+    // Nothing lists a session's stored files, so an attachment is never proved or proved closed.
+    if (lookup.surface === 'attachment') return undefined;
     // No authoritative listing means no answer, in either direction.
     if (evidence[lookup.surface] === null) return undefined;
     if (!open[lookup.surface].has(lookup.key)) return { state: 'closed' } satisfies SurfaceProof;

@@ -68,6 +68,8 @@ export interface WorktreesNeeds {
 
 export interface BuiltWorktrees {
   readonly service: ManagedWorktreeService;
+  /** Git's read side over this daemon's host IO (a fork asks whether a folder is a checkout and where its HEAD is); `undefined` while this daemon hosts none. */
+  readonly gateway: GitWorktreeGateway | undefined;
   /** Where managed checkouts live; `undefined` while this daemon hosts none. */
   readonly managedRoot: string | undefined;
   /** Every worktree of the repository whose common directory this is (the repository listing). */
@@ -86,16 +88,12 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
   const clock = new KernelWorktreeClock(needs.clock);
   const io = needs.io;
   const runner = io === undefined ? undefined : new KernelGitRunner(io.git);
+  const gateway =
+    io === undefined || runner === undefined ? undefined : new GitWorktreeGateway(runner, io.fileSystem, clock);
   const baseOperations: ManagedWorktreeOperations =
-    io === undefined || runner === undefined
+    io === undefined || runner === undefined || gateway === undefined
       ? NO_HOST_OPERATIONS
-      : new ManagedWorktreeAdapter(
-          new GitWorktreeGateway(runner, io.fileSystem, clock),
-          io.fileSystem,
-          clock,
-          new WorktreeOperationQueue(),
-          io.pinner,
-        );
+      : new ManagedWorktreeAdapter(gateway, io.fileSystem, clock, new WorktreeOperationQueue(), io.pinner);
   const inPlace =
     io === undefined || runner === undefined
       ? undefined
@@ -179,5 +177,5 @@ export function buildWorktrees(needs: WorktreesNeeds): BuiltWorktrees {
     adopt: async request => await service.adopt(request.path),
     listRepo,
   };
-  return { service, managedRoot: io?.managedRoot, listRepo, routes: worktreeRoutes(subsystem) };
+  return { service, gateway, managedRoot: io?.managedRoot, listRepo, routes: worktreeRoutes(subsystem) };
 }

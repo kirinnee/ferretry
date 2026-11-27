@@ -33,6 +33,7 @@ import type {
   MoveFailure,
   MoveOptions,
   ResumeOptions,
+  ForksApi,
   RuntimeControlApi,
   Sitrep,
   StartFailure,
@@ -105,6 +106,7 @@ interface FerretsApiAtBase {
   markStalled?(ferret: FerretId, stalled: boolean): Promise<boolean>;
   exclusive?<T>(ferret: FerretId, work: () => Promise<T>): Promise<T>;
   runtimeControl?: RuntimeControlApi['runtimeControl'];
+  forks?: ForksApi['forks'];
 }
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;

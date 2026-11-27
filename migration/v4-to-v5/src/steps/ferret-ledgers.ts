@@ -3,7 +3,6 @@ import {
   ArchiveFile,
   FerretHistoryEventSchema,
   FerretHistoryFiles,
-  ForkFiles,
   ManagedWorktreeDocumentSchema,
   NameClaimSchema,
   NamesDocumentSchema,
@@ -16,6 +15,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem } from '../report.ts';
 import { info, json, type V4Config } from '../v4/ferrets.ts';
+import { ForkFiles } from '../v4/fork-receipts.ts';
 import type { StepContext } from './index.ts';
 
 // These contracts describe the body; the kernel's declared format stamp surrounds it on disk.
