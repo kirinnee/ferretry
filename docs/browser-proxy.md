@@ -92,7 +92,11 @@ page with an error rather than a direct connection.
   addresses; use a proxy whose exit you trust to look the way you need.
 - **A missing `machine.yaml`** is read as "no proxy": a machine that has never been set up goes direct. An
   invalid file is refused at edit time by `fy config check`.
-- **One proxy per machine.** There is no per-site or per-agent routing beyond the bypass list.
+- **One proxy per machine, unless an identity has its own.** An identity's `proxy:` entry in `browsers.yaml`
+  (`identities.<key>.proxy`, the same shape) replaces the machine's for that identity's Chrome, and a credentialed one gets its
+  own sign-in relay. Setting or changing one is a loosening, held for the owner like the machine's. There is no per-site or
+  per-agent routing beyond the bypass list.
+  - **GAP: a credentialed proxy still refuses to launch** for either, until Browsers has a Vault read path for its credentials.
 
 ## Test proxy
 

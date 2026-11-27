@@ -125,6 +125,9 @@ describe('Codex dialogs, read by the Claude Code plugin’s parser', () => {
     ['codex-0.156.1-sign-in', 'sign-in', undefined, undefined],
     ['codex-0.163.0-directory-trust', 'directory-trust', 'Folder access', 'back'],
     ['codex-0.163.0-directory-restricted', 'directory-trust', 'Folder access', 'back'],
+    ['codex-0.170.0-hooks-review', 'hooks-review', 'Hooks need review', 'skip'],
+    ['codex-0.170.0-directory-trust', 'directory-trust', 'Folder access', 'back'],
+    ['codex-0.170.0-sign-in', 'sign-in', undefined, undefined],
   ] as const;
 
   for (const [name, kind, title, escapeLabel] of cases) {

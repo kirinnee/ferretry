@@ -22,6 +22,15 @@ export function forkWorktrees(built: BuiltWorktrees | undefined): ForkWorktrees 
       const made = await built.service.create({ ...request });
       return { cwd: made.cwd, worktree: { path: made.worktree.path, branch: made.worktree.branch } };
     },
+    discard: async worktree => {
+      // Brand new and never started in: its branch holds exactly the source's HEAD (the source keeps those commits).
+      await built.service.remove({
+        path: worktree.path,
+        overrides: ['accept_unpushed_commits'],
+        deleteBranch: true,
+        confirmations: ['delete_unpushed_branch', 'delete_unmerged_branch'],
+      });
+    },
   };
 }
 
@@ -49,6 +58,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
             ...(record.runtime === undefined ? {} : { runtime: record.runtime }),
             ...(record.login === undefined ? {} : { login: record.login }),
             folder: record.folder,
+            running: record.state === 'starting' || record.state === 'working',
           };
     },
     mayTouch: (caller, target) => registry.mayTouch(caller, target),

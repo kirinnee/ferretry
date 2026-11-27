@@ -1,0 +1,54 @@
+"outcomes":
+  [
+    {
+      "cause": "timed-out"
+      "harness": "claude"
+      "manualCommand": "npm install -g @anthropic-ai/claude-code"
+      "outcome": "failed"
+      "output":
+        [
+          "still downloading"
+        ]
+      "reason": "npm did not finish within 15 minutes, so it was stopped. It said: still downloading"
+    }
+    {
+      "cause": "timed-out"
+      "harness": "codex"
+      "manualCommand": "npm install -g @openai/codex"
+      "outcome": "failed"
+      "output":
+        [
+          "still downloading"
+        ]
+      "reason": "npm did not finish within 15 minutes, so it was stopped. It said: still downloading"
+    }
+  ]
+"runs":
+  [
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@anthropic-ai/claude-code"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@openai/codex"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+  ]

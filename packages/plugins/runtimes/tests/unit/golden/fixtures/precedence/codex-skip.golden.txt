@@ -1,0 +1,278 @@
+"args":
+  [
+    "-c"
+    "model_reasoning_effort=\"high\""
+    "-c"
+    "mcp_servers.github.command=\"gh\""
+    "--search"
+    "-c"
+    "approval_policy=\"never\""
+    "-c"
+    "sandbox_mode=\"danger-full-access\""
+    "-c"
+    "projects={\"/golden/launch-folder\"={trust_level=\"trusted\"}}"
+    "--no-alt-screen"
+    "-c"
+    "notice={hide_full_access_warning=true,hide_world_writable_warning=true,hide_rate_limit_model_nudge=true,hide_gpt5_1_migration_prompt=true,\"hide_gpt-5.1-codex-max_migration_prompt\"=true}"
+    "-c"
+    "mcp_servers.ferretry.command=\"/opt/ferretry/bin/fy\""
+    "-c"
+    "mcp_servers.ferretry.args=[\"mcp\",\"serve\"]"
+    "-c"
+    "mcp_servers.ferretry.env_vars=[\"FY_HOME\",\"FY_URL\",\"FY_SESSION_ID\",\"FY_SESSION_TOKEN\",\"FY_SESSION_BOARD_CAPABILITY\"]"
+    "-c"
+    "developer_instructions=\"prefer bun\\u000a\\u000abe terse\\u000a\\u000aFerretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.\\u000a\\u000aFerretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (`fy config path`). Before changing any, read `fy config guide` and follow it: never write a secret value into a file (the owner runs `fy secret set NAME`; then ${secret:NAME}), run `fy config check` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.\""
+  ]
+"overridden":
+  [
+    {
+      "fixed":
+        "key": "approval_policy"
+        "path":
+          [
+            "approval_policy"
+          ]
+        "purpose": "permission-mode"
+        "target": "settings"
+        "value": "never"
+      "key": "approval_policy.nested"
+      "kind": "setting"
+      "layer":
+        "componentKind": "settings"
+        "name": "second"
+        "origin": "settings/second"
+        "reference": "settings/second"
+        "via": []
+      "path":
+        [
+          "approval_policy"
+          "nested"
+        ]
+      "value": 1
+    }
+    {
+      "fixed":
+        "key": "sandbox_mode"
+        "path":
+          [
+            "sandbox_mode"
+          ]
+        "purpose": "permission-mode"
+        "target": "settings"
+        "value": "danger-full-access"
+      "key": "sandbox_mode"
+      "kind": "setting"
+      "layer":
+        "componentKind": "settings"
+        "name": "second"
+        "origin": "settings/second"
+        "reference": "settings/second"
+        "via": []
+      "path":
+        [
+          "sandbox_mode"
+        ]
+      "value": "read-only"
+    }
+    {
+      "fixed":
+        "key": "mcp_servers.ferretry"
+        "path":
+          [
+            "mcp_servers"
+            "ferretry"
+          ]
+        "purpose": "tools"
+        "target": "settings"
+        "value":
+          "args":
+            [
+              "mcp"
+              "serve"
+            ]
+          "command": "/opt/ferretry/bin/fy"
+          "env_vars":
+            [
+              "FY_HOME"
+              "FY_URL"
+              "FY_SESSION_ID"
+              "FY_SESSION_TOKEN"
+              "FY_SESSION_BOARD_CAPABILITY"
+            ]
+      "key": "mcp_servers.ferretry.command"
+      "kind": "setting"
+      "layer":
+        "componentKind": "settings"
+        "name": "second"
+        "origin": "settings/second"
+        "reference": "settings/second"
+        "via": []
+      "path":
+        [
+          "mcp_servers"
+          "ferretry"
+          "command"
+        ]
+      "value": "/evil"
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "first"
+        "origin": "settings/first"
+        "reference": "settings/first"
+        "via": []
+      "tokens":
+        [
+          "--full-auto"
+        ]
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "first"
+        "origin": "settings/first"
+        "reference": "settings/first"
+        "via": []
+      "tokens":
+        [
+          "-a"
+          "untrusted"
+        ]
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "first"
+        "origin": "settings/first"
+        "reference": "settings/first"
+        "via": []
+      "tokens":
+        [
+          "--ask-for-approval=on-failure"
+        ]
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "first"
+        "origin": "settings/first"
+        "reference": "settings/first"
+        "via": []
+      "tokens":
+        [
+          "-s"
+          "read-only"
+        ]
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "first"
+        "origin": "settings/first"
+        "reference": "settings/first"
+        "via": []
+      "tokens":
+        [
+          "--sandbox"
+          "workspace-write"
+        ]
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "first"
+        "origin": "settings/first"
+        "reference": "settings/first"
+        "via": []
+      "tokens":
+        [
+          "--dangerously-bypass-approvals-and-sandbox"
+        ]
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "first"
+        "origin": "settings/first"
+        "reference": "settings/first"
+        "via": []
+      "tokens":
+        [
+          "-c"
+          "approval_policy=\"untrusted\""
+        ]
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "first"
+        "origin": "settings/first"
+        "reference": "settings/first"
+        "via": []
+      "tokens":
+        [
+          "--config=sandbox_mode=read-only"
+        ]
+    }
+    {
+      "kind": "flag"
+      "layer":
+        "componentKind": "settings"
+        "name": "second"
+        "origin": "settings/second"
+        "reference": "settings/second"
+        "via": []
+      "tokens":
+        [
+          "-c"
+          "mcp_servers.ferretry.command=\"/evil\""
+        ]
+    }
+  ]
+"settings":
+  "approval_policy": "never"
+  "developer_instructions":
+    <<<
+      prefer bun
+
+      be terse
+
+      Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.
+
+      Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (`fy config path`). Before changing any, read `fy config guide` and follow it: never write a secret value into a file (the owner runs `fy secret set NAME`; then ${secret:NAME}), run `fy config check` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.
+    >>>
+  "mcp_servers":
+    "ferretry":
+      "args":
+        [
+          "mcp"
+          "serve"
+        ]
+      "command": "/opt/ferretry/bin/fy"
+      "env_vars":
+        [
+          "FY_HOME"
+          "FY_URL"
+          "FY_SESSION_ID"
+          "FY_SESSION_TOKEN"
+          "FY_SESSION_BOARD_CAPABILITY"
+        ]
+    "github": "command": "gh"
+  "model_reasoning_effort": "high"
+  "notice":
+    "hide_full_access_warning": true
+    "hide_gpt-5.1-codex-max_migration_prompt": true
+    "hide_gpt5_1_migration_prompt": true
+    "hide_rate_limit_model_nudge": true
+    "hide_world_writable_warning": true
+  "projects": "/golden/launch-folder": "trust_level": "trusted"
+  "sandbox_mode": "danger-full-access"

@@ -43,6 +43,17 @@ export const CLAUDE_DIALOG_RULES: readonly DialogRule[] = [
     title: '^lsp plugin recommendation$',
     action: { choose: 'No, not now' },
   },
+  {
+    // "Claude in Chrome" (2.1.327, drawn by `--chrome`): a notice with no rows. Esc closes it and turns nothing on. It is
+    // named by its title AND its own footer line AND having no rows, so a screen that only shares the title never gets an Esc.
+    id: 'claude-chrome-notice',
+    harness: 'claude',
+    kind: 'other',
+    title: '^claude in chrome$',
+    text: '^enter to continue · esc to close$',
+    rows: 'none',
+    action: { press: 'escape' },
+  },
 ];
 
 export const CODEX_DIALOG_RULES: readonly DialogRule[] = [

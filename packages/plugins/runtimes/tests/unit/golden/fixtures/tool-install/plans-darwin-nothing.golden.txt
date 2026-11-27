@@ -1,0 +1,20 @@
+[
+  {
+    "harness": "claude"
+    "installed": false
+    "plan":
+      "harness": "claude"
+      "kind": "no-package-manager"
+      "manualCommand": "brew install --cask claude-code"
+      "reason": "Claude Code is installed with Homebrew or npm, and this machine has neither; install Homebrew first, then run the command yourself"
+  }
+  {
+    "harness": "codex"
+    "installed": false
+    "plan":
+      "harness": "codex"
+      "kind": "no-package-manager"
+      "manualCommand": "brew install --cask codex"
+      "reason": "Codex is installed with Homebrew or npm, and this machine has neither; install Homebrew first, then run the command yourself"
+  }
+]

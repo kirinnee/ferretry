@@ -87,12 +87,15 @@ function tickingClock(stepMs: number): () => number {
 /** An Xvfb child whose stdout the test writes, so `-displayfd` can be simulated without a process. */
 function fakeXvfb(chunks: readonly string[], options: { readonly error?: boolean } = {}): XvfbChild {
   const signals: string[] = [];
+  // Like a real server, it is gone once it is signalled: close() waits for that exit.
+  const exit = Promise.withResolvers<number>();
   return {
     pid: 77,
-    exited: running(),
+    exited: exit.promise,
     signals,
     kill: signal => {
       signals.push(signal);
+      exit.resolve(0);
     },
     stdout: new ReadableStream<Uint8Array>({
       start(controller) {
@@ -173,6 +176,7 @@ describe('XvfbDisplay', () => {
         },
       });
     const started: string[][] = [];
+    const exit = Promise.withResolvers<number>();
     const subject = new XvfbDisplay({
       processes: {
         ...PROCESSES,
@@ -185,8 +189,8 @@ describe('XvfbDisplay', () => {
               stdout: stream('41\n'),
               stderr: stream(undefined),
               write: () => undefined,
-              kill: () => undefined,
-              exited: running(),
+              kill: () => exit.resolve(0),
+              exited: exit.promise,
               pipes: [],
               closePipes: () => undefined,
             };
@@ -272,6 +276,52 @@ describe('XvfbDisplay', () => {
     } finally {
       await subject.close();
     }
+  });
+
+  it.each([
+    ['a server that takes a moment to exit on SIGTERM', "trap 'sleep 0.3; exit 0' TERM", 3_000],
+    ['a server that ignores SIGTERM and has to be killed', "trap '' TERM", 200],
+  ])('should not resolve close until the real server has exited: %s', async (_name, trap, terminateGraceMs) => {
+    // The caller's slot and the daemon's shutdown both wait on close(), so a resolved close with the server
+    // still alive leaves an X server behind. The pid is the one the display itself spawned (its own child
+    // handle), read the instant close resolves — never found again by a later scan of the host.
+    // Arrange
+    const root = await workspace();
+    const executable = await script(root, 'Xvfb', `${trap}\nprintf '99\\n'\nwhile :; do sleep 0.05; done`);
+    let pid: number | undefined;
+    const subject = new XvfbDisplay({
+      processes: {
+        ...PROCESSES,
+        spawn: {
+          run: PROCESSES.spawn.run,
+          start: (program, args) => {
+            const child = PROCESSES.spawn.start(program, args);
+            pid = child.pid;
+            return child;
+          },
+        },
+      },
+      authorityDirectory: join(root, 'x11'),
+      executable: () => executable,
+      pollIntervalMs: 5,
+      terminateGraceMs,
+    });
+    await subject.display();
+    const alive = (): boolean => {
+      try {
+        process.kill(pid ?? 0, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    should(alive()).be.true();
+
+    // Act
+    await subject.close();
+
+    // Assert
+    should(alive()).be.false();
   });
 
   it('should mint a different cookie for every display it takes', async () => {
@@ -502,7 +552,16 @@ describe('XvfbDisplay', () => {
       processes: PROCESSES,
       authorityDirectory: await x11Directory(),
       executable: () => '/usr/bin/Xvfb',
-      spawn: () => ({ ...fakeXvfb(['5\n']), kill: signal => signals.push(signal) }),
+      spawn: () => {
+        const child = fakeXvfb(['5\n']);
+        return {
+          ...child,
+          kill: signal => {
+            signals.push(signal);
+            child.kill(signal);
+          },
+        };
+      },
       pollIntervalMs: 1,
       sleep: noSleep,
     });

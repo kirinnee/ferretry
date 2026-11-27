@@ -114,6 +114,47 @@ describe('structured questions: the runner’s form seam', () => {
     );
   });
 
+  it('formCapture carries the dialog reader’s own result (title, row count, footer) for the very frame it captured', async () => {
+    const RULE = '─'.repeat(80);
+    const FOOTER = '  Enter to continue · Esc to close';
+    // A frame a line-scan could take for the Chrome notice: a short separator inside a selected row's details hides the row.
+    const trap = [
+      RULE,
+      '  Other dialog',
+      '',
+      '  ❯ 1. Keep this dialog open',
+      '       ---',
+      '       Claude in Chrome',
+      '       a detail line',
+      '',
+      FOOTER,
+    ].join('\n');
+    const chrome = readFileSync(
+      join(import.meta.dir, '../../../fixtures/harness-dialogs/claude-2.1.327-chrome-notice.txt'),
+      'utf8',
+    );
+    const trapWorld = subject({ redaction: identity });
+    trapWorld.server.modal = trap;
+    trapWorld.server.modalReplacesComposer = true;
+    const chromeWorld = subject({ redaction: identity });
+    chromeWorld.server.modal = chrome;
+    chromeWorld.server.modalReplacesComposer = true;
+
+    const seenTrap = await trapWorld.runner.formCapture(trapWorld.handle);
+    const seenChrome = await chromeWorld.runner.formCapture(chromeWorld.handle);
+
+    expect(seenTrap?.blocking).toBe('dialog');
+    expect(seenTrap?.dialog).toEqual({ title: 'Other dialog', options: 1, footer: 'Enter to continue · Esc to close' });
+    expect(seenChrome?.dialog).toEqual({
+      title: 'Claude in Chrome',
+      options: 0,
+      footer: 'Enter to continue · Esc to close',
+    });
+    // No dialog on the frame: no reading.
+    const idle = subject({ redaction: identity });
+    expect((await idle.runner.formCapture(idle.handle))?.dialog).toBeUndefined();
+  });
+
   it('formCapture is total: a pane that is gone, replaced, held or unreadable reads undefined; with no redaction bound it reads nothing', async () => {
     const gone = subject({ redaction: identity });
     gone.server.alive = false;

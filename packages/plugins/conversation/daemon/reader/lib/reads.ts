@@ -37,6 +37,7 @@ import {
   type ExactConversationMessagePoint,
   ExactConversationMessagePointSchema,
   formatPoint,
+  parsePoint,
 } from './session/protocol.ts';
 import { markerMediaType, numberRecordImages, type RecordImage } from './transcript/images.ts';
 import { isOwnerMessage } from './transcript/owner.ts';
@@ -106,6 +107,14 @@ export type TranscriptReadFailure =
    * caller's own mistake rather than a statement about this session's transcript.
    */
   | 'message_cursor_stale'
+  /**
+   * A fork's selection no longer names the message the caller read (its binding does not hold), or names none.
+   * One answer for every well-formed disagreement, as `message_cursor_stale` is: the remedy is to list the
+   * conversation again and choose from the rows as they now read.
+   */
+  | 'selection_stale'
+  /** The selection is well formed and still holds, but it is not somewhere a fork can cut. */
+  | 'not_a_turn'
   /**
    * A page of older history was asked for against a transcript file other than the one the caller's
    * earlier pages came from — the session was re-bound, or its file replaced. Byte offsets name places
@@ -932,6 +941,60 @@ export class TranscriptReadService {
     // only safe reading of it.
     if (verdict !== 'accepted') throw staleCursor(sessionId);
     return at + 1;
+  }
+
+  /**
+   * The turn a fork is cut at: the selected message's point and binding, proved against a FRESH read of the raw
+   * conversation, answered as the number of owner turns up to and including it (the cut keeps through the end of that turn).
+   *
+   * Nothing is written and nothing is claimed: a binding that does not hold (a tampered tag, another ferret's or
+   * another run's, a rewritten prefix, a point that is no longer there) is `selection_stale`, one answer for all of them.
+   * A message before the first thing the owner said has no turn to keep, and is `not_a_turn`.
+   */
+  async forkTurn(sessionId: string, point: string, selectionBinding: string): Promise<number> {
+    const wanted = parsePoint(point);
+    if (wanted === undefined)
+      throw new TranscriptReadError('invalid_query', 'point is not a well-formed message point');
+    const read = await this.messageSource.read(sessionId);
+    if (read.kind === 'unresolved')
+      throw new TranscriptReadError(
+        'no_transcript',
+        `session ${sessionId} has no transcript this daemon can prove is its own`,
+      );
+    if (read.kind === 'unreadable')
+      throw new TranscriptReadError(
+        'transcript_unreadable',
+        `session ${sessionId} has a proved transcript this daemon could not read completely${
+          read.reason === undefined ? '' : `: ${read.reason}`
+        }`,
+      );
+    const stale = (): TranscriptReadError =>
+      new TranscriptReadError(
+        'selection_stale',
+        'That message no longer reads as it did when you chose it. Pick it again from the conversation as it is now.',
+      );
+    if (read.context.provenance.identity === 'undiscovered') throw stale();
+    const at = read.rows.findIndex(row => sameConversationMessagePoint(row.point, wanted));
+    const row = read.rows[at];
+    if (row === undefined) throw stale();
+    const verdict = await verifySessionTranscriptMessageToken(
+      this.messageTokens,
+      SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+      read.context,
+      row.point,
+      row.rawPrefix,
+      selectionBinding,
+    );
+    if (verdict !== 'accepted') throw stale();
+    const turn = read.rows
+      .slice(0, at + 1)
+      .filter(each => each.role === 'user' && each.inputSource !== 'harness').length;
+    if (turn < 1)
+      throw new TranscriptReadError(
+        'not_a_turn',
+        'That message comes before anything you said, so there is no turn to fork.',
+      );
+    return turn;
   }
 
   /**

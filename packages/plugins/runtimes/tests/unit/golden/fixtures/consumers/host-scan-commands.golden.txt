@@ -1,0 +1,24 @@
+"asked":
+  [
+    "catalogue codex"
+    "PATH npx"
+    "catalogue claude"
+    "PATH npx"
+    "PATH golden-not-installed"
+  ]
+"harnesses":
+  [
+    {
+      "command": "/opt/harness/bin/claude"
+      "harness": "claude"
+      "missingCommands":
+        [
+          "golden-not-installed"
+        ]
+    }
+    {
+      "command": null
+      "harness": "codex"
+      "missingCommands": []
+    }
+  ]

@@ -1,0 +1,20 @@
+[
+  {
+    "harness": "claude"
+    "installed": false
+    "plan":
+      "harness": "claude"
+      "kind": "no-package-manager"
+      "manualCommand": "npm install -g @anthropic-ai/claude-code"
+      "reason": "Claude Code is installed with npm, and this machine has neither; install npm first, then run the command yourself"
+  }
+  {
+    "harness": "codex"
+    "installed": false
+    "plan":
+      "harness": "codex"
+      "kind": "no-package-manager"
+      "manualCommand": "npm install -g @openai/codex"
+      "reason": "Codex is installed with npm, and this machine has neither; install npm first, then run the command yourself"
+  }
+]

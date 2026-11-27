@@ -93,10 +93,14 @@ import { type PointerPosition, pointerAfter, pointerSequence } from '../pages/po
 import { type PointerPage, performPointerAct, pointerActParam } from '../pages/pointer-acts.ts';
 import type { PushNumberPage } from '../challenges/push-number-read.ts';
 import { BrowserCapture, type CaptureFrameEvent, withheldPageStatus } from './capture/index.ts';
+import { browserPageId } from '../pages/page-id.ts';
 
 const endpoint = process.argv[2];
 /** This worker drives a stealth identity's Chrome (`STEALTH_WORKER_ENVIRONMENT` in `client.ts`): patchright-core, with no `Runtime.enable`. */
 const STEALTH = process.env.FY_BROWSER_WORKER_STEALTH === '1';
+/** Before every page id this worker mints: empty for the default identity (its ids are what they always were), `<identity>-` for another's. */
+const PAGE_PREFIX = process.env.FY_BROWSER_PAGE_PREFIX ?? '';
+/** What a stealth page's console log says first: the page's console cannot be read without the DevTools domain a page can detect. */
 export const STEALTH_CONSOLE_NOTE =
   'the page console is not captured in a stealth browser: reading it needs the DevTools Runtime domain, which sites detect';
 function newConsoleLog(page: Page): ConsoleLog {
@@ -292,8 +296,7 @@ function requireContext(): BrowserContext {
 function pageId(page: Page): string {
   const known = pageIds.get(page);
   if (known) return known;
-  pageSerial += 1;
-  const id = `pg-${pageSerial.toString(36)}`;
+  const id = browserPageId(PAGE_PREFIX, ++pageSerial);
   pageIds.set(page, id);
   return id;
 }

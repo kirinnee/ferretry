@@ -1,0 +1,23 @@
+[
+  {
+    "harness": "claude"
+    "installed": true
+    "path": "/bin/claude"
+  }
+  {
+    "harness": "codex"
+    "installed": false
+    "plan":
+      "args":
+        [
+          "install"
+          "--cask"
+          "codex"
+        ]
+      "command": "brew install --cask codex"
+      "executable": "/opt/x/brew"
+      "harness": "codex"
+      "kind": "runnable"
+      "manager": "brew"
+  }
+]

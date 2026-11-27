@@ -1,5 +1,5 @@
 import type { Loosens } from '@ferretry/kernel/contract';
-import { type BrowsersConfig, stealthOn } from './wire.ts';
+import { type BrowserProxySetting, type BrowsersConfig, stealthOn } from './wire.ts';
 
 const PROXY_SENTENCE = (url: string): string => `the agent browser now sends its traffic through the proxy at ${url}`;
 /** What a held machine-wide `off` → `on` says; the Browser tab reads it from the kernel's pending list to know the switch is NOT in effect. */
@@ -21,14 +21,20 @@ const IDENTITY_STEALTH_LOOSENING =
  * being dropped while it is on. Stealth spends money (a solver) and changes what the browser does, so it waits for the
  * owner. `on` → `off`, and a new opt-out, tighten and apply at once.
  */
+const proxyMoved = (was: BrowserProxySetting | undefined, proxy: BrowserProxySetting | undefined): boolean =>
+  proxy !== undefined &&
+  !(was !== undefined && was.url === proxy.url && was.username === proxy.username && was.password === proxy.password);
+
 export const browsersLoosens: Loosens<BrowsersConfig> = (before, after) => {
   const sentences: string[] = [];
-  const proxy = after.proxy;
-  const was = before?.proxy;
-  const same =
-    proxy === undefined ||
-    (was !== undefined && was.url === proxy.url && was.username === proxy.username && was.password === proxy.password);
-  if (proxy !== undefined && !same) sentences.push(PROXY_SENTENCE(proxy.url));
+  if (proxyMoved(before?.proxy, after.proxy) && after.proxy !== undefined)
+    sentences.push(PROXY_SENTENCE(after.proxy.url));
+  // An identity's own proxy is the same act for that identity: it sees every host that identity's browser visits.
+  for (const [identity, setting] of Object.entries(after.identities ?? {}))
+    if (proxyMoved(before?.identities?.[identity]?.proxy, setting.proxy) && setting.proxy !== undefined)
+      sentences.push(
+        `the ${identity} browser identity now sends its traffic through the proxy at ${setting.proxy.url}`,
+      );
   if (after.captcha !== undefined && before?.captcha === undefined) sentences.push(CAPTCHA_SENTENCE);
   const machineNewlyOn = stealthOn(after) && (before === undefined || !stealthOn(before));
   if (machineNewlyOn) sentences.push(STEALTH_LOOSENING);

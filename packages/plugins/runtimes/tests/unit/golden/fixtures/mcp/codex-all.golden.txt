@@ -1,0 +1,22 @@
+"http": "url": "https://docs.example.test/mcp"
+"oauth":
+  "bearer_token_env_var": "FY_MCP_OAUTH_BCE92E878ABCC0FF_TOKEN"
+  "url": "https://notes.example.test/mcp"
+"oauth-sse":
+  "bearer_token_env_var": "FY_MCP_OAUTH_SSE_2A80F5995F5FD817_TOKEN"
+  "url": "https://feed.example.test/sse"
+"sse": "url": "https://feed.example.test/sse"
+"stdio":
+  "args":
+    [
+      "server-files"
+      "--root"
+      "/srv/files"
+    ]
+  "command": "npx"
+  "env": "FILES_MODE": "read"
+  "env_vars":
+    [
+      "FILES_TOKEN"
+    ]
+"stdio-bare": "command": "golden-server"

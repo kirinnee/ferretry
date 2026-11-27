@@ -1,0 +1,57 @@
+"a named default beats the order": "default": "aaa-codex"
+"both need sign-in":
+  "default": null
+  "list": []
+"claude listed first, codex second":
+  "default": "aaa-claude"
+  "list":
+    [
+      {
+        "available": true
+        "harness": "claude-code"
+        "id": "aaa-claude"
+      }
+      {
+        "available": true
+        "harness": "codex"
+        "id": "zzz-codex"
+      }
+    ]
+"claude needs sign-in, codex ready":
+  "default": "zzz-codex"
+  "list":
+    [
+      {
+        "available": true
+        "harness": "codex"
+        "id": "zzz-codex"
+      }
+    ]
+"codex listed first, claude second":
+  "default": "zzz-claude"
+  "list":
+    [
+      {
+        "available": true
+        "harness": "codex"
+        "id": "aaa-codex"
+      }
+      {
+        "available": true
+        "harness": "claude-code"
+        "id": "zzz-claude"
+      }
+    ]
+"no logins":
+  "default": null
+  "list": []
+"only codex":
+  "default": "only-codex"
+  "list":
+    [
+      {
+        "available": true
+        "harness": "codex"
+        "id": "only-codex"
+      }
+    ]

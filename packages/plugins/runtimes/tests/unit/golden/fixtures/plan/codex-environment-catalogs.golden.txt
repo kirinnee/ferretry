@@ -1,0 +1,510 @@
+"ids":
+  "runtimes":
+    "codex-golden":
+      "formerNames": []
+      "id": "00000000-0000-4000-8000-00000000000a"
+  "version": 1
+"manifest":
+  "accounts":
+    [
+      {
+        "available": true
+        "codexCatalog": 1
+        "defaultModel": "golden-large"
+        "displayName": "codex-golden"
+        "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+        "id": "00000000-0000-4000-8000-00000000000a"
+        "kind": "codex"
+        "mode": "auto"
+        "modelCatalog":
+          "customIds": true
+          "id": "golden-gateway"
+          "label": "Golden gateway"
+        "models":
+          [
+            {
+              "available": true
+              "context": 200000
+              "defaultEffort": "low"
+              "displayName": "Golden Large"
+              "efforts":
+                [
+                  "low"
+                  "high"
+                ]
+              "id": "golden-large"
+              "reasoning": true
+              "tier": "best"
+            }
+            {
+              "available": true
+              "context": 200000
+              "defaultEffort": "low"
+              "displayName": "Golden Small"
+              "efforts":
+                [
+                  "low"
+                  "high"
+                ]
+              "id": "golden-small"
+              "reasoning": true
+              "tier": "fast"
+            }
+          ]
+        "secretEnv":
+          "FILES_TOKEN": "${secret:GOLDEN_FILES}"
+          "FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN": "${secret:MCP_NOTES_7866F28AAAFD7E54_ACCESS}"
+          "OPENAI_API_KEY": "${secret:GOLDEN_KEY}"
+        "unavailableReason": null
+        "wrapper": "/fy/fleet/bin/codex-golden"
+      }
+    ]
+  "generatedAt": "2026-10-13T08:00:00.000Z"
+  "runtimes":
+    [
+      {
+        "credential": "codex-environment"
+        "defaultModel": "golden-large"
+        "harness": "codex"
+        "id": "00000000-0000-4000-8000-00000000000a"
+        "models":
+          [
+            {
+              "available": true
+              "context": 200000
+              "defaultEffort": "low"
+              "displayName": "Golden Large"
+              "efforts":
+                [
+                  "low"
+                  "high"
+                ]
+              "id": "golden-large"
+              "reasoning": true
+              "tier": "best"
+            }
+            {
+              "available": true
+              "context": 200000
+              "defaultEffort": "low"
+              "displayName": "Golden Small"
+              "efforts":
+                [
+                  "low"
+                  "high"
+                ]
+              "id": "golden-small"
+              "reasoning": true
+              "tier": "fast"
+            }
+          ]
+        "name": "codex-golden"
+        "profile": "default"
+        "wrapper": "/fy/fleet/bin/codex-golden"
+      }
+    ]
+  "version": 1
+"manifestPath": "/fy/fleet/manifest.json"
+"operations":
+  [
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/bin"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes"
+    }
+    {
+      "content":
+        <<<
+          {
+            "version": 1,
+            "runtimes": {
+              "codex-golden": {
+                "id": "00000000-0000-4000-8000-00000000000a",
+                "formerNames": []
+              }
+            }
+          }
+
+        >>>
+      "kind": "file"
+      "mode": 384
+      "path": "/fy/fleet/ids.json"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/shared/codex/sqlite"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy"
+    }
+    {
+      "keep":
+        [
+          "materialised.json"
+          "codex-model-catalog.json"
+        ]
+      "kind": "prune-directory"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy"
+      "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+      "recordedAs": ".fy"
+    }
+    {
+      "keep": []
+      "kind": "prune-directory"
+      "only":
+        [
+          "hooks"
+          "hooks.json"
+        ]
+      "ownLinksUnder": "/fy/fleet/assets"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+      "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+    }
+    {
+      "kind": "symlink"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/AGENTS.md"
+      "source": "/fy/fleet/assets/components/instructions/main.md"
+      "unlessUnrecorded":
+        "key": "AGENTS.md"
+        "ownLinksUnder": "/fy/fleet/assets"
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills"
+    }
+    {
+      "kind": "symlink"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills/review"
+      "source": "/fy/fleet/assets/skills/review"
+      "unlessUnrecorded":
+        "key": "skills/review"
+        "ownLinksUnder": "/fy/fleet/assets"
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+    }
+    {
+      "keep":
+        [
+          "review"
+          ".system"
+        ]
+      "kind": "prune-directory"
+      "ownLinksUnder": "/fy/fleet/assets/skills"
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills"
+      "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+      "recordedAs": "skills"
+    }
+    {
+      "format": "toml"
+      "kind": "settings"
+      "layers":
+        [
+          {
+            "from": "inline"
+            "settings":
+              "cli_auth_credentials_store": "file"
+              "mcp_servers":
+                "docs": "url": "https://docs.example.test/mcp"
+                "feed": "url": "https://feed.example.test/sse"
+                "files":
+                  "args":
+                    [
+                      "server-files"
+                      "--root"
+                      "/srv/files"
+                    ]
+                  "command": "npx"
+                  "env": "FILES_MODE": "read"
+                  "env_vars":
+                    [
+                      "FILES_TOKEN"
+                    ]
+                "notes":
+                  "bearer_token_env_var": "FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN"
+                  "url": "https://notes.example.test/mcp"
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+          }
+        ]
+      "mode": 384
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/config.toml"
+      "preserveExisting": true
+    }
+    {
+      "kind": "directory"
+      "mode": 448
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/rules"
+    }
+    {
+      "content":
+        <<<
+          prefix_rule(pattern=["pkill"], decision="forbidden", justification="pkill can stop other ferrets' processes; stop the one process you started instead")
+          prefix_rule(pattern=["killall"], decision="forbidden", justification="killall can stop other ferrets' processes; stop the one process you started instead")
+
+        >>>
+      "kind": "file"
+      "mode": 384
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/rules/ferretry.rules"
+      "unlessUnrecorded":
+        "byName": true
+        "key": "rules/ferretry.rules"
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+    }
+    {
+      "content":
+        <<<
+          {
+            "models": [
+              {
+                "slug": "golden-large",
+                "display_name": "Golden Large",
+                "description": "Best · 200K context",
+                "default_reasoning_level": "low",
+                "supported_reasoning_levels": [
+                  {
+                    "effort": "low",
+                    "description": "Fast responses with lighter reasoning"
+                  },
+                  {
+                    "effort": "high",
+                    "description": "Greater reasoning depth for complex problems"
+                  }
+                ],
+                "visibility": "list",
+                "priority": 1,
+                "supported_in_api": true,
+                "shell_type": "default",
+                "base_instructions": "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\nYour capabilities:\n\n- Receive user prompts and other context provided by the harness, such as files in the workspace.\n- Communicate with the user by streaming thinking & responses, and by making & updating plans.\n- Emit function calls to run terminal commands and apply patches. Depending on how this specific run is configured, you can request that these function calls be escalated to the user for approval before running. More on this in the \"Sandbox and approvals\" section.\n\nWithin this context, Codex refers to the open-source agentic coding interface (not the old Codex language model built by OpenAI).\n\n# How you work\n\n## Personality\n\nYour default personality and tone is concise, direct, and friendly. You communicate efficiently, always keeping the user clearly informed about ongoing actions without unnecessary detail. You always prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps. Unless explicitly asked, you avoid excessively verbose explanations about your work.\n\n# AGENTS.md spec\n- Repos often contain AGENTS.md files. These files can appear anywhere within the repository.\n- These files are a way for humans to give you (the agent) instructions or tips for working within the container.\n- Some examples might be: coding conventions, info about how code is organized, or instructions for how to run or test code.\n- Instructions in AGENTS.md files:\n    - The scope of an AGENTS.md file is the entire directory tree rooted at the folder that contains it.\n    - For every file you touch in the final patch, you must obey instructions in any AGENTS.md file whose scope includes that file.\n    - Instructions about code style, structure, naming, etc. apply only to code within the AGENTS.md file's scope, unless the file states otherwise.\n    - More-deeply-nested AGENTS.md files take precedence in the case of conflicting instructions.\n    - Direct system/developer/user instructions (as part of a prompt) take precedence over AGENTS.md instructions.\n- The contents of the AGENTS.md file at the root of the repo and any directories from the CWD up to the root are included with the developer message and don't need to be re-read. When working in a subdirectory of CWD, or a directory outside the CWD, check for any AGENTS.md files that may be applicable.\n\n## Responsiveness\n\n### Preamble messages\n\nBefore making tool calls, send a brief preamble to the user explaining what you’re about to do. When sending preamble messages, follow these principles and examples:\n\n- **Logically group related actions**: if you’re about to run several related commands, describe them together in one preamble rather than sending a separate note for each.\n- **Keep it concise**: be no more than 1-2 sentences, focused on immediate, tangible next steps. (8–12 words for quick updates).\n- **Build on prior context**: if this is not your first tool call, use the preamble message to connect the dots with what’s been done so far and create a sense of momentum and clarity for the user to understand your next actions.\n- **Keep your tone light, friendly and curious**: add small touches of personality in preambles feel collaborative and engaging.\n- **Exception**: Avoid adding a preamble for every trivial read (e.g., `cat` a single file) unless it’s part of a larger grouped action.\n\n**Examples:**\n\n- “I’ve explored the repo; now checking the API route definitions.”\n- “Next, I’ll patch the config and update the related tests.”\n- “I’m about to scaffold the CLI commands and helper functions.”\n- “Ok cool, so I’ve wrapped my head around the repo. Now digging into the API routes.”\n- “Config’s looking tidy. Next up is patching helpers to keep things in sync.”\n- “Finished poking at the DB gateway. I will now chase down error handling.”\n- “Alright, build pipeline order is interesting. Checking how it reports failures.”\n- “Spotted a clever caching util; now hunting where it gets used.”\n\n## Task execution\n\nYou are a coding agent. Please keep going until the query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved. Autonomously resolve the query to the best of your ability, using the tools available to you, before coming back to the user. Do NOT guess or make up an answer.\n\nYou MUST adhere to the following criteria when solving queries:\n\n- Working on the repo(s) in the current environment is allowed, even if they are proprietary.\n- Analyzing code for vulnerabilities is allowed.\n- Showing user code and tool call details is allowed.\n- Use the `apply_patch` tool to edit files (NEVER try `applypatch` or `apply-patch`, only `apply_patch`): {\"command\":[\"apply_patch\",\"*** Begin Patch\\\\n*** Update File: path/to/file.py\\\\n@@ def example():\\\\n- pass\\\\n+ return 123\\\\n*** End Patch\"]}\n\nIf completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (i.e. AGENTS.md) may override these guidelines:\n\n- Fix the problem at the root cause rather than applying surface-level patches, when possible.\n- Avoid unneeded complexity in your solution.\n- Do not attempt to fix unrelated bugs or broken tests. It is not your responsibility to fix them. (You may mention them to the user in your final message though.)\n- Update documentation as necessary.\n- Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.\n- Use `git log` and `git blame` to search the history of the codebase if additional context is required.\n- NEVER add copyright or license headers unless specifically requested.\n- Do not waste tokens by re-reading files after calling `apply_patch` on them. The tool call will fail if it didn't work. The same goes for making folders, deleting folders, etc.\n- Do not `git commit` your changes or create new git branches unless explicitly requested.\n- Do not add inline comments within code unless explicitly requested.\n- Do not use one-letter variable names unless explicitly requested.\n- NEVER output inline citations like \"【F:README.md†L5-L14】\" in your outputs. The CLI is not able to render these so they will just be broken in the UI. Instead, if you output valid filepaths, users will be able to click on them to open the files in their editor.\n\n## Validating your work\n\nIf the codebase has tests or the ability to build or run, consider using them to verify that your work is complete. \n\nWhen testing, your philosophy should be to start as specific as possible to the code you changed so that you can catch issues efficiently, then make your way to broader tests as you build confidence. If there's no test for the code you changed, and if the adjacent patterns in the codebases show that there's a logical place for you to add a test, you may do so. However, do not add tests to codebases with no tests.\n\nSimilarly, once you're confident in correctness, you can suggest or use formatting commands to ensure that your code is well formatted. If there are issues you can iterate up to 3 times to get formatting right, but if you still can't manage it's better to save the user time and present them a correct solution where you call out the formatting in your final message. If the codebase does not have a formatter configured, do not add one.\n\nFor all of testing, running, building, and formatting, do not attempt to fix unrelated bugs. It is not your responsibility to fix them. (You may mention them to the user in your final message though.)\n\nBe mindful of whether to run validation commands proactively. In the absence of behavioral guidance:\n\n- When running in the non-interactive approval mode **never**, proactively run tests, lint and do whatever you need to ensure you've completed the task.\n- When working in interactive approval modes like **untrusted**, or **on-request**, hold off on running tests or lint commands until the user is ready for you to finalize your output, because these commands take time to run and slow down iteration. Instead suggest what you want to do next, and let the user confirm first.\n- When working on test-related tasks, such as adding tests, fixing tests, or reproducing a bug to verify behavior, you may proactively run tests regardless of approval mode. Use your judgement to decide whether this is a test-related task.\n\n## Ambition vs. precision\n\nFor tasks that have no prior context (i.e. the user is starting something brand new), you should feel free to be ambitious and demonstrate creativity with your implementation.\n\nIf you're operating in an existing codebase, you should make sure you do exactly what the user asks with surgical precision. Treat the surrounding codebase with respect, and don't overstep (i.e. changing filenames or variables unnecessarily). You should balance being sufficiently ambitious and proactive when completing tasks of this nature.\n\nYou should use judicious initiative to decide on the right level of detail and complexity to deliver based on the user's needs. This means showing good judgment that you're capable of doing the right extras without gold-plating. This might be demonstrated by high-value, creative touches when scope of the task is vague; while being surgical and targeted when scope is tightly specified.\n\n## Sharing progress updates\n\nFor especially longer tasks that you work on (i.e. requiring many tool calls, or a plan with multiple steps), you should provide progress updates back to the user at reasonable intervals. These updates should be structured as a concise sentence or two (no more than 8-10 words long) recapping progress so far in plain language: this update demonstrates your understanding of what needs to be done, progress so far (i.e. files explores, subtasks complete), and where you're going next.\n\nBefore doing large chunks of work that may incur latency as experienced by the user (i.e. writing a new file), you should send a concise message to the user with an update indicating what you're about to do to ensure they know what you're spending time on. Don't start editing or writing large files before informing the user what you are doing and why.\n\nThe messages you send before tool calls should describe what is immediately about to be done next in very concise language. If there was previous work done, this preamble message should also include a note about the work done so far to bring the user along.\n\n## Presenting your work and final message\n\nYour final message should read naturally, like an update from a concise teammate. For casual conversation, brainstorming tasks, or quick questions from the user, respond in a friendly, conversational tone. You should ask questions, suggest ideas, and adapt to the user’s style. If you've finished a large amount of work, when describing what you've done to the user, you should follow the final answer formatting guidelines to communicate substantive changes. You don't need to add structured formatting for one-word answers, greetings, or purely conversational exchanges.\n\nYou can skip heavy formatting for single, simple actions or confirmations. In these cases, respond in plain sentences with any relevant next step or quick option. Reserve multi-section structured responses for results that need grouping or explanation.\n\nThe user is working on the same computer as you, and has access to your work. As such there's no need to show the full contents of large files you have already written unless the user explicitly asks for them. Similarly, if you've created or modified files using `apply_patch`, there's no need to tell users to \"save the file\" or \"copy the code into a file\"—just reference the file path.\n\nIf there's something that you think you could help with as a logical next step, concisely ask the user if they want you to do so. Good examples of this are running tests, committing changes, or building out the next logical component. If there’s something that you couldn't do (even with approval) but that the user might want to do (such as verifying changes by running the app), include those instructions succinctly.\n\nBrevity is very important as a default. You should be very concise (i.e. no more than 10 lines), but can relax this requirement for tasks where additional detail and comprehensiveness is important for the user's understanding.\n\n### Final answer structure and style guidelines\n\nYou are producing plain text that will later be styled by the CLI. Follow these rules exactly. Formatting should make results easy to scan, but not feel mechanical. Use judgment to decide how much structure adds value.\n\n**Section Headers**\n\n- Use only when they improve clarity — they are not mandatory for every answer.\n- Choose descriptive names that fit the content\n- Keep headers short (1–3 words) and in `**Title Case**`. Always start headers with `**` and end with `**`\n- Leave no blank line before the first bullet under a header.\n- Section headers should only be used where they genuinely improve scanability; avoid fragmenting the answer.\n\n**Bullets**\n\n- Use `-` followed by a space for every bullet.\n- Merge related points when possible; avoid a bullet for every trivial detail.\n- Keep bullets to one line unless breaking for clarity is unavoidable.\n- Group into short lists (4–6 bullets) ordered by importance.\n- Use consistent keyword phrasing and formatting across sections.\n\n**Monospace**\n\n- Wrap all commands, file paths, env vars, and code identifiers in backticks (`` `...` ``).\n- Apply to inline examples and to bullet keywords if the keyword itself is a literal file/command.\n- Never mix monospace and bold markers; choose one based on whether it’s a keyword (`**`) or inline code/path (`` ` ``).\n\n**File References**\nWhen referencing files in your response, make sure to include the relevant start line and always follow the below rules:\n  * Use inline code to make file paths clickable.\n  * Each reference should have a stand alone path. Even if it's the same file.\n  * Accepted: absolute, workspace‑relative, a/ or b/ diff prefixes, or bare filename/suffix.\n  * Line/column (1‑based, optional): :line[:column] or #Lline[Ccolumn] (column defaults to 1).\n  * Do not use URIs like file://, vscode://, or https://.\n  * Do not provide range of lines\n  * Examples: src/app.ts, src/app.ts:42, b/server/index.js#L10, C:\\repo\\project\\main.rs:12:5\n\n**Structure**\n\n- Place related bullets together; don’t mix unrelated concepts in the same section.\n- Order sections from general → specific → supporting info.\n- For subsections (e.g., “Binaries” under “Rust Workspace”), introduce with a bolded keyword bullet, then list items under it.\n- Match structure to complexity:\n  - Multi-part or detailed results → use clear headers and grouped bullets.\n  - Simple results → minimal headers, possibly just a short list or paragraph.\n\n**Tone**\n\n- Keep the voice collaborative and natural, like a coding partner handing off work.\n- Be concise and factual — no filler or conversational commentary and avoid unnecessary repetition\n- Use present tense and active voice (e.g., “Runs tests” not “This will run tests”).\n- Keep descriptions self-contained; don’t refer to “above” or “below”.\n- Use parallel structure in lists for consistency.\n\n**Don’t**\n\n- Don’t use literal words “bold” or “monospace” in the content.\n- Don’t nest bullets or create deep hierarchies.\n- Don’t output ANSI escape codes directly — the CLI renderer applies them.\n- Don’t cram unrelated keywords into a single bullet; split for clarity.\n- Don’t let keyword lists run long — wrap or reformat for scanability.\n\nGenerally, ensure your final answers adapt their shape and depth to the request. For example, answers to code explanations should have a precise, structured explanation with code references that answer the question directly. For tasks with a simple implementation, lead with the outcome and supplement only with what’s needed for clarity. Larger changes can be presented as a logical walkthrough of your approach, grouping related steps, explaining rationale where it adds value, and highlighting next actions to accelerate the user. Your answers should provide the right level of detail while being easily scannable.\n\nFor casual greetings, acknowledgements, or other one-off conversational messages that are not delivering substantive information or structured results, respond naturally without section headers or bullet formatting.\n\n# Tool Guidelines\n\n## Shell commands\n\nWhen using the shell, you must adhere to the following guidelines:\n\n- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)\n- Do not use python scripts to attempt to output larger chunks of a file.\n\n",
+                "supports_reasoning_summaries": false,
+                "default_reasoning_summary": "auto",
+                "support_verbosity": false,
+                "supports_search_tool": false,
+                "web_search_tool_type": "text",
+                "truncation_policy": {
+                  "mode": "bytes",
+                  "limit": 10000
+                },
+                "supports_parallel_tool_calls": false,
+                "supports_image_detail_original": false,
+                "context_window": 200000,
+                "max_context_window": 200000,
+                "effective_context_window_percent": 95,
+                "experimental_supported_tools": [],
+                "input_modalities": [
+                  "text"
+                ]
+              },
+              {
+                "slug": "golden-small",
+                "display_name": "Golden Small",
+                "description": "Fast · 200K context",
+                "default_reasoning_level": "low",
+                "supported_reasoning_levels": [
+                  {
+                    "effort": "low",
+                    "description": "Fast responses with lighter reasoning"
+                  },
+                  {
+                    "effort": "high",
+                    "description": "Greater reasoning depth for complex problems"
+                  }
+                ],
+                "visibility": "list",
+                "priority": 2,
+                "supported_in_api": true,
+                "shell_type": "default",
+                "base_instructions": "You are a coding agent running in the Codex CLI, a terminal-based coding assistant. Codex CLI is an open source project led by OpenAI. You are expected to be precise, safe, and helpful.\n\nYour capabilities:\n\n- Receive user prompts and other context provided by the harness, such as files in the workspace.\n- Communicate with the user by streaming thinking & responses, and by making & updating plans.\n- Emit function calls to run terminal commands and apply patches. Depending on how this specific run is configured, you can request that these function calls be escalated to the user for approval before running. More on this in the \"Sandbox and approvals\" section.\n\nWithin this context, Codex refers to the open-source agentic coding interface (not the old Codex language model built by OpenAI).\n\n# How you work\n\n## Personality\n\nYour default personality and tone is concise, direct, and friendly. You communicate efficiently, always keeping the user clearly informed about ongoing actions without unnecessary detail. You always prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps. Unless explicitly asked, you avoid excessively verbose explanations about your work.\n\n# AGENTS.md spec\n- Repos often contain AGENTS.md files. These files can appear anywhere within the repository.\n- These files are a way for humans to give you (the agent) instructions or tips for working within the container.\n- Some examples might be: coding conventions, info about how code is organized, or instructions for how to run or test code.\n- Instructions in AGENTS.md files:\n    - The scope of an AGENTS.md file is the entire directory tree rooted at the folder that contains it.\n    - For every file you touch in the final patch, you must obey instructions in any AGENTS.md file whose scope includes that file.\n    - Instructions about code style, structure, naming, etc. apply only to code within the AGENTS.md file's scope, unless the file states otherwise.\n    - More-deeply-nested AGENTS.md files take precedence in the case of conflicting instructions.\n    - Direct system/developer/user instructions (as part of a prompt) take precedence over AGENTS.md instructions.\n- The contents of the AGENTS.md file at the root of the repo and any directories from the CWD up to the root are included with the developer message and don't need to be re-read. When working in a subdirectory of CWD, or a directory outside the CWD, check for any AGENTS.md files that may be applicable.\n\n## Responsiveness\n\n### Preamble messages\n\nBefore making tool calls, send a brief preamble to the user explaining what you’re about to do. When sending preamble messages, follow these principles and examples:\n\n- **Logically group related actions**: if you’re about to run several related commands, describe them together in one preamble rather than sending a separate note for each.\n- **Keep it concise**: be no more than 1-2 sentences, focused on immediate, tangible next steps. (8–12 words for quick updates).\n- **Build on prior context**: if this is not your first tool call, use the preamble message to connect the dots with what’s been done so far and create a sense of momentum and clarity for the user to understand your next actions.\n- **Keep your tone light, friendly and curious**: add small touches of personality in preambles feel collaborative and engaging.\n- **Exception**: Avoid adding a preamble for every trivial read (e.g., `cat` a single file) unless it’s part of a larger grouped action.\n\n**Examples:**\n\n- “I’ve explored the repo; now checking the API route definitions.”\n- “Next, I’ll patch the config and update the related tests.”\n- “I’m about to scaffold the CLI commands and helper functions.”\n- “Ok cool, so I’ve wrapped my head around the repo. Now digging into the API routes.”\n- “Config’s looking tidy. Next up is patching helpers to keep things in sync.”\n- “Finished poking at the DB gateway. I will now chase down error handling.”\n- “Alright, build pipeline order is interesting. Checking how it reports failures.”\n- “Spotted a clever caching util; now hunting where it gets used.”\n\n## Task execution\n\nYou are a coding agent. Please keep going until the query is completely resolved, before ending your turn and yielding back to the user. Only terminate your turn when you are sure that the problem is solved. Autonomously resolve the query to the best of your ability, using the tools available to you, before coming back to the user. Do NOT guess or make up an answer.\n\nYou MUST adhere to the following criteria when solving queries:\n\n- Working on the repo(s) in the current environment is allowed, even if they are proprietary.\n- Analyzing code for vulnerabilities is allowed.\n- Showing user code and tool call details is allowed.\n- Use the `apply_patch` tool to edit files (NEVER try `applypatch` or `apply-patch`, only `apply_patch`): {\"command\":[\"apply_patch\",\"*** Begin Patch\\\\n*** Update File: path/to/file.py\\\\n@@ def example():\\\\n- pass\\\\n+ return 123\\\\n*** End Patch\"]}\n\nIf completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (i.e. AGENTS.md) may override these guidelines:\n\n- Fix the problem at the root cause rather than applying surface-level patches, when possible.\n- Avoid unneeded complexity in your solution.\n- Do not attempt to fix unrelated bugs or broken tests. It is not your responsibility to fix them. (You may mention them to the user in your final message though.)\n- Update documentation as necessary.\n- Keep changes consistent with the style of the existing codebase. Changes should be minimal and focused on the task.\n- Use `git log` and `git blame` to search the history of the codebase if additional context is required.\n- NEVER add copyright or license headers unless specifically requested.\n- Do not waste tokens by re-reading files after calling `apply_patch` on them. The tool call will fail if it didn't work. The same goes for making folders, deleting folders, etc.\n- Do not `git commit` your changes or create new git branches unless explicitly requested.\n- Do not add inline comments within code unless explicitly requested.\n- Do not use one-letter variable names unless explicitly requested.\n- NEVER output inline citations like \"【F:README.md†L5-L14】\" in your outputs. The CLI is not able to render these so they will just be broken in the UI. Instead, if you output valid filepaths, users will be able to click on them to open the files in their editor.\n\n## Validating your work\n\nIf the codebase has tests or the ability to build or run, consider using them to verify that your work is complete. \n\nWhen testing, your philosophy should be to start as specific as possible to the code you changed so that you can catch issues efficiently, then make your way to broader tests as you build confidence. If there's no test for the code you changed, and if the adjacent patterns in the codebases show that there's a logical place for you to add a test, you may do so. However, do not add tests to codebases with no tests.\n\nSimilarly, once you're confident in correctness, you can suggest or use formatting commands to ensure that your code is well formatted. If there are issues you can iterate up to 3 times to get formatting right, but if you still can't manage it's better to save the user time and present them a correct solution where you call out the formatting in your final message. If the codebase does not have a formatter configured, do not add one.\n\nFor all of testing, running, building, and formatting, do not attempt to fix unrelated bugs. It is not your responsibility to fix them. (You may mention them to the user in your final message though.)\n\nBe mindful of whether to run validation commands proactively. In the absence of behavioral guidance:\n\n- When running in the non-interactive approval mode **never**, proactively run tests, lint and do whatever you need to ensure you've completed the task.\n- When working in interactive approval modes like **untrusted**, or **on-request**, hold off on running tests or lint commands until the user is ready for you to finalize your output, because these commands take time to run and slow down iteration. Instead suggest what you want to do next, and let the user confirm first.\n- When working on test-related tasks, such as adding tests, fixing tests, or reproducing a bug to verify behavior, you may proactively run tests regardless of approval mode. Use your judgement to decide whether this is a test-related task.\n\n## Ambition vs. precision\n\nFor tasks that have no prior context (i.e. the user is starting something brand new), you should feel free to be ambitious and demonstrate creativity with your implementation.\n\nIf you're operating in an existing codebase, you should make sure you do exactly what the user asks with surgical precision. Treat the surrounding codebase with respect, and don't overstep (i.e. changing filenames or variables unnecessarily). You should balance being sufficiently ambitious and proactive when completing tasks of this nature.\n\nYou should use judicious initiative to decide on the right level of detail and complexity to deliver based on the user's needs. This means showing good judgment that you're capable of doing the right extras without gold-plating. This might be demonstrated by high-value, creative touches when scope of the task is vague; while being surgical and targeted when scope is tightly specified.\n\n## Sharing progress updates\n\nFor especially longer tasks that you work on (i.e. requiring many tool calls, or a plan with multiple steps), you should provide progress updates back to the user at reasonable intervals. These updates should be structured as a concise sentence or two (no more than 8-10 words long) recapping progress so far in plain language: this update demonstrates your understanding of what needs to be done, progress so far (i.e. files explores, subtasks complete), and where you're going next.\n\nBefore doing large chunks of work that may incur latency as experienced by the user (i.e. writing a new file), you should send a concise message to the user with an update indicating what you're about to do to ensure they know what you're spending time on. Don't start editing or writing large files before informing the user what you are doing and why.\n\nThe messages you send before tool calls should describe what is immediately about to be done next in very concise language. If there was previous work done, this preamble message should also include a note about the work done so far to bring the user along.\n\n## Presenting your work and final message\n\nYour final message should read naturally, like an update from a concise teammate. For casual conversation, brainstorming tasks, or quick questions from the user, respond in a friendly, conversational tone. You should ask questions, suggest ideas, and adapt to the user’s style. If you've finished a large amount of work, when describing what you've done to the user, you should follow the final answer formatting guidelines to communicate substantive changes. You don't need to add structured formatting for one-word answers, greetings, or purely conversational exchanges.\n\nYou can skip heavy formatting for single, simple actions or confirmations. In these cases, respond in plain sentences with any relevant next step or quick option. Reserve multi-section structured responses for results that need grouping or explanation.\n\nThe user is working on the same computer as you, and has access to your work. As such there's no need to show the full contents of large files you have already written unless the user explicitly asks for them. Similarly, if you've created or modified files using `apply_patch`, there's no need to tell users to \"save the file\" or \"copy the code into a file\"—just reference the file path.\n\nIf there's something that you think you could help with as a logical next step, concisely ask the user if they want you to do so. Good examples of this are running tests, committing changes, or building out the next logical component. If there’s something that you couldn't do (even with approval) but that the user might want to do (such as verifying changes by running the app), include those instructions succinctly.\n\nBrevity is very important as a default. You should be very concise (i.e. no more than 10 lines), but can relax this requirement for tasks where additional detail and comprehensiveness is important for the user's understanding.\n\n### Final answer structure and style guidelines\n\nYou are producing plain text that will later be styled by the CLI. Follow these rules exactly. Formatting should make results easy to scan, but not feel mechanical. Use judgment to decide how much structure adds value.\n\n**Section Headers**\n\n- Use only when they improve clarity — they are not mandatory for every answer.\n- Choose descriptive names that fit the content\n- Keep headers short (1–3 words) and in `**Title Case**`. Always start headers with `**` and end with `**`\n- Leave no blank line before the first bullet under a header.\n- Section headers should only be used where they genuinely improve scanability; avoid fragmenting the answer.\n\n**Bullets**\n\n- Use `-` followed by a space for every bullet.\n- Merge related points when possible; avoid a bullet for every trivial detail.\n- Keep bullets to one line unless breaking for clarity is unavoidable.\n- Group into short lists (4–6 bullets) ordered by importance.\n- Use consistent keyword phrasing and formatting across sections.\n\n**Monospace**\n\n- Wrap all commands, file paths, env vars, and code identifiers in backticks (`` `...` ``).\n- Apply to inline examples and to bullet keywords if the keyword itself is a literal file/command.\n- Never mix monospace and bold markers; choose one based on whether it’s a keyword (`**`) or inline code/path (`` ` ``).\n\n**File References**\nWhen referencing files in your response, make sure to include the relevant start line and always follow the below rules:\n  * Use inline code to make file paths clickable.\n  * Each reference should have a stand alone path. Even if it's the same file.\n  * Accepted: absolute, workspace‑relative, a/ or b/ diff prefixes, or bare filename/suffix.\n  * Line/column (1‑based, optional): :line[:column] or #Lline[Ccolumn] (column defaults to 1).\n  * Do not use URIs like file://, vscode://, or https://.\n  * Do not provide range of lines\n  * Examples: src/app.ts, src/app.ts:42, b/server/index.js#L10, C:\\repo\\project\\main.rs:12:5\n\n**Structure**\n\n- Place related bullets together; don’t mix unrelated concepts in the same section.\n- Order sections from general → specific → supporting info.\n- For subsections (e.g., “Binaries” under “Rust Workspace”), introduce with a bolded keyword bullet, then list items under it.\n- Match structure to complexity:\n  - Multi-part or detailed results → use clear headers and grouped bullets.\n  - Simple results → minimal headers, possibly just a short list or paragraph.\n\n**Tone**\n\n- Keep the voice collaborative and natural, like a coding partner handing off work.\n- Be concise and factual — no filler or conversational commentary and avoid unnecessary repetition\n- Use present tense and active voice (e.g., “Runs tests” not “This will run tests”).\n- Keep descriptions self-contained; don’t refer to “above” or “below”.\n- Use parallel structure in lists for consistency.\n\n**Don’t**\n\n- Don’t use literal words “bold” or “monospace” in the content.\n- Don’t nest bullets or create deep hierarchies.\n- Don’t output ANSI escape codes directly — the CLI renderer applies them.\n- Don’t cram unrelated keywords into a single bullet; split for clarity.\n- Don’t let keyword lists run long — wrap or reformat for scanability.\n\nGenerally, ensure your final answers adapt their shape and depth to the request. For example, answers to code explanations should have a precise, structured explanation with code references that answer the question directly. For tasks with a simple implementation, lead with the outcome and supplement only with what’s needed for clarity. Larger changes can be presented as a logical walkthrough of your approach, grouping related steps, explaining rationale where it adds value, and highlighting next actions to accelerate the user. Your answers should provide the right level of detail while being easily scannable.\n\nFor casual greetings, acknowledgements, or other one-off conversational messages that are not delivering substantive information or structured results, respond naturally without section headers or bullet formatting.\n\n# Tool Guidelines\n\n## Shell commands\n\nWhen using the shell, you must adhere to the following guidelines:\n\n- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)\n- Do not use python scripts to attempt to output larger chunks of a file.\n\n",
+                "supports_reasoning_summaries": false,
+                "default_reasoning_summary": "auto",
+                "support_verbosity": false,
+                "supports_search_tool": false,
+                "web_search_tool_type": "text",
+                "truncation_policy": {
+                  "mode": "bytes",
+                  "limit": 10000
+                },
+                "supports_parallel_tool_calls": false,
+                "supports_image_detail_original": false,
+                "context_window": 200000,
+                "max_context_window": 200000,
+                "effective_context_window_percent": 95,
+                "experimental_supported_tools": [],
+                "input_modalities": [
+                  "text"
+                ]
+              }
+            ]
+          }
+
+        >>>
+      "kind": "file"
+      "mode": 384
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/codex-model-catalog.json"
+      "unlessUnrecorded":
+        "byName": true
+        "key": ".fy/codex-model-catalog.json"
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+    }
+    {
+      "content":
+        <<<
+          {"version":1,"entries":[".fy/codex-model-catalog.json","AGENTS.md","rules/ferretry.rules","skills/review"]}
+
+        >>>
+      "kind": "file"
+      "mode": 384
+      "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json"
+      "recordsMaterialised": true
+    }
+    {
+      "content":
+        <<<
+          #!/bin/sh
+          # ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten
+          # runtime codex-golden 00000000-0000-4000-8000-00000000000a (codex)
+
+          if [ -z "${FILES_TOKEN:-}" ]; then printf '%s\n' 'ferretry: FILES_TOKEN is not set — this account takes it from Ferretry'\''s secret store (secret GOLDEN_FILES). Launch it through the daemon, or run: fy secret set GOLDEN_FILES' >&2; exit 1; fi
+          if [ -z "${FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN:-}" ]; then printf '%s\n' 'ferretry: FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN is not set — this account takes it from Ferretry'\''s secret store (secret MCP_NOTES_7866F28AAAFD7E54_ACCESS). Launch it through the daemon, or run: fy secret set MCP_NOTES_7866F28AAAFD7E54_ACCESS' >&2; exit 1; fi
+          if [ -z "${OPENAI_API_KEY:-}" ]; then printf '%s\n' 'ferretry: OPENAI_API_KEY is not set — this account takes it from Ferretry'\''s secret store (secret GOLDEN_KEY). Launch it through the daemon, or run: fy secret set GOLDEN_KEY' >&2; exit 1; fi
+
+          export CODEX_HOME='/fy/fleet/homes/00000000-0000-4000-8000-00000000000a'
+          export CODEX_SQLITE_HOME='/fy/fleet/shared/codex/sqlite'
+          export FY_CREDENTIAL='codex-environment'
+          export FY_HOME='/fy'
+          export FY_RUNTIME='codex-golden'
+
+          # A ferret started in auto mode runs unattended: the fixed layer, the seeded prompts and the trusted folder.
+          if [ "${FY_SESSION_MODE:-}" = auto ]; then
+
+            # One live writer per conversation: claim the one these arguments resume before handing this pid to
+            # the harness. Only a refusal (exit 75: another session is writing it) stops the launch; any other failure warns and launches anyway.
+            _fy_claim=0
+            for _fy_arg in "$@"; do
+              case "$_fy_arg" in resume) _fy_claim=1 ;; esac
+            done
+            if [ "$_fy_claim" = 1 ]; then
+              if command -v '/opt/ferretry/bin/fy' >/dev/null 2>&1; then
+                '/opt/ferretry/bin/fy' history claim --harness codex --pid $$ --from-arguments -- "$@"
+                _fy_status=$?
+                if [ "$_fy_status" -eq 75 ]; then exit 75; fi
+                if [ "$_fy_status" -ne 0 ]; then
+                  if [ -n "${FY_SESSION_ID:-}" ]; then
+                    echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so not launching: this session must hold its conversation before it writes" >&2
+                    exit 75
+                  fi
+                  echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so launching anyway" >&2
+                fi
+              else
+                if [ -n "${FY_SESSION_ID:-}" ]; then
+                  echo "ferretry: fy was not found, so this session could not check whether another session is writing this conversation; not launching" >&2
+                  exit 75
+                fi
+                echo "ferretry: fy was not found, so this launch did not check whether another session is writing this conversation; launching anyway" >&2
+              fi
+            fi
+
+            # Trust the launch folder (the measured -c projects={"<folder>"={trust_level="trusted"}} form).
+            _fy_cwd="$(pwd -P 2>/dev/null)" || _fy_cwd="$PWD"
+            case "$_fy_cwd" in
+              *[[:cntrl:]]*)
+                echo "ferretry: this folder's name holds a control character, so Codex may ask whether to trust it" >&2
+                ;;
+              *)
+                _fy_cwd="$(printf '%s' "$_fy_cwd" | sed 's/[\\"]/\\&/g')"
+                set -- -c "projects={\"$_fy_cwd\"={trust_level=\"trusted\"}}" "$@"
+                ;;
+            esac
+            set -- -c features.default_mode_request_user_input=false "$@"
+
+            # This ferret's own sections of the appended system prompt: each switch the daemon set to 1.
+            if [ "${FY_SUB_FERRET:-0}" = 1 ]; then _fy_sections='\u000a\u000aSub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> \"<message>\"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver'\''s turn end). Only a password, code or approval the daemon asks for reaches the owner from you.'; else _fy_sections=''; fi
+            if [ "${FY_BROWSER_STEALTH:-0}" = 1 ]; then _fy_sections="$_fy_sections"'\u000a\u000aOn the owner'\''s identities the browser passes bot checks and solves token checks (Turnstile, reCAPTCHA, hCaptcha) itself. You may try a simple picture puzzle shown in the page yourself; never use outside tools or services to solve or bypass a check, and never change the browser'\''s identity. If a check stays, ask the owner (browser_ask_owner).'; else _fy_sections="$_fy_sections"'\u000a\u000aNever solve captchas, spoof a browser or identity.'; fi
+            if [ "${FY_HYPERMEDIA:-0}" = 1 ]; then _fy_sections="$_fy_sections"'\u000a\u000aHypermedia: to teach, explain or compare anything not simple, show it, not just say it. Inline: never publish a page or link unless asked.\u000aExplainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point. Make it interactive: a visual the reader changes (sliders, toggles) that redraws live, no steppers; gentle motion (prefers-reduced-motion).\u000aWrite Markdown. Parts are fences: ```terminal, ```filetree, ```editor, ```tierlist, ```alignment, ```mermaid, ```animation (`3d` after it: 3D); `@step <caption>` lines give a part steps (mermaid: `%% @step <caption>`); :::tabs and :::accordion; `:::human` is for people, `:::llm` after a part for another agent.\u000a- mermaid: flowchart TB, sequenceDiagram, …: top-down, short labels; auto-themed: no %%{init}%% or colours.\u000a- Charts, svg, interactive html, maps, media, live tasks: a fence whose info string is exactly fy-render: `type: chart|svg|html|map|image|video|audio|pdf|lottie|task|board`, `alt: <one line>`, `---`, then the payload.\u000a- chart (fy-render only; a part named chart is shown as code): YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; no colours.\u000aReferences are plain text, never links: `:agent @file &F12 ^A3 /skill $skill %terminal:dev %browser:app`.\u000aEvery spec: `fy render guide <part>`. Before sending, run `fy render check <file|->`: prints `line N: …` per problem; exit 1 on error.\u000aDraws in chat and the ferret'\''s Queue panel; agenda, tasks, Board, PRs, All queues show code; never in files, docs, commits.'; fi
+            if [ "${FY_PACK:-0}" = 1 ]; then _fy_sections="$_fy_sections"'\u000a\u000aPack mode: hand self-contained parts of your task to sub-ferrets (each on the model that suits it). Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line.\u000a1. `fy recommend` lists usable models, most quota first, with start commands.\u000a2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name \"<short task title>\" \"<complete brief>\"` starts one (`fy new --auto \"<brief>\"`: Ferretry chooses). Always pass `--name` (2–5 Title Case words). The brief is all it knows: what to do, where, what to report.\u000a3. If refused (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, try the next. limit_reached or depth_exceeded: do it yourself.\u000a4. `fy wait <id>` prints its result; check it, then combine. Label sends: `--kind blocker|action|fyi` (fyi rarely).\u000aCheck your children with `fy status --subtree` instead of asking them. Delegate screenshot review to a sub-agent and keep only its verdict.\u000aStop unneeded sub-ferrets: `fy stop children <your id> --yes`.'; fi
+            if [ "${FY_PACK:-0}" = 1 ] && [ -n "${FY_PACK_ROUTING:-}" ]; then _fy_routing="$(printf '%s' "$FY_PACK_ROUTING" | tr -d '"\\\000-\037\177')"; _fy_sections="$_fy_sections"'\u000a'"$_fy_routing"; fi
+            if [ "${FY_AGENDA:-0}" = 1 ] && [ "${FY_SUB_FERRET:-0}" != 1 ]; then _fy_sections="$_fy_sections"'\u000a\u000aAgenda mode: one channel of the owner'\''s attention; only what they can give. Share if same place, same context, same pace; dependent things always share. Search, check, then open (`fy search`): none fits→open, else closest. `split` misfits, `merge` items that share.\u000aOpen: `fy agenda add --title \"<topic>\" --premise \"<now>\" --context \"<facts>\" \"<ask>\"`. Title ≤40, ask ≤80. Read cold: no ids/paths/jargon (`--term X=meaning`); short points, answer first, no headings. Kinds: choice=ONE question+2–3 `-o \"Label: why\"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`); todo=`--step`s; info=Got it; permission=Approve/Deny. `--blocking`=stuck, `--will-block`=later, `--by <time>`.\u000aNeeds you buzzes; Resting is quiet. Owner reply/answer rests it; `answer <id> \"…\"` returns it. `rest <id> --why …`=working. Ask/answer stack on the topic'\''s ONE item: `show <id> --yaml` whole→`patch <id> --file f`; chat points there. Float EVERY open ask in premise (where we are) + ask (what I need); answered Q&A→`History`, oldest first, with answer. Tabs by kind, serial stays one; steps/explainers stay. Only you mark it `done` when nothing'\''s left. Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.\u000aBug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options stay; no item: ONE `-k info`.'; fi
+
+            exec '/opt/harness/bin/codex' '-c' 'model="golden-large"' '-c' 'model_catalog_json="/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/codex-model-catalog.json"' '-c' 'approval_policy="on-request"' '-c' 'sandbox_mode="workspace-write"' '--no-alt-screen' '-c' 'notice={hide_full_access_warning=true,hide_world_writable_warning=true,hide_rate_limit_model_nudge=true,hide_gpt5_1_migration_prompt=true,"hide_gpt-5.1-codex-max_migration_prompt"=true}' '-c' 'mcp_servers.ferretry.command="/opt/ferretry/bin/fy"' '-c' 'mcp_servers.ferretry.args=["mcp","serve"]' '-c' 'mcp_servers.ferretry.env_vars=["FY_HOME","FY_URL","FY_SESSION_ID","FY_SESSION_TOKEN","FY_SESSION_BOARD_CAPABILITY"]' '-c' 'developer_instructions="Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person'\''s hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.\u000a\u000aFerretry settings: this machine'\''s logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (`fy config path`). Before changing any, read `fy config guide` and follow it: never write a secret value into a file (the owner runs `fy secret set NAME`; then ${secret:NAME}), run `fy config check` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.'"$_fy_sections"'"' "$@"
+          fi
+
+          # One live writer per conversation: claim the one these arguments resume before handing this pid to
+          # the harness. Only a refusal (exit 75: another session is writing it) stops the launch; any other failure warns and launches anyway.
+          _fy_claim=0
+          for _fy_arg in "$@"; do
+            case "$_fy_arg" in resume) _fy_claim=1 ;; esac
+          done
+          if [ "$_fy_claim" = 1 ]; then
+            if command -v '/opt/ferretry/bin/fy' >/dev/null 2>&1; then
+              '/opt/ferretry/bin/fy' history claim --harness codex --pid $$ --from-arguments -- "$@"
+              _fy_status=$?
+              if [ "$_fy_status" -eq 75 ]; then exit 75; fi
+              if [ "$_fy_status" -ne 0 ]; then
+                if [ -n "${FY_SESSION_ID:-}" ]; then
+                  echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so not launching: this session must hold its conversation before it writes" >&2
+                  exit 75
+                fi
+                echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so launching anyway" >&2
+              fi
+            else
+              if [ -n "${FY_SESSION_ID:-}" ]; then
+                echo "ferretry: fy was not found, so this session could not check whether another session is writing this conversation; not launching" >&2
+                exit 75
+              fi
+              echo "ferretry: fy was not found, so this launch did not check whether another session is writing this conversation; launching anyway" >&2
+            fi
+          fi
+
+          exec '/opt/harness/bin/codex' '-c' 'model="golden-large"' '-c' 'model_catalog_json="/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/codex-model-catalog.json"' "$@"
+
+        >>>
+      "kind": "file"
+      "mode": 493
+      "path": "/fy/fleet/bin/codex-golden"
+    }
+    {
+      "keep":
+        [
+          "codex-golden"
+        ]
+      "kind": "prune"
+      "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten"
+      "path": "/fy/fleet/bin"
+    }
+  ]
+"sharedHistoryRequests":
+  [
+    {
+      "homes": []
+      "kind": "claude"
+      "poolRoot": "/fy/fleet/shared"
+    }
+    {
+      "homes":
+        [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a"
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      "kind": "codex"
+      "poolRoot": "/fy/fleet/shared"
+    }
+  ]

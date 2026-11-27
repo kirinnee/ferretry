@@ -1,0 +1,4 @@
+"golden":
+  "headers": "Authorization": "Bearer ${FY_MCP_GOLDEN_2214FE1123486893_TOKEN}"
+  "type": "sse"
+  "url": "https://feed.example.test/sse"

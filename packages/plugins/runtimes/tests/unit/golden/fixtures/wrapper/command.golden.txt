@@ -1,0 +1,8 @@
+<<<
+  #!/bin/sh
+  # ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten
+  # runs account claude-golden
+
+  exec '/fy/fleet/bin/claude-golden' '--model' 'golden model' "$@"
+
+>>>

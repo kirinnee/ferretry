@@ -1,0 +1,3 @@
+"golden":
+  "bearer_token_env_var": "FY_MCP_GOLDEN_2214FE1123486893_TOKEN"
+  "url": "https://feed.example.test/sse"

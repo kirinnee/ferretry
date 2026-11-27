@@ -41,8 +41,10 @@ the dialog is shown to them as a box instead. Not used, on purpose:
 
 ## What is recognised
 
-Read off real panes captured from Codex 0.145.0, 0.156.1, 0.163.0 and 0.164.0 and Claude Code 2.1.220 and 2.1.281 in throwaway
-homes with no network. The captures are the fixtures in `packages/daemon/tests/fixtures/harness-dialogs/`.
+Read off real panes captured from Codex 0.145.0, 0.156.1, 0.163.0, 0.164.0 and 0.170.0 and Claude Code 2.1.220, 2.1.281 and
+2.1.327 in throwaway homes with no network (a synthetic home, a fake key, nothing signed in). The captures are the fixtures in
+`packages/plugins/claude-code/tests/fixtures/harness-dialogs/` and `codex-harness-dialogs/` (the runner's reader, Terminals, keeps the
+same frames in `packages/plugins/terminals/tests/fixtures/harness-dialogs/`).
 
 | Harness | Dialog                               | `kind`            | Options that grant trust                                                                |
 | ------- | ------------------------------------ | ----------------- | --------------------------------------------------------------------------------------- |
@@ -54,10 +56,20 @@ homes with no network. The captures are the fixtures in `packages/daemon/tests/f
 | Claude  | Settings Error                       | `settings-error`  | —                                                                                       |
 | Claude  | What do you want to do? (limit hit)  | `usage-limit`     | — (the session is recorded `rate_limited`; no row is ever picked for you)               |
 | Codex   | Usage limit reached                  | `usage-limit`     | — (the session is recorded `rate_limited`; the "Increase limits" rows are never picked) |
-| Either  | Do you trust this folder?            | `directory-trust` | the "Yes" rows                                                                          |
+| Either  | Do you trust this folder?            | `directory-trust` | the "Yes" rows (2.1.327 draws it with no digits and the cursor on "No, exit")           |
+| Claude  | Detected a custom API key            | `other`           | — ("Yes" uses the key; no rule picks either row)                                        |
+| Claude  | WARNING: Bypass Permissions mode     | `other`           | — (a home key skips it; "Yes, I accept" is never pressed)                               |
+| Claude  | Claude in Chrome (`--chrome`)        | `other`           | — (no rows: Enter continues, Esc closes; see the rules below)                           |
 | Codex   | Folder access: Trust this folder?    | `directory-trust` | Trust and continue                                                                      |
 | Codex   | Folder access: Open restricted       | `directory-trust` | — (opening changes no saved trust)                                                      |
 | Codex   | Model migration ("Meet GPT-6 Sol")   | `other`           | — (0.164 asks it when the model has a successor; the generic reading carries it)        |
+
+A Claude notice with **no rows** — a title and paragraphs under the full-width rule, and the footer "Enter to continue · Esc
+to close" — is read as `other` with no options and no selected row; Esc is its only answer. It is read by its **signature**,
+not its shape: the notice's own title ("Claude in Chrome" is the one known) and that footer, the whole line,
+under the rule, and no cursor row, numbered row or composer glyph — a bare `❯` included — between them.
+An editor or help frame that borrows the footer, a list, the idle composer or a bare footer is never one. A new notice is
+added by its own title, never by the shape.
 
 Any other screen of the same shape — a header, a list with a cursor on one row, and a key-hint footer that
 names Enter or Esc ("enter confirm · esc skip", "Press enter to continue", "Enter to confirm · Esc to
@@ -186,6 +198,7 @@ or **the row whose label is exactly this**. Free pane text never picks a rule.
 | Claude  | New MCP server found (`mcp-servers`)             | `claude-mcp-servers`        | ↓/↑ to "Continue without using this MCP server", Enter      |
 | Claude  | Settings Error (`settings-error`)                | `claude-settings-error`     | ↓/↑ to "Continue without these settings", Enter             |
 | Claude  | LSP plugin recommendation (`other`)              | `claude-lsp-recommendation` | ↓/↑ to "No, not now", Enter                                 |
+| Claude  | Claude in Chrome notice (`other`)                | `claude-chrome-notice`      | Esc (closes it; nothing is turned on; see below)            |
 | Codex   | Hooks need review (`hooks-review`)               | `codex-hooks-review`        | ↓/↑ to "Continue without trusting (hooks won't run)", Enter |
 | Codex   | The hook list (`hooks-list`)                     | `codex-hooks-list`          | Esc                                                         |
 | Codex   | Update available (`update`)                      | `codex-update`              | ↓/↑ to "Skip", Enter                                        |
@@ -200,9 +213,22 @@ again`, `install`, `update now`…, unless it says _without_ / _not_), and the p
 `grantsTrust`. That is checked three times: the rules file's schema, the table's own test (over every known screen), and the
 planner at the moment of pressing. A screen whose only way out grants something has no plan and stays a notice.
 
+**The Claude in Chrome notice has no rows**, so its rule is named three ways at once: the title `Claude in Chrome`, **no rows**
+(`rows: none`: a screen that only shares the title, with rows to choose, is not it) and its own footer line "Enter to
+continue · Esc to close" on the live frame. Anything less could press Esc on a Claude composer, where Esc interrupts work.
+The same three are read from the **fresh frame itself** at the write, not only from the earlier record — and by the
+terminal plugin's own dialog reader, not by a second parse in the Warden: the runner attaches what it read of that very frame
+(title, row count, footer) to the capture, and the Warden presses only if the title and the exact footer match and the reader
+counts zero rows. A fresh frame with the footer but another title, or with rows (a separator inside a row's details included,
+which a line scan would lose), presses nothing and the owner is told.
+
 **What a press looks like.** (1) The live frame is read and must still show the screen — the recorded dialog can lag, and Esc
 on a pane that moved on would interrupt a turn — and the runner's own reader must say the KIND the rule presses on blocks it (a dialog for a row to choose, a permission prompt for Esc on one). (2) Arrows
-move the cursor; the frame is read again and Enter is pressed only when the cursor is positively on the chosen row. (3) ONE
+move the cursor; the frame is read again and Enter is pressed only when the cursor is positively on the chosen row. **Every key is guarded where it is written:** the key port re-reads the pane immediately before it types and sends the key only if
+that fresh frame still passes the same test as (1) (and, for the Enter that confirms a row, still has the cursor on it); a
+frame that is unreadable or has moved on presses nothing and leaves the dialog to the notice. A **declared gap** remains: the
+read and the key are two steps through the runner, so a pane that changes in the few milliseconds between them is not seen — the
+guard narrows that window, it does not close it. (3) ONE
 journal line: `fleet.warden_dialog_autocleared` (ferret, harness, kind, rule id) — no agenda item, no pane text. The same
 dialog on the same ferret is never keyed twice; if the next look still sees it on screen the keys failed (or a hold refused
 them) and the owner is told once, as before (`fleet.warden_dialog_clear_failed`). The look runs every 10 s.
@@ -234,6 +260,24 @@ terminal), and names no row. What the screen says is read in the terminal.
 
 ## Declared gaps
 
+- **Survey and feedback (Claude).** "How is Claude doing this session? (optional)" with `1: Bad  2: Fine  3: Good  0: Dismiss`, and its
+  follow-up "Can Anthropic look at your session transcript…", are strips under the composer, not modal dialogs: the composer stays
+  live and there is no list to read. They need a live API session, so no pane could be captured offline; the text is from the
+  2.1.327 binary's strings. `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` in the launch environment (pinned by the fixed-layer test)
+  keeps them away, which is the only answer Ferretry gives. No Codex survey was observed offline (Codex 0.170).
+- **Launch screens that could not be captured offline.** Claude 2.1.327 checks api.anthropic.com before it draws its first-run
+  theme picker, login-method screen and security notes, so none could be read; they remain covered by the home keys above and the
+  startup answers. The "Resume session" picker (`claude --resume` with no id, which Ferretry never passes — it always names the
+  session) has a list footer this reader does not name, so it is not read. Codex 0.170 draws its update as a banner above the
+  composer, not a dialog, when it cannot self-update.
+
+- **Codex hooks review picks the refusing row.** The rule `codex-hooks-review` presses "Continue without trusting (hooks won't
+  run)" — the row that **refuses** trust, never "Trust all and continue" — so a ferret launched on a changed hook goes on
+  without that hook rather than the hook being trusted for it. It is kept deliberately (accepted 2026-11-27): the alternative
+  is a ferret parked on a screen nobody is watching. The consequence is that the hook does not run; the owner who wants it
+  trusts it in the terminal. It never grants trust, and the planner would refuse a granting row anyway.
+- **Esc guard window.** See "Every key is guarded where it is written" above: a pane that changes between the guard's read and
+  the key's arrival at the terminal is not seen.
 - **Which hooks.** The hook review says how many hooks are new, not which; the box shows what the pane
   shows. "Review hooks" opens Codex's own list, which the box can only close (Esc).
 - **Signing in** from the box picks a sign-in method; finishing it (a browser, a device code) happens in
