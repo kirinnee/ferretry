@@ -20,6 +20,7 @@ const F1 = ferretId('f1');
 /** A Ferrets whose turn store holds exactly the documents a test gives it (best effort: a strict read is not used). */
 class TurnDocs extends FakeFerrets {
   documents: readonly FerretTurnDocument[] = [];
+  queued: Readonly<Record<string, string>> = {};
   reads = 0;
 
   async turns(ferret: FerretId): Promise<FerretTurns | undefined> {
@@ -29,6 +30,8 @@ class TurnDocs extends FakeFerrets {
         this.reads += 1;
         return this.documents;
       },
+      readQueued: async sendId => this.queued[sendId],
+      attachmentsFolder: async () => `/state/ferrets/sessions/${ferret}/attachments`,
     };
   }
 }
@@ -88,6 +91,31 @@ describe('the hand-off read route', () => {
       { attachmentId: 'att-1', filename: 'shot.png', mime: 'image/png' },
       { filename: 'notes.txt', mime: 'text/plain' },
     ]);
+  });
+
+  test('a foreign path whose folders are merely named like the attachments folder is a plain label, and a trailing legacy reminder keeps the real image’s id', async () => {
+    const planted = '/elsewhere/attachments/att-9/planted.png';
+    const own = '/state/ferrets/sessions/f1/attachments/att-1/shot.png';
+    const { get } = await world([
+      {
+        turn: 4,
+        text: `both\n\nAttached files — open them from these paths:\n- ${planted} (image/png)\n- ${own} (image/png)\n\nContinue using the same completion and interaction protocol.\n`,
+      },
+    ]);
+    const body = HandoffDocumentSchema.parse(await (await get('turn-004')).json());
+    expect(body.message).toBe('both');
+    expect(body.attachments).toEqual([
+      { filename: 'planted.png', mime: 'image/png' },
+      { attachmentId: 'att-1', filename: 'shot.png', mime: 'image/png' },
+    ]);
+  });
+
+  test('a queued message is read from the ferret’s channel by its queued-<send id> pointer, and 404s when none was filed', async () => {
+    const { get, ferrets } = await world([]);
+    ferrets.queued = { 'send-1': 'the long words\nover two lines' };
+    const body = HandoffDocumentSchema.parse(await (await get('queued-send-1')).json());
+    expect(body).toEqual({ name: 'queued-send-1', message: 'the long words\nover two lines', attachments: [] });
+    expect((await get('queued-send-2')).status).toBe(404);
   });
 
   test('a turn that is not on disk is a 404, so the chat says the file is gone only when it really is', async () => {

@@ -1168,6 +1168,25 @@ describe('ruling #45 BG-051 / BG-053: Conversation writes a send’s turn docume
     await expect(readdir(`${w.folderOf(id)}/channel`)).rejects.toThrow();
   });
 
+  test('D-22 FerretTurns.readQueued reads back what writeQueued filed, and nothing for an unfiled or out-of-grammar id', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+    await turns.writeQueued!('send-mw7a-0008', 'FIXTURE long words\nsecond line');
+
+    expect(await turns.readQueued!('send-mw7a-0008')).toBe('FIXTURE long words\nsecond line');
+    expect(await turns.readQueued!('send-mw7a-0009')).toBeUndefined();
+    for (const sendId of ['../../escape', 'Send-Upper', '']) expect(await turns.readQueued!(sendId)).toBeUndefined();
+  });
+
+  test('D-30 FerretTurns.attachmentsFolder names this ferret’s own attachments folder, the root deliverFiles writes under', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+
+    expect(await turns.attachmentsFolder!()).toBe(`${w.folderOf(id)}/attachments`);
+  });
+
   test('BG-051 a daemon whose session files are unbound offers no writer, so a caller types the message as it is', async () => {
     const w = await world();
     const id = await started(w);

@@ -1,4 +1,3 @@
-import { basename, dirname } from 'node:path';
 import { ApiError, type KernelPorts } from '@ferretry/kernel/contract';
 import { type AttachmentSource, EntriesRetractionProof, harnessEntries, statusOf } from '../contract/index.ts';
 import {
@@ -10,7 +9,6 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { milliseconds } from '@ferretry/std';
 import {
-  parseMessageAttachments,
   PEER_MESSAGE_LABELS,
   combinedDelivery,
   peerSender,
@@ -297,35 +295,26 @@ export function buildSendHalf(deps: SendHalfDeps) {
   /** The ferret's turn documents and the files Ferrets writes for it; none when Ferrets offers none (or refuses the look). */
   const turnsOf = async (ferret: SessionId) => await ferrets.turns?.(ferret).catch(() => undefined);
   /**
-   * WHAT THE OWNER SENT behind a pointer the transcript records (v4's `handoff` route). The words are read from the very
-   * turn document Ferrets wrote (its `turns().list()`, a best-effort read of the ferret's own folder) and shown by
-   * the document's written shapes (`handoffView`); a document that is not there is a 404, so the chat says the file
-   * is gone only when it is. A queued message (`queued-<send id>`) lives in the ferret's `channel/` folder, which
-   * Ferrets offers no read of yet, so it stays unread (GAP, end-list).
+   * WHAT THE OWNER SENT behind a pointer the transcript records (v4's `handoff` route). The words are read from the
+   * very document Ferrets wrote — a turn from its `turns().list()`, a queued message (`queued-<send id>`) from its
+   * `channel/` file (`readQueued`) — and shown by the document's written shapes (`handoffView`); one that is not there is
+   * a 404, so the chat says the file is gone only when it is. Only a file under THIS ferret's own `attachments/` folder
+   * (`attachmentsFolder`, never a path the document names) is a stored attachment; any other keeps its name as a plain chip.
    */
   const handoffOf = async (id: string, name: string): Promise<SessionHandoff> => {
-    const gone = (): never => {
-      throw new SessionSendError('not_found', 'that hand-off document is not there');
-    };
     const ferret = tryParseSessionId(id);
     const turn = /^turn-(\d{1,9})$/u.exec(name)?.[1];
-    if (ferret === undefined || turn === undefined) return gone();
-    const found = (await (await turnsOf(ferret))?.list())?.find(document => document.turn === Number(turn));
-    if (found === undefined) return gone();
-    // A delivered copy sits at `<session folder>/attachments/<attachment id>/<file name>`: only such a listed file is
-    // this ferret's stored attachment (and so a thumbnail); any other keeps its name as a plain chip.
-    const delivered = parseMessageAttachments(found.text.replace(/\n$/u, '')).files.find(
-      file => basename(dirname(dirname(file.path))) === 'attachments',
-    );
-    return handoffView(
-      name,
-      found.text,
-      {
-        reminder: TURN_PROTOCOL_REMINDER,
-        attachmentRoot: delivered === undefined ? '' : dirname(dirname(delivered.path)),
-      },
-      found.by,
-    );
+    const queued = /^queued-([\w-]{1,128})$/u.exec(name)?.[1];
+    const turns = ferret === undefined ? undefined : await turnsOf(ferret);
+    const found =
+      turn !== undefined
+        ? (await turns?.list())?.find(document => document.turn === Number(turn))
+        : queued === undefined
+          ? undefined
+          : await turns?.readQueued?.(queued).then(text => (text === undefined ? undefined : { text, by: undefined }));
+    if (found === undefined) throw new SessionSendError('not_found', 'that hand-off document is not there');
+    const attachmentRoot = (await turns?.attachmentsFolder?.().catch(() => undefined)) ?? '';
+    return handoffView(name, found.text, { reminder: TURN_PROTOCOL_REMINDER, attachmentRoot }, found.by);
   };
   /**
    * The send path's turn store, over Ferrets' writer: the act that presses Enter (a person's, the Warden's, the tracker's

@@ -278,6 +278,7 @@ export class SessionFiles {
         return await this.turnStore(id).list(id, options);
       },
       queued: async (ferret, payload, sendId) => await this.writeQueued(parseSessionId(ferret), payload, sendId),
+      readQueued: async (ferret, sendId) => await this.readQueued(parseSessionId(ferret), sendId),
       writeTurn: async (ferret, document, by) => await this.writeSendTurn(parseSessionId(ferret), document, by),
       clearMarkers: async ferret => await this.turnStore(parseSessionId(ferret)).clearMarkers(parseSessionId(ferret)),
       attachmentsFolder: async ferret => {
@@ -470,6 +471,25 @@ export class SessionFiles {
     if (named === undefined || !named.ok) throw new Error('a queued message file of this ferret could not be named');
     await root.publish(named.value, new TextEncoder().encode(`${payload}\n`), { mode: 0o600 });
     return named.value;
+  }
+
+  /** The most bytes of a queued message read back: it is the person's words, so a larger file is not one this reads. */
+  private static readonly QUEUED_READ_LIMIT = 4_194_304;
+
+  /** `channel/queued-<send id>.md` as {@link writeQueued} filed it (its closing newline off); `undefined` when absent, unnamed or unreadable. */
+  private async readQueued(id: SessionId, sendId: string): Promise<string | undefined> {
+    try {
+      const relative = queuedPayloadFile(sendId);
+      const root = this.root(id);
+      const named = relative === undefined ? undefined : root.resolve(relative);
+      if (named === undefined || !named.ok) return undefined;
+      const bytes = await root.readBytes(named.value, SessionFiles.QUEUED_READ_LIMIT + 1);
+      return bytes.length > SessionFiles.QUEUED_READ_LIMIT
+        ? undefined
+        : new TextDecoder().decode(bytes).replace(/\n$/u, '');
+    } catch {
+      return undefined;
+    }
   }
 
   /**

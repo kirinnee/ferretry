@@ -440,6 +440,8 @@ export interface FerretSessionPort {
    * transport then goes wrong. Unbound: a long queued message is refused, never typed inline.
    */
   queued?(ferret: FerretId, payload: string, sendId?: string): Promise<string>;
+  /** Additive: the message {@link queued} filed under `sendId`, or `undefined` when there is none or it cannot be read. */
+  readQueued?(ferret: FerretId, sendId: string): Promise<string | undefined>;
   /**
    * Additive (#45 BG-051, `FerretTurns.write`): the next numbered turn document of THIS ferret, written durably with its
    * author beside it and counted, as a revive's turn is. Answers its number and absolute path.

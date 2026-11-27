@@ -17,6 +17,8 @@ export async function turns(
   const session = ports.session;
   const writeTurn = session?.writeTurn?.bind(session);
   const queued = session?.queued?.bind(session);
+  const readQueued = session?.readQueued?.bind(session);
+  const attachmentsFolder = session?.attachmentsFolder?.bind(session);
   const clearMarkers = session?.clearMarkers?.bind(session);
   return {
     list: async options => (await session?.turns?.(ferret, { strict: options?.strict === true })) ?? [],
@@ -36,6 +38,8 @@ export async function turns(
             return await queued(ferret, payload, sendId);
           },
         }),
+    ...(readQueued === undefined ? {} : { readQueued: async (sendId: string) => await readQueued(ferret, sendId) }),
+    ...(attachmentsFolder === undefined ? {} : { attachmentsFolder: async () => await attachmentsFolder(ferret) }),
     ...(clearMarkers === undefined ? {} : { clearMarkers: async () => await clearMarkers(ferret) }),
   };
 }
