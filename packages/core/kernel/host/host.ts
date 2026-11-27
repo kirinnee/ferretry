@@ -1733,7 +1733,7 @@ async function bootLocked(
       try {
         trace.push('stop:listen');
         listenerAt = undefined;
-        await sessionLayer.close();
+        if (sessionLayer.report().sessions > 0) await sessionLayer.close();
         stopCarriers();
         for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
         for (const cancel of unwatchState) cancel();
