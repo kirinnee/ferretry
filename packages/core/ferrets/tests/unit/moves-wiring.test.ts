@@ -23,6 +23,8 @@ test('moves wiring: every declared fork, handover and move route is built once a
   for (const [method, path, body] of ROUTES) {
     const response = await h.request(method, path, body === undefined ? {} : { body });
     answered.push([`${method} ${path}`, response.status, response.json<{ code?: string }>().code]);
+    if (path.endsWith('/fork'))
+      expect(response.json<{ error: string }>().error).toBe('Fork is not wired yet in this version of Ferretry.');
   }
 
   // Assert

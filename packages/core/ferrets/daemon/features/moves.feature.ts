@@ -220,7 +220,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   // the declared one answers 503 as the unbound fork always did. The cut and the start it will call are `forks.feature.ts`.
   const forkRoute = async (call: CallContext) => {
     mayAct(call, await pathFerret(call));
-    throw new ApiError(503, 'Fork is served by the Conversation plugin, which is not running.', 'plugin_unavailable');
+    throw new ApiError(503, 'Fork is not wired yet in this version of Ferretry.', 'plugin_unavailable');
   };
   return { routes: { ...moveRoutes, 'POST /v1/ferrets/:ferretId/fork': forkRoute } };
 }

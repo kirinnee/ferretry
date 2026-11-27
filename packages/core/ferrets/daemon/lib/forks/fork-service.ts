@@ -71,8 +71,8 @@ const slug = (name: string): string =>
  * The harness cuts the source conversation at a turn into a new conversation in its own history (`Harness.fork`); Ferrets
  * then starts a new ferret on that conversation, as a conversation import does. The source is only ever READ: its record,
  * its home and its conversation are not written, so a refusal at any step leaves it as it was. Every refusal that can be
- * made before the cut is made before it (the harness, the caller, the checkout), so the only thing a failed start leaves
- * behind is the cut itself, which the harness is asked to remove, and a checkout it made, which is named and left in place
+ * made before the cut is made before it (the harness, the caller, the checkout). A failed start can leave a live pane
+ * whose stop failed: the start's failure proves no cleanup, so the cut is kept and named, as is any checkout it made
  * (a worktree is never removed unasked).
  */
 export class ForkService {
@@ -129,9 +129,13 @@ export class ForkService {
       )
       .catch((error: unknown) => err<StartFailure>({ code: 'failed', reason: messageOf(error) }));
     if (!started.ok) {
-      // Remove the conversation this fork wrote, and nothing else. A harness that cannot leaves it unreferenced.
-      await plan.discard?.().catch(() => undefined);
-      return err({ code: 'start', reason: `${started.error.reason}${this.left(checkout)}`, start: started.error });
+      // StartFailure carries no proof that the new conversation has no live writer. Never delete under its pane.
+      const kept = `. The forked conversation ${plan.harnessConversation} was kept because the launch could not prove it has no live writer`;
+      return err({
+        code: 'start',
+        reason: `${started.error.reason}${kept}${this.left(checkout)}`,
+        start: started.error,
+      });
     }
     return ok({
       ferret: started.value,

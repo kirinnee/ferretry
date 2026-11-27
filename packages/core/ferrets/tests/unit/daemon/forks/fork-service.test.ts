@@ -207,7 +207,7 @@ describe('the fork service', () => {
     expect(calls.starts[0]?.request).toMatchObject({ by: 'ferret', parent: SOURCE });
   });
 
-  test('should leave the source untouched and remove only the new conversation when the start fails after the cut', async () => {
+  test('should leave the source untouched and keep the cut when the failed start does not prove cleanup', async () => {
     // Arrange
     const failure: StartFailure = { code: 'login_unavailable', reason: 'the login main is signed out' };
     const { service, calls } = world({ start: async () => err(failure) });
@@ -216,8 +216,14 @@ describe('the fork service', () => {
     const forked = await service.fork(SOURCE, AT, { worktree: 'same' }, PERSON);
 
     // Assert
-    expect(forked).toEqual(err({ code: 'start', reason: failure.reason, start: failure }));
-    expect(calls.discards).toEqual([{ from: SOURCE, at: AT, harnessConversation: 'conv-new' }]);
+    expect(forked).toEqual(
+      err({
+        code: 'start',
+        reason: `${failure.reason}. The forked conversation conv-new was kept because the launch could not prove it has no live writer`,
+        start: failure,
+      }),
+    );
+    expect(calls.discards).toEqual([]);
     // The only thing asked of the source was the cut itself (a read of its home).
     expect(calls.cuts).toHaveLength(1);
   });
@@ -233,6 +239,23 @@ describe('the fork service', () => {
     // Assert
     expect(forked.ok).toBe(false);
     if (!forked.ok) expect(forked.error.code).toBe('start');
+    expect(calls.discards).toEqual([]);
+  });
+
+  test('should keep the cut when start throws without proving its writer stopped', async () => {
+    const { service, calls } = world({
+      start: async () => {
+        throw new Error('launch failed');
+      },
+    });
+
+    const forked = await service.fork(SOURCE, AT, { worktree: 'same' }, PERSON);
+
+    expect(forked.ok).toBe(false);
+    if (!forked.ok) {
+      expect(forked.error.code).toBe('start');
+      expect(forked.error.reason).toContain('The forked conversation conv-new was kept');
+    }
     expect(calls.discards).toEqual([]);
   });
 
@@ -345,7 +368,7 @@ describe('the fork service', () => {
     expect(forked.ok).toBe(false);
     if (!forked.ok)
       expect(forked.error.reason).toBe(
-        'the launch failed. The new worktree /managed/repo-1/fork-quick-otter was left in place; remove it with fy worktree remove if you do not want it',
+        'the launch failed. The forked conversation conv-new was kept because the launch could not prove it has no live writer. The new worktree /managed/repo-1/fork-quick-otter was left in place; remove it with fy worktree remove if you do not want it',
       );
   });
 });
