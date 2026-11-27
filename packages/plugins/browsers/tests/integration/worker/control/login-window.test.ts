@@ -62,6 +62,7 @@ class FakeProfile implements BrowserProfilePort {
   readonly calls: string[] = [];
   primed = false;
   readonly lease: BrowserProfileLease = {
+    identity: 'agent',
     profile: '/private/profile',
     sessionId: 'human-login',
     daemonPid: 101,

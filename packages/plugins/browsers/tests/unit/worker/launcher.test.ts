@@ -72,6 +72,7 @@ function fakeChild(pid: number, onSignal: (signal: string, child: FakeChild) => 
 }
 
 const lease = (released: string[]): BrowserProfileLease => ({
+  identity: 'agent',
   profile: '/fake/profile',
   sessionId: 'agent-browser',
   daemonPid: 1,
