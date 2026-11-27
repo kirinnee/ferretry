@@ -1,6 +1,6 @@
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import { handoffView, type TrustedHandoffAttachment } from '../contract/lib/send/handoff.ts';
-import { deliveredFilename } from '../contract/turn-handoff.ts';
+import { deliveredFilename, readHandoffDocument } from '../contract/turn-handoff.ts';
 import { tryParseSessionId, type AttachmentSource, type SendLedger, type SessionHandoff } from '../contract/index.ts';
 import { SessionSendError } from './lib/delivery/mounts/session-send.ts';
 
@@ -25,13 +25,23 @@ export function handoffReader(ferrets: FerretsApi, ledger: SendLedger, source: A
     const records = await ledger.list(ferret).catch(() => []);
     const record = records.find(row => (turn === undefined ? row.sendId === queued : row.turn === Number(turn)));
     const attachments: TrustedHandoffAttachment[] = [];
+    const { files } = readHandoffDocument(found.text, TURN_PROTOCOL_REMINDER);
     for (const attachmentId of new Set(record?.attachmentIds ?? [])) {
       // IDs and filenames come from delivery/store metadata, never from parsing a footer in the person's words.
-      const stored = await source?.download(ferret, attachmentId).catch(() => undefined);
-      if (stored === undefined || stored.attachment.id !== attachmentId) continue;
-      const filename = deliveredFilename(stored.attachment.filename);
+      const metadata = await source?.lookup(ferret, attachmentId).catch(() => undefined);
+      if (metadata === undefined || metadata.id !== attachmentId) continue;
+      const filename = deliveredFilename(metadata.filename);
       const path = await turns?.attachmentFile?.(attachmentId, filename).catch(() => undefined);
-      if (path !== undefined) attachments.push({ path, attachmentId, filename, mime: stored.attachment.mime });
+      if (path === undefined || !files.some(file => file.path === path)) continue;
+      // Read and verify original bytes only for a scope-proved copy that will actually receive an id.
+      const stored = await source?.download(ferret, attachmentId).catch(() => undefined);
+      if (
+        stored === undefined ||
+        stored.attachment.id !== attachmentId ||
+        deliveredFilename(stored.attachment.filename) !== filename
+      )
+        continue;
+      attachments.push({ path, attachmentId, filename, mime: stored.attachment.mime });
     }
     return handoffView(name, found.text, { reminder: TURN_PROTOCOL_REMINDER, attachments }, found.by);
   };

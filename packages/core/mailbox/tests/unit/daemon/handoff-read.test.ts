@@ -40,6 +40,7 @@ function world(parts: {
       list: async () => (parts.turns ?? []).map(turn => ({ turn: turn.turn, attachmentIds: parts.delivered ?? [] })),
     },
     attachments: {
+      lookup: async (_ferret: string, id: string) => ({ id, filename: 'shot.png', mime: 'image/png' }),
       download: async (_ferret: string, id: string) => ({
         attachment: { id, filename: 'shot.png', mime: 'image/png' },
         bytes: new Uint8Array(),

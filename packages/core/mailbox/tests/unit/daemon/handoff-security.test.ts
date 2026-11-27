@@ -58,6 +58,10 @@ async function handoffFixture() {
     channel: {},
     askedQuestion: async () => undefined,
     attachments: {
+      lookup: async (ferret: string, attachment: string) => {
+        if (ferret !== id || attachment !== attachmentId) throw new Error('not this session’s attachment');
+        return { id: attachmentId, filename: 'shot.png', mime: 'image/png' };
+      },
       download: async (ferret: string, attachment: string) => {
         if (ferret !== id || attachment !== attachmentId) throw new Error('not this session’s attachment');
         return { attachment: { id: attachmentId, filename: 'shot.png', mime: 'image/png' }, bytes: new Uint8Array() };

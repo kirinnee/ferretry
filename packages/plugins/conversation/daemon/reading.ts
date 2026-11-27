@@ -115,6 +115,11 @@ export interface ReadingHalf {
   readonly api: ReadingApi;
   /** `conversation.stage` (Ferrets' start asks it): one indexed conversation's transcript staged where its harness resumes it. */
   readonly stage: ConversationStageSource['stage'];
+  /** Manifest metadata only: no original bytes are read. */
+  lookupAttachment(
+    ferret: string,
+    id: string,
+  ): Promise<{ readonly id: string; readonly filename: string; readonly mime: string }>;
   /**
    * A stored original of THIS ferret, its digest re-checked: what a send hands to the agent. Rejects with an
    * {@link AttachmentError} for an id that is not this ferret's, a missing or altered original, or an unknown ferret.
@@ -374,6 +379,7 @@ export function buildReading(deps: {
     tools: search.tools,
     api,
     stage: async ({ harness, conversation, source }) => await links.service.stage(harness, conversation, source),
+    lookupAttachment: async (ferret, id) => await attachments.scoped.lookup(ferret, id),
     download: async (ferret, id) => await attachments.scoped.download(ferret, id),
     forkTurn: async (ferret, point, binding) => await reader.reads.forkTurn(ferret, point, binding),
     copyAttachments: async (from, to) => await attachments.scoped.copy(from, to),
