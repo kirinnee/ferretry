@@ -201,6 +201,19 @@ const plugin = {
   },
 };
 
+/** Only the dev server imports Vite's own worker URL into the shell's policy. A release build never adds the import. */
+const devWorkerUrlPlugin = {
+  name: 'fy-durian-dev-worker-url',
+  apply: 'serve' as const,
+  enforce: 'pre' as const,
+  transform(code: string): string | null {
+    const marker = 'import.meta.env.FY_DURIAN_DEV_WORKER_URL';
+    if (!code.includes(marker)) return null;
+    const module = fileURLToPath(new URL('./hypermedia/durian-worker-url.ts', import.meta.url));
+    return `import __fyDurianDevWorkerUrl from ${JSON.stringify(module)};\n${code.replaceAll(marker, '__fyDurianDevWorkerUrl')}`;
+  },
+};
+
 /**
  * WHAT THE DURIAN WORKER ADDS (r12 H11): no DOM. micromark (which reads every message's fences) decodes character references
  * through `decode-named-character-reference`, whose `browser` condition is a build that makes a `<i>` element and reads its text;
@@ -224,4 +237,4 @@ const workerPlugin = {
 };
 
 /** What the shell's `vite.config.ts` registers (`plugins`, and `workerPlugin` for the Durian worker's own build), and the pin record the build test reads. */
-export const durianBuild = { plugin, workerPlugin, pin: DURIAN_PIN } as const;
+export const durianBuild = { plugin, workerPlugin, devWorkerUrlPlugin, pin: DURIAN_PIN } as const;
