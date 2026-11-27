@@ -136,7 +136,7 @@ export class IdentityBrowsers implements BrowserSubsystem {
       return { status: await this.status(sessionId) };
     }
     if (action.action === 'start' || action.action === 'open' || action.action === 'new-page') {
-      const identity = this.named(options.identity) ?? this.homeOf(sessionId, options.viewer);
+      const identity = this.current(this.named(options.identity) ?? this.homeOf(sessionId, options.viewer));
       const acted = await this.admit(identity, async () => {
         const answered = await this.serviceOf(identity).act(
           sessionId,
@@ -164,7 +164,7 @@ export class IdentityBrowsers implements BrowserSubsystem {
 
   async openPage(sessionId: string, name: string, options: BrowserOpenOptions = {}): Promise<BrowserPageSummary> {
     return await this.withName(sessionId, name, async () => {
-      const identity = this.named(options.identity) ?? this.homeOf(sessionId);
+      const identity = this.current(this.named(options.identity) ?? this.homeOf(sessionId));
       return await this.admit(identity, async () => {
         const opened = await this.serviceOf(identity).openPage(sessionId, name, options);
         this.last.set(sessionId, identity);
@@ -411,6 +411,11 @@ export class IdentityBrowsers implements BrowserSubsystem {
     if (identity === undefined) return undefined;
     if (!BrowserIdentityKeySchema.safeParse(identity).success)
       throw new BrowserSessionError('not_found', `there is no browser identity named ${identity}`);
+    return this.current(identity);
+  }
+
+  /** The identity as the configuration stands NOW, asked at every open, new page and start and never remembered: one retired since the session last used it is refused, whatever its profile folder still holds. */
+  private current(identity: string): string {
     if (identity !== DEFAULT_BROWSER_IDENTITY && !this.options.configured(identity))
       throw new BrowserSessionError(
         'not_found',

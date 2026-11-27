@@ -84,6 +84,14 @@ const frame = (pageId: string): ArrayBuffer => {
   return bytes.buffer;
 };
 
+/** The browser finishing loading the frame it was given: the moment that frame is on screen, which is later than when it arrived. */
+const painted = (renderer: ReturnType<typeof render>, url = 'blob:frame'): void =>
+  run(() =>
+    renderer.root
+      .find(node => node.type === 'img' && node.props.alt === 'Live remote browser frame')
+      .props.onLoad({ currentTarget: { getAttribute: () => url } }),
+  );
+
 describe('RemoteBrowserViewer', () => {
   it('stays idle while its retained surface is inactive', () => {
     const sockets: FakeSocket[] = [];
@@ -548,6 +556,7 @@ const interactive = (overrides: Record<string, unknown> = {}, options?: TestRend
     socket.emit('open', new Event('open'));
     socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
   });
+  painted(renderer);
   const canvas = renderer.root.find(node => node.props.className === 'fy-remote-browser-input');
   return { renderer, socket, canvas, activity };
 };
@@ -631,6 +640,7 @@ describe('RemoteBrowserViewer input', () => {
       socket.emit('open', new Event('open'));
       socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
     });
+    painted(renderer);
     const held = renderer.root.find(node => node.props.className === 'fy-remote-browser-input').props;
     run(() => held.onPointerMove(pointerEvent({ buttons: 0 })));
 
@@ -639,6 +649,7 @@ describe('RemoteBrowserViewer input', () => {
     run(() => held.onPointerMove(pointerEvent({ buttons: 0 })));
     const between = socket.pages();
     run(() => socket.emit('message', new MessageEvent('message', { data: frame('page-b') })));
+    painted(renderer);
     const fresh = renderer.root.find(node => node.props.className === 'fy-remote-browser-input').props;
     run(() => fresh.onPointerMove(pointerEvent({ buttons: 0 })));
 
@@ -646,6 +657,64 @@ describe('RemoteBrowserViewer input', () => {
     expect(between).toEqual(['page-a']);
     expect(socket.pages()).toEqual(['page-a', 'page-b']);
     expect(sockets).toHaveLength(1);
+  });
+
+  it('sends nothing to page B while B’s first image is still loading and A is still on screen, then names B once it has painted', () => {
+    // Arrange — page A painted; B's frame arrives on the same stream but the browser has not finished loading it
+    const sockets: FakeSocket[] = [];
+    let made = 0;
+    const scope = daemonSessionScope(daemonA, 'session-a');
+    // One factory and one measure for the whole test: a new function each render would re-open the stream.
+    const socketFactory = () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const createObjectUrl = () => {
+      made += 1;
+      return `blob:frame-${made}`;
+    };
+    const measureFrame = () => frameRect;
+    const now = () => 1_000;
+    const revokeObjectUrl = () => undefined;
+    const tree = (pageId: string) => (
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={scope}
+        status={running('session-a', pageId)}
+        interactive
+        measureFrame={measureFrame}
+        now={now}
+        socketFactory={socketFactory}
+        createObjectUrl={createObjectUrl}
+        revokeObjectUrl={revokeObjectUrl}
+      />
+    );
+    const renderer = render(tree('page-a'));
+    const socket = sockets[0];
+    if (socket === undefined) throw new Error('no socket was opened');
+    run(() => {
+      socket.readyState = 1;
+      socket.emit('open', new Event('open'));
+      socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
+    });
+    painted(renderer, 'blob:frame-1');
+    const surface = () => renderer.root.find(node => node.props.className === 'fy-remote-browser-input').props;
+    run(() => surface().onPointerMove(pointerEvent({ buttons: 0 })));
+
+    // Act — the status moves to B and its first frame ARRIVES; typing happens before the image has loaded
+    run(() => renderer.update(tree('page-b')));
+    run(() => socket.emit('message', new MessageEvent('message', { data: frame('page-b') })));
+    const before = [...socket.pages()];
+    run(() => surface().onPointerMove(pointerEvent({ buttons: 0 })));
+    const during = [...socket.pages()];
+    painted(renderer, 'blob:frame-2');
+    run(() => surface().onPointerMove(pointerEvent({ buttons: 0 })));
+
+    // Assert — no input went out between B arriving and B painting; after it, input names B
+    expect(before).toEqual(['page-a']);
+    expect(during).toEqual(['page-a']);
+    expect(socket.pages()).toEqual(['page-a', 'page-b']);
   });
 
   it('maps a click into the daemon-negotiated viewport, not the on-screen box', () => {

@@ -137,6 +137,23 @@ describe('the browsers daemon half, per identity', () => {
     should((await host.request('GET', '/v1/browser/login')).status).equal(200);
   });
 
+  it('should refuse a name that is only an inherited property of the configuration, on every path', async () => {
+    // Arrange
+    const world = await built();
+    host = world.host;
+
+    // Act / Assert
+    // `constructor` is the one inherited name the identity grammar admits (`toString` and the rest fail its pattern earlier).
+    for (const inherited of ['constructor']) {
+      const opened = await host.tool('browser_open', { name: 'x', identity: inherited }, { as: ferret('f1') });
+      const read = await host.request('GET', '/v1/browser/login', { query: { identity: inherited } });
+      should(opened.isError).be.true();
+      should(read.status).equal(400);
+      should(JSON.stringify(read.body)).containEql(`no browser identity named ${inherited}`);
+    }
+    should(world.launched).deepEqual([]);
+  });
+
   it('should refuse a login window for something that is no identity key', async () => {
     // Arrange
     const world = await built();

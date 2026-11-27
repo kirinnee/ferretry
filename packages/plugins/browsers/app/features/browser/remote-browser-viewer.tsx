@@ -183,6 +183,8 @@ export function RemoteBrowserViewer({
   const activePageRef = useRef<string | undefined>(undefined);
   /** The page whose frame is painted right now: what every input says it is meant for. None while nothing is painted. */
   const paintedPageRef = useRef<string | undefined>(undefined);
+  /** Each frame that has arrived but may not be painted yet, by its object URL: it counts as painted only once the image has loaded it. */
+  const arrivedFramesRef = useRef(new Map<string, string>());
   const frameContainerRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const frameRef = useRef<HTMLCanvasElement | null>(null);
@@ -461,9 +463,13 @@ export function RemoteBrowserViewer({
       const previousUrl = previousUrlRef.current;
       previousUrlRef.current = nextUrl;
       previousPageRef.current = livePageId;
-      paintedPageRef.current = frame.pageId;
+      // Not yet painted: the image still shows the frame before this one until it has loaded this, so input keeps naming that one's page.
+      arrivedFramesRef.current.set(nextUrl, frame.pageId);
       setFrameUrl(nextUrl);
-      if (previousUrl !== null) revokeObjectUrl(previousUrl);
+      if (previousUrl !== null) {
+        arrivedFramesRef.current.delete(previousUrl);
+        revokeObjectUrl(previousUrl);
+      }
       setFrameRevision(value => value + 1);
       setDisplayState('live');
       setError(null);
@@ -693,7 +699,12 @@ export function RemoteBrowserViewer({
             ref={imageRef}
             src={frameUrl}
             alt="Live remote browser frame"
-            onLoad={measureInputSurface}
+            onLoad={event => {
+              // The frame is on screen now, not when it arrived: only from here does input name its page.
+              const painted = arrivedFramesRef.current.get(event.currentTarget.getAttribute('src') ?? '');
+              if (painted !== undefined) paintedPageRef.current = painted;
+              measureInputSurface();
+            }}
             style={
               fit
                 ? { flex: '0 1 auto', minHeight: 0, minWidth: 0 }

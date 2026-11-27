@@ -530,3 +530,45 @@ describe('BrowserLoginWindowService, one window per identity', () => {
     should(onTheWire(await subject.status()).state).equal('closed');
   });
 });
+
+describe('BrowserLoginWindowService, an identity retired while the daemon runs', () => {
+  it('should refuse every login operation for an identity retired after its window was first asked about, and spawn nothing', async () => {
+    // Arrange — `a` is configured and its window service is made (a cached pass), then `a` is retired; its profile is still on disk
+    const events: string[] = [];
+    const profiles = new IdentityProfiles();
+    const configured = new Set(['a']);
+    const subject = new BrowserLoginWindowService({
+      configured: identity => configured.has(identity),
+      profile: profiles,
+      runtime: identityRuntime(events),
+      closeAgentBrowsers: async identity => {
+        events.push(`agents-closed:${identity}`);
+      },
+    });
+    should(onTheWire(await subject.status('a')).state).equal('closed');
+    configured.delete('a');
+
+    // Act
+    const refusals = await Promise.all(
+      [
+        async () => await subject.status('a'),
+        async () => await subject.start({ identity: 'a' }),
+        async () => await subject.confirm('a'),
+      ].map(
+        async call =>
+          await call().then(
+            () => undefined,
+            (error: unknown) => error,
+          ),
+      ),
+    );
+
+    // Assert
+    for (const refusal of refusals) {
+      should(refusal).be.instanceOf(BrowserControlError);
+      should(refusal).match({ code: 'bad_request' });
+    }
+    should(events).deepEqual([]);
+    should(profiles.held.size).equal(0);
+  });
+});

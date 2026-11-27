@@ -268,6 +268,10 @@ const mountPane = async (
   return renderer;
 };
 
+/** The browser finishing loading the frame it was given: only then is that frame on screen, and input is allowed over it. */
+const painted = (renderer: ReactTestRenderer, url = 'blob:frame'): void =>
+  run(() => renderer.root.findByType('img').props.onLoad({ currentTarget: { getAttribute: () => url } }));
+
 describe('RemoteBrowserPane composition', () => {
   it('renders the daemon chrome, the display and the governor in source order', async () => {
     const transport = new FakeTransport(runningStatus());
@@ -767,6 +771,7 @@ describe('RemoteBrowserPane text entry', () => {
       // Input is sent over a painted frame only, naming its page.
       socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
     });
+    painted(renderer);
     // The pane's own text seam, not the viewer's keyboard sink that the painted frame brings with it.
     const field = renderer.root
       .findAllByType('textarea')
@@ -999,6 +1004,7 @@ describe('RemoteBrowserPane clipboard', () => {
         // Input is sent over a painted frame only, naming its page.
         socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
       });
+    if (connect) painted(renderer);
     return { renderer, socket };
   };
 

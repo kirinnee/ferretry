@@ -57,6 +57,11 @@ import { NodeSessionBrowserLauncher } from './worker/launcher.ts';
 import { engineFor } from './worker/engine.ts';
 import { workerCommand } from './worker/program.ts';
 
+/** Whether `browsers.yaml` holds this identity among its OWN entries: a name every object inherits (`constructor`, `toString`) is none. */
+function isConfiguredIdentity(config: BrowsersConfig | undefined, identity: string): boolean {
+  return config?.identities !== undefined && Object.hasOwn(config.identities, identity);
+}
+
 /** An identity's browser nobody watches or drives stops after this long, so a forgotten one does not hold its profile. */
 const BROWSER_IDLE_TIMEOUT_MS = 15 * 60_000;
 
@@ -256,7 +261,7 @@ export function buildBrowsers(
         quota,
       ),
     maxRunning: () => config()?.maxRunning ?? DEFAULT_MAX_RUNNING_IDENTITIES,
-    configured: identity => config()?.identities?.[identity] !== undefined,
+    configured: identity => isConfiguredIdentity(config(), identity),
   });
   // Which pages hold a sealed value, and whether a clipboard capture is running: told by Accounts (secure copy's reach), asked by the tools.
   const sealed = new SealedPages({ after: (delay, action) => kernel.clock.after(milliseconds(delay), action) });
@@ -310,7 +315,7 @@ export function buildBrowsers(
     runtime: loginRuntime,
     // Only the identity being signed in has its agent browser closed: every other identity's pages stay live.
     closeAgentBrowsers: async identity => await pages.closeIdentity(identity),
-    configured: identity => config()?.identities?.[identity] !== undefined,
+    configured: identity => isConfiguredIdentity(config(), identity),
   });
 
   // ── the proxy test and state ─────────────────────────────────────────────────────────────────────────────────

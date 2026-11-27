@@ -84,7 +84,9 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
   }
 
   async stop(options: { readonly primed?: boolean; readonly identity?: string } = {}): Promise<BrowserLoginStatus> {
-    return await this.of(options.identity ?? DEFAULT_BROWSER_IDENTITY).stop(options);
+    const identity = options.identity ?? DEFAULT_BROWSER_IDENTITY;
+    // Letting go of a window that is already open launches nothing, so a retired identity's window can still be closed.
+    return await (this.windows.get(identity) ?? this.of(identity)).stop(options);
   }
 
   async confirm(identity: string = DEFAULT_BROWSER_IDENTITY): Promise<BrowserLoginStatus> {
@@ -92,13 +94,14 @@ export class BrowserLoginWindowService implements BrowserLoginLifecycle {
   }
 
   private of(identity: string): IdentityLoginWindow {
+    // Asked of the configuration at every call, never cached: an identity retired since its window was first made gets none.
+    if (identity !== DEFAULT_BROWSER_IDENTITY && !this.options.configured(identity))
+      throw new BrowserControlError(
+        'bad_request',
+        `there is no browser identity named ${identity}; add it under identities in browsers.yaml first`,
+      );
     let window = this.windows.get(identity);
     if (window === undefined) {
-      if (identity !== DEFAULT_BROWSER_IDENTITY && !this.options.configured(identity))
-        throw new BrowserControlError(
-          'bad_request',
-          `there is no browser identity named ${identity}; add it under identities in browsers.yaml first`,
-        );
       window = new IdentityLoginWindow(this.options, identity);
       this.windows.set(identity, window);
     }

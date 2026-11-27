@@ -299,6 +299,41 @@ describe('identity browsers — one Chrome per identity behind the one surface',
     should(launched).deepEqual([]);
   });
 
+  it('should refuse a new page, an open and a named page for an identity retired since its Chrome stopped, and launch nothing', async () => {
+    // Arrange — `work` was configured and in use; its Chrome stops, then it is retired (its profile folder stays on disk)
+    const live = new Set(['work']);
+    const { pages, launched } = world(4, {}, identity => live.has(identity));
+    await pages.openPage('s1', 'work', { identity: 'work' });
+    await pages.closeIdentity('work');
+    live.delete('work');
+    const before = [...launched];
+
+    // Act — none names an identity: the session's remembered one is what they would have gone to
+    const fresh = await failure(pages.act('s1', { action: 'new-page' }));
+    const opened = await failure(pages.act('s1', { action: 'open', url: 'https://example.test/' }));
+    const named = await failure(pages.openPage('s1', 'again'));
+
+    // Assert
+    for (const refused of [fresh, opened, named]) should(refused).match({ code: 'not_found' });
+    should(launched).deepEqual(before);
+  });
+
+  it('should refuse a retired identity even when its Chrome is still up, for a new page', async () => {
+    // Arrange
+    const live = new Set(['work']);
+    const { pages, launched } = world(4, {}, identity => live.has(identity));
+    await pages.openPage('s1', 'work', { identity: 'work' });
+    live.delete('work');
+    const before = [...launched];
+
+    // Act
+    const fresh = await failure(pages.act('s1', { action: 'new-page' }));
+
+    // Assert
+    should(fresh).match({ code: 'not_found' });
+    should(launched).deepEqual(before);
+  });
+
   it('should still open the built-in agent identity and a configured one when the configuration names only the latter', async () => {
     // Arrange
     const { pages, launched } = world(4, {}, identity => identity === 'work');
