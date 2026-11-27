@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ActiveCarrierCard, CARRIER_UNMEASURED } from '../../../app/features/carrier/active-carrier-card.tsx';
+import { PAIR_AGAIN_AFTER_MS } from '../../../app/features/connection/connection-copy.ts';
 import { chooseConnection, describeConnectionMethod, type ConnectionMethod } from '../../../app/lib/connection.ts';
 const direct: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://box.example' };
 const relay: ConnectionMethod = { kind: 'relay', relayUrl: 'https://relay.example', operator: 'hosted' };
@@ -100,4 +101,44 @@ test('R15 the card links the self-hosting runbook and offers no relay setting of
   expect(html).not.toContain('<input');
   expect(html).not.toContain('<button');
   expect(html.match(/<a /gu)).toHaveLength(1);
+});
+
+test('C-80b a relay-only outage offers Pair again at ten minutes and not at nine, and never claims a replacement', () => {
+  const outage = {
+    kind: 'reconnecting',
+    since: 1_000,
+    attempt: 60,
+    nextAttemptAt: null,
+    failures: [{ label: 'Hosted relay', detail: 'the machine is not connected to it (4404)' }],
+    cause: 'daemon-unreachable',
+    stalled: true,
+  } as const;
+  const choice = chooseConnection([{ method: relay, reachable: true }]);
+  const drawn = (now: number, onPairAgain?: () => void) =>
+    renderToStaticMarkup(
+      createElement(ActiveCarrierCard, {
+        choice,
+        relayAdvertised: true,
+        health: outage,
+        machine: 'studio',
+        now,
+        ...(onPairAgain === undefined ? {} : { onPairAgain }),
+      }),
+    );
+  const NINE = 1_000 + 9 * 60_000;
+  const TEN = 1_000 + PAIR_AGAIN_AFTER_MS;
+
+  expect(PAIR_AGAIN_AFTER_MS).toBe(10 * 60_000);
+  const nine = drawn(NINE, () => undefined);
+  expect(nine).not.toContain('data-pair-again');
+  expect(nine).not.toContain('If Ferretry was reinstalled there, pair again.');
+  const ten = drawn(TEN, () => undefined);
+  expect(ten).toContain('data-pair-again-button');
+  expect(ten).toContain('If Ferretry was reinstalled there, pair again.');
+  expect(ten).toContain('Pair again');
+  // Not a verdict: nothing says the machine was replaced or that this browser was refused.
+  expect(ten.toLowerCase()).not.toContain('replaced');
+  expect(ten.toLowerCase()).not.toContain('removed');
+  // A card handed no way to pair (a direct or tunnel pairing) never shows it, however old the outage.
+  expect(drawn(TEN + 3_600_000)).not.toContain('data-pair-again');
 });

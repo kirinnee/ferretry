@@ -43,6 +43,8 @@ import {
   carrierLines,
   OUTAGE_COPY,
   outageDuration,
+  PAIR_AGAIN_COPY,
+  pairAgainOffered,
   RECONNECTING_LABEL,
   stallCopy,
 } from '../connection/connection-copy.ts';
@@ -67,6 +69,11 @@ export interface ActiveCarrierCardProps {
   readonly now?: number;
   /** Retries THIS machine at once (its health model's `retryNow`); absent where nothing can. */
   readonly onRetry?: () => void;
+  /**
+   * Opens pairing for THIS machine. Passed only for a relay-only pairing (a relay cannot tell a replaced machine from an
+   * asleep one), and offered only once the outage is old enough ({@link pairAgainOffered}); absent, never.
+   */
+  readonly onPairAgain?: () => void;
   /** The machine's display name, for the reconnecting advice. */
   readonly machine?: string;
   /** The connection preference selector; absent where nothing can change it. */
@@ -172,6 +179,7 @@ export function ActiveCarrierCard({
   health,
   now = Date.now(),
   onRetry,
+  onPairAgain,
   machine = 'this machine',
   preference,
   relayFallback,
@@ -228,6 +236,20 @@ export function ActiveCarrierCard({
             <div className="mt-2">
               <Button type="button" size="sm" className="min-h-[44px]" onClick={onRetry} data-connection-retry="">
                 {OUTAGE_COPY.retryNow}
+              </Button>
+            </div>
+          )}
+          {onPairAgain === undefined || !pairAgainOffered(outage.since, now) ? null : (
+            <div className="mt-3" data-pair-again="">
+              <p className="mb-0 text-cell leading-base text-muted">{PAIR_AGAIN_COPY.line}</p>
+              <Button
+                type="button"
+                size="sm"
+                className="mt-2 min-h-[44px]"
+                onClick={onPairAgain}
+                data-pair-again-button=""
+              >
+                {PAIR_AGAIN_COPY.button}
               </Button>
             </div>
           )}

@@ -73,3 +73,22 @@ export const carrierLines = (failures: readonly CarrierFailure[]): readonly Carr
     return true;
   });
 };
+
+/**
+ * How long a RELAY-ONLY machine may stay unreachable before the card offers "Pair again": about the time its backoff
+ * has been at its ten-second ceiling for a good while. Measured from the first failure of the outage (`since`), so a
+ * recovered machine that fails again starts the count anew.
+ */
+export const PAIR_AGAIN_AFTER_MS = 10 * 60_000;
+
+/**
+ * The offer's words. It claims nothing: a relay-only browser cannot tell a reinstalled machine from a sleeping one
+ * (a relay's `4404` reads the same), so the line only says what to do IF that is what happened.
+ */
+export const PAIR_AGAIN_COPY = {
+  line: 'If Ferretry was reinstalled there, pair again.',
+  button: 'Pair again',
+} as const;
+
+/** Whether an outage that began at `since` is old enough for {@link PAIR_AGAIN_COPY}, on the clock the card is drawn by. */
+export const pairAgainOffered = (since: number, now: number): boolean => now - since >= PAIR_AGAIN_AFTER_MS;
