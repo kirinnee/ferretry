@@ -5,6 +5,7 @@ import { ClaudeTranscriptParser } from '../../../daemon/reader/lib/transcript/cl
 import { transcriptTurnPhase } from '../../../daemon/turns/lib/policy.ts';
 import fixture from '../../fixtures/transcript/claude.jsonl' with { type: 'text' };
 import compactionFixture from '../../fixtures/transcript/claude-compaction.jsonl' with { type: 'text' };
+(await import('@ferretry/plugin-claude-code/contract/testing')).forkInputs(new ClaudeTranscriptParser());
 
 describe('ClaudeTranscriptParser', () => {
   it('should normalize the synthetic fixture into the common event model', () => {
