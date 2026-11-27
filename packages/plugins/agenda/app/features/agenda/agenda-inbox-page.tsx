@@ -773,9 +773,13 @@ function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonl
   );
 }
 
-/** Refusals whose task is no longer on the deck: said once, until the reader dismisses them. */
-function OrphanedFailures({ inbox }: { readonly inbox: AgendaInbox }) {
-  const onDeck = new Set(inbox.cards.map(card => card.key));
+/**
+ * Refusals whose task the reader is not looking at: said once, until they dismiss them. `shown` names the tasks whose
+ * own view already says their refusal; absent, that is every task still on the list. An opened deck shows ONE task, so a
+ * retried answer refused again while the reader is on another one is said here, not only on a card they may never reopen.
+ */
+function OrphanedFailures({ inbox, shown }: { readonly inbox: AgendaInbox; readonly shown?: readonly string[] }) {
+  const onDeck = new Set(shown ?? inbox.cards.map(card => card.key));
   const orphans = inbox.deferredState.failed.filter(failure => !onDeck.has(failure.key));
   if (orphans.length === 0) return null;
   return (
@@ -1976,7 +1980,7 @@ export function AgendaInboxPage({
             ) : null}
           </header>
         )}
-        <OrphanedFailures inbox={inbox} />
+        <OrphanedFailures inbox={inbox} shown={deck.slice(0, 1).map(card => card.key)} />
         {atEnd ? (
           // The end sits where the task did, at its height: the deck's peek gap and hint line are kept.
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">

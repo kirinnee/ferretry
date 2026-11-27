@@ -1183,3 +1183,24 @@ describe('a lane-proposal card', () => {
     await mounted.unmount();
   });
 });
+
+describe('AgendaInboxPage a second refusal on the open deck', () => {
+  const deckFailures = (mounted: Mounted): string =>
+    mounted.container.querySelector('[data-agenda-failures]')?.textContent ?? '';
+
+  it('says the second refusal of a retried answer on the deck the reader is on, not only on its own card', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [threeWay, twoWay], { phone: true, initialOpen: twoWay.key }));
+    const answer = { kind: 'dismiss', label: 'Dismiss' } as never;
+    // The first answer is refused; the reader retries it, and that is refused too, while they are reading ANOTHER item.
+    fake.failNext = 'first refusal';
+    await interact(() => fake.deferred.schedule(threeWay, answer));
+    await advance(fake, 10_000);
+    fake.failNext = 'second refusal';
+    await interact(() => fake.deferred.schedule(threeWay, answer));
+    await advance(fake, 10_000);
+    expect(mounted.container.querySelector('.fy-attn-deck__top')?.getAttribute('data-agenda-view') ?? 'A2').toBe('A2');
+    expect(deckFailures(mounted)).toContain('second refusal');
+    await mounted.unmount();
+  });
+});
