@@ -672,6 +672,28 @@ describe('W2-a auto-resume, mounted', () => {
       expect(types(h, id)).not.toContain('session.auto_resumed');
     });
 
+    // A stop that cuts the machine's switch question short is not Runtimes saying off: the ledger is kept for the next boot.
+    test('W2-a D-89 a host stop while the switch is being asked ends the pass and keeps the ledger', async () => {
+      const runtimes = fakeRuntimes(() => new Promise(() => undefined));
+      let { h, runner } = await boot([runtimes.plugin]);
+      const id = await start(h, 'yew');
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      let done = false;
+      const pass = h.runJob(AUTO_RESUME_JOB).finally(() => {
+        done = true;
+      });
+      await advance(h, 1_000);
+      expect(runtimes.asked).toEqual([{ ask: 'switch' }]);
+      expect(done).toBe(false);
+      await h.stop();
+      await advance(h, 0);
+      expect(done).toBe(true);
+      await pass;
+      expect(h.state('ferrets').raw(AutoResumeFile) ?? '').toContain(id);
+      expect(runner.starts).toBe(launches);
+    });
+
     // The other half: the ferret's own Stop while the pass waits wins, and the pass asks nothing more about it.
     test('W2-a D-89 a ferret Stop while the pass waits to ask again leaves no second ask and no launch', async () => {
       let lost = true;
