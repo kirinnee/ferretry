@@ -218,3 +218,68 @@ describe('the steps back in after a login page (recoveryPlan)', () => {
     should(recoveryPlan([link(1, 'work'), link(1, 'home')], WORLD, 'code.example', facts)).eql([]);
   });
 });
+
+/**
+ * THROUGH THE REAL IN-MEMORY ACCOUNTS DIRECTORY (R1): the listing's `via.signIn` is built by the directory, not by a
+ * helper, so the proof that only the provider's OWN sign-in counts has to hold for whichever sign-in was saved first.
+ */
+describe('which sign-in the directory names as the provider (real directory, both save orders)', () => {
+  const OWN = 'accounts.google.com';
+  const OTHER = 'other.example';
+
+  async function saved(order: readonly string[]) {
+    const index = new MemoryLoginIndex();
+    const sealed = new CountingSealed();
+    let signInNo = 0;
+    let keyNo = 0;
+    const { directory } = daemonOver(index, sealed, {
+      newKey: () => `L${(++keyNo).toString(16).toUpperCase().padStart(24, '0')}`,
+      newSignInId: () => `si_${(++signInNo).toString(16).padStart(16, '0')}`,
+    });
+    await directory.putAccount('GOOGLE', { label: 'Google' });
+    await directory.putAccount('PERSONAL', { label: 'Personal' });
+    const ids = new Map<string, string>();
+    for (const host of order) ids.set(host, (await directory.addSignIn('GOOGLE', { place: site(host) })).id);
+    const backed = await directory.addSignIn('PERSONAL', {
+      place: site('backed.example'),
+      method: { kind: 'google', via: 'GOOGLE' },
+    });
+    const listing = await directory.list();
+    return { listing, ids, backed };
+  }
+
+  for (const order of [
+    [OTHER, OWN],
+    [OWN, OTHER],
+  ]) {
+    it(`should name Google's own sign-in as the provider when saved in the order ${order.join(' then ')}`, async () => {
+      const { listing, ids, backed } = await saved(order);
+      should(listing.signIns.find(each => each.id === backed.id)?.via?.signIn).equal(ids.get(OWN));
+    });
+
+    it(`should not put a Google-backed site in the identity that holds only another site (${order.join(' then ')})`, async () => {
+      const { listing, ids } = await saved(order);
+      const onlyOther: IdentityLink = {
+        signIn: ids.get(OTHER) as string,
+        identity: 'personal',
+        seenAt: AT,
+        how: 'filled',
+      };
+      should(resolveIdentity([onlyOther], listing, 'backed.example')).eql({ none: true });
+      should(recoveryPlan([onlyOther], listing, 'backed.example', { providerSignedIn: true, standingRule: true })).eql(
+        [],
+      );
+    });
+
+    it(`should still follow a link on Google's own sign-in (${order.join(' then ')})`, async () => {
+      const { listing, ids } = await saved(order);
+      const own: IdentityLink = { signIn: ids.get(OWN) as string, identity: 'personal', seenAt: AT, how: 'filled' };
+      should(resolveIdentity([own], listing, 'backed.example')).eql({ identity: 'personal', via: ['GOOGLE'] });
+    });
+  }
+
+  it('should name no provider sign-in when the provider account has none at its own host', async () => {
+    const { listing, backed } = await saved([OTHER]);
+    should(listing.signIns.find(each => each.id === backed.id)?.via?.signIn).be.undefined();
+  });
+});

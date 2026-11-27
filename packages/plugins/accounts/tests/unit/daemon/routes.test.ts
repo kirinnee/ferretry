@@ -503,7 +503,7 @@ describe('a ferret reading the hint: the browser identity', () => {
     const w = await seedWorld();
     await w.directory.putAccount('GOOGLE', { label: 'Google' });
     const google = await w.directory.addSignIn('GOOGLE', {
-      place: { kind: 'site', domains: ['idp.example'], match: [] },
+      place: { kind: 'site', domains: ['accounts.google.com'], match: [] },
     });
     await w.directory.addSignIn('GITHUB', {
       place: { kind: 'site', domains: ['github.com'], match: ['github.com'] },
