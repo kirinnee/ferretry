@@ -92,7 +92,7 @@ import { disablePasskeys } from './passkeys.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../pages/pointer.ts';
 import { type PointerPage, performPointerAct, pointerActParam } from '../pages/pointer-acts.ts';
 import type { PushNumberPage } from '../challenges/push-number-read.ts';
-import { BrowserCapture, type CaptureFrameEvent } from './capture/index.ts';
+import { BrowserCapture, type CaptureFrameEvent, withheldPageStatus } from './capture/index.ts';
 
 const endpoint = process.argv[2];
 /** This worker drives a stealth identity's Chrome (`STEALTH_WORKER_ENVIRONMENT` in `client.ts`): patchright-core, with no `Runtime.enable`. */
@@ -816,10 +816,7 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
 }
 
 async function acted(page: Page, extra: Readonly<Record<string, unknown>> = {}): Promise<Record<string, unknown>> {
-  const safe = await capture.inspect([page]).then(
-    () => true,
-    () => false,
-  );
+  const safe = await capture.inspectSafely(page);
   const pending = dialogs.pending(pageId(page));
   const dialog = pending === undefined || safe ? pending : { type: pending.type, message: '[capture withheld]' };
   const notices = await downloads.notices(pageId(page));
@@ -828,19 +825,7 @@ async function acted(page: Page, extra: Readonly<Record<string, unknown>> = {}):
   try {
     status = await snapshot(page, safe ? (capture.masks(page).data(extra) as Record<string, unknown>) : {});
   } catch {
-    // An action can finish while another tab navigates. Keep controls available, withholding all observations.
-    return {
-      url: 'about:blank',
-      title: '[capture withheld]',
-      activePageId: pageId(page),
-      actedPageId: pageId(page),
-      pages: livePages()
-        .slice(0, MAX_PAGES)
-        .map(item => ({ id: pageId(item), url: 'about:blank', title: '[capture withheld]' })),
-      pageState: 'ready',
-      canGoBack: false,
-      canGoForward: false,
-    };
+    return withheldPageStatus(pageId(page), livePages().slice(0, MAX_PAGES).map(pageId));
   }
   return {
     ...status,
@@ -915,10 +900,7 @@ async function lifecycle(params: Readonly<Record<string, unknown>>): Promise<Rec
     },
     parsed.data,
   );
-  const safe = await capture.inspect([page]).then(
-    () => true,
-    () => false,
-  );
+  const safe = await capture.inspectSafely(page);
   return {
     ...(await acted(page)),
     lifecycle: safe ? capture.masks(page).data(reply) : { text: 'The dialog was answered; its message is withheld.' },
@@ -1448,12 +1430,7 @@ async function answer(request: Request): Promise<void> {
     send({ id: request.id, ok: true, result: !internal && page ? capture.masks(page).data(result) : result });
     if (request.method === 'close') process.exit(0);
   } catch (error) {
-    const inspected =
-      page !== undefined &&
-      (await capture.inspect([page]).then(
-        () => true,
-        () => false,
-      ));
+    const inspected = page !== undefined && (await capture.inspectSafely(page));
     send({
       id: request.id,
       ok: false,

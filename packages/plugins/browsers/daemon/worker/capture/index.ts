@@ -13,6 +13,20 @@ export interface CaptureFrameEvent {
   readonly metadata?: { readonly deviceWidth?: unknown; readonly deviceHeight?: unknown };
 }
 
+/** Keep action controls available when observations from a changing context must be withheld. */
+export function withheldPageStatus(id: string, pages: readonly string[]): Record<string, unknown> {
+  return {
+    url: 'about:blank',
+    title: '[capture withheld]',
+    activePageId: id,
+    actedPageId: id,
+    pages: pages.map(id => ({ id, url: 'about:blank', title: '[capture withheld]' })),
+    pageState: 'ready',
+    canGoBack: false,
+    canGoForward: false,
+  };
+}
+
 /** One capture boundary for the worker's tools, live stream and recording stream. */
 export class BrowserCapture {
   private readonly fields = new WeakMap<Page, CaptureFields>();
@@ -103,6 +117,13 @@ export class BrowserCapture {
     await this.bounded(async () => {
       for (const context of new Set(pages.map(page => page.context()))) await this.inspectContext(context);
     });
+  }
+
+  inspectSafely(page: Page): Promise<boolean> {
+    return this.inspect([page]).then(
+      () => true,
+      () => false,
+    );
   }
 
   private async inspectContext(context: BrowserContext): Promise<Map<Page, CaptureScan>> {
