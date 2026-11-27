@@ -75,7 +75,7 @@ const fixtureScan = async (entries: Readonly<Record<string, FixtureEntry>>, clau
     ...entries,
   });
   const scanner = new HostHarnessScanner({
-    kits: () => new Map([['claude', claudeRuntimesKit]]),
+    kits: () => IMPORT_KITS,
     userHome: '/fixture/home',
     ...(claudeConfigDir === undefined ? {} : { claudeConfigDir }),
     files: fixture.files,
@@ -192,7 +192,7 @@ const scan = async (logins: Pick<LoginsApi, 'list'>) => {
     return undefined;
   };
   const scanner = new HostHarnessScanner({
-    kits: () => new Map([['claude', claudeRuntimesKit]]),
+    kits: () => IMPORT_KITS,
     userHome: '/fixture/home',
     files: {
       stat: async path => touch(path),

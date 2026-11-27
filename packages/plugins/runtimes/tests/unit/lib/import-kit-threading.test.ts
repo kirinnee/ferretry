@@ -25,6 +25,7 @@ beforeEach(() => {
   calls.length = 0;
 });
 
+const { HostHarnessScanner } = await import('../../../daemon/adapters/host-harness-scan.ts');
 const { planImport } = await import('../../../daemon/lib/account/import-plan.ts');
 const { fileFleetSetupDeps } = await import('../../../daemon/adapters/setup-files.ts');
 const { FleetSetupService } = await import('../../../daemon/lib/service/setup-service.ts');
@@ -117,12 +118,63 @@ describe('host import kit threading', () => {
     const service = new FleetSetupService(deps);
     await expect(service.scan()).rejects.toThrow('claude is not supported here');
     expect(calls).toEqual([]);
-    expect(requested).toEqual(['claude', 'codex']);
+    expect(requested).toEqual(['claude']);
     calls.length = 0;
     requested.length = 0;
     online = true;
     await service.scan();
     expectKits(kits);
     expect(requested).toEqual(['claude', 'codex', 'claude', 'codex', 'claude', 'codex']);
+  });
+});
+
+describe('host scan kit refusal', () => {
+  const scannerOver = (kitMap: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined) => {
+    const touched: string[] = [];
+    const note = (path: string) => {
+      touched.push(path);
+      return undefined;
+    };
+    const scanner = new HostHarnessScanner({
+      kits: () => kitMap,
+      files: {
+        stat: async path => note(path),
+        lstat: async path => note(path),
+        readText: async path => note(path),
+        readBytes: async path => note(path),
+        list: async path => note(path),
+      },
+      userHome: '/fixture/home',
+      commands: { resolve: () => undefined },
+      logins: fakeLogins([]),
+      maxDocumentBytes: 1024,
+    });
+    return { scanner, touched };
+  };
+
+  it('refuses a missing kit map, and each harness missing its own kit or scan member, before any host read', async () => {
+    const cases: [string, ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined, string][] = [
+      ['no kits', undefined, 'claude is not supported here'],
+      ['no Codex kit', new Map([['claude', claudeRuntimesKit]]), 'codex is not supported here'],
+      ['no Claude kit', new Map([['codex', codexRuntimesKit]]), 'claude is not supported here'],
+      [
+        'a Codex kit without scanHost',
+        new Map([
+          ['claude', claudeRuntimesKit],
+          ['codex', { ...codexRuntimesKit, scanHost: undefined }],
+        ]),
+        'codex is not supported here',
+      ],
+    ];
+    for (const [, kitMap, sentence] of cases) {
+      const { scanner, touched } = scannerOver(kitMap);
+      await expect(scanner.scan()).rejects.toThrow(sentence);
+      expect(touched).toEqual([]);
+    }
+  });
+
+  it('scans both harnesses with their own kits', async () => {
+    const { scanner } = scannerOver(kits);
+    expect((await scanner.scan()).map(found => found.harness)).toEqual(['claude', 'codex']);
   });
 });

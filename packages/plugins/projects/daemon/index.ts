@@ -1,4 +1,5 @@
-import type { FerretId } from '@ferretry/core-ferrets/contract';
+import { type FerretId, projectGroup } from '@ferretry/core-ferrets/contract';
+import path from 'node:path';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { type ProjectId, ProjectRegistered, ProjectRemoved } from '../contract/index.ts';
 import manifest from '../manifest.ts';
@@ -59,11 +60,22 @@ export const implementProjects = (folders?: ProjectFolders, repoScan?: ScanDeps,
           'launch.roots:projects': {
             roots: async () => (await registry.list()).map(project => project.path),
             // The repository list is asked by project id; the directory is the one registration recorded, never a caller's.
-            repository: async project => {
+            repository: async (project, commonDirectory) => {
               const found = await registry.find(project as ProjectId);
-              return found?.git === undefined
+              if (found === undefined) return undefined;
+              if (commonDirectory !== undefined && commonDirectory !== found.git?.commonDirectory) {
+                const repo = found.repos?.find(repo => path.join(found.path, repo.path, '.git') === commonDirectory);
+                return repo === undefined
+                  ? undefined
+                  : { folder: path.join(found.path, repo.path), commonDirectory, worktreeGroup: projectGroup(found) };
+              }
+              return found.git === undefined
                 ? undefined
-                : { folder: found.path, commonDirectory: found.git.commonDirectory };
+                : {
+                    folder: found.path,
+                    commonDirectory: found.git.commonDirectory,
+                    worktreeGroup: projectGroup(found),
+                  };
             },
           },
           // A ferret started in a repository nobody registered: it becomes a project (a known one is left as it is).

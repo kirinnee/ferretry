@@ -5,6 +5,8 @@ import { z } from 'zod';
 export interface ProjectRepository {
   readonly folder: string;
   readonly commonDirectory: string;
+  /** The same opaque group Projects supplies for new worktrees. */
+  readonly worktreeGroup?: string;
 }
 
 /** The project folders a governed device may start a ferret in without terminal access (absolute paths). */
@@ -15,7 +17,7 @@ export interface LaunchRootsSource {
    * such project, or one that is no git repository). The repository worktree list asks it so a caller names a project
    * and never a path: Ferrets reads the answer, it never takes a directory from the caller.
    */
-  repository?(project: string): Promise<ProjectRepository | undefined>;
+  repository?(project: string, commonDirectory?: string): Promise<ProjectRepository | undefined>;
 }
 
 /** The one key `launch.roots` is provided under. */
