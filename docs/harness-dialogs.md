@@ -216,6 +216,10 @@ planner at the moment of pressing. A screen whose only way out grants something 
 **The Claude in Chrome notice has no rows**, so its rule is named three ways at once: the title `Claude in Chrome`, **no rows**
 (`rows: none`: a screen that only shares the title, with rows to choose, is not it) and its own footer line "Enter to
 continue · Esc to close" on the live frame. Anything less could press Esc on a Claude composer, where Esc interrupts work.
+The same three are read from the **fresh frame itself** at the write, not only from the earlier record: the footer must be the
+frame's last line, the block above it (back to the divider that opens the screen) must start with the title line, and it must
+hold no row, cursor glyph or chevron. A fresh frame with the footer but another title, or with rows, presses nothing and the
+owner is told.
 
 **What a press looks like.** (1) The live frame is read and must still show the screen — the recorded dialog can lag, and Esc
 on a pane that moved on would interrupt a turn — and the runner's own reader must say the KIND the rule presses on blocks it (a dialog for a row to choose, a permission prompt for Esc on one). (2) Arrows

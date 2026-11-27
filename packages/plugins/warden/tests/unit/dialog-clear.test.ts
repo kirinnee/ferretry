@@ -780,7 +780,7 @@ describe('a key is sent only if the live notice is still on screen when it is wr
   const COMPOSER = ['● Reading the files…', '', '─'.repeat(40), '❯ ', '─'.repeat(40), '  esc to interrupt'].join('\n');
 
   /** Ferrets' form seam over a pane that shows the notice for `noticeReads` captures, then a working composer. */
-  function seam(noticeReads: number) {
+  function seam(noticeReads: number, later = COMPOSER, laterBlocking: 'dialog' | undefined = undefined) {
     let reads = 0;
     const pressed: FormKey[] = [];
     const harness = {
@@ -788,7 +788,7 @@ describe('a key is sent only if the live notice is still on screen when it is wr
         capture: async () => {
           reads += 1;
           const shown = reads <= noticeReads;
-          return { ok: true, value: { visible: shown ? NOTICE : COMPOSER, blocking: shown ? 'dialog' : undefined } };
+          return { ok: true, value: { visible: shown ? NOTICE : later, blocking: shown ? 'dialog' : laterBlocking } };
         },
         key: async (key: FormKey) => {
           pressed.push(key);
@@ -826,6 +826,54 @@ describe('a key is sent only if the live notice is still on screen when it is wr
     should(result.cleared).equal(0);
     should(result.toTell).have.length(1);
     should(events.filter(event => event.type === 'fleet.warden_dialog_autocleared')).eql([]);
+  });
+
+  const FOOTER = '  Enter to continue · Esc to close';
+  const OTHER_TITLE = ['', '  Something else entirely', '  A different notice.', '', FOOTER].join('\n');
+  const WITH_ROWS = ['', '  Claude in Chrome', '  Turn it on?', '', '  ❯ Enable', '    Not now', '', FOOTER].join('\n');
+  const NUMBERED_ROWS = [
+    '',
+    '  Claude in Chrome',
+    '  Turn it on?',
+    '',
+    '  ❯ 1. Enable',
+    '    2. Not now',
+    '',
+    FOOTER,
+  ].join('\n');
+  /** The notice's title only in prose above a different screen that carries the same footer. */
+  const TITLE_IN_PROSE = ['  the Claude in Chrome', '', '  Another heading', '', FOOTER].join('\n');
+  const FRESH: readonly (readonly [string, string])[] = [
+    ['another title and the exact footer', OTHER_TITLE],
+    ['the title, the footer and rows', WITH_ROWS],
+    ['the title, the footer and numbered rows', NUMBERED_ROWS],
+    ['the title only in prose above another screen with the footer', TITLE_IN_PROSE],
+  ];
+
+  for (const [name, fresh] of FRESH) {
+    it(`should press nothing, and tell the owner, when the fresh frame at the write shows ${name}`, async () => {
+      // Arrange: the look and the recorded words say the Chrome notice; the write path's own re-read says otherwise
+      const { pressed, ports } = seam(1, fresh, 'dialog');
+      const { clear, events } = stand(ports);
+
+      // Act
+      const result = await clear.clear([watched(chrome)]);
+
+      // Assert
+      should(pressed).eql([]);
+      should(result.cleared).equal(0);
+      should(result.toTell).have.length(1);
+      should(events.filter(event => event.type === 'fleet.warden_dialog_autocleared')).eql([]);
+    });
+  }
+
+  it('should read the notice by its own title, footer and zero rows in the very frame it checks', () => {
+    // Arrange
+    const rule = BUILT_IN.find(each => each.id === 'claude-chrome-notice') as NonNullable<(typeof BUILT_IN)[number]>;
+
+    // Assert
+    for (const [, fresh] of FRESH) should(frameShows(rule, chrome.dialog, fresh)).equal(false);
+    should(frameShows(rule, chrome.dialog, NOTICE)).equal(true);
   });
 
   it('should not match a Claude in Chrome title that has rows, nor a frame without the notice’s own footer', () => {
