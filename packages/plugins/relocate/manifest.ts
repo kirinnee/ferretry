@@ -104,5 +104,5 @@ export default definePlugin({
 
   // The working tree is read through the `imports` root, scoped to the one folder the ferret works in, and git is run
   // only to list, diff and bundle it.
-  permissions: { roots: ['imports'], spawn: ['git', 'mkdir'] },
+  permissions: { roots: ['imports', 'worktrees'], spawn: ['git'] },
 });

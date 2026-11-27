@@ -21,7 +21,7 @@ export interface Checkout {
   prepare(
     source: { readonly repo: string } | { readonly remote: string },
     folder: string,
-  ): Promise<{ readonly repo: string; cleanup(): Promise<void> }>;
+  ): Promise<{ readonly repo: string; readonly folder: string; cleanup(): Promise<void> }>;
   /** Prove the full history and the patched index before any checkout or launch; detach from borrowed objects. */
   audit(repo: string, head: string, diff?: Uint8Array): Promise<void>;
   finish(repo: string): Promise<void>;
@@ -47,6 +47,11 @@ const READ_BYTES = 64 * 1024;
 /** The checkout over the kernel: git through `kernel.spawn` inside a held directory, files through the `imports` root. */
 export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Checkout {
   const alternates = new Map<string, string>();
+  const quarantines = new Map<string, () => Promise<void>>();
+  const verify = async (folder: string) => {
+    for (const [quarantine, check] of quarantines)
+      if (folder === quarantine || folder.startsWith(`${quarantine}/`)) await check();
+  };
   const parentOf = (path: string): { readonly parent: string; readonly name: string } => {
     const cut = path.lastIndexOf('/');
     return { parent: cut <= 0 ? '/' : path.slice(0, cut), name: path.slice(cut + 1) };
@@ -57,11 +62,13 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
     args: readonly string[],
     options: { readonly stdin?: Uint8Array; readonly maxStdoutBytes?: number } = {},
   ) => {
+    await verify(folder);
     const handle = kernel.roots.root('imports', { subfolder: folder });
     const self = handle.resolve('');
     if (!self.ok) throw new CheckoutError('this folder cannot be fenced for git');
     const held = await handle.pin(self.value, { fence: 'none' });
     try {
+      await verify(folder);
       const done = await kernel.spawn.runBytes(
         'git',
         [
@@ -124,40 +131,34 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
 
   return {
     prepare: async (source, folder) => {
-      const { parent, name } = parentOf(folder);
-      const handle = kernel.roots.root('imports', { subfolder: parent });
+      const { name } = parentOf(folder);
+      // The kernel provisions this parent, outside the daemon's state home. Never stage beside an untrusted project.
+      const handle = kernel.roots.root('worktrees');
       const path = handle.resolve(name);
-      const cwd = handle.resolve('');
-      if (!path.ok || !cwd.ok) throw new CheckoutError('the quarantine folder cannot be fenced');
-      const held = await handle.pin(cwd.value, { fence: 'none' });
-      try {
-        const created = await kernel.spawn.runBytes('mkdir', ['-m', '700', '--', name], {
-          cwd: held.policyCwd,
-          env: {},
-          sealed: true,
-          timeout: milliseconds(GIT_TIMEOUT_MS),
-          maxStdoutBytes: READ_BYTES,
-          maxStderrBytes: READ_BYTES,
-          killOnOutputLimit: true,
-        });
-        if (created.exitCode !== 0 || created.timedOut)
-          throw new CheckoutError('the quarantine folder is already taken or could not be created');
-      } finally {
-        await held.close();
-      }
-      const identity: RootIdentity | undefined = await handle.fileIdentity(path.value);
-      if (identity === undefined) throw new CheckoutError('the quarantine folder identity could not be proved');
-      const repo = `${folder}/repository`;
+      if (!path.ok || handle.createDirectory === undefined)
+        throw new CheckoutError('the quarantine folder cannot be created with a bound identity');
+      const identity: RootIdentity = await handle.createDirectory(path.value);
+      const stage = path.value;
+      const repo = `${stage}/repository`;
+      const check = async () => {
+        const actual = await handle.fileIdentity(path.value);
+        if (actual?.device !== identity.device || actual.inode !== identity.inode)
+          throw new CheckoutError('the quarantine folder changed; it was kept');
+      };
+      quarantines.set(stage, check);
       const cleanup = async () => {
         alternates.delete(repo);
+        quarantines.delete(stage);
+        await check();
         await handle.remove(path.value, { expectedIdentity: identity });
       };
       try {
+        await check();
         if ('remote' in source) {
           if (!approvedRemote(source.remote))
             throw new CheckoutError('only an approved https or ssh project address may be cloned');
           await must(
-            folder,
+            stage,
             ['clone', '--no-checkout', '--template=', '--', source.remote, repo],
             'the network project could not be cloned',
           );
@@ -174,10 +175,10 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
             .trim();
           if (!objects.startsWith('/') || /[\n\r:\0]/u.test(objects))
             throw new CheckoutError('the project objects cannot be borrowed safely');
-          await must(folder, ['init', '--template=', '--', repo], 'the quarantine repository could not be made');
+          await must(stage, ['init', '--template=', '--', repo], 'the quarantine repository could not be made');
           alternates.set(repo, objects);
         }
-        return { repo, cleanup };
+        return { repo, folder: stage, cleanup };
       } catch (error) {
         try {
           await cleanup();
@@ -204,6 +205,8 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
       await must(repo, ['repack', '-a', '-d'], 'the quarantined objects could not be made independent');
       alternates.delete(repo);
       await must(repo, ['fsck', '--no-reflogs', '--connectivity-only'], 'the quarantined objects are incomplete');
+      await verify(repo);
+      for (const stage of quarantines.keys()) if (repo.startsWith(`${stage}/`)) quarantines.delete(stage);
     },
     hasCommit: async (repo, sha) => (await git(repo, ['cat-file', '-e', `${sha}^{commit}`])).exitCode === 0,
 
@@ -241,6 +244,7 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
     },
 
     writeNewFile: async (tree, relative, bytes) => {
+      await verify(tree);
       const handle = kernel.roots.root('imports', { subfolder: tree });
       const fenced = handle.resolve(relative);
       if (!fenced.ok) throw new CheckoutError('a moved file would land outside its working tree');

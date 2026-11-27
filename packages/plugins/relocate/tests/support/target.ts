@@ -118,7 +118,9 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
       },
     },
   });
-  const realCheckout = kernelCheckout(realKernel(new Map([[REMOTE_URL.replace(/\.git$/u, ''), bare]])));
+  const realCheckout = kernelCheckout(
+    realKernel(new Map([[REMOTE_URL.replace(/\.git$/u, ''), bare]]), join(machine, 'managed-worktrees')),
+  );
   const deps: ImporterDeps = {
     crypto,
     ownDaemonId: identity.daemonId,

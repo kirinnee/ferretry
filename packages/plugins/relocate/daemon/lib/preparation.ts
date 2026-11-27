@@ -62,7 +62,7 @@ export class Preparation {
         tree === undefined
           ? undefined
           : {
-              inspect: check => this.wait(() => tree.inspect(check)),
+              inspect: (check, changes) => this.wait(() => tree.inspect(check, changes)),
               head: () => this.wait(() => tree.head()),
               remote: () => this.wait(() => tree.remote()),
               ignoredTopLevel: () => this.wait(() => tree.ignoredTopLevel()),

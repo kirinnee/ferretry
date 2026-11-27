@@ -3,11 +3,12 @@ import { milliseconds } from '@ferretry/std';
 import { namesASecret } from './path-policy.ts';
 import { normalizeRemote } from './remote.ts';
 import type { KernelPorts } from '@ferretry/kernel/contract';
+import { inspectBinaryPatch } from './binary-patch.ts';
 
 /** What the snapshot asks of one working tree. Git runs only to list, diff and bundle; it never writes the tree. */
 export interface WorkingTree {
   /** Decompressed history objects, inspected inside the daemon before their pack may be exported. */
-  inspect(check: (path: string, bytes: Uint8Array) => void): Promise<void>;
+  inspect(check: (path: string, bytes: Uint8Array) => void, changes?: Uint8Array): Promise<void>;
   /** `HEAD`'s commit and the branch it is on (absent on a detached `HEAD`), or `undefined` for a folder that is no work tree. */
   head(): Promise<{ readonly head: string; readonly branch?: string } | undefined>;
   /** `origin`'s address in the one spelling two machines compare (`normalizeRemote`), or `undefined` when it has none or it is no network address. */
@@ -162,7 +163,7 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
     return head;
   };
   return {
-    inspect: async check => {
+    inspect: async (check, changes) => {
       const head = await verifiedHead();
       const deadline = kernel.clock.nowMs() + 10_000;
       const objects = decoder
@@ -180,6 +181,17 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
         if (inspected > 500 * 1024 * 1024) throw new WorkingTreeError('the expanded history is too large to inspect');
         check(split < 0 ? 'git history' : object.slice(split + 1), bytes);
       }
+      if (changes !== undefined)
+        await inspectBinaryPatch(
+          changes,
+          async oid => await ok(['cat-file', 'blob', oid], 64 * 1024 * 1024, deadline),
+          (path, bytes) => {
+            inspected += bytes.length;
+            if (inspected > 500 * 1024 * 1024 || kernel.clock.nowMs() >= deadline)
+              throw new WorkingTreeError('the expanded move exceeded its inspection limits');
+            check(path, bytes);
+          },
+        );
     },
     head: async () => {
       const done = await git(['rev-parse', '--verify', '-q', 'HEAD'], 4096);
@@ -224,7 +236,21 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
       const paths = await audit(head);
       if (paths.length === 0) return new Uint8Array();
       const diff = await ok(
-        ['diff', '--binary', '--no-renames', '--no-ext-diff', '--no-textconv', head, '--', ...paths],
+        [
+          'diff',
+          '--binary',
+          '--full-index',
+          '--no-color',
+          '--no-relative',
+          '--src-prefix=a/',
+          '--dst-prefix=b/',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          head,
+          '--',
+          ...paths,
+        ],
         maxBytes,
       );
       if (/^(?:old mode|new mode|new file mode|deleted file mode) (?!100644|100755)/mu.test(decoder.decode(diff)))

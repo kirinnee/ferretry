@@ -152,7 +152,7 @@ export class Relocation {
               check(entry.path, entry.bytes);
             }
             // A git pack compresses its blobs. Inspect their original bytes as well as the exported pack.
-            await after.tree?.inspect(check);
+            await after.tree?.inspect(check, entries.find(entry => entry.kind === 'worktree-changes')?.bytes);
           })
           .catch(error => {
             if (error instanceof RelocateRefused) throw error;

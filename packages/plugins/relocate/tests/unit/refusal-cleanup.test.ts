@@ -42,12 +42,19 @@ test('failed quarantine preparation reports a failed identity-bound cleanup and 
   const root = mkdtempSync(join(tmpdir(), 'relocate-cleanup-'));
   const folder = join(root, 'quarantine');
   const kernel = realKernel();
+  let quarantine = '';
   const checkout = kernelCheckout({
     ...kernel,
     roots: {
       ...kernel.roots,
       root: (name, options) => ({
         ...kernel.roots.root(name, options),
+        createDirectory: async path => {
+          quarantine = path;
+          const create = kernel.roots.root(name, options).createDirectory;
+          if (create === undefined) throw new Error('missing creating handle');
+          return await create(path);
+        },
         remove: async () => {
           throw new Error('injected cleanup failure');
         },
@@ -55,7 +62,7 @@ test('failed quarantine preparation reports a failed identity-bound cleanup and 
     },
   });
   await expect(checkout.prepare({ remote: 'file:///tmp/hostile.git' }, folder)).rejects.toThrow('cleanup failed');
-  expect(existsSync(folder)).toBe(true);
+  expect(existsSync(quarantine)).toBe(true);
 });
 
 test('expanded-history inspection refuses an excessive object list before reading any object', async () => {

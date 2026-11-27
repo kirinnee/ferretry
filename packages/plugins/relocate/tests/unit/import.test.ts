@@ -108,7 +108,7 @@ describe('what is refused before anything is written', () => {
     expect(refused.code).toBe('move_refused');
     expect(second.started).toEqual([]);
     expect(t.shape()).toEqual(before);
-    expect(second.shape().folders).toEqual([]);
+    expect(second.shape().folders).toEqual(['managed-worktrees']);
   });
 
   test('with an account but no folder to clone into it says so; with one, the preflight offers the clone', async () => {
@@ -210,14 +210,14 @@ describe('a failure at any step leaves the target with nothing new', () => {
     expect(await Bun.file(join(cloneInto, 'project', 'README.md')).exists()).toBe(false);
   });
 
-  test('a clone succeeds into the folder the person named, beside which the working tree is made', async () => {
+  test('a network clone succeeds in the daemon-owned managed parent', async () => {
     const w = await world();
     const t = await targetWorld({ project: false, accounts: 1 }, w.fixture.remote);
     const cloneInto = join(t.root, 'clones');
     mkdirSync(cloneInto);
     const { offerId, header } = await t.carry(w);
     const done = await t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId, cloneInto });
-    expect(done.folder.startsWith(`${join(cloneInto, 'project')}-main-`)).toBe(true);
+    expect(done.folder.startsWith(`${join(t.root, 'managed-worktrees', 'project')}-main-`)).toBe(true);
     expect(git(done.folder, 'rev-parse', 'HEAD')).toBe(git(w.fixture.folder, 'rev-parse', 'HEAD'));
   });
 

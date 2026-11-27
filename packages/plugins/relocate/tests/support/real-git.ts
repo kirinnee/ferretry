@@ -44,7 +44,9 @@ export function gitInput(cwd: string, input: Uint8Array, ...args: string[]): str
  */
 export function realKernel(
   remotes: ReadonlyMap<string, string> = new Map(),
+  worktrees = mkdtempSync(join(tmpdir(), 'relocate-private-worktrees-')),
 ): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
+  mkdirSync(worktrees, { recursive: true, mode: 0o700 });
   return {
     clock: { nowMs: () => performance.now() } as KernelPorts['clock'],
     spawn: {
@@ -97,8 +99,8 @@ export function realKernel(
       },
     },
     roots: {
-      root: (_name: string, scope?: { readonly subfolder?: string }) => {
-        const base = scope?.subfolder ?? '';
+      root: (name: string, scope?: { readonly subfolder?: string }) => {
+        const base = name === 'worktrees' ? worktrees : (scope?.subfolder ?? '');
         return {
           resolve: (relative: string) =>
             relative.startsWith('/') || relative.split('/').includes('..')
@@ -131,6 +133,11 @@ export function realKernel(
             new Uint8Array(await Bun.file(path).arrayBuffer()).slice(0, limit),
           makeDirectory: async (path: string) => {
             mkdirSync(path, { recursive: true });
+          },
+          createDirectory: async (path: string) => {
+            mkdirSync(path, { mode: 0o700 });
+            const stat = lstatSync(path, { bigint: true });
+            return { device: stat.dev, inode: stat.ino };
           },
           writeBytes: async (path: string, bytes: Uint8Array, options?: { readonly exclusive?: boolean }) => {
             if (options?.exclusive === true && lstatSync(path, { throwIfNoEntry: false }) !== undefined)

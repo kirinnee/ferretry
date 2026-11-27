@@ -17,14 +17,18 @@ function safePath(path: string): boolean {
   );
 }
 
-function targetOf(path: string, target: string): string {
+function targetOf(path: string, target: string, links: ReadonlyMap<string, string>): string {
   if (target === '' || target.startsWith('/') || /[\\\p{Cc}]/u.test(target))
     throw new CheckoutError('a moved symlink leaves its tree');
   const parts = path.split('/').slice(0, -1);
   for (const part of target.split('/')) {
     if (part === '..') {
       if (parts.pop() === undefined) throw new CheckoutError('a moved symlink leaves its tree');
-    } else if (part !== '' && part !== '.') parts.push(part);
+    } else if (part !== '' && part !== '.') {
+      parts.push(part);
+      // Judge the original walk BEFORE a later `..` could erase a symlink hop.
+      if (links.has(parts.join('/'))) throw new CheckoutError('chained moved symlinks cannot be audited safely');
+    }
   }
   const resolved = parts.join('/');
   if (!safePath(resolved)) throw new CheckoutError('a moved symlink names a protected path');
@@ -50,13 +54,10 @@ export async function auditTree(git: Git, head: string, diff?: Uint8Array): Prom
         throw new CheckoutError('the moved tree contains an unsafe path, mode or submodule');
       if (match[1] === '120000') {
         const path = match[3] as string;
-        links.set(path, targetOf(path, decode(await git(['cat-file', 'blob', match[2] as string]))));
+        links.set(path, decode(await git(['cat-file', 'blob', match[2] as string])));
       }
     }
-    // Refuse chained/directory links: a lexical in-tree target must never hide a second escaping hop.
-    for (const target of links.values())
-      if ([...links.keys()].some(link => target === link || target.startsWith(`${link}/`)))
-        throw new CheckoutError('chained moved symlinks cannot be audited safely');
+    for (const [path, target] of links) targetOf(path, target, links);
   };
   for (const revision of revisions) await check(revision);
   await git(['read-tree', head]);

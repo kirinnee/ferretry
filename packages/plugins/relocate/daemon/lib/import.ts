@@ -201,6 +201,7 @@ export class Importer {
       );
 
     let cleanup: (() => Promise<void>) | undefined;
+    let quarantine = folder;
     let ferretExists = false;
     try {
       const stage = await this.deps.checkout.prepare(
@@ -208,6 +209,7 @@ export class Importer {
         folder,
       );
       cleanup = stage.cleanup;
+      quarantine = stage.folder;
       const repo = stage.repo;
       const ref = 'refs/fy-relocate/import';
       if (commits !== undefined)
@@ -223,7 +225,7 @@ export class Importer {
           : (await this.deps.checkout.branchExists(resolved.kind === 'found' ? resolved.repo : repo, wanted))
             ? wanted + '-moved-' + tag
             : wanted;
-      const tree = folder + '/worktree';
+      const tree = `${stage.folder}/worktree`;
       await this.deps.checkout.addWorktree(repo, tree, {
         head: manifest.worktree.head,
         ...(branch === undefined ? {} : { branch }),
@@ -265,7 +267,7 @@ export class Importer {
           this.deps.log.warn('a moved quarantine could not be removed');
           throw new RelocateRefused(
             409,
-            'the move failed and its quarantine could not be removed: ' + folder,
+            'the move failed and its quarantine could not be removed: ' + quarantine,
             'cleanup_failed',
           );
         }

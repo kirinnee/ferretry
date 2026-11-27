@@ -190,14 +190,9 @@ describe('MUST 3: rollback owns only quarantine bytes', () => {
     let folder = '';
     const t = await targetWorld(
       {
+        start: 'refuse',
         wrapCheckout: real => ({
           ...real,
-          addWorktree: async (_repo, path) => {
-            folder = path;
-            mkdirSync(path);
-            writeFileSync(join(path, 'owned-by-other'), 'preserve');
-            throw new Error('injected folder race');
-          },
           prepare: async (source, path) => {
             // Simulate the competing creator before the exclusive claim, outside our owned directory.
             folder = path;

@@ -38,6 +38,7 @@ import type {
 } from '../contract/ports.ts';
 import type { FileIdentity, HostFs, OpenedDirectory, OpenedFile } from './adapters/node-fs.ts';
 import { rootQuarantine, rootRemoval } from './root-removal.ts';
+import { createPrivateDirectory } from './root-directory.ts';
 import {
   absolute,
   type Fence,
@@ -1914,14 +1915,8 @@ function harnessFileHandle(setup: HarnessFileSetup): RootFileHandle {
 function rootHandle(setup: HandleSetup): RootHandle {
   const { fs, home, name, plugin, base, anchor, scopedParent, check, immutable, random, pins, privateFiles } = setup;
   /**
-   * A scope that names an anchor (`within`): every folder from the anchor's first child down to the scoped folder is
-   * looked at WITHOUT following it, and a link at any of them is refused `link_escape`. The anchor itself and its
-   * ancestors are not looked at (a symlinked project folder works). A folder that is not there yet is no link, and
-   * nothing below it exists either. An anchor equal to the scoped folder walks nothing. The walk is the EARLY refusal
-   * (a link is told before any descriptor is opened). For `imports` and `project-files` the descriptors their calls then
-   * hold are the PROOF, so a folder swapped for a link after the walk is still caught (except where
-   * `descriptorReachNote` says a listing or a stat goes by path); `harness-history` and `harness-home` hold no such
-   * descriptor, and for them this walk is the only link check.
+   * Refuse links below `within`, stopping at the first absent folder; the anchor itself may be a link.
+   * Imports/project-files prove by descriptor (see `descriptorReachNote`); harness roots rely on this early check.
    */
   const anchoredFolders = async (): Promise<void> => {
     for (const folder of setup.linkFreeFolders() ?? []) {
@@ -2739,9 +2734,14 @@ function rootHandle(setup: HandleSetup): RootHandle {
         await made.folder.close();
       });
     },
+    createDirectory: async path => {
+      writable();
+      gate(path, 'make');
+      const { full, scope } = await realParent(path);
+      return await pinning(full, () => createPrivateDirectory(scope, full, setup.daemonUid, openCheckedFolder, refuse));
+    },
     realPath: async path => {
-      // `real` resolved every existing component inside the root; the whole must exist (a broken link throws), and a
-      // name that moved between the two answers is refused rather than re-resolved.
+      // Refuse a broken link or a name that moved after `real` proved its components.
       gate(path, 'probe');
       const { full } = await real(path);
       const again = await fs.realpath(full);
