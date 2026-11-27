@@ -3,8 +3,8 @@
  * comes with. The ids are `STYLE_IDS` / `PALETTE_IDS` in the Layouts contract (the one list, so a theme item and this app
  * cannot disagree); this file adds everything a picker needs and nothing a stylesheet decides.
  *
- *   style   HOW things are drawn   `styles/style/<id>.css`    type, radii, strokes, shadow geometry, spacing, motion
- *   palette WHICH colours          `styles/palette/<id>.css`  seed colours, status/syntax hues, shadow colours
+ *   style   HOW things are drawn   `theme/packs/style/<id>/`  type, radii, strokes, shadow geometry, spacing, motion
+ *   palette WHICH colours          `theme/packs/palette/<id>/` seed colours, status/syntax hues, shadow colours
  *   mode    light | dark                                      a third axis: any style takes any palette in either mode
  *
  * `styles/themes.css` says where every token lives; `tests/unit/theme-axes.test.ts` pins that the files, this list and
@@ -19,7 +19,7 @@ import {
   THEME_FAMILY_IDS,
   type StyleId,
 } from '@ferretry/plugin-layouts/contract';
-import { PALETTE_PACKS } from '../generated/theme-packs.ts';
+import { PALETTE_PACKS, STYLE_PACKS } from '../generated/theme-packs.ts';
 
 export { PALETTE_IDS, type PaletteId, STYLE_IDS, type StyleId };
 /** A single-pick look is a palette (with the style that comes with it): the family ids ARE the palette ids now. */
@@ -48,108 +48,22 @@ export interface PaletteEntry {
   readonly blurb: string;
 }
 
-/** Order is the order shown. A style EARNS a row by differing structurally, never by recolouring another. */
-export const STYLES: readonly StyleEntry[] = Object.freeze([
-  {
-    id: 'studio',
-    label: 'Studio',
-    blurb: 'The house look: soft blurred shadows, calm rounded surfaces.',
-    defaultPalette: 'studio',
-  },
-  {
-    id: 'mission',
-    label: 'Mission Control',
-    blurb: 'A ruled instrument grid, square mono controls, hairlines.',
-    defaultPalette: 'mission',
-  },
-  {
-    id: 'neo',
-    label: 'Neo-Brutalism',
-    blurb: 'Hard rules, flat offset shadows, black display weights.',
-    defaultPalette: 'neo',
-  },
-  {
-    id: 'geist',
-    label: 'Geist',
-    blurb: 'Hairline rules, small precise type, airy engineered minimalism.',
-    defaultPalette: 'geist',
-  },
-  {
-    id: 'glass',
-    label: 'Glassmorphism',
-    blurb: 'Frosted translucent panels over a soft colour field, big radii, light edges.',
-    defaultPalette: 'aurora',
-  },
-  {
-    id: 'neumorphism',
-    label: 'Neumorphism',
-    blurb: 'Soft forms moulded from one ground: paired light and dark shadows, pressed in when chosen.',
-    defaultPalette: 'afterglow',
-  },
-  {
-    id: 'retro',
-    label: 'Retro Desktop',
-    blurb: 'An early-2000s desktop: bevelled buttons, sunken fields, gradient title strips, hard drop shadows.',
-    defaultPalette: 'geist',
-  },
-  {
-    id: 'lucid',
-    label: 'Lucid',
-    blurb: 'Glossy pill controls, soft deep shadows, a springy halo focus, system fonts.',
-    defaultPalette: 'mesh',
-  },
-  {
-    id: 'hud',
-    label: 'HUD',
-    blurb: 'A sci-fi heads-up display: corner brackets, thin lit rules, a soft signal glow, scan-lines.',
-    defaultPalette: 'mission',
-  },
-  {
-    id: 'raw',
-    label: 'Raw Brutalism',
-    blurb: 'The unstyled web on purpose: system serif and mono, square boxes, hard rules, no shadows.',
-    defaultPalette: 'neo',
-  },
-  {
-    id: 'swiss',
-    label: 'Minimal Swiss',
-    blurb: 'Ruled, flat and square: one tight grotesque, space instead of boxes.',
-    defaultPalette: 'geist',
-  },
-  {
-    id: 'pixel',
-    label: 'Pixel art',
-    blurb: 'Bitmap type, 2px blocks, flat offset shadows, stepped motion.',
-    defaultPalette: 'hacker',
-  },
-  {
-    id: 'antiposh',
-    label: 'Anti-posh',
-    blurb: 'Photocopied zine: typewriter type, dashed edges, off-register hard shadows. Rough on purpose.',
-    defaultPalette: 'vintage',
-    loud: true,
-  },
-  {
-    id: 'briefing',
-    label: 'Briefing',
-    blurb:
-      'A calm written report: Poppins, mono numbers, pill controls, 16px panels, soft shadows, an indigo focus ring.',
-    defaultPalette: 'briefing',
-  },
-  {
-    id: 'genz',
-    label: 'Gen Z Maximalism',
-    blurb: 'Loud on purpose: bubble type, sticker tags, stacked colour shadows, a spring on every pick.',
-    defaultPalette: 'vaporwave',
-    loud: true,
-  },
-  {
-    id: 'exaggerated',
-    label: 'Exaggerated Minimalism',
-    blurb: 'Huge hair-thin titles, vast air, one hairline for everything, no shadows.',
-    defaultPalette: 'hacker',
-  },
-] as const);
+/**
+ * Order is the order shown: each style pack's own `order` (a style EARNS a row by differing structurally, never by
+ * recolouring another). A style's label, blurb, default palette and `loud` flag live on its pack
+ * (`theme/packs/style/<id>/style.ts`), so there is no second list of them.
+ */
+export const STYLES: readonly StyleEntry[] = Object.freeze(
+  STYLE_PACKS.map(
+    (pack): StyleEntry => ({
+      id: pack.id,
+      label: pack.label,
+      blurb: pack.blurb,
+      defaultPalette: pack.defaultPalette,
+      ...('loud' in pack ? { loud: true } : {}),
+    }),
+  ),
+);
 
 /**
  * Order is the order shown: each palette pack's own `order`. A palette's name and blurb live on its pack
@@ -160,7 +74,8 @@ export const PALETTES: readonly PaletteEntry[] = Object.freeze(
   PALETTE_PACKS.map(({ id, label, blurb }): PaletteEntry => ({ id, label, blurb })),
 );
 
-export const DEFAULT_STYLE: StyleId = 'studio';
+/** The style pack flagged `default: true` (the generator pins that there is exactly one). */
+export const DEFAULT_STYLE: StyleId = STYLE_PACKS.find(pack => 'default' in pack)?.id ?? STYLE_PACKS[0].id;
 /** The palette pack flagged `default: true` (the generator pins that there is exactly one). */
 export const DEFAULT_PALETTE: PaletteId = PALETTE_PACKS.find(pack => 'default' in pack)?.id ?? PALETTE_PACKS[0].id;
 

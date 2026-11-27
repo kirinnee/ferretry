@@ -134,7 +134,7 @@
   --md-th-weight: 700;
   --md-zebra: color-mix(in srgb, var(--surface-2) 70%, transparent);
   --md-link-decoration: underline;
-  --md-link-weight: inherit;
+  --md-link-weight: var(--weight-normal);
   --md-link-bg: transparent;
   --md-link-pad: 0;
   --md-link-radius: 0px;

@@ -4,9 +4,9 @@
  * raised card's edge against the page on every palette and mode); this pins the cascade facts behind them.
  */
 import { describe, expect, it } from 'bun:test';
-import { readStyleFile } from '../../src/testing/theme-css.ts';
+import { readStylePackCss } from '../../src/testing/theme-css.ts';
 
-const css = readStyleFile('style/neumorphism.css');
+const css = readStylePackCss('neumorphism');
 const rule = (selector: string): string => {
   const at = css.indexOf(`${selector} {`);
   expect(at).toBeGreaterThanOrEqual(0);
