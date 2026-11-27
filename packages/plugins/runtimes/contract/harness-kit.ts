@@ -159,6 +159,43 @@ export interface KitHostScanInput {
   projectInstructions(mcp: KitHostDocumentRead): Promise<readonly KitProjectInstructionHint[]>;
 }
 
+/** A harness's own import document names and settings format. */
+export interface KitImportSetup {
+  readonly settingsFormat: KitSettingsFormat;
+  readonly settingsFile: string;
+  readonly instructionsName: string;
+}
+
+/** An imported environment: component references, safe plain values, and secret names only. */
+export interface KitImportedEnvironment {
+  readonly env: Record<string, string>;
+  readonly secretKeys: string[];
+  readonly dropped: string[];
+  readonly gated: string[];
+  readonly plain: { readonly name: string; readonly value: string }[];
+  readonly minted: { readonly name: string; readonly secretName: string }[];
+}
+
+/** Shared import services with the harness's mutable settings copy; secret handling remains in Runtimes. */
+export interface KitHarvestInput {
+  readonly rest: Record<string, unknown>;
+  readonly source: string;
+  readonly mcpSource?: string;
+  readonly parsedEnv?: unknown;
+  readonly skippedEnv: boolean;
+  readonly skippedModelSet: boolean;
+  countHooks(block: KitSettingsObject): number;
+  importEnvironment(value: unknown, prefix: string, source: string): KitImportedEnvironment;
+}
+
+/** The harness-owned parts of a harvest, before shared component and secret reconciliation. */
+export interface KitHarvestParts {
+  readonly hooks?: { readonly source: string; readonly count: number };
+  readonly envImport?: KitImportedEnvironment;
+  readonly modelEnvironment?: KitSettingsObject;
+  readonly mcpSource: string;
+}
+
 /** What a plugin is asked for to name a runtime's extra environment and files. */
 export interface KitExtrasInput {
   readonly home: string;
@@ -217,6 +254,8 @@ export interface RuntimesHarnessKit {
   // Login notes and host import.
   loginNote?(login: KitHostLogin): string;
   scanHost?(input: KitHostScanInput): Promise<KitHostSetup>;
+  readonly importSetup?: KitImportSetup;
+  harvest?(input: KitHarvestInput): KitHarvestParts;
 
   // The launch line.
   readonly wrapper?: {
