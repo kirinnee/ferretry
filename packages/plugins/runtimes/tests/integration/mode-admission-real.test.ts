@@ -42,8 +42,11 @@ beforeAll(async () => {
   await put(join(home, 'config/runtimes.yaml'), 'defaultRuntime: play\nautoResume: false\n');
   await put(join(home, 'config/harness-claude-code.yaml'), 'permissionMode: auto\nchannels: false\n');
   await put(join(home, 'config/logins/test.yaml'), 'harness: claude-code\nstore: environment\nenv: {}\n');
+  await put(join(home, 'config/logins/codex-test.yaml'), 'harness: codex\nstore: environment\nenv: {}\n');
   await put(join(home, 'config/profiles/plain.yaml'), 'contents: []\n');
   await put(join(home, 'config/runtimes/play.yaml'), 'login: test\nprofile: plain\n');
+  // A configured Codex runtime need not have legacy wrapper publication rows.
+  await put(join(home, 'config/runtimes/code.yaml'), 'login: codex-test\nprofile: plain\n');
   await put(join(home, 'state/ferrets/tokens.json'), JSON.stringify({ format: 1, tokens: [] }));
   await put(
     join(home, 'fleet/ids.json'),
@@ -114,7 +117,7 @@ beforeAll(async () => {
       }),
     );
   }
-  await put(join(root, 'bin/codex'), '#!/bin/sh\nexit 0\n', 0o700);
+  await put(join(root, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.1.0"\n', 0o700);
   await put(
     join(root, 'bin/claude'),
     `#!/bin/sh
@@ -202,7 +205,8 @@ const start = (runtime: string, mode: 'auto' | 'interactive') =>
     folder: root,
     runtime,
     mode,
-    ...(mode === 'auto' ? { prompt: 'synthetic admission test' } : { detach: true }),
+    detach: true,
+    ...(mode === 'auto' ? { prompt: 'synthetic admission test' } : {}),
   });
 
 test('MUST 1: installed Claude without Auto admits normal launches and refuses auto through fyd', async () => {
@@ -241,6 +245,21 @@ test('MUST 2: former names retain published auto refusals on resume', async () =
   const resume = await call('POST', '/v1/ferrets/auto-stopped/resume', {});
   expect(resume.status, resume.text).toBe(409);
   expect(resume.text).toContain('synthetic wrapper refuses Auto');
+});
+
+test('R1: Codex without publication rows admits interactive and auto through fyd', async () => {
+  const manifest = JSON.parse(await readFile(join(home, 'fleet/manifest.json'), 'utf8'));
+  expect(manifest.accounts.every((account: { kind: string }) => account.kind !== 'codex')).toBe(true);
+  expect(manifest.runtimes.every((runtime: { name: string }) => runtime.name !== 'code')).toBe(true);
+  for (const mode of ['interactive', 'auto'] as const) {
+    const before = (await readFile(join(root, 'launches'), 'utf8')).length;
+    const started = await start('code', mode);
+    expect(started.status, started.text).toBe(201);
+    const receiptBy = Date.now() + 3000;
+    while ((await readFile(join(root, 'launches'), 'utf8')).length === before && Date.now() < receiptBy)
+      await Bun.sleep(30);
+    expect((await readFile(join(root, 'launches'), 'utf8')).length).toBeGreaterThan(before);
+  }
 });
 
 test('MUST 2: failed published-facts reads refuse auto before launch admission', async () => {

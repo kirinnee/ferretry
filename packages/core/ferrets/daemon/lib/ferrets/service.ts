@@ -5,7 +5,7 @@ import type { FencedPath, HookDecision, InstructionEntry, SharedCredential } fro
 import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
-import { openHarness } from './harness-facade.ts';
+import { harnessFacts, openHarness } from './harness-facade.ts';
 import {
   type DecidedFast,
   decideResume,
@@ -926,7 +926,7 @@ export class FerretsService implements FerretsApi {
   harnesses(): readonly HarnessKey[] {
     return this.ports.harnessKeys();
   }
-  harnessFacts = (key: HarnessKey): Harness['facts'] | undefined => this.ports.harness(key)?.facts;
+  harnessFacts = (key: HarnessKey): Harness['facts'] | undefined => harnessFacts(this.ports.harness(key));
   harnessRuntime = (key: HarnessKey): Harness['runtime'] => this.ports.harness(key)?.runtime;
   /** The harness's own copy of one conversation of the owner's history, in its shared pool (`Harness.importConversation`). */
   async importConversation(

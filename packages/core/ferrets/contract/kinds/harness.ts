@@ -245,6 +245,8 @@ export type TranscriptFormatId = string;
  * cannot drift from what the harness writes.
  */
 export interface HarnessFacts {
+  /** Ferrets derives this from `Harness.autoLaunchRefusal`; absent when the harness offers no Auto admission check. */
+  readonly checksAutoLaunch?: true;
   /** What a person reads: "Claude Code", "Codex". */
   readonly displayName: string;
   /** The instruction file the harness reads from its home (`CLAUDE.md`, `AGENTS.md`). */
