@@ -2,17 +2,23 @@
  * The host scan against a real filesystem. Every path is inside a temporary directory this test made
  * and stands in for a person's home; every credential is a placeholder that authenticates nothing.
  */
+import { claudeRuntimesKit } from '../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { claudeRuntimesKit } from '../../../claude-code/daemon/lib/runtimes-kit/index.ts';
 import { HostHarnessScanner, type HostHarnessScanDeps } from '../../daemon/adapters/host-harness-scan.ts';
 import type { HostFiles } from '../../daemon/adapters/ports.ts';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { planImport } from '../../daemon/lib/account/import-plan.ts';
 import { nodeHostFiles } from './support/node-host.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 const created: string[] = [];
 afterEach(async () => {
@@ -146,7 +152,7 @@ describe('HostHarnessScanner — a set-up machine', () => {
     }
     const plan = planImport(
       [claude, codex].filter(scan => scan !== undefined),
-      { digest: text => text },
+      { kits: IMPORT_KITS, digest: text => text },
     );
     // Both harnesses hold the same rules text, which is only knowable now that it is read.
     should(plan.preview.instructionsIdentical).be.true();

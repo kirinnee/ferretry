@@ -1,7 +1,14 @@
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type HostDocumentRead, type HostHarnessScan } from '../../../daemon/lib/account/import.ts';
 import { mergeImport, planImport } from '../../../daemon/lib/account/import-plan.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 const FAKE_KEY = 'sk-placeholder-not-a-real-key-0000';
 const digest = (text: string): string => String(Bun.hash(text));
@@ -37,7 +44,7 @@ const SETTINGS = {
 
 describe('planImport — the harness env for the login (r9 A8)', () => {
   it('should hand the env over as host text and as the names of the keys it files, for the login the apply selected', () => {
-    const plan = planImport([claude(SETTINGS)], { digest, tickedEnv: ['GITHUB_TOKEN'] });
+    const plan = planImport([claude(SETTINGS)], { kits: IMPORT_KITS, digest, tickedEnv: ['GITHUB_TOKEN'] });
     should(plan.loginEnvs).have.length(1);
     const env = plan.loginEnvs[0];
     should(env?.harness).equal('claude');
@@ -55,8 +62,8 @@ describe('planImport — the harness env for the login (r9 A8)', () => {
 
   it('should file no key and bind nothing for a GitHub token that is not ticked, and still list its name for the scan', () => {
     for (const plan of [
-      planImport([claude(SETTINGS)], { digest }),
-      planImport([claude(SETTINGS)], { digest, tickedEnv: [] }),
+      planImport([claude(SETTINGS)], { kits: IMPORT_KITS, digest }),
+      planImport([claude(SETTINGS)], { kits: IMPORT_KITS, digest, tickedEnv: [] }),
     ]) {
       should(plan.secrets.map(secret => secret.name)).eql(['ANTHROPIC_API_KEY']);
       should(plan.loginEnvs[0]?.minted.map(entry => entry.name)).eql(['ANTHROPIC_API_KEY']);
@@ -66,23 +73,23 @@ describe('planImport — the harness env for the login (r9 A8)', () => {
   });
 
   it('should file and bind a GitHub token that is ticked, and no other that is not', () => {
-    const plan = planImport([claude(SETTINGS)], { digest, tickedEnv: ['GITHUB_TOKEN'] });
+    const plan = planImport([claude(SETTINGS)], { kits: IMPORT_KITS, digest, tickedEnv: ['GITHUB_TOKEN'] });
     should(plan.secrets.map(secret => secret.name).sort()).eql(['ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
     should(plan.loginEnvs[0]?.minted.map(entry => entry.name)).containEql('GITHUB_TOKEN');
     // Another token name, unticked, stays out.
     const other = planImport(
       [claude({ env: { GH_TOKEN: 'ghp_placeholder000000000000000000', GITHUB_TOKEN: FAKE_KEY } })],
-      {
-        digest,
-        tickedEnv: ['GITHUB_TOKEN'],
-      },
+      { kits: IMPORT_KITS, digest, tickedEnv: ['GITHUB_TOKEN'] },
     );
     should(other.secrets.map(secret => secret.name)).eql(['GITHUB_TOKEN']);
   });
 
   it('should not repeat a variable name that is shaped like a key in the scan or a warning', () => {
     const keyed = 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
-    const plan = planImport([claude({ env: { [keyed]: FAKE_KEY, CLAUDE_CONFIG_DIR: '/else' } })], { digest });
+    const plan = planImport([claude({ env: { [keyed]: FAKE_KEY, CLAUDE_CONFIG_DIR: '/else' } })], {
+      kits: IMPORT_KITS,
+      digest,
+    });
     const spoken = JSON.stringify([plan.preview, plan.notes, plan.secrets.map(secret => secret.from)]);
     should(spoken.includes(keyed)).be.false();
     should(plan.preview.harnesses[0]?.secretKeys).eql([]);
@@ -91,7 +98,10 @@ describe('planImport — the harness env for the login (r9 A8)', () => {
 
   it('should derive no Vault name from a variable name shaped like a key', () => {
     const keyed = 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
-    const plan = planImport([claude({ env: { [keyed]: FAKE_KEY, ANTHROPIC_API_KEY: FAKE_KEY } })], { digest });
+    const plan = planImport([claude({ env: { [keyed]: FAKE_KEY, ANTHROPIC_API_KEY: FAKE_KEY } })], {
+      kits: IMPORT_KITS,
+      digest,
+    });
     should(plan.secrets.map(secret => secret.name)).eql(['ANTHROPIC_API_KEY']);
     should(plan.loginEnvs[0]?.minted.map(entry => entry.name)).eql(['ANTHROPIC_API_KEY']);
     should(JSON.stringify(plan).includes(keyed)).be.false();
@@ -99,15 +109,21 @@ describe('planImport — the harness env for the login (r9 A8)', () => {
   });
 
   it('should bring in no env when the person left the env item out', () => {
-    const plan = planImport([claude(SETTINGS)], { digest, skip: ['claude-code:env'] });
+    const plan = planImport([claude(SETTINGS)], { kits: IMPORT_KITS, digest, skip: ['claude-code:env'] });
     should(plan.loginEnvs).eql([]);
   });
 
   it('should not repeat the env on Import again, so a second run files no second key', () => {
     const scans = [claude(SETTINGS)];
-    const first = planImport(scans, { digest });
+    const first = planImport(scans, { kits: IMPORT_KITS, digest });
     const existing = mergeImport(undefined, first);
-    const again = planImport(scans, { digest, existing, record: first.record, existingSecrets: ['ANTHROPIC_API_KEY'] });
+    const again = planImport(scans, {
+      kits: IMPORT_KITS,
+      digest,
+      existing,
+      record: first.record,
+      existingSecrets: ['ANTHROPIC_API_KEY'],
+    });
     should(again.loginEnvs).eql([]);
     should(again.secrets.map(secret => secret.name)).not.containEql('ANTHROPIC_API_KEY_2');
   });

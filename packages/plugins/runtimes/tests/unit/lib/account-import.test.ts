@@ -1,3 +1,5 @@
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
@@ -15,6 +17,11 @@ import { looksSecret } from '@ferretry/std/credential-words';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { profileScope } from '../../../daemon/lib/account/scope.ts';
 import { TEST_STARTERS } from '../../support/starters.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 /** Placeholder secret values: shaped like real ones so detection fires, worthless as credentials. */
 const FAKE_KEY = 'sk-placeholder-not-a-real-key-0000';
@@ -121,7 +128,7 @@ const fullScans = (): HostHarnessScan[] => [
 ];
 
 describe('planImport — a machine with both harnesses set up', () => {
-  const plan = planImport(fullScans(), { digest, starters: TEST_STARTERS });
+  const plan = planImport(fullScans(), { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
 
   it('should share each login in place and never copy it (C1, C3)', () => {
     should(plan.credentials).deepEqual({
@@ -298,7 +305,7 @@ describe('planImport — instructions and harness choices', () => {
     // Act
     const plan = planImport(
       [claude({ instructions: text('/c', 'claude words') }), codex({ instructions: text('/x', 'codex words') })],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
 
     // Assert
@@ -318,6 +325,7 @@ describe('planImport — instructions and harness choices', () => {
 
   it('should narrow the one instructions document found when both harnesses are imported', () => {
     const plan = planImport([claude({ instructions: text('/c', 'claude words') }), codex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
     });
@@ -338,7 +346,7 @@ describe('planImport — instructions and harness choices', () => {
         claude({ instructions: text('/c', 'claude words'), skills: [{ item: 'a', source: '/a', digest: 'a' }] }),
         uninstalled,
       ],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
 
     // Assert — a lone harness's things are its own, named and scoped to it.
@@ -365,13 +373,13 @@ describe('planImport — instructions and harness choices', () => {
   });
 
   it('should import only the harnesses the person chose', () => {
-    const plan = planImport(fullScans(), { digest, starters: TEST_STARTERS, include: ['codex'] });
+    const plan = planImport(fullScans(), { kits: IMPORT_KITS, digest, starters: TEST_STARTERS, include: ['codex'] });
     should(plan.imported).deepEqual(['codex']);
     should(Object.keys(plan.credentials)).deepEqual(['codex-you']);
   });
 
   it('should import nothing when nothing is chosen (E10)', () => {
-    const plan = planImport(fullScans(), { digest, starters: TEST_STARTERS, include: [] });
+    const plan = planImport(fullScans(), { kits: IMPORT_KITS, digest, starters: TEST_STARTERS, include: [] });
     should(plan.components).be.empty();
     should(plan.profiles).deepEqual({});
     should(plan.runtimes).deepEqual({});
@@ -380,8 +388,9 @@ describe('planImport — instructions and harness choices', () => {
 
 describe('planImport — logins (E4, E6, G5)', () => {
   const noteFor = (login: HostHarnessScan['login']) =>
-    planImport([claude({ login })], { digest, starters: TEST_STARTERS }).notes.find(note => note.harness === 'claude')
-      ?.text;
+    planImport([claude({ login })], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS }).notes.find(
+      note => note.harness === 'claude',
+    )?.text;
 
   it('should say the login is shared with the terminal when signed in', () => {
     should(noteFor({ state: 'signed-in', email: 'a@b.test' })).equal(
@@ -398,7 +407,11 @@ describe('planImport — logins (E4, E6, G5)', () => {
 
   it('should import the setup and leave sign-in for later when not signed in (E4)', () => {
     // Act
-    const plan = planImport([claude({ login: { state: 'not-signed-in' } })], { digest, starters: TEST_STARTERS });
+    const plan = planImport([claude({ login: { state: 'not-signed-in' } })], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+    });
 
     // Assert
     should(plan.credentials).deepEqual({ 'claude-you': { harness: 'claude', store: 'host' } });
@@ -413,6 +426,7 @@ describe('planImport — logins (E4, E6, G5)', () => {
   it('should make an empty slot when the login cannot be shared in place (G5)', () => {
     // Act
     const plan = planImport([codex({ login: { state: 'not-shareable', reason: 'keyring' } })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
     });
@@ -423,7 +437,8 @@ describe('planImport — logins (E4, E6, G5)', () => {
       "Your Codex login can't be shared in place (keyring), so this login needs its own sign-in.",
     );
     should(
-      planImport([codex({ login: { state: 'not-shareable' } })], { digest, starters: TEST_STARTERS }).notes[0]?.text,
+      planImport([codex({ login: { state: 'not-shareable' } })], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS })
+        .notes[0]?.text,
     ).match(/\(it is not kept in a file\)/);
   });
 });
@@ -431,7 +446,7 @@ describe('planImport — logins (E4, E6, G5)', () => {
 describe('planImport — nothing found (E5)', () => {
   it('should make a plain Starter profile: the built-in profile of the harness under a model set', () => {
     // Act
-    const plan = planImport([claude(), codex()], { digest, starters: TEST_STARTERS });
+    const plan = planImport([claude(), codex()], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
 
     // Assert
     should(plan.profiles).deepEqual({
@@ -450,6 +465,7 @@ describe('planImport — nothing found (E5)', () => {
 
   it('should treat an empty instructions file or settings document as nothing', () => {
     const plan = planImport([claude({ instructions: text('/c', '  \n'), settings: text('/s', '   ') })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
     });
@@ -470,7 +486,7 @@ describe('planImport — documents it could not use', () => {
         }),
         codex({ settings: text('/t', 'x = = 1'), hooks: { kind: 'unreadable', source: '/hk', reason: 'denied' } }),
       ],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
 
     // Assert
@@ -495,7 +511,7 @@ describe('planImport — documents it could not use', () => {
     // Act
     const plan = planImport(
       [claude({ settings: text('/s', brokenJson) }), codex({ settings: text('/t', brokenToml) })],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
 
     // Assert
@@ -531,7 +547,7 @@ describe('planImport — documents it could not use', () => {
           ),
         }),
       ],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
 
     // Assert
@@ -563,7 +579,7 @@ describe('planImport — documents it could not use', () => {
           skills: [{ item: '..', source: '/x', digest: 'x' }],
         }),
       ],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
 
     // Assert
@@ -581,6 +597,7 @@ describe('planImport — documents it could not use', () => {
 
   it('should read Codex hooks written without the hooks wrapper', () => {
     const plan = planImport([codex({ hooks: text('/hk', JSON.stringify({ Stop: [{ hooks: [1, 2] }] })) })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
     });
@@ -589,6 +606,7 @@ describe('planImport — documents it could not use', () => {
 
   it('should drop an empty shell environment policy once its set moves out', () => {
     const plan = planImport([codex({ settings: text('/t', `[shell_environment_policy.set]\nLOG = "1"\n`) })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
     });
@@ -597,12 +615,18 @@ describe('planImport — documents it could not use', () => {
 });
 
 describe('planImport — Import again (O6)', () => {
-  const first = planImport(fullScans(), { digest, starters: TEST_STARTERS });
+  const first = planImport(fullScans(), { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
   const existing = mergeImport(undefined, first);
 
   it('should add nothing and report the runtimes that already exist (E15)', () => {
     // Act
-    const again = planImport(fullScans(), { digest, starters: TEST_STARTERS, existing, record: first.record });
+    const again = planImport(fullScans(), {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      existing,
+      record: first.record,
+    });
 
     // Assert
     should(again.components).be.empty();
@@ -618,6 +642,7 @@ describe('planImport — Import again (O6)', () => {
 
   it('should add a duplicate runtime when asked to anyway', () => {
     const again = planImport(fullScans(), {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing,
@@ -636,7 +661,13 @@ describe('planImport — Import again (O6)', () => {
     scans[1] = { ...(scans[1] as HostHarnessScan), instructions: text('/h/.codex/AGENTS.md', '# Be kinder\n') };
 
     // Act
-    const again = planImport(scans, { digest, starters: TEST_STARTERS, existing, record: first.record });
+    const again = planImport(scans, {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      existing,
+      record: first.record,
+    });
 
     // Assert
     should(again.components).be.empty();
@@ -657,6 +688,7 @@ describe('planImport — Import again (O6)', () => {
 
     // Act
     const again = planImport(scans, {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing,
@@ -683,7 +715,13 @@ describe('planImport — Import again (O6)', () => {
     };
 
     // Act
-    const again = planImport(scans, { digest, starters: TEST_STARTERS, existing, record: first.record });
+    const again = planImport(scans, {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      existing,
+      record: first.record,
+    });
 
     // Assert — the claude-skills component changed (an update) and nothing was silently replaced.
     should(again.updates.map(update => update.reference)).deepEqual(['skills/claude-skills']);
@@ -692,7 +730,11 @@ describe('planImport — Import again (O6)', () => {
 
   it('should keep the compactAt of the profile it extends', () => {
     // Arrange
-    const earlier = planImport([claude({ instructions: text('/c', 'mine') })], { digest, starters: TEST_STARTERS });
+    const earlier = planImport([claude({ instructions: text('/c', 'mine') })], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+    });
     const merged = mergeImport(undefined, earlier);
     const profileName = 'claude-default';
     const tuned = parseAccountModel({
@@ -707,7 +749,13 @@ describe('planImport — Import again (O6)', () => {
     ];
 
     // Act
-    const again = planImport(scans, { digest, starters: TEST_STARTERS, existing: tuned, record: earlier.record });
+    const again = planImport(scans, {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      existing: tuned,
+      record: earlier.record,
+    });
 
     // Assert
     should(again.profiles[profileName]?.layers.length).be.above(merged.profiles[profileName]?.layers.length as number);
@@ -718,7 +766,11 @@ describe('planImport — Import again (O6)', () => {
     // Arrange — the person's own "claude-instructions" and "claude-settings", and a profile called default.
     const own = mergeImport(
       undefined,
-      planImport([claude({ instructions: text('/o', 'mine') })], { digest, starters: TEST_STARTERS }),
+      planImport([claude({ instructions: text('/o', 'mine') })], {
+        kits: IMPORT_KITS,
+        digest,
+        starters: TEST_STARTERS,
+      }),
     );
     const scans = [
       claude({
@@ -729,6 +781,7 @@ describe('planImport — Import again (O6)', () => {
     const personal = mergeImport(
       own,
       planImport([claude({ settings: text('/p', JSON.stringify({ a: 1 })) })], {
+        kits: IMPORT_KITS,
         digest,
         starters: TEST_STARTERS,
         existing: own,
@@ -737,7 +790,7 @@ describe('planImport — Import again (O6)', () => {
     );
 
     // Act
-    const plan = planImport(scans, { digest, starters: TEST_STARTERS, existing: personal });
+    const plan = planImport(scans, { kits: IMPORT_KITS, digest, starters: TEST_STARTERS, existing: personal });
 
     // Assert
     should(component(plan, 'instructions', 'claude-instructions-2')).deepEqual({ text: 'theirs', harness: 'claude' });
@@ -755,11 +808,16 @@ describe('planImport — Import again (O6)', () => {
     // Arrange
     const existingModel = mergeImport(
       undefined,
-      planImport([codex({ login: { state: 'not-shareable' } })], { digest, starters: TEST_STARTERS }),
+      planImport([codex({ login: { state: 'not-shareable' } })], {
+        kits: IMPORT_KITS,
+        digest,
+        starters: TEST_STARTERS,
+      }),
     );
 
     // Act
     const plan = planImport([codex({ login: { state: 'not-shareable' } })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: existingModel,
@@ -771,18 +829,17 @@ describe('planImport — Import again (O6)', () => {
 
   it('should extend an import-made profile with what is new', () => {
     // Arrange
-    const base = planImport([claude({ instructions: text('/c', 'x') })], { digest, starters: TEST_STARTERS });
+    const base = planImport([claude({ instructions: text('/c', 'x') })], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+    });
     const model = mergeImport(undefined, base);
 
     // Act
     const again = planImport(
       [claude({ instructions: text('/c', 'x'), skills: [{ item: 'n', source: '/n', digest: 'n' }] })],
-      {
-        digest,
-        starters: TEST_STARTERS,
-        existing: model,
-        record: base.record,
-      },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS, existing: model, record: base.record },
     );
 
     // Assert
@@ -801,7 +858,7 @@ describe('planImport — Import again (O6)', () => {
 
 describe('the import preview', () => {
   it('should be the plan preview, with names and no values', () => {
-    const { preview } = planImport(fullScans(), { digest: text => text });
+    const { preview } = planImport(fullScans(), { kits: IMPORT_KITS, digest: text => text });
     should(JSON.stringify(preview).includes(FAKE_KEY)).be.false();
     should(preview.harnesses.map(harness => harness.mcpServers)).deepEqual([
       ['github', 'notes', 'docs'],
@@ -888,7 +945,7 @@ describe('secret names', () => {
           mcp: text('/m', JSON.stringify({ mcpServers: { a: { command: 'a', env: { _TOKEN: FAKE_GH } } } })),
         }),
       ],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
 
     // Assert
@@ -903,6 +960,7 @@ describe('planImport — one profile per harness (P7)', () => {
   it('should make a profile for a harness imported for the first time from what an earlier import made', () => {
     // Arrange — Claude alone first: its instructions are Claude's own, so Codex's profile is not handed them.
     const first = planImport([claude({ instructions: text('/c', 'shared words') })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
     });
@@ -911,7 +969,7 @@ describe('planImport — one profile per harness (P7)', () => {
     // Act
     const again = planImport(
       [claude({ instructions: text('/c', 'shared words') }), codex({ instructions: text('/x', 'codex words') })],
-      { digest, starters: TEST_STARTERS, existing, record: first.record, include: ['codex'] },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS, existing, record: first.record, include: ['codex'] },
     );
 
     // Assert — Codex gets its own instructions and model set, never Claude's instructions.
@@ -928,7 +986,7 @@ describe('planImport — one profile per harness (P7)', () => {
 
   it('should make a Starter for a harness with nothing found, beside a model set the person made', () => {
     // Arrange — a Starter for Claude, whose model set is all a record holds.
-    const first = planImport([claude()], { digest, starters: TEST_STARTERS });
+    const first = planImport([claude()], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
     const existing = mergeImport(undefined, first);
 
     // Act — Codex arrives with nothing found, and the person already has a set under the name it wants.
@@ -940,6 +998,7 @@ describe('planImport — one profile per harness (P7)', () => {
       },
     };
     const again = planImport([claude(), codex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: own,
@@ -955,7 +1014,7 @@ describe('planImport — one profile per harness (P7)', () => {
 
   it('should still extend the ONE shared profile a record written before P7 names', () => {
     // Arrange — the old shape: one Default holding both harnesses' parts, recorded as `profile`.
-    const first = planImport(fullScans(), { digest, starters: TEST_STARTERS });
+    const first = planImport(fullScans(), { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
     const shared = mergeImport(undefined, first);
     const legacyLayers = [
       ...(shared.profiles['claude-default']?.layers ?? []),
@@ -975,7 +1034,7 @@ describe('planImport — one profile per harness (P7)', () => {
     const record = { version: 1 as const, components, profile: 'default' };
 
     // Act — Codex's "linear" server is new since that import.
-    const again = planImport(fullScans(), { digest, starters: TEST_STARTERS, existing, record });
+    const again = planImport(fullScans(), { kits: IMPORT_KITS, digest, starters: TEST_STARTERS, existing, record });
 
     // Assert — the legacy profile takes what is new; no per-harness profile appears beside it.
     should(again.profiles.default?.layers.at(-1)).equal('mcp/linear');
@@ -994,11 +1053,17 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
 
   it('should add the second tool its own instructions and skills, and leave the first tool its own', () => {
     // Arrange — Claude applied alone: instructions A + skill x.
-    const first = planImport([claudeScan(), codex()], { digest, starters: TEST_STARTERS, include: ['claude'] });
+    const first = planImport([claudeScan(), codex()], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      include: ['claude'],
+    });
     const afterClaude = mergeImport(undefined, first);
 
     // Act — then a rescan, and Codex alone: instructions B + skill y.
     const second = planImport([claudeScan(), codexScan()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: afterClaude,
@@ -1042,12 +1107,14 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
   /** Claude applied alone, then Codex imported on its own with the same-named server `codexArgs` describes. */
   const claudeThenCodex = (codexArgs: string[]) => {
     const first = planImport([claudeWithGithub(['a']), codex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       include: ['claude'],
     });
     const afterClaude = mergeImport(undefined, first);
     const second = planImport([claudeWithGithub(['a']), codexWithGithub(codexArgs)], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: afterClaude,
@@ -1087,6 +1154,7 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
 
     // And importing Codex again with the server unchanged offers nothing.
     const again = planImport([claudeWithGithub(['a']), codexWithGithub(['b'])], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: afterCodex,
@@ -1106,12 +1174,14 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
         mcp: text('/m', JSON.stringify({ mcpServers: { github: { command: 'gh-mcp', args: ['a'] } } })),
       });
     const first = planImport([claudeWith('claude words'), codex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       include: ['claude'],
     });
     const afterClaude = mergeImport(undefined, first);
     const second = planImport([claudeWith('claude words'), codexWithGithub(['a'])], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: afterClaude,
@@ -1124,6 +1194,7 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
 
     // Act
     const again = planImport([claudeAgain, codexWithGithub(['a'])], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: afterCodex,
@@ -1138,6 +1209,7 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
 
     // And Codex again, unchanged, offers nothing and creates no copy either.
     const codexAgain = planImport([claudeAgain, codexWithGithub(['a'])], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: afterCodex,
@@ -1151,11 +1223,12 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
   it('should keep a server shared by both tools shared when its update is offered', () => {
     // Arrange — one pass imports both tools with the identical github server: one shared item.
     const both = (claudeArgs: string[]) => [claudeWithGithub(claudeArgs), codexWithGithub(['a'])];
-    const first = planImport(both(['a']), { digest, starters: TEST_STARTERS });
+    const first = planImport(both(['a']), { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
     const shared = mergeImport(undefined, first);
 
     // Act — Claude's copy of the server changes; the next import offers its update.
     const again = planImport(both(['b']), {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: shared,
@@ -1170,9 +1243,15 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
 
   it('should update the first tool its own item when it is imported again with changed text', () => {
     // Arrange — both applied in turn.
-    const first = planImport([claudeScan(), codexScan()], { digest, starters: TEST_STARTERS, include: ['claude'] });
+    const first = planImport([claudeScan(), codexScan()], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      include: ['claude'],
+    });
     const afterClaude = mergeImport(undefined, first);
     const second = planImport([claudeScan(), codexScan()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: afterClaude,
@@ -1183,6 +1262,7 @@ describe('planImport — one tool imported after the other (r9 A1/A3)', () => {
 
     // Act — Claude's CLAUDE.md changed.
     const again = planImport([claudeScan('claude words, edited'), codexScan()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: afterCodex,

@@ -13,6 +13,12 @@ const TESTS = [
   'tests/integration/host-harness-scan.test.ts',
   'tests/integration/daemon/host-harness-scan-roots.test.ts',
   'tests/integration/daemon/file-deps.test.ts',
+  'tests/unit/lib/account-import.test.ts',
+  'tests/unit/lib/account-import-skip.test.ts',
+  'tests/unit/lib/account-import-retry.test.ts',
+  'tests/unit/lib/account-import-login-env.test.ts',
+  'tests/unit/lib/account-import-branches.test.ts',
+  'tests/unit/daemon/setup-service.test.ts',
 ];
 const imports = (prefix: string) =>
   `import '${prefix}claude-code/daemon/lib/runtimes-kit/index.ts';\nimport '${prefix}codex/daemon/lib/runtimes-kit/index.ts';\n`;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { KitHostDocumentRead, KitHostScanInput } from '@ferretry/plugin-runtimes/contract';
+import type { KitHarvestInput, KitHostDocumentRead, KitHostScanInput } from '@ferretry/plugin-runtimes/contract';
 import { claudeImportKit } from '../../daemon/lib/runtimes-kit/import.ts';
 
 const world = (configuredHome?: string) => {
@@ -72,4 +72,68 @@ describe('Claude host scan kit', () => {
       'skill problem',
     ]);
   });
+});
+
+describe('Claude host harvest kit', () => {
+  const harvestWorld = (skippedEnv = false, skippedModelSet = false) => {
+    const env = { ANTHROPIC_MODEL: 'claude-fixture' };
+    const rest: Record<string, unknown> = {
+      theme: 'dark',
+      env,
+      hooks: { Stop: [{ hooks: [{ command: 'never executed' }] }] },
+    };
+    const calls: unknown[][] = [];
+    const imported = {
+      env: { ANTHROPIC_MODEL: 'claude-fixture' },
+      secretKeys: [],
+      dropped: [],
+      gated: [],
+      plain: [],
+      minted: [],
+    };
+    const input: KitHarvestInput = {
+      rest,
+      source: '/fixture/settings.json',
+      mcpSource: '/fixture/.claude.json',
+      parsedEnv: env,
+      skippedEnv,
+      skippedModelSet,
+      countHooks: block => {
+        calls.push(['hooks', block]);
+        return 1;
+      },
+      importEnvironment: (...args) => {
+        calls.push(['env', ...args]);
+        return imported;
+      },
+    };
+    return { input, env, rest, calls, imported };
+  };
+
+  it('counts and drops hooks, delegates environment handling, and keeps the raw model source', () => {
+    const w = harvestWorld();
+    const hooks = w.rest.hooks;
+    const result = claudeImportKit.harvest!(w.input);
+    expect(w.rest).toEqual({ theme: 'dark' });
+    expect(w.calls).toEqual([
+      ['hooks', hooks],
+      ['env', w.env, 'env.', 'settings.json'],
+    ]);
+    expect(result.hooks).toEqual({ source: '/fixture/settings.json', count: 1 });
+    expect(result.envImport).toBe(w.imported);
+    expect(result.modelEnvironment).toBe(w.env);
+    expect(result.mcpSource).toBe('/fixture/.claude.json');
+  });
+
+  for (const skip of ['env', 'model-set'] as const) {
+    it(`keeps the ${skip} choice out of the model source and drops host env from settings`, () => {
+      const w = harvestWorld(skip === 'env', skip === 'model-set');
+      const result = claudeImportKit.harvest!({ ...w.input, mcpSource: undefined });
+      expect(w.rest).toEqual({ theme: 'dark' });
+      expect(result.modelEnvironment).toBeUndefined();
+      expect(result.mcpSource).toBe('.claude.json');
+      expect(w.calls.filter(call => call[0] === 'env')).toHaveLength(skip === 'env' ? 0 : 1);
+      if (skip === 'env') expect(result.envImport).toBeUndefined();
+    });
+  }
 });
