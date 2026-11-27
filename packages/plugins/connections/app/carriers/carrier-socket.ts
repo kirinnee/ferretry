@@ -210,6 +210,7 @@ class WalkingSocket implements ScopedSocket {
   /** This side closed the session (the shell, the router, or the heartbeat): nothing after it is a drop. */
   #closedHere = false;
   #ended = false;
+  #keyed = false;
   /** The session ended before acceptance on a leg that carried its frames: the walk may go on, once. */
   #unsent = false;
   #servingSince: number | undefined;
@@ -234,6 +235,10 @@ class WalkingSocket implements ScopedSocket {
   ) {
     this.#lastHeardAt = deps.now();
     this.adapted = {
+      lost: () => this.#carrierEnded(1006, 'the connection was lost', { close: 'connection lost' }),
+      keyed: () => {
+        this.#keyed = true;
+      },
       send: bytes => this.#carryOnSend()?.send(bytes),
       sendText: text => this.#carryOnSend()?.sendText(text),
       close: (code, reason) => this.#closeFromSession(code ?? 1000, reason ?? 'the browser closed this session'),
@@ -265,7 +270,7 @@ class WalkingSocket implements ScopedSocket {
     this.#unsent = false;
     this.#stop();
     this.#socket?.close(1000, reason);
-    this.#end(1000, reason);
+    this.#end(1000, reason, undefined, true);
   }
 
   /**
@@ -290,7 +295,7 @@ class WalkingSocket implements ScopedSocket {
   #requestLost(): void {
     const code = this.#droppedWith;
     this.#droppedWith = undefined;
-    if (code === undefined || code === RELAY_CLOSE_CODES.authRejected) return;
+    if (code === undefined) return;
     this.walk.observer.lost?.(this.#method);
   }
 
@@ -492,11 +497,12 @@ class WalkingSocket implements ScopedSocket {
    */
   #carrierEnded(code: number, reason: string, options: { readonly close?: string } = {}): void {
     if (this.#ended) return;
+    if (this.#keyed) code = 1006;
     const phase = this.#phase;
     this.#stop();
     this.#cancelAcceptance?.();
     if (options.close !== undefined) {
-      this.#socket?.close(code, options.close);
+      this.#socket?.close(code === 1006 ? 1000 : code, options.close);
     }
     if (phase === 'carrying' && this.#streamRefused(code)) this.#unsent = false;
     else if (phase === 'carrying') this.#unsentFailure(code, reason);
@@ -571,13 +577,13 @@ class WalkingSocket implements ScopedSocket {
     this.#pongDeadline = undefined;
   }
 
-  #end(code: number, reason: string, identityReplaced?: true): void {
+  #end(code: number, reason: string, identityReplaced?: true, localFence?: true): void {
     if (this.#ended) return;
     this.#ended = true;
     this.#untrack();
     const onEnded = this.#onEnded;
     this.#onEnded = undefined;
     onEnded?.();
-    this.events.onClose(code, reason, identityReplaced);
+    this.events.onClose(code, reason, identityReplaced, localFence);
   }
 }

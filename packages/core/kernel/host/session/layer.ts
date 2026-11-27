@@ -198,8 +198,8 @@ export interface SessionLayerHost extends SessionLayer {
   report(): SessionLayerReport;
   /** A mode went away (turned off, failed): every session it verified ends with the one refusal (§4.13). */
   endMode(mode: 'device' | 'pair' | 'member'): void;
-  /** Release every session, saying nothing (the daemon is going away). */
-  close(): void;
+  /** Release every session, sealing the shutdown verdict before carrier teardown. */
+  close(): Promise<void>;
 }
 
 interface ConnectionState {
@@ -274,9 +274,11 @@ class LayerState {
     for (const session of [...this.sessions]) session.endIfVerifiedBy(mode);
   }
 
-  close(): void {
-    for (const session of [...this.sessions]) session.closed('the daemon is going away');
+  async close(): Promise<void> {
+    const sessions = [...this.sessions];
+    for (const session of sessions) session.shutdown();
     this.sessions.clear();
+    await Promise.all(sessions.map(session => session.connection.outbox));
   }
 }
 
@@ -377,6 +379,8 @@ class SealedSession implements CarrierLink {
   /** The session has an outcome and ends once that outcome has actually been handed over. */
   #owesConclusion = false;
   #end: SessionEnd | undefined;
+  #endPending = false;
+  #endFrame: SealedFrame | undefined;
   /** The peer went away: nothing more is pulled or delivered. */
   #gone = false;
   /** Serialises inbound frames: frame `n+1` is never opened before frame `n` is handled. */
@@ -450,6 +454,10 @@ class SealedSession implements CarrierLink {
     this.layer.sessions.delete(this);
   }
 
+  shutdown(): void {
+    this.#endSession(SESSION_CLOSE_CODES.relayInternal, 'the daemon is going away');
+  }
+
   /**
    * The pull. The PERMIT of the head record is asked here, synchronously, after its seal and immediately before
    * the bytes are returned (§7.3): a record whose permit changed is dropped unsent, its sequence number is
@@ -457,7 +465,12 @@ class SealedSession implements CarrierLink {
    */
   #next(): SealedFrame | SessionEnd | undefined {
     if (this.#gone) return this.#end;
-    if (this.#end !== undefined) return this.#end;
+    if (this.#end !== undefined) {
+      if (this.#endPending) return undefined;
+      const frame = this.#endFrame;
+      this.#endFrame = undefined;
+      return frame ?? this.#end;
+    }
     const plain = this.#plain.shift();
     if (plain !== undefined) return plain;
     const sealed = this.#sealed;
@@ -469,9 +482,11 @@ class SealedSession implements CarrierLink {
     } catch {
       permitted = false;
     }
+    // A final check can revoke the holder synchronously. Its old ciphertext must never leave after that end.
+    if (!this.#live()) return this.#next();
     if (!permitted) {
       this.#endSession(SESSION_CLOSE_CODES.protocolError, 'what it was about to send changed before it left');
-      return this.#end;
+      return this.#next();
     }
     if (this.#waiting[0] === sealed.pending) this.#waiting.shift();
     this.#channel =
@@ -1351,9 +1366,36 @@ class SealedSession implements CarrierLink {
   }
 
   #finish(end: SessionEnd): void {
+    const channel = this.#channel;
     this.#forget();
-    this.#end = end;
+    this.#end =
+      channel === undefined
+        ? end
+        : {
+            code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+            reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+          };
     this.layer.sessions.delete(this);
+    if (channel !== undefined && maySend(this.#send)) {
+      this.#endPending = true;
+      this.connection.outbox = this.connection.outbox
+        .then(async () => {
+          try {
+            if (this.#gone) return;
+            const sealed = await sealRecord(
+              this.deps.crypto,
+              channel,
+              encodeDaemonRecord({ t: 'session-end', protocol: SESSION_PROTOCOL_ID, ...end }),
+            );
+            if (sealed.ok && !this.#gone)
+              this.#endFrame = { sequence: sealed.frame.sequence, bytes: encodeFrame(sealed.frame) };
+          } finally {
+            this.#endPending = false;
+            this.#ready();
+          }
+        })
+        .catch(() => undefined);
+    }
     this.#ready();
   }
 

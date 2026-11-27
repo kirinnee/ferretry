@@ -1733,9 +1733,9 @@ async function bootLocked(
       try {
         trace.push('stop:listen');
         listenerAt = undefined;
+        await sessionLayer.close();
         stopCarriers();
         for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
-        sessionLayer.close();
         for (const cancel of unwatchState) cancel();
         stopWatching?.();
         watched?.cancel();

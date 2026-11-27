@@ -92,7 +92,11 @@ import {
   partitionTunnelBody,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
 } from './wire/index.ts';
-import { RELAY_SESSION_CONCLUDED_CLOSE_CODE, relayDataByteBudget } from '@ferretry/kernel/session';
+import {
+  RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+  RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+  relayDataByteBudget,
+} from '@ferretry/kernel/session';
 import { z } from 'zod';
 import { decodeCompressedAnswer } from './compression.ts';
 import { outgoingRequest } from './outgoing-request.ts';
@@ -114,6 +118,10 @@ export interface RelayClientSocket {
   send(bytes: Uint8Array): void;
   sendText(text: string): void;
   close(code: number, reason: string): void;
+  /** The pinned daemon's handshake verified; plain carrier verdicts are no longer authoritative. */
+  keyed?(): void;
+  /** A plain control or invalid record ended the keyed session as a carrier outage. */
+  lost?(): void;
 }
 
 /* ---------- §14, the client's half of the tunnel above the channel --------- */
@@ -220,6 +228,12 @@ const StreamCloseSchema = z.strictObject({
 
 const RelayTunnelDaemonMessageSchema = z.union([
   z.discriminatedUnion('t', [
+    z.strictObject({
+      t: z.literal('session-end'),
+      protocol: Dialect,
+      code: z.number().int().min(1_000).max(4_999),
+      reason: z.string().max(200),
+    }),
     z.strictObject({
       t: z.literal('authenticated'),
       protocol: Dialect,
@@ -787,23 +801,13 @@ export class RelayClientSession {
   #streamClosed: RelayStreamClosed | undefined;
   readonly #streamListeners = new Set<(closed: RelayStreamClosed) => void>();
   /**
-   * Receives in flight, and the close that is waiting for them to finish.
-   *
-   * WHY A CLOSE HAS TO WAIT, and it is the sharpest bug this class has had. Opening a record is
-   * asynchronous — `openRecord` decrypts — while a socket close arrives synchronously, and the
-   * adapter hands frames over without awaiting them. So the sealed record stating a pairing's
-   * outcome can still be inside `openRecord` when the daemon's `4440` lands. Applying that close
-   * immediately sets the phase to `ended`, and the resumed record handler then finds a session that
-   * is over and drops the outcome on the floor: the daemon minted the grant, the browser saw the
-   * close, and a SUCCESSFUL pairing is reported as a failure. §14 puts the sealed outcome before the
-   * close precisely so that cannot happen, and honouring it means the close is applied only once
-   * nothing is still being read.
-   *
-   * The counter keeps the common path synchronous — nothing in flight, close applied at once, which
-   * is what every existing caller and test sees — and defers only in the race it exists for.
+   * A carrier close waits for every earlier record to finish decrypting, in every mode. Otherwise the
+   * socket can end the session while the authenticated daemon verdict is still inside openRecord.
    */
   #receiving = 0;
-  #deferredClose: { readonly code: number; readonly reason: string; readonly replaced?: true } | undefined;
+  #deferredClose:
+    | { readonly code: number; readonly reason: string; readonly replaced?: true; readonly localFence?: true }
+    | undefined;
   /** Serialises frame handling, so a later frame never overtakes an earlier one mid-decrypt. */
   #inbox: Promise<void> = Promise.resolve();
 
@@ -1090,58 +1094,26 @@ export class RelayClientSession {
   }
 
   /**
-   * The carrier dropped the socket. Every session on it is gone, which is what §9 says.
-   *
-   * EXCEPT WHEN THIS SESSION ALREADY SAID HOW IT ENDED. A pairing and a stream state their outcome
-   * inside the channel and the daemon then closes with `4440`; §14 calls that "expected teardown,
-   * not a failure that overwrites a pairing that succeeded". So a close after a latched conclusion
-   * changes nothing at all — and a close BEFORE one is still a failure carrying its own code, which
-   * is how "a `4440` with no sealed outcome" is reported as the protocol violation §14 says it is
-   * rather than smoothed into a quiet end.
+   * A plain carrier close after keying means connection loss. Let all previously delivered records finish
+   * decrypting first: only a sealed outcome or session-end can establish the daemon's verdict.
    */
-  carrierClosed(code: number, reason: string, replaced?: true): void {
+  carrierClosed(code: number, reason: string, replaced?: true, localFence?: true): void {
     if (this.#done()) return;
     // A record may still be decrypting. Applying a close under it would drop the outcome that record
     // carries — see `#receiving`.
     //
-    // ONLY FOR THE MODES THAT END WITH A SEALED OUTCOME, deliberately. A request session has no
-    // record whose arrival a close could destroy the meaning of: its answers are per-request and a
-    // close genuinely ends it, so deferring there would delay every ordinary teardown by a microtask
-    // to protect nothing. The hazard §14 legislates against is specific to pairing and streams.
-    if (this.#receiving > 0 && this.deps.mode.kind !== 'auth' && this.deps.mode.kind !== 'member') {
-      this.#deferredClose ??= { code, reason, ...(replaced ? { replaced } : {}) };
+    // Every mode can receive a sealed session-end immediately before carrier teardown.
+    if (this.#receiving > 0) {
+      this.#deferredClose ??= { code, reason, replaced, localFence };
       return;
     }
-    // Quietly: the carrier has already taken this socket away, so there is nothing left to close.
-    this.#fail(code, this.#closedWithoutOutcome(code, reason), false, replaced);
+    if (this.#channel !== undefined && !localFence) this.#fail(1006, 'the connection was lost', false);
+    else this.#fail(code, reason || 'the carrier closed this session', false, replaced);
   }
 
   /** Nothing more will happen to this session, by either route out of it. */
   #done(): boolean {
     return this.#phase === 'ended' || this.#phase === 'concluded';
-  }
-
-  /**
-   * What to say about a close that arrived where a sealed outcome was owed.
-   *
-   * Named rather than generic because the two cases read completely differently to somebody holding
-   * the resulting error: a session that never got as far as its credential simply lost its carrier,
-   * while one that sent a credential and got a bare close was told nothing by a daemon that owed it
-   * an answer. §14 requires the second to be reported as a violation.
-   *
-   * THE VIOLATION SENTENCE DOES NOT DEPEND ON THE CARRIER SAYING NOTHING. It used to be reached only
-   * for an EMPTY reason, so a `4440` that arrived carrying any string at all — which a conforming
-   * rendezvous forwards from the daemon — was reported in the carrier's words instead of as the
-   * violation it is. The phase is what decides this, because the phase is what knows an outcome was
-   * owed; the carrier's own words are kept for the cases where nothing was.
-   */
-  #closedWithoutOutcome(code: number, reason: string): string {
-    if (this.#phase !== 'awaiting-credential' && this.#phase !== 'streaming') {
-      return reason === '' ? 'the carrier closed this session' : reason;
-    }
-    return code === RELAY_SESSION_CONCLUDED_CLOSE_CODE
-      ? 'the daemon ended this session as concluded without stating an outcome inside the channel, which this protocol does not allow'
-      : 'the carrier closed this session before the daemon answered its credential';
   }
 
   /**
@@ -1157,7 +1129,8 @@ export class RelayClientSession {
       return;
     }
     if (text === HEARTBEAT_RESPONSE) return;
-    this.#fail(RELAY_CLOSE_CODES.protocolError, 'the carrier sent an unknown text message');
+    if (this.#channel !== undefined) this.#connectionLost();
+    else this.#fail(RELAY_CLOSE_CODES.protocolError, 'the carrier sent an unknown text message');
   }
 
   /**
@@ -1201,7 +1174,7 @@ export class RelayClientSession {
       const deferred = this.#receiving === 0 ? this.#deferredClose : undefined;
       if (deferred !== undefined) {
         this.#deferredClose = undefined;
-        this.carrierClosed(deferred.code, deferred.reason, deferred.replaced);
+        this.carrierClosed(deferred.code, deferred.reason, deferred.replaced, deferred.localFence);
       }
     }
   }
@@ -1210,7 +1183,8 @@ export class RelayClientSession {
     if (this.#done()) return;
     const decoded = decodeFrame(bytes);
     if (!decoded.ok) {
-      this.#fail(decoded.code, decoded.reason);
+      if (this.#channel !== undefined) this.#connectionLost();
+      else this.#fail(decoded.code, decoded.reason);
       return;
     }
     const frame = decoded.frame;
@@ -1220,7 +1194,8 @@ export class RelayClientSession {
     }
     const sessionId = this.#sessionId;
     if (sessionId === undefined || frame.sessionId.text !== sessionId.text) {
-      this.#fail(RELAY_CLOSE_CODES.protocolError, 'a frame named a session this browser does not hold');
+      if (this.#channel !== undefined) this.#connectionLost();
+      else this.#fail(RELAY_CLOSE_CODES.protocolError, 'a frame named a session this browser does not hold');
       return;
     }
     if (frame.kind === FRAME_KINDS.credit) {
@@ -1228,7 +1203,8 @@ export class RelayClientSession {
       return;
     }
     if (frame.kind === FRAME_KINDS.handshake) {
-      await this.#onHandshake(frame);
+      if (this.#channel !== undefined) this.#connectionLost();
+      else await this.#onHandshake(frame);
       return;
     }
     await this.#onRecord(frame);
@@ -1237,6 +1213,10 @@ export class RelayClientSession {
   // ─── rendezvous control ─────────────────────────────────────────────────────
 
   async #onControl(frame: RelayFrame): Promise<void> {
+    if (this.#channel !== undefined) {
+      this.#connectionLost();
+      return;
+    }
     const message = decodeControlMessage(frame.payload);
     if (message === null) {
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'unparseable rendezvous control');
@@ -1247,14 +1227,6 @@ export class RelayClientSession {
         await this.#onReady(frame.sessionId);
         return;
       case 'closed':
-        // R575: a forwarded close owes the same sealed outcome as a carrier close.
-        if (
-          message.code === RELAY_SESSION_CONCLUDED_CLOSE_CODE &&
-          (this.#phase === 'awaiting-credential' || this.#phase === 'streaming')
-        ) {
-          this.#quietly(message.code, this.#closedWithoutOutcome(message.code, message.reason));
-          return;
-        }
         // A daemon that speaks another session dialect says so in its own words; passed through as-is.
         if (message.code === RELAY_CLOSE_CODES.versionUnsupported) {
           this.#quietly(RELAY_CLOSE_CODES.versionUnsupported, message.reason);
@@ -1316,14 +1288,16 @@ export class RelayClientSession {
   #onCredit(frame: RelayFrame): void {
     const frames = decodeCreditPayload(frame.payload);
     if (frames === null) {
-      this.#fail(RELAY_CLOSE_CODES.flowViolation, 'malformed credit');
+      if (this.#channel !== undefined) this.#connectionLost();
+      else this.#fail(RELAY_CLOSE_CODES.flowViolation, 'malformed credit');
       return;
     }
     const granted = grantCredit(this.#send, frames);
     if (granted.allowed === this.#send.allowed) {
       // A grant that changes nothing means the peer and the carrier disagree about
       // the window, and guessing which one is right is not available.
-      this.#fail(RELAY_CLOSE_CODES.flowViolation, 'credit grant had no effect');
+      if (this.#channel !== undefined) this.#connectionLost();
+      else this.#fail(RELAY_CLOSE_CODES.flowViolation, 'credit grant had no effect');
       return;
     }
     this.#send = granted;
@@ -1354,6 +1328,7 @@ export class RelayClientSession {
     }
     this.#consume();
     this.#channel = openChannel(pending.sessionId, completed.keys, 'client');
+    this.deps.socket.keyed?.();
     this.#transcript = completed.keys.transcriptHash;
     this.#phase = 'awaiting-credential';
     this.#sendRecord(await credentialRecord(this.deps.crypto, this.deps.mode, completed.keys.transcriptHash));
@@ -1428,7 +1403,7 @@ export class RelayClientSession {
     }
     const opened = await openRecord(this.deps.crypto, channel, frame);
     if (!opened.ok) {
-      this.#fail(opened.code, opened.reason);
+      this.#connectionLost();
       return;
     }
     // ONLY THE RECEIVE COUNTER, and writing the whole state back was a real defect rather than a
@@ -1442,6 +1417,11 @@ export class RelayClientSession {
     const message = decodeTunnelDaemonMessage(opened.plaintext);
     if (message === null) {
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'unparseable tunnel record');
+      return;
+    }
+    if (message.t === 'session-end') {
+      this.#fail(message.code, message.reason, false);
+      this.deps.socket.close(RELAY_SESSION_CONCLUDED_CLOSE_CODE, RELAY_SESSION_CONCLUDED_CLOSE_REASON);
       return;
     }
     if (this.#phase === 'awaiting-credential') {
@@ -1772,7 +1752,6 @@ export class RelayClientSession {
    */
   #fail(code: number, reason: string, close = true, replaced?: true): void {
     if (this.#done()) return;
-    if (close) this.deps.socket.close(code, reason);
     const streaming = this.#phase === 'streaming';
     const serving = this.#phase === 'serving';
     this.#phase = 'ended';
@@ -1803,10 +1782,17 @@ export class RelayClientSession {
       this.#streamClosed = { code: 1006, reason };
       this.#announceStreamClosed(this.#streamClosed);
     }
+    if (close) this.deps.socket.close(code, reason);
   }
 
   /** End without closing: for the two cases where the far end is already closing this socket. */
   #quietly(code: number, reason: string): void {
     this.#fail(code, reason, false);
+  }
+
+  #connectionLost(): void {
+    this.#fail(1006, 'the connection was lost', false);
+    if (this.deps.socket.lost !== undefined) this.deps.socket.lost();
+    else this.deps.socket.close(1000, 'connection lost');
   }
 }
