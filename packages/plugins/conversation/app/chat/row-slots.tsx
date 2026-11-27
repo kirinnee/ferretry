@@ -18,12 +18,17 @@ import { shellCommandOf } from './peer-delivery.ts';
 import { isSoleClientCommand } from './slot-command.ts';
 import type { ToolCall, TranscriptEntry } from './transcript-entries.ts';
 
-interface RowSlotPlace {
+export interface RowSlotPlace {
   readonly daemon: string;
   readonly ferret: string;
 }
 
 const RowSlotContext = createContext<RowSlotPlace | null>(null);
+
+/** The daemon and ferret the chat is drawing, or `null` outside a chat that said (a test, a harness). */
+export function useRowSlotPlace(): RowSlotPlace | null {
+  return useContext(RowSlotContext);
+}
 
 export function RowSlotProvider({
   daemon,

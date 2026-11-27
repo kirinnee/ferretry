@@ -1,0 +1,60 @@
+/* The Fork form: a turn picker and two choices, drawn with the action-form rules (compact-at.css). Round-safe: a row is a
+   panel-shaped box with the shared control radius, never a pill, and its text sits inside its padding. */
+/* The form is a column: its fields scroll inside the dialog while the refusal and the buttons stay in view. */
+.fy-fork-form {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.fy-fork-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fy-fork-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-fork-pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: var(--control-h-sm);
+  padding: 6px var(--pad-control-x, 10px);
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.fy-fork-pick:has(input:checked) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.fy-fork-pick > input {
+  flex: none;
+  margin-top: 3px;
+}
+.fy-fork-pick__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.fy-fork-pick__text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+.fy-fork-pick__when {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
