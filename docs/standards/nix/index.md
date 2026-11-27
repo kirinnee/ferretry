@@ -214,7 +214,10 @@ Nodes.
   `PATH` before doing any work. The Pages release build must stay that script, not a bare `task`.
 - On Linux every shell also sets `FONTCONFIG_FILE` to a flake-built fonts configuration over DejaVu
   (`nix/shells.nix`), so Chrome in the browser tiers has fonts on a host that has none; the same script
-  fails when it is missing.
+  fails when it is missing. The file is **hermetic**: one `/nix/store` font root, no `<include>` of `/etc`,
+  no home, XDG or host font directory, so a font planted on the machine cannot change what the tests
+  measure. `scripts/validate/fonts-config.ts` (run by the guard) fails on any `<include>` or non-store
+  `<dir>`, and when `fc-list` resolves a font outside the store.
 - Do not add a tool to a workflow with `actions/setup-node` or rely on the image's Node. If a new
   script needs another runtime, add it to the flake and to the guard's list.
 

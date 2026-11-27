@@ -6,7 +6,6 @@ import type { DaemonRegistry } from '../../../../../scripts/test/two-release/rel
 import { realDaemonRegistry } from '../../../../../scripts/test/two-release/real-release.ts';
 import { standings, wholeDaemonBlocked } from '../../../src/client/inventory.ts';
 import { CORE_IDS } from '@ferretry/kernel/contract';
-import { inventorySurfacesOf } from '@ferretry/kernel/host';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { type AppSession, openApp } from '../two-release/session.ts';
 
@@ -98,6 +97,9 @@ describe.each([['full'], ['limited']] as const)('a %s device on a daemon of this
   });
 });
 
+/** Packages a full device deliberately does not see: a harness adapter whose app half is empty declares nothing to reach. */
+const DELIBERATELY_HIDDEN: ReadonlySet<string> = new Set(['opencode']);
+
 describe('narrowing still narrows', () => {
   test('a full device sees every package; a limited one loses what its grants do not reach, never a core piece', async () => {
     // Board and Agenda ride the one `work` switch, which is OFF by default (O8-14 P2): a daemon whose owner has not turned
@@ -118,14 +120,27 @@ describe('narrowing still narrows', () => {
       };
       const fullStandings = read(full);
       const limitedStandings = read(limited);
-      // "Every package" is every package with something a device could reach: the daemon hides one that declares no route,
-      // socket or tool (a harness adapter such as OpenCode, whose app half is empty), so it is named, not allowed.
-      const reachable = (entry: SurfaceEntry): boolean =>
-        entry.core || entry.id === 'access' || inventorySurfacesOf(entry.manifest).length > 0;
+      // The expectation is written out here, NOT computed with the daemon's own extractor (`inventorySurfacesOf`): a test
+      // that asks the same function the daemon asks passes whatever that function drops (a preload that removed all eleven
+      // Projects surfaces still passed). A full device sees every package except the ones named in DELIBERATELY_HIDDEN.
       for (const entry of surfaces)
         expect(fullStandings.get(entry.id)).toEqual(
-          reachable(entry) ? { state: 'allowed' } : { state: 'blocked', reason: 'missing' },
+          DELIBERATELY_HIDDEN.has(entry.id) ? { state: 'blocked', reason: 'missing' } : { state: 'allowed' },
         );
+      // The one deliberate exclusion, proved from the raw manifest (not the extractor): OpenCode's app half is empty, so it
+      // declares no route, socket or tool and the daemon has nothing to show a device. Everything else declares something.
+      for (const entry of surfaces) {
+        const declared =
+          (entry.manifest.actions?.routes?.length ?? 0) +
+          (entry.manifest.actions?.sockets?.length ?? 0) +
+          (entry.manifest.actions?.agentTools?.length ?? 0);
+        expect({ id: entry.id, declaresNothing: declared === 0 }).toEqual({
+          id: entry.id,
+          declaresNothing: DELIBERATELY_HIDDEN.has(entry.id),
+        });
+      }
+      expect(fullStandings.get('opencode')).toEqual({ state: 'blocked', reason: 'missing' });
+      expect(fullStandings.get('projects')).toEqual({ state: 'allowed' });
       for (const id of CORE_IDS) expect(limitedStandings.get(id)).toEqual({ state: 'allowed' });
       const hidden = surfaces.filter(entry => limitedStandings.get(entry.id)?.state === 'blocked');
       expect(hidden.length).toBeGreaterThan(0);

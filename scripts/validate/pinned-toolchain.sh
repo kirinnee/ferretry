@@ -28,13 +28,13 @@ done
 
 # fonts (Linux): Chrome in the visual and browser tiers finds fonts through fontconfig. A host with none gives it an empty
 # font set, so every unit-free "does this label fit" measurement is wrong and Chromium needs a hand-made config before
-# it renders text at all. The devshell hands it one (nix/shells.nix): a file in /nix/store that names a font directory.
+# it renders text at all. The devshell hands it one (nix/shells.nix): a file in /nix/store that names ONE font directory,
+# and fonts-config.ts fails when it reads anything else (an <include>, a home, XDG or host font directory).
 if [[ "$(uname -s)" == Linux ]]; then
   fonts="${FONTCONFIG_FILE:-}"
   [[ -n ${fonts} && ${fonts} == /nix/store/* && -r ${fonts} ]] ||
     fail "FONTCONFIG_FILE is ${fonts:-unset}, not a fonts configuration from /nix/store: Chrome would draw no text"
-  grep -q '<dir>/nix/store/.*dejavu' "${fonts}" ||
-    fail "FONTCONFIG_FILE (${fonts}) names no DejaVu font directory, so Chrome would have no font to draw with"
+  bun "$(dirname "${BASH_SOURCE[0]}")/fonts-config.ts" "${fonts}" || exit 1
 fi
 
 echo "✅ node $(node --version), bun $(bun --version) and $(tmux -V) come from /nix/store"
