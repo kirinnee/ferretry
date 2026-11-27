@@ -866,7 +866,7 @@ export class BrowserSessionService implements BrowserSubsystem {
   }
 
   private async launch(): Promise<Running> {
-    let driver: BrowserAutomation;
+    let driver: BrowserAutomation | undefined;
     try {
       driver = await this.launcher.launch(DEFAULT_BROWSER_VIEWPORT, this.identity);
       const snapshot = pageOf(await driver.location());
@@ -888,6 +888,10 @@ export class BrowserSessionService implements BrowserSubsystem {
       this.touch(run);
       return run;
     } catch (error) {
+      // The launcher already handed us a live Chrome, even if its first snapshot never arrived. Its close also owns
+      // the private X display; finish that teardown before this launch settles or shutdown/admission can pass it.
+      await driver?.close().catch(() => undefined);
+      if (this.run?.driver === driver) this.run = undefined;
       throw error instanceof BrowserSessionError
         ? error
         : new BrowserSessionError('launch_failed', error instanceof Error ? error.message : 'browser launch failed');

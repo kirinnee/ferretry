@@ -93,6 +93,7 @@ import { type PointerPosition, pointerAfter, pointerSequence } from '../pages/po
 import { type PointerPage, performPointerAct, pointerActParam } from '../pages/pointer-acts.ts';
 import type { PushNumberPage } from '../challenges/push-number-read.ts';
 import { BrowserCapture, type CaptureFrameEvent, withheldPageStatus } from './capture/index.ts';
+import { browserPageId } from '../pages/page-id.ts';
 
 const endpoint = process.argv[2];
 /** This worker drives a stealth identity's Chrome (`STEALTH_WORKER_ENVIRONMENT` in `client.ts`): patchright-core, with no `Runtime.enable`. */
@@ -296,7 +297,7 @@ function pageId(page: Page): string {
   const known = pageIds.get(page);
   if (known) return known;
   pageSerial += 1;
-  const id = `${PAGE_PREFIX}pg-${pageSerial.toString(36)}`;
+  const id = browserPageId(PAGE_PREFIX, pageSerial);
   pageIds.set(page, id);
   return id;
 }

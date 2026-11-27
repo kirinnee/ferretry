@@ -8,7 +8,10 @@ import { Tabs } from '../../support/tabs.ts';
 const known = new Set(['s1', 's2']);
 
 /** One fake browser per identity, and a record of which identity each launch was asked for. */
-function world(maxRunning = 4, gates: { launch?: Promise<void>; close?: Promise<void> } = {}) {
+function world(
+  maxRunning = 4,
+  gates: { launch?: Promise<void>; close?: Promise<void>; location?: () => Promise<void> } = {},
+) {
   const browsers = new Map<string, Tabs>();
   const launched: string[] = [];
   const tabsOf = (identity: string): Tabs => {
@@ -33,6 +36,10 @@ function world(maxRunning = 4, gates: { launch?: Promise<void>; close?: Promise<
             const tabs = tabsOf(named ?? 'agent');
             return {
               ...tabs.automation,
+              location: async pageId => {
+                await gates.location?.();
+                return await tabs.automation.location(pageId);
+              },
               close: async () => {
                 await gates.close;
                 await tabs.automation.close();
@@ -69,8 +76,44 @@ describe('identity browsers — one Chrome per identity behind the one surface',
 
   it('should reserve every generated id spelling before a future page exists', async () => {
     const { pages } = world();
-    for (const name of ['pg-1', 'work-pg-2'])
+    for (const name of ['pg-1', 'work-pg-2', 'pg-a', 'work-pg-z', 'work-pg-1a', 'work-2-pg-zz'])
       should(await failure(pages.openPage('s1', name))).match({ code: 'conflict' });
+  });
+
+  it('should reserve letter-suffixed page ids for adoption as well as opening', async () => {
+    const { pages } = world();
+    const unnamed = await pages.act('s1', { action: 'new-page' });
+    const key = unnamed.status.pages.at(-1)?.id ?? '';
+    for (const name of ['pg-a', 'work-pg-z'])
+      should(await failure(pages.adoptPage('s1', key, name))).match({ code: 'conflict' });
+  });
+
+  it('should finish closing a driver whose initial snapshot failed before shutdown returns', async () => {
+    const snapshot = Promise.withResolvers<void>();
+    const reading = Promise.withResolvers<void>();
+    const teardown = Promise.withResolvers<void>();
+    const { pages, tabsOf } = world(1, {
+      location: async () => {
+        reading.resolve();
+        await snapshot.promise;
+      },
+      close: teardown.promise,
+    });
+    const opening = failure(pages.openPage('s1', 'home'));
+    await reading.promise;
+    let stopped = false;
+    const closing = pages.closeAll().then(() => {
+      stopped = true;
+    });
+    snapshot.reject(new Error('injected initial snapshot failure'));
+    await Bun.sleep(10);
+    const returnedBeforeTeardown = stopped;
+    teardown.resolve();
+    const [error] = await Promise.all([opening, closing]);
+    should(returnedBeforeTeardown).be.false();
+    should(error).match({ code: 'launch_failed', message: 'injected initial snapshot failure' });
+    should(tabsOf('agent').calls).containEql('close');
+    should(pages.runningIdentities()).deepEqual([]);
   });
 
   it('should reserve a name atomically across concurrent identity opens', async () => {

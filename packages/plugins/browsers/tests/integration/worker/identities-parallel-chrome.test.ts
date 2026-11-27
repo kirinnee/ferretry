@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import should from 'should';
 import type { BrowserScreencastFrame } from '../../../contract/wire/browser.ts';
 import type { ResolvedBrowserProxy } from '../../../daemon/proxy/index.ts';
+import type { BrowserAutomation } from '../../../daemon/pages/automation.ts';
 import { IdentityBrowsers } from '../../../daemon/pages/identities.ts';
 import { BrowserSessionService } from '../../../daemon/pages/service.ts';
 import { XvfbDisplay } from '../../../daemon/worker/control/adapters/login-runtime.ts';
@@ -481,13 +482,14 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
     120_000,
   );
 
-  it.if(xvfb !== null)(
-    'should finish shutdown during a real window launch with no Chrome or Xvfb left behind',
-    async () => {
+  it.skipIf(xvfb === null).each([false, true])(
+    'should finish shutdown during a real window launch with no Chrome or Xvfb left behind (initial snapshot fails: %s)',
+    async failSnapshot => {
       await pages.closeAll();
       mode = 'window';
       const started = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
+      let launchedBrowser: BrowserAutomation | undefined;
       const local = new IdentityBrowsers({
         maxRunning: () => 1,
         make: (identity, quota) =>
@@ -496,8 +498,13 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
             {
               launch: async viewport => {
                 const browser = await launcher.launch(viewport, identity);
+                launchedBrowser = browser;
                 started.resolve();
                 await release.promise;
+                if (failSnapshot)
+                  browser.location = async () => {
+                    throw new Error('injected initial snapshot failure');
+                  };
                 return browser;
               },
             },
@@ -509,7 +516,10 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
             quota,
           ),
       });
-      const opening = local.openPage('s1', 'late', { identity: 'shutdown', url: `${base}/read` });
+      const opening = local.openPage('s1', 'late', { identity: 'shutdown', url: `${base}/read` }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
       await started.promise;
       const pid = await chromePid('shutdown');
       const displays = await xvfbPids();
@@ -520,13 +530,16 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
       await Bun.sleep(50);
       const early = settled;
       release.resolve();
-      await Promise.allSettled([opening, closing]);
+      const [error] = await Promise.all([opening, closing]);
       try {
         should(early).be.false();
+        if (failSnapshot) should(error).match({ code: 'launch_failed', message: 'injected initial snapshot failure' });
         should(await readFile(`/proc/${String(pid)}/cmdline`, 'utf8').catch(() => '')).equal('');
         should((await xvfbPids()).filter(pid => displays.includes(pid))).deepEqual([]);
       } finally {
         await local.closeAll();
+        // The red regression still owns a live Chrome: explicitly close that test's driver, too.
+        await launchedBrowser?.close();
         mode = 'headless';
       }
     },

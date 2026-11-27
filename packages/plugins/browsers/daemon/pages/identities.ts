@@ -12,6 +12,7 @@ import type { PageScript } from '../../contract/wire/page-script.ts';
 import type { SurfaceOpener } from '../../contract/wire/surface.ts';
 import type { BrowserInputFieldsPort } from '../target/lib/contracts.ts';
 import type { BrowserCopyPort } from './copy-contracts.ts';
+import { isBrowserPageId } from './page-id.ts';
 import type { ViewerAttachment, ViewerRef, ViewerTerminalSignal } from '../stream/viewer-contracts.ts';
 import {
   type BrowserActGuard,
@@ -310,11 +311,7 @@ export class IdentityBrowsers implements BrowserSubsystem {
   /** Reserve synchronously before either operation yields, across all identities and both naming paths. */
   private async withName<T>(sessionId: string, name: string, work: () => Promise<T>): Promise<T> {
     let pending = this.naming.get(sessionId);
-    if (
-      /^(?:[a-z][a-z0-9-]*-)?pg-\d+$/u.test(name) ||
-      pending?.has(name) === true ||
-      this.holder(sessionId, name) !== undefined
-    )
+    if (isBrowserPageId(name) || pending?.has(name) === true || this.holder(sessionId, name) !== undefined)
       throw new BrowserSessionError(
         'conflict',
         `this session already has a browser page named ${name}, or that name is reserved for page ids`,
