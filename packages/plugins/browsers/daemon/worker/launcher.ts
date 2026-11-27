@@ -1,6 +1,6 @@
 import { createServer } from 'node:net';
 import { milliseconds } from '@ferretry/std';
-import type { BrowserMode, BrowserProxyStatus } from '../../contract/index.ts';
+import { type BrowserMode, type BrowserProxyStatus, DEFAULT_BROWSER_IDENTITY } from '../../contract/index.ts';
 import type { ResolvedBrowserPorts } from '../proxy/wire/ports.ts';
 import {
   agentBrowserArguments,
@@ -162,7 +162,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     const mode: BrowserMode = stealth === undefined ? configuredMode : 'window';
     const version = await chromeVersion(this.ports.spawn, executable);
     const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
-    const lease = await this.profile.acquire({ sessionId: AGENT_BROWSER_HOLDER });
+    const lease = await this.profile.acquire(DEFAULT_BROWSER_IDENTITY, { sessionId: AGENT_BROWSER_HOLDER });
     let chrome: ChromeChild | undefined;
     let relay: ProxySignInRelay | undefined;
     try {

@@ -75,7 +75,7 @@ const statusBase = {
   viewport,
   viewers: 2,
   persistentProfile: true,
-  profileKind: 'session',
+  profileKind: 'shared',
   profileSignedIn: false,
   idleTimeoutSeconds: 300,
   idleDeadline: LATER_INSTANT,
@@ -143,7 +143,7 @@ const stopResult = { status: stoppedStatus } satisfies BrowserActionResult;
 const browserCases: SchemaCase[] = [
   { name: 'lifecycle', schema: browser.BrowserLifecycleSchema, value: 'running' },
   { name: 'actor kind', schema: browser.BrowserActorKindSchema, value: 'human' },
-  { name: 'profile kind', schema: browser.BrowserProfileKindSchema, value: 'session' },
+  { name: 'profile kind', schema: browser.BrowserProfileKindSchema, value: 'shared' },
   { name: 'page state', schema: browser.BrowserPageStateSchema, value: 'ready' },
   { name: 'mode', schema: browser.BrowserModeSchema, value: 'window' },
   { name: 'challenge provider', schema: browser.BrowserChallengeProviderSchema, value: 'cloudflare' },
@@ -208,7 +208,7 @@ describe('browser schemas', () => {
     const enums = [
       { schema: browser.BrowserLifecycleSchema, members: ['stopped', 'starting', 'running', 'stopping', 'error'] },
       { schema: browser.BrowserActorKindSchema, members: ['agent', 'human'] },
-      { schema: browser.BrowserProfileKindSchema, members: ['shared', 'session'] },
+      { schema: browser.BrowserProfileKindSchema, members: ['shared'] },
       { schema: browser.BrowserPageStateSchema, members: ['loading', 'ready', 'error'] },
       {
         schema: browser.BrowserActivitySchema,

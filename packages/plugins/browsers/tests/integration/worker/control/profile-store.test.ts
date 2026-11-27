@@ -41,7 +41,7 @@ describe('BrowserProfileStore', () => {
     );
 
     // Act
-    const lease = await subject.acquire({ sessionId: 'first' });
+    const lease = await subject.acquire('agent', { sessionId: 'first' });
 
     // Assert
     should(JSON.parse(await readFile(preferences, 'utf8'))).eql({
@@ -62,8 +62,8 @@ describe('BrowserProfileStore', () => {
     await writeFile(damagedFile, '{ not json');
 
     // Act
-    await (await fresh.acquire({ sessionId: 'first' })).release();
-    await (await damaged.acquire({ sessionId: 'first' })).release();
+    await (await fresh.acquire('agent', { sessionId: 'first' })).release();
+    await (await damaged.acquire('agent', { sessionId: 'first' })).release();
 
     // Assert
     for (const file of [path.join(fresh.browserDirectory, 'data', 'agent', 'Default', 'Preferences'), damagedFile])
@@ -81,7 +81,7 @@ describe('BrowserProfileStore', () => {
     // Act
     let refused: unknown;
     try {
-      await subject.acquire({ sessionId: 'first' });
+      await subject.acquire('agent', { sessionId: 'first' });
     } catch (error) {
       refused = error;
     }
@@ -90,7 +90,7 @@ describe('BrowserProfileStore', () => {
     should(refused).instanceOf(BrowserControlError);
     should((refused as Error).message).containEql('could not turn off password saving');
     await rm(path.join(subject.browserDirectory, 'data', 'agent', 'Default', 'Preferences'), { recursive: true });
-    await (await subject.acquire({ sessionId: 'again' })).release();
+    await (await subject.acquire('agent', { sessionId: 'again' })).release();
   });
 
   it('should lease a private profile, record explicit priming, and protect against Chrome downgrades', async () => {
@@ -98,23 +98,23 @@ describe('BrowserProfileStore', () => {
     const subject = await profile();
 
     // Act
-    const lease = await subject.acquire({ sessionId: 'first', chromeVersion: 'Chrome 150.0.0.0' });
+    const lease = await subject.acquire('agent', { sessionId: 'first', chromeVersion: 'Chrome 150.0.0.0' });
     await lease.updateChromePid(2002, 'Chrome 151.0.0.0');
     await lease.updateChromePid();
     await lease.markPrimed('Chrome 151.0.0.0');
 
     // Assert
     should(lease.profile).equal(path.join(subject.browserDirectory, 'data', 'agent'));
-    should(await subject.isPrimed()).be.true();
-    await subject.assertChromeVersionCompatible('Chrome 151.0.0.0');
+    should(await subject.isPrimed('agent')).be.true();
+    await subject.assertChromeVersionCompatible('agent', 'Chrome 151.0.0.0');
     let downgrade: unknown;
     try {
-      await subject.assertChromeVersionCompatible('Chrome 150.0.0.0');
+      await subject.assertChromeVersionCompatible('agent', 'Chrome 150.0.0.0');
     } catch (error) {
       downgrade = error;
     }
     should(downgrade).instanceOf(BrowserControlError);
-    should(JSON.parse(await readFile(subject.leaseFile, 'utf8'))).not.have.property('chromePid');
+    should(JSON.parse(await readFile(subject.paths('agent').leaseFile, 'utf8'))).not.have.property('chromePid');
     should(await lease.release()).be.true();
     should(await lease.release()).be.false();
   });
@@ -123,7 +123,7 @@ describe('BrowserProfileStore', () => {
     // Arrange — a hand-edited metadata file whose created version became a number. The other recorded
     // version still guards the profile, so the damaged field must cost itself alone.
     const subject = await profile();
-    const lease = await subject.acquire({ sessionId: 'first' });
+    const lease = await subject.acquire('agent', { sessionId: 'first' });
     await lease.release();
     await writeFile(
       path.join(subject.browserDirectory, 'profile.metadata.json'),
@@ -133,7 +133,7 @@ describe('BrowserProfileStore', () => {
     // Act
     let downgrade: unknown;
     try {
-      await subject.assertChromeVersionCompatible('Chrome 150.0.0.0');
+      await subject.assertChromeVersionCompatible('agent', 'Chrome 150.0.0.0');
     } catch (error) {
       downgrade = error;
     }
@@ -152,12 +152,12 @@ describe('BrowserProfileStore', () => {
     // Arrange — this daemon must read as ALIVE, or a same-session retry would reach the dead-owner
     // reclaim and pass for entirely the wrong reason.
     const subject = await profile(pid => pid === 1001);
-    await subject.acquire({ sessionId: 'first' });
+    await subject.acquire('agent', { sessionId: 'first' });
 
     // Act
     let refusal: unknown;
     try {
-      await subject.acquire({ sessionId: 'first' });
+      await subject.acquire('agent', { sessionId: 'first' });
     } catch (error) {
       refusal = error;
     }
@@ -173,13 +173,13 @@ describe('BrowserProfileStore', () => {
     // restart: a session that closed cleanly has released, and its next launch is ordinary business.
     // Arrange
     const subject = await profile(pid => pid === 1001);
-    const held = await subject.acquire({ sessionId: 'first' });
+    const held = await subject.acquire('agent', { sessionId: 'first' });
 
     // Act
     should(await held.release()).be.true();
 
     // Assert
-    should(await subject.acquire({ sessionId: 'first' })).have.property('sessionId', 'first');
+    should(await subject.acquire('agent', { sessionId: 'first' })).have.property('sessionId', 'first');
   });
 
   it('should use the production process inspector to retain a lease owned by this daemon', async () => {
@@ -187,55 +187,55 @@ describe('BrowserProfileStore', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ferretry-browser-profile-production-'));
     roots.push(root);
     const subject = new BrowserProfileStore(path.join(root, 'daemon'));
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
     await writeFile(
-      subject.leaseFile,
+      subject.paths('agent').leaseFile,
       JSON.stringify({ sessionId: 'live', daemonPid: process.pid, acquiredAt: new Date(0).toISOString() }),
     );
 
     // Act + Assert
-    await should(subject.acquire({ sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
+    await should(subject.acquire('agent', { sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
   });
 
   it('should refuse live owners, reclaim dead owners, and never reclaim their live Chrome child', async () => {
     // Arrange
     const subject = await profile(pid => pid === 4444);
-    await subject.acquire({ sessionId: 'seed' });
+    await subject.acquire('agent', { sessionId: 'seed' });
     await writeFile(
-      subject.leaseFile,
+      subject.paths('agent').leaseFile,
       JSON.stringify({ sessionId: 'live', daemonPid: 4444, acquiredAt: new Date(0).toISOString() }),
     );
 
     // Act + Assert
-    await should(subject.acquire({ sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
+    await should(subject.acquire('agent', { sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
     await writeFile(
-      subject.leaseFile,
+      subject.paths('agent').leaseFile,
       JSON.stringify({ sessionId: 'dead', daemonPid: 3333, chromePid: 4444, acquiredAt: new Date(0).toISOString() }),
     );
-    await should(subject.acquire({ sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
+    await should(subject.acquire('agent', { sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
     await writeFile(
-      subject.leaseFile,
+      subject.paths('agent').leaseFile,
       JSON.stringify({ sessionId: 'dead', daemonPid: 3333, acquiredAt: new Date(0).toISOString() }),
     );
-    const reclaimed = await subject.acquire({ sessionId: 'other' });
+    const reclaimed = await subject.acquire('agent', { sessionId: 'other' });
     should(reclaimed.recoveredDeadOwner).be.true();
   });
 
   it('should clean Chrome lock material only with proof that its owner is dead', async () => {
     // Arrange
     const subject = await profile();
-    const first = await subject.acquire({ sessionId: 'first' });
+    const first = await subject.acquire('agent', { sessionId: 'first' });
     await writeFile(path.join(first.profile, 'DevToolsActivePort'), 'unproven');
 
     // Act + Assert
     should(await first.cleanupStaleChromeLocks()).deepEqual([]);
     should(await readFile(path.join(first.profile, 'DevToolsActivePort'), 'utf8')).equal('unproven');
     await first.release();
-    await symlink('test-host-9999', path.join(subject.profile, 'SingletonLock'));
+    await symlink('test-host-9999', path.join(subject.paths('agent').profile, 'SingletonLock'));
     for (const name of ['SingletonSocket', 'SingletonCookie'])
-      await writeFile(path.join(subject.profile, name), 'stale');
-    const stale = await subject.acquire({ sessionId: 'stale' });
+      await writeFile(path.join(subject.paths('agent').profile, name), 'stale');
+    const stale = await subject.acquire('agent', { sessionId: 'stale' });
     should(await stale.cleanupStaleChromeLocks()).deepEqual([
       'SingletonLock',
       'SingletonSocket',
@@ -247,13 +247,13 @@ describe('BrowserProfileStore', () => {
   it('should release its just-created lease when a live Chrome lock blocks acquisition', async () => {
     // Arrange
     const subject = await profile(pid => pid === 9009);
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
-    await symlink('test-host-9009', path.join(subject.profile, 'SingletonLock'));
+    await symlink('test-host-9009', path.join(subject.paths('agent').profile, 'SingletonLock'));
 
     // Act + Assert
-    await should(subject.acquire({ sessionId: 'blocked' })).be.rejectedWith(BrowserProfileBusyError);
-    await should(readFile(subject.leaseFile, 'utf8')).be.rejected();
+    await should(subject.acquire('agent', { sessionId: 'blocked' })).be.rejectedWith(BrowserProfileBusyError);
+    await should(readFile(subject.paths('agent').leaseFile, 'utf8')).be.rejected();
   });
 
   it('should reclaim a lease whose owner process has really exited, using the production inspector', async () => {
@@ -264,15 +264,15 @@ describe('BrowserProfileStore', () => {
     const child = spawn(process.execPath, ['--version'], { stdio: 'ignore' });
     const exitedPid = child.pid as number;
     await new Promise(resolve => child.once('exit', resolve));
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
     await writeFile(
-      subject.leaseFile,
+      subject.paths('agent').leaseFile,
       JSON.stringify({ sessionId: 'gone', daemonPid: exitedPid, acquiredAt: new Date(0).toISOString() }),
     );
 
     // Act
-    const lease = await subject.acquire({ sessionId: 'next' });
+    const lease = await subject.acquire('agent', { sessionId: 'next' });
 
     // Assert
     should(lease.recoveredDeadOwner).be.true();
@@ -283,15 +283,15 @@ describe('BrowserProfileStore', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'ferretry-browser-profile-eperm-'));
     roots.push(root);
     const subject = new BrowserProfileStore(path.join(root, 'daemon'));
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
     await writeFile(
-      subject.leaseFile,
+      subject.paths('agent').leaseFile,
       JSON.stringify({ sessionId: 'init', daemonPid: 1, acquiredAt: new Date(0).toISOString() }),
     );
 
     // Act + Assert
-    await should(subject.acquire({ sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
+    await should(subject.acquire('agent', { sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
   });
 
   it('should refuse a blank session id before it touches the profile', async () => {
@@ -299,39 +299,39 @@ describe('BrowserProfileStore', () => {
     const subject = await profile();
 
     // Act
-    const refusal = await subject.acquire({ sessionId: '   ' }).catch((error: unknown) => error);
+    const refusal = await subject.acquire('agent', { sessionId: '   ' }).catch((error: unknown) => error);
 
     // Assert
     should(refusal).instanceOf(BrowserControlError);
     should((refusal as BrowserControlError).code).equal('bad_request');
-    await should(readFile(subject.leaseFile, 'utf8')).be.rejected();
+    await should(readFile(subject.paths('agent').leaseFile, 'utf8')).be.rejected();
   });
 
   it('should refuse a Chrome lock it cannot verify, and release its just-created lease', async () => {
     // Arrange
     const subject = await profile();
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
-    await symlink('another-host-1234', path.join(subject.profile, 'SingletonLock'));
+    await symlink('another-host-1234', path.join(subject.paths('agent').profile, 'SingletonLock'));
 
     // Act
-    const refusal = await subject.acquire({ sessionId: 'blocked' }).catch((error: unknown) => error);
+    const refusal = await subject.acquire('agent', { sessionId: 'blocked' }).catch((error: unknown) => error);
 
     // Assert
     should(refusal).instanceOf(BrowserProfileBusyError);
     should((refusal as BrowserProfileBusyError).reason).equal('unknown');
-    await should(readFile(subject.leaseFile, 'utf8')).be.rejected();
+    await should(readFile(subject.paths('agent').leaseFile, 'utf8')).be.rejected();
   });
 
   it('should refuse a Chrome lock that is not a symlink at all', async () => {
     // Arrange
     const subject = await profile();
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
-    await writeFile(path.join(subject.profile, 'SingletonLock'), 'not a symlink');
+    await writeFile(path.join(subject.paths('agent').profile, 'SingletonLock'), 'not a symlink');
 
     // Act
-    const refusal = await subject.acquire({ sessionId: 'blocked' }).catch((error: unknown) => error);
+    const refusal = await subject.acquire('agent', { sessionId: 'blocked' }).catch((error: unknown) => error);
 
     // Assert
     should(refusal).instanceOf(BrowserProfileBusyError);
@@ -341,23 +341,23 @@ describe('BrowserProfileStore', () => {
   it('should refuse a lease file that cannot be parsed rather than reclaim it', async () => {
     // Arrange
     const subject = await profile();
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
-    await writeFile(subject.leaseFile, '{ torn');
+    await writeFile(subject.paths('agent').leaseFile, '{ torn');
 
     // Act
-    const refusal = await subject.acquire({ sessionId: 'other' }).catch((error: unknown) => error);
+    const refusal = await subject.acquire('agent', { sessionId: 'other' }).catch((error: unknown) => error);
 
     // Assert
     should(refusal).instanceOf(BrowserProfileBusyError);
     should((refusal as BrowserProfileBusyError).message).containEql('malformed');
-    should(await readFile(subject.leaseFile, 'utf8')).equal('{ torn');
+    should(await readFile(subject.paths('agent').leaseFile, 'utf8')).equal('{ torn');
   });
 
   it('should refuse chrome pid, version and priming input that is unusable, and say which', async () => {
     // Arrange
     const subject = await profile();
-    const lease = await subject.acquire({ sessionId: 'first' });
+    const lease = await subject.acquire('agent', { sessionId: 'first' });
 
     // Act
     const badPid = await lease.updateChromePid(-3).catch((error: unknown) => error);
@@ -368,13 +368,13 @@ describe('BrowserProfileStore', () => {
     should((badPid as BrowserControlError).code).equal('bad_request');
     should((badVersion as BrowserControlError).code).equal('launch_failed');
     should((blankPriming as BrowserControlError).code).equal('bad_request');
-    should(await subject.isPrimed()).be.false();
+    should(await subject.isPrimed('agent')).be.false();
   });
 
   it('should refuse every write from a lease that was released, and say it is no longer owned', async () => {
     // Arrange
     const subject = await profile();
-    const lease = await subject.acquire({ sessionId: 'first' });
+    const lease = await subject.acquire('agent', { sessionId: 'first' });
     await lease.release();
 
     // Act
@@ -388,8 +388,8 @@ describe('BrowserProfileStore', () => {
   it('should refuse to clean Chrome locks while Chrome is live or its lock cannot be verified', async () => {
     // Arrange
     const subject = await profile(pid => pid === 9009);
-    const lease = await subject.acquire({ sessionId: 'first' });
-    const lock = path.join(subject.profile, 'SingletonLock');
+    const lease = await subject.acquire('agent', { sessionId: 'first' });
+    const lock = path.join(subject.paths('agent').profile, 'SingletonLock');
 
     // Act
     await symlink('test-host-9009', lock);
@@ -406,12 +406,12 @@ describe('BrowserProfileStore', () => {
   it('should surface a Chrome lock file it cannot remove instead of calling the profile clean', async () => {
     // Arrange: a directory with content cannot be removed as a file.
     const subject = await profile();
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
-    await symlink('test-host-9999', path.join(subject.profile, 'SingletonLock'));
-    await mkdir(path.join(subject.profile, 'SingletonSocket'));
-    await writeFile(path.join(subject.profile, 'SingletonSocket', 'held'), 'x');
-    const lease = await subject.acquire({ sessionId: 'stale' });
+    await symlink('test-host-9999', path.join(subject.paths('agent').profile, 'SingletonLock'));
+    await mkdir(path.join(subject.paths('agent').profile, 'SingletonSocket'));
+    await writeFile(path.join(subject.paths('agent').profile, 'SingletonSocket', 'held'), 'x');
+    const lease = await subject.acquire('agent', { sessionId: 'stale' });
 
     // Act
     const failure = await lease.cleanupStaleChromeLocks().catch((error: unknown) => error);
@@ -437,11 +437,11 @@ describe('BrowserProfileStore', () => {
         alive.delete(2222);
       },
     });
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
     const guardFile = path.join(subject.browserDirectory, 'profile.lock.reclaim');
     await writeFile(
-      subject.leaseFile,
+      subject.paths('agent').leaseFile,
       JSON.stringify({ sessionId: 'dead', daemonPid: 3333, acquiredAt: new Date(0).toISOString() }),
     );
     await writeFile(
@@ -450,7 +450,7 @@ describe('BrowserProfileStore', () => {
     );
 
     // Act
-    const lease = await subject.acquire({ sessionId: 'next' });
+    const lease = await subject.acquire('agent', { sessionId: 'next' });
 
     // Assert: it napped once for the live reclaimer, then cleared the guard once that reclaimer died.
     should(naps).eql([10]);
@@ -461,16 +461,16 @@ describe('BrowserProfileStore', () => {
   it('should clear an unreadable reclaim guard and still reclaim the dead lease', async () => {
     // Arrange
     const subject = await profile();
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
     await writeFile(
-      subject.leaseFile,
+      subject.paths('agent').leaseFile,
       JSON.stringify({ sessionId: 'dead', daemonPid: 3333, acquiredAt: new Date(0).toISOString() }),
     );
     await writeFile(path.join(subject.browserDirectory, 'profile.lock.reclaim'), 'garbage');
 
     // Act
-    const lease = await subject.acquire({ sessionId: 'next' });
+    const lease = await subject.acquire('agent', { sessionId: 'next' });
 
     // Assert
     should(lease.recoveredDeadOwner).be.true();
@@ -491,16 +491,126 @@ describe('BrowserProfileStore', () => {
       },
       now: () => new Date(0),
     });
-    const seed = await subject.acquire({ sessionId: 'seed' });
+    const seed = await subject.acquire('agent', { sessionId: 'seed' });
     await seed.release();
     const record = { sessionId: 'racing', daemonPid: 3333, acquiredAt: new Date(0).toISOString() };
-    await writeFile(subject.leaseFile, JSON.stringify(record));
+    await writeFile(subject.paths('agent').leaseFile, JSON.stringify(record));
 
     // Act
-    const refusal = await subject.acquire({ sessionId: 'next' }).catch((error: unknown) => error);
+    const refusal = await subject.acquire('agent', { sessionId: 'next' }).catch((error: unknown) => error);
 
     // Assert: the record survives, and the caller is told the owner is live.
     should(refusal).instanceOf(BrowserProfileBusyError);
-    should(JSON.parse(await readFile(subject.leaseFile, 'utf8'))).containEql({ sessionId: 'racing' });
+    should(JSON.parse(await readFile(subject.paths('agent').leaseFile, 'utf8'))).containEql({ sessionId: 'racing' });
+  });
+});
+
+describe('BrowserProfileStore identities', () => {
+  it('should let two identities hold leases at the same time while one identity stays exclusive', async () => {
+    // Arrange
+    const subject = await profile(pid => pid === 1001);
+
+    // Act
+    const a = await subject.acquire('a', { sessionId: 'first' });
+    const b = await subject.acquire('b', { sessionId: 'second' });
+
+    // Assert
+    should(a.identity).equal('a');
+    should(b.identity).equal('b');
+    await should(subject.acquire('a', { sessionId: 'again' })).be.rejectedWith(BrowserProfileBusyError);
+    await should(subject.acquire('b', { sessionId: 'again' })).be.rejectedWith(BrowserProfileBusyError);
+  });
+
+  it('should free one identity without freeing another', async () => {
+    // Arrange
+    const subject = await profile(pid => pid === 1001);
+    const a = await subject.acquire('a', { sessionId: 'first' });
+    await subject.acquire('b', { sessionId: 'second' });
+
+    // Act
+    await a.release();
+
+    // Assert
+    should(await subject.acquire('a', { sessionId: 'again' })).have.property('sessionId', 'again');
+    await should(subject.acquire('b', { sessionId: 'again' })).be.rejectedWith(BrowserProfileBusyError);
+  });
+
+  it('should give each identity its own folder, lease, metadata and primed marker', async () => {
+    // Arrange
+    const subject = await profile(pid => pid === 1001);
+
+    // Act
+    const a = await subject.acquire('a', { sessionId: 'first', chromeVersion: 'Chrome 150.0.0.0' });
+    const b = await subject.acquire('b', { sessionId: 'second', chromeVersion: 'Chrome 152.0.0.0' });
+    await a.markPrimed('Chrome 150.0.0.0');
+
+    // Assert
+    should(a.profile).equal(path.join(subject.browserDirectory, 'data', 'a'));
+    should(b.profile).equal(path.join(subject.browserDirectory, 'data', 'b'));
+    should(await subject.isPrimed('a')).be.true();
+    should(await subject.isPrimed('b')).be.false();
+    should(await subject.isPrimed('agent')).be.false();
+    await subject.assertChromeVersionCompatible('a', 'Chrome 150.0.0.0');
+    await should(subject.assertChromeVersionCompatible('b', 'Chrome 150.0.0.0')).be.rejectedWith(BrowserControlError);
+  });
+
+  it('should resolve the built-in agent identity to the folder and files it has always used', async () => {
+    // Arrange
+    const subject = await profile(pid => pid === 1001);
+
+    // Act + Assert
+    const paths = subject.paths('agent');
+    should(paths.profile).equal(path.join(subject.browserDirectory, 'data', 'agent'));
+    should(paths.leaseFile).equal(path.join(subject.browserDirectory, 'profile.lock'));
+    should(paths.metadataFile).equal(path.join(subject.browserDirectory, 'profile.metadata.json'));
+    should(paths.primedFile).equal(path.join(subject.browserDirectory, 'profile.primed.json'));
+    should(subject.paths('work').leaseFile).equal(path.join(subject.browserDirectory, 'profile.work.lock'));
+  });
+
+  it('should refuse an identity key that could leave the data folder before touching the disk', async () => {
+    // Arrange
+    const subject = await profile(pid => pid === 1001);
+
+    // Act + Assert
+    for (const key of ['a/b', '..', '../agent', 'Work', '']) {
+      await should(subject.acquire(key, { sessionId: 'first' })).be.rejectedWith(BrowserControlError);
+    }
+    should(() => subject.paths('../x')).throw(BrowserControlError);
+    await should(readFile(path.join(subject.browserDirectory, 'data'), 'utf8')).be.rejected();
+  });
+
+  it('should reclaim a stale lease from a dead pid per identity, leaving a live one on another identity alone', async () => {
+    // Arrange
+    const subject = await profile(pid => pid === 4444);
+    await subject.acquire('a', { sessionId: 'seed-a' });
+    await subject.acquire('b', { sessionId: 'seed-b' });
+    await writeFile(
+      subject.paths('a').leaseFile,
+      JSON.stringify({ sessionId: 'dead', daemonPid: 3333, acquiredAt: new Date(0).toISOString() }),
+    );
+    await writeFile(
+      subject.paths('b').leaseFile,
+      JSON.stringify({ sessionId: 'live', daemonPid: 4444, acquiredAt: new Date(0).toISOString() }),
+    );
+
+    // Act
+    const reclaimed = await subject.acquire('a', { sessionId: 'other' });
+
+    // Assert
+    should(reclaimed.recoveredDeadOwner).be.true();
+    await should(subject.acquire('b', { sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
+  });
+
+  it('should hold many identities at once without them crossing', async () => {
+    // Arrange
+    const subject = await profile(pid => pid === 1001);
+    const keys = ['a', 'b', 'c', 'd', 'e', 'f'];
+
+    // Act
+    const leases = await Promise.all(keys.map(key => subject.acquire(key, { sessionId: `s-${key}` })));
+
+    // Assert
+    should(leases.map(lease => lease.identity)).deepEqual(keys);
+    for (const lease of leases) should(await lease.release()).be.true();
   });
 });

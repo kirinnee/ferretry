@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, open, readFile, readlink, rename, rm, writeFile } 
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
+import { BrowserIdentityKeySchema, DEFAULT_BROWSER_IDENTITY } from '../../../../contract/index.ts';
 import {
   BrowserControlError,
   BrowserProfileBusyError,
@@ -29,10 +30,6 @@ import {
 // lease file and the symlink checks need a real state path and a lease no kernel port gives (`kernel.state` stores
 // documents, not a folder Chrome writes); the lease's `acquiredAt` (`new Date()`) moves to the clock with it.
 
-const leaseName = 'profile.lock';
-const reclaimName = 'profile.lock.reclaim';
-const metadataName = 'profile.metadata.json';
-const primedName = 'profile.primed.json';
 const staleChromeFiles = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort'] as const;
 
 /**
@@ -149,13 +146,21 @@ export interface BrowserProfileStoreOptions {
   readonly sleep?: (milliseconds: number) => Promise<void>;
 }
 
-/** Node filesystem implementation of the daemon-global, private browser profile. */
+/** Where one identity keeps its profile folder and the files beside it. */
+interface IdentityPaths {
+  readonly identity: string;
+  readonly profile: string;
+  readonly leaseFile: string;
+  readonly reclaimFile: string;
+  readonly metadataFile: string;
+  readonly primedFile: string;
+}
+
+/** Node filesystem implementation of the daemon's private browser profiles, one per identity. */
 export class BrowserProfileStore implements BrowserProfilePort {
   readonly browserDirectory: string;
   /** Where a private X display keeps the cookie file its clients must present. */
   readonly displayDirectory: string;
-  readonly profile: string;
-  readonly leaseFile: string;
   private readonly daemonPid: number;
   private readonly hostname: string;
   private readonly isProcessAlive: (pid: number) => boolean;
@@ -164,11 +169,9 @@ export class BrowserProfileStore implements BrowserProfilePort {
   private readonly sleep: (milliseconds: number) => Promise<void>;
 
   constructor(stateDirectory: string, options: BrowserProfileStoreOptions = {}) {
-    // `state/browsers/` (§9.2): Chrome's own profile under `data/agent`, the display cookies under `x11/`.
+    // `state/browsers/` (§9.2): each identity's Chrome profile under `data/<key>`, the display cookies under `x11/`.
     this.browserDirectory = stateDirectory;
     this.displayDirectory = path.join(this.browserDirectory, 'x11');
-    this.profile = path.join(this.browserDirectory, 'data', 'agent');
-    this.leaseFile = path.join(this.browserDirectory, leaseName);
     this.daemonPid = options.daemonPid ?? process.pid;
     this.hostname = options.hostname ?? os.hostname();
     this.isProcessAlive =
@@ -186,13 +189,43 @@ export class BrowserProfileStore implements BrowserProfilePort {
     this.sleep = options.sleep ?? (milliseconds => Bun.sleep(milliseconds));
   }
 
-  async acquire(options: {
-    readonly sessionId: string;
-    readonly chromeVersion?: string;
-  }): Promise<BrowserProfileLease> {
+  /**
+   * The folders and files of one identity. The key is parsed here, so a key that could leave `data/` (`/`, `..`,
+   * capitals) never becomes a path. The built-in identity keeps the names the machine's one agent browser has always
+   * used (`profile.lock`, `profile.metadata.json`, `profile.primed.json`), so every login and lease already on disk
+   * is its own; any other identity carries its key in the same names (`profile.<key>.lock`).
+   */
+  paths(identity: string): IdentityPaths {
+    const parsed = BrowserIdentityKeySchema.safeParse(identity);
+    if (!parsed.success) {
+      throw new BrowserControlError(
+        'bad_request',
+        'a browser identity is a short lowercase name: letters, digits and dashes, starting with a letter',
+      );
+    }
+    const key = parsed.data;
+    const stem = key === DEFAULT_BROWSER_IDENTITY ? 'profile' : `profile.${key}`;
+    return {
+      identity: key,
+      profile: path.join(this.browserDirectory, 'data', key),
+      leaseFile: path.join(this.browserDirectory, `${stem}.lock`),
+      reclaimFile: path.join(this.browserDirectory, `${stem}.lock.reclaim`),
+      metadataFile: path.join(this.browserDirectory, `${stem}.metadata.json`),
+      primedFile: path.join(this.browserDirectory, `${stem}.primed.json`),
+    };
+  }
+
+  async acquire(
+    identity: string,
+    options: {
+      readonly sessionId: string;
+      readonly chromeVersion?: string;
+    },
+  ): Promise<BrowserProfileLease> {
+    const paths = this.paths(identity);
     if (!options.sessionId.trim())
       throw new BrowserControlError('bad_request', 'a browser profile session id is required');
-    await this.ensureProfile(options.chromeVersion);
+    await this.ensureProfile(paths, options.chromeVersion);
     let recoveredDeadOwner = false;
     for (;;) {
       const desired: BrowserProfileLeaseRecord = {
@@ -201,41 +234,41 @@ export class BrowserProfileStore implements BrowserProfilePort {
         acquiredAt: this.now().toISOString(),
       };
       try {
-        await this.createExclusive(this.leaseFile, desired);
+        await this.createExclusive(paths.leaseFile, desired);
         // A live Chrome holding the profile with no lease naming it is never signalled: with no Ferretry launch
         // record it may be the owner's own browser, so it blocks (and is named) rather than being stopped.
-        const singleton = await this.singletonLockState();
+        const singleton = await this.singletonLockState(paths);
         if (singleton.kind === 'live') {
-          await this.releaseRecord(desired);
+          await this.releaseRecord(paths, desired);
           throw new BrowserProfileBusyError(
             'chrome',
-            `shared browser profile is in use by Chrome pid ${singleton.pid}`,
+            `browser profile "${paths.identity}" is in use by Chrome pid ${singleton.pid}`,
           );
         }
         if (singleton.kind === 'unknown') {
-          await this.releaseRecord(desired);
+          await this.releaseRecord(paths, desired);
           throw new BrowserProfileBusyError(
             'unknown',
-            `shared browser profile lock cannot be verified: ${singleton.detail}`,
+            `browser profile "${paths.identity}" lock cannot be verified: ${singleton.detail}`,
           );
         }
         // Chrome is not running on the profile now, and nobody else holds it: its own preferences are set here, on
         // every lease, so a profile made before this rule gets it too. A profile that cannot be kept from saving
         // passwords is not handed out.
         try {
-          await this.keepPasswordsUnsaved();
+          await this.keepPasswordsUnsaved(paths);
         } catch {
-          await this.releaseRecord(desired);
+          await this.releaseRecord(paths, desired);
           throw new BrowserControlError(
             'launch_failed',
-            'Ferretry could not turn off password saving in the agent browser profile, so it did not start the browser',
+            `Ferretry could not turn off password saving in the "${paths.identity}" browser profile, so it did not start the browser`,
           );
         }
-        return this.lease(desired, recoveredDeadOwner || singleton.kind === 'stale');
+        return this.lease(paths, desired, recoveredDeadOwner || singleton.kind === 'stale');
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
       }
-      const current = await this.readLease();
+      const current = await this.readLease(paths);
       if (!current) continue;
       // There is deliberately NO same-session shortcut here, and its absence is load-bearing. A lease
       // that still exists while this daemon holds no live browser is one the session launcher could
@@ -248,7 +281,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
       if (this.isProcessAlive(current.daemonPid)) {
         throw new BrowserProfileBusyError(
           current.daemonPid === this.daemonPid ? 'lease' : 'unknown',
-          `shared browser profile is leased by session ${current.sessionId}`,
+          `browser profile "${paths.identity}" is leased by session ${current.sessionId}`,
         );
       }
       // The owning daemon is gone. A Chrome it named is only ever stopped when the lease's own launch record (pid AND
@@ -262,52 +295,58 @@ export class BrowserProfileStore implements BrowserProfilePort {
             pid: current.chromePid,
             ...(current.chromeStartedAt === undefined ? {} : { startedAt: current.chromeStartedAt }),
           },
-          this.profile,
+          paths.profile,
         );
         if (outcome === 'refused') {
           throw new BrowserProfileBusyError(
             'chrome',
-            `shared browser profile has a live orphaned Chrome pid ${current.chromePid}`,
+            `browser profile "${paths.identity}" has a live orphaned Chrome pid ${current.chromePid}`,
           );
         }
         chromeCleared = current.chromePid;
       }
-      await this.reclaimDeadLease(current, chromeCleared);
+      await this.reclaimDeadLease(paths, current, chromeCleared);
       recoveredDeadOwner = true;
     }
   }
 
-  async isPrimed(): Promise<boolean> {
-    return isPrimedMarker(await this.readJson(path.join(this.browserDirectory, primedName), z.unknown()));
+  async isPrimed(identity: string): Promise<boolean> {
+    return isPrimedMarker(await this.readJson(this.paths(identity).primedFile, z.unknown()));
   }
 
-  async assertChromeVersionCompatible(runningChromeVersion: string): Promise<void> {
-    const metadata = await this.readJson(path.join(this.browserDirectory, metadataName), BrowserProfileMetadataSchema);
+  async assertChromeVersionCompatible(identity: string, runningChromeVersion: string): Promise<void> {
+    const paths = this.paths(identity);
+    const metadata = await this.readJson(paths.metadataFile, BrowserProfileMetadataSchema);
     const recorded = highestChromeVersion(metadata);
     if (!recorded || compareChromeVersions(runningChromeVersion, recorded) !== -1) return;
     throw new BrowserControlError(
       'launch_failed',
-      `Chrome ${runningChromeVersion.slice(0, 160)} is older than shared-profile Chrome ${recorded.slice(0, 160)}`,
+      `Chrome ${runningChromeVersion.slice(0, 160)} is older than the Chrome ${recorded.slice(0, 160)} that made the "${paths.identity}" profile`,
     );
   }
 
-  private lease(record: BrowserProfileLeaseRecord, recoveredDeadOwner: boolean): BrowserProfileLease {
+  private lease(
+    paths: IdentityPaths,
+    record: BrowserProfileLeaseRecord,
+    recoveredDeadOwner: boolean,
+  ): BrowserProfileLease {
     return {
-      profile: this.profile,
+      identity: paths.identity,
+      profile: paths.profile,
       sessionId: record.sessionId,
       daemonPid: record.daemonPid,
       acquiredAt: record.acquiredAt,
       recoveredDeadOwner,
-      updateChromePid: async (pid, version) => await this.updateChromePid(record, pid, version),
-      cleanupStaleChromeLocks: async () => await this.cleanupStaleChromeLocks(record, recoveredDeadOwner),
-      markPrimed: async version => await this.markPrimed(record, version),
-      release: async () => await this.release(record),
+      updateChromePid: async (pid, version) => await this.updateChromePid(paths, record, pid, version),
+      cleanupStaleChromeLocks: async () => await this.cleanupStaleChromeLocks(paths, record, recoveredDeadOwner),
+      markPrimed: async version => await this.markPrimed(paths, record, version),
+      release: async () => await this.release(paths, record),
     };
   }
 
   /** Forces Chrome's password saving off in the profile's `Default/Preferences`, keeping everything else in it. */
-  private async keepPasswordsUnsaved(): Promise<void> {
-    const directory = path.join(this.profile, 'Default');
+  private async keepPasswordsUnsaved(paths: IdentityPaths): Promise<void> {
+    const directory = path.join(paths.profile, 'Default');
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const file = path.join(directory, 'Preferences');
     const existing = await readFile(file, 'utf8').then(
@@ -323,13 +362,12 @@ export class BrowserProfileStore implements BrowserProfilePort {
     await this.writeJson(file, passwordSavingOff(existing));
   }
 
-  private async ensureProfile(chromeVersion?: string): Promise<void> {
-    await mkdir(this.profile, { recursive: true, mode: 0o700 });
+  private async ensureProfile(paths: IdentityPaths, chromeVersion?: string): Promise<void> {
+    await mkdir(paths.profile, { recursive: true, mode: 0o700 });
     await chmod(this.browserDirectory, 0o700);
-    await chmod(this.profile, 0o700);
-    const metadataFile = path.join(this.browserDirectory, metadataName);
-    if (!(await this.readJson(metadataFile, BrowserProfileMetadataSchema)) && chromeVersion?.trim()) {
-      await this.writeJson(metadataFile, {
+    await chmod(paths.profile, 0o700);
+    if (!(await this.readJson(paths.metadataFile, BrowserProfileMetadataSchema)) && chromeVersion?.trim()) {
+      await this.writeJson(paths.metadataFile, {
         createdChromeVersion: chromeVersion.trim(),
         createdAt: this.now().toISOString(),
       });
@@ -337,6 +375,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
   }
 
   private async updateChromePid(
+    paths: IdentityPaths,
     expected: BrowserProfileLeaseRecord,
     chromePid?: number,
     chromeVersion?: string,
@@ -348,27 +387,30 @@ export class BrowserProfileStore implements BrowserProfilePort {
     // first `await`, so it is the identity of the process the caller has just spawned (both callers report the pid
     // in the same synchronous step as the spawn) and never of a replacement that took the pid during the file work.
     const startedAt = chromePid === undefined ? undefined : this.orphans.identify(chromePid)?.startedAt;
-    const current = await this.requireOwner(expected);
-    if (chromeVersion !== undefined) await this.recordChromeVersion(chromeVersion);
+    const current = await this.requireOwner(paths, expected);
+    if (chromeVersion !== undefined) await this.recordChromeVersion(paths, chromeVersion);
     const { chromePid: _previousChromePid, chromeStartedAt: _previousStart, ...withoutChromePid } = current;
     const updated =
       chromePid === undefined
         ? withoutChromePid
         : { ...withoutChromePid, chromePid, ...(startedAt === undefined ? {} : { chromeStartedAt: startedAt }) };
-    await this.writeJson(this.leaseFile, updated);
+    await this.writeJson(paths.leaseFile, updated);
   }
 
-  private async markPrimed(expected: BrowserProfileLeaseRecord, chromeVersion: string): Promise<void> {
-    await this.requireOwner(expected);
+  private async markPrimed(
+    paths: IdentityPaths,
+    expected: BrowserProfileLeaseRecord,
+    chromeVersion: string,
+  ): Promise<void> {
+    await this.requireOwner(paths, expected);
     const version = chromeVersion.trim();
     if (!version)
       throw new BrowserControlError('bad_request', 'the Chrome version used to prime the profile is required');
-    const metadataFile = path.join(this.browserDirectory, metadataName);
-    const metadata = (await this.readJson(metadataFile, BrowserProfileMetadataSchema)) ?? {};
+    const metadata = (await this.readJson(paths.metadataFile, BrowserProfileMetadataSchema)) ?? {};
     const previous = highestChromeVersion(metadata);
     const latestChromeVersion = previous && compareChromeVersions(version, previous) === -1 ? previous : version;
     const now = this.now().toISOString();
-    await this.writeJson(metadataFile, {
+    await this.writeJson(paths.metadataFile, {
       ...metadata,
       ...(metadata.createdChromeVersion ? {} : { createdChromeVersion: version, createdAt: now }),
       primedChromeVersion: version,
@@ -376,40 +418,50 @@ export class BrowserProfileStore implements BrowserProfilePort {
       latestChromeVersion,
       latestAt: now,
     });
-    await this.writeJson(path.join(this.browserDirectory, primedName), { version, primedAt: now });
+    await this.writeJson(paths.primedFile, { version, primedAt: now });
   }
 
-  private async recordChromeVersion(chromeVersion: string): Promise<void> {
+  private async recordChromeVersion(paths: IdentityPaths, chromeVersion: string): Promise<void> {
     const version = chromeVersion.trim();
     if (compareChromeVersions(version, version) === undefined) {
-      throw new BrowserControlError('launch_failed', 'Chrome returned an unreadable version for the shared profile');
+      throw new BrowserControlError(
+        'launch_failed',
+        `Chrome returned an unreadable version for the "${paths.identity}" profile`,
+      );
     }
-    const file = path.join(this.browserDirectory, metadataName);
-    const metadata = (await this.readJson(file, BrowserProfileMetadataSchema)) ?? {};
+    const metadata = (await this.readJson(paths.metadataFile, BrowserProfileMetadataSchema)) ?? {};
     const previous = highestChromeVersion(metadata);
     if (previous && compareChromeVersions(version, previous) !== 1) return;
-    await this.writeJson(file, { ...metadata, latestChromeVersion: version, latestAt: this.now().toISOString() });
+    await this.writeJson(paths.metadataFile, {
+      ...metadata,
+      latestChromeVersion: version,
+      latestAt: this.now().toISOString(),
+    });
   }
 
   private async cleanupStaleChromeLocks(
+    paths: IdentityPaths,
     expected: BrowserProfileLeaseRecord,
     recoveredDeadOwner: boolean,
   ): Promise<readonly string[]> {
-    await this.requireOwner(expected);
-    const singleton = await this.singletonLockState();
+    await this.requireOwner(paths, expected);
+    const singleton = await this.singletonLockState(paths);
     if (singleton.kind === 'live')
-      throw new BrowserProfileBusyError('chrome', `shared browser profile is in use by Chrome pid ${singleton.pid}`);
+      throw new BrowserProfileBusyError(
+        'chrome',
+        `browser profile "${paths.identity}" is in use by Chrome pid ${singleton.pid}`,
+      );
     if (singleton.kind === 'unknown')
       throw new BrowserProfileBusyError(
         'unknown',
-        `shared browser profile lock cannot be verified: ${singleton.detail}`,
+        `browser profile "${paths.identity}" lock cannot be verified: ${singleton.detail}`,
       );
     if (singleton.kind !== 'stale' && !recoveredDeadOwner) return [];
     const removed: string[] = [];
     for (const name of staleChromeFiles) {
       try {
-        await lstat(path.join(this.profile, name));
-        await rm(path.join(this.profile, name));
+        await lstat(path.join(paths.profile, name));
+        await rm(path.join(paths.profile, name));
         removed.push(name);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -418,21 +470,31 @@ export class BrowserProfileStore implements BrowserProfilePort {
     return removed;
   }
 
-  private async release(expected: BrowserProfileLeaseRecord): Promise<boolean> {
-    const current = await this.readLease();
+  private async release(paths: IdentityPaths, expected: BrowserProfileLeaseRecord): Promise<boolean> {
+    const current = await this.readLease(paths);
     if (!current || !sameBrowserProfileLease(current, expected)) return false;
-    await rm(this.leaseFile, { force: true });
+    await rm(paths.leaseFile, { force: true });
     return true;
   }
 
-  private async requireOwner(expected: BrowserProfileLeaseRecord): Promise<BrowserProfileLeaseRecord> {
-    const current = await this.readLease();
+  private async requireOwner(
+    paths: IdentityPaths,
+    expected: BrowserProfileLeaseRecord,
+  ): Promise<BrowserProfileLeaseRecord> {
+    const current = await this.readLease(paths);
     if (current && sameBrowserProfileLease(current, expected)) return current;
-    throw new BrowserProfileBusyError('lease', 'shared browser profile lease is no longer owned by this session');
+    throw new BrowserProfileBusyError(
+      'lease',
+      `the "${paths.identity}" browser profile lease is no longer owned by this session`,
+    );
   }
 
-  private async reclaimDeadLease(expected: BrowserProfileLeaseRecord, chromeCleared?: number): Promise<void> {
-    const guard = path.join(this.browserDirectory, reclaimName);
+  private async reclaimDeadLease(
+    paths: IdentityPaths,
+    expected: BrowserProfileLeaseRecord,
+    chromeCleared?: number,
+  ): Promise<void> {
+    const guard = paths.reclaimFile;
     try {
       await this.createExclusive(guard, {
         sessionId: `reclaim-${this.daemonPid}`,
@@ -447,23 +509,23 @@ export class BrowserProfileStore implements BrowserProfilePort {
       return;
     }
     try {
-      const current = await this.readLease();
+      const current = await this.readLease(paths);
       if (!current || !sameBrowserProfileLease(current, expected)) return;
       const chromeLive =
         current.chromePid !== undefined &&
         current.chromePid !== chromeCleared &&
         this.isProcessAlive(current.chromePid);
       if (this.isProcessAlive(current.daemonPid) || chromeLive) return;
-      await rm(this.leaseFile, { force: true });
+      await rm(paths.leaseFile, { force: true });
     } finally {
       await rm(guard, { force: true });
     }
   }
 
-  private async singletonLockState(): Promise<SingletonLockState> {
+  private async singletonLockState(paths: IdentityPaths): Promise<SingletonLockState> {
     let target: string;
     try {
-      target = await readlink(path.join(this.profile, 'SingletonLock'));
+      target = await readlink(path.join(paths.profile, 'SingletonLock'));
     } catch (error) {
       return (error as NodeJS.ErrnoException).code === 'ENOENT'
         ? { kind: 'missing' }
@@ -477,17 +539,17 @@ export class BrowserProfileStore implements BrowserProfilePort {
     return this.isProcessAlive(pid) ? { kind: 'live', pid } : { kind: 'stale', pid };
   }
 
-  private async readLease(): Promise<BrowserProfileLeaseRecord | undefined> {
-    const record = await this.readLeaseFile(this.leaseFile);
+  private async readLease(paths: IdentityPaths): Promise<BrowserProfileLeaseRecord | undefined> {
+    const record = await this.readLeaseFile(paths.leaseFile);
     if (record !== undefined) return record;
     try {
-      await readFile(this.leaseFile, 'utf8');
+      await readFile(paths.leaseFile, 'utf8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     }
     throw new BrowserProfileBusyError(
       'unknown',
-      'shared browser profile lease is malformed and cannot be safely reclaimed',
+      `the "${paths.identity}" browser profile lease is malformed and cannot be safely reclaimed`,
     );
   }
 
@@ -508,9 +570,9 @@ export class BrowserProfileStore implements BrowserProfilePort {
     }
   }
 
-  private async releaseRecord(record: BrowserProfileLeaseRecord): Promise<void> {
-    const current = await this.readLease();
-    if (current && sameBrowserProfileLease(current, record)) await rm(this.leaseFile, { force: true });
+  private async releaseRecord(paths: IdentityPaths, record: BrowserProfileLeaseRecord): Promise<void> {
+    const current = await this.readLease(paths);
+    if (current && sameBrowserProfileLease(current, record)) await rm(paths.leaseFile, { force: true });
   }
 
   private async readJson<T>(file: string, schema: z.ZodType<T>): Promise<T | undefined> {
