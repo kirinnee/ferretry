@@ -86,28 +86,23 @@ export function judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVer
   }
   const capability = capabilityOf(path);
   const axis = act === 'read' ? 'use' : 'configure';
-  const decision = governance.decide({ capability: CAPABILITIES[capability], axis });
-  if (!decision.allowed) {
-    if (decision.refusal === 'step-up-required')
-      return refuse(stepUpRefusal(`changing ${path} from this device needs a passkey confirmation`, capability, false));
-    return refuse(
-      errorResponse(
-        403,
-        `this device may not ${act === 'read' ? 'read' : 'change'} ${path}`,
-        grantRefusalCode(decision.refusal),
-      ),
-    );
+  const capabilities: CapabilityName[] = [capability];
+  if (path === 'browsers.yaml' && act !== 'read') capabilities.push('browser');
+  for (const demanded of capabilities) {
+    const decision = governance.decide({ capability: CAPABILITIES[demanded], axis });
+    if (!decision.allowed) {
+      if (decision.refusal === 'step-up-required')
+        return refuse(stepUpRefusal(`changing ${path} from this device needs a passkey confirmation`, demanded, false));
+      return refuse(
+        errorResponse(
+          403,
+          `this device may not ${act === 'read' ? 'read' : 'change'} ${path}`,
+          grantRefusalCode(decision.refusal),
+        ),
+      );
+    }
   }
   if (act === 'read') return { allowed: true };
-  if (path === 'browsers.yaml') {
-    const browser = governance.decide({ capability: CAPABILITIES.browser, axis: 'configure' });
-    if (!browser.allowed)
-      return refuse(
-        browser.refusal === 'step-up-required'
-          ? stepUpRefusal(`changing ${path} from this device needs a passkey confirmation`, 'browser', false)
-          : errorResponse(403, `this device may not change ${path}`, grantRefusalCode(browser.refusal)),
-      );
-  }
   const fleet = governance.decide(FLEET_USE);
   if (!fleet.allowed)
     return refuse(
