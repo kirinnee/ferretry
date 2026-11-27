@@ -57,6 +57,13 @@ export interface PairPageEnvironment {
   readonly passkeyClient?: FirstPasskeyClientFactory;
   /** The offer's test seams (credentials, origin, browser support, clock). */
   readonly passkeyOffer?: PairingScreenProps['passkeyOffer'];
+  /**
+   * How a finished pairing leaves the page: a real document load of the address, not a router move. The document a pairing
+   * link opened is a pairing screen for as long as it lives (an agent's browser refuses to show it, docs/pairing.md), so
+   * the page the person lands on after a pairing is a new document. The browser's own `location.assign` unless a suite
+   * hands another.
+   */
+  readonly openDocument?: (href: string) => void;
 }
 
 /** The camera, or `null` where this browser has no QR decoder of its own to offer (the paste path stays). */
@@ -118,6 +125,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
   const store = environment.store ?? accessKeyStore(ports);
   const claims = accessClaims(ports, { store });
   const passkeyClient = environment.passkeyClient ?? pairedPasskeyClient();
+  const openDocument = environment.openDocument ?? ((href: string) => window.location.assign(href));
   return function PairPage({ navigate, location }: DaemonlessScreenProps) {
     // The code is taken once per arrival, never re-read from an address the shell already emptied, so a plain render
     // cannot resurrect a code the reader declined. Each new arrival restarts the screen (the new key) for that link.
@@ -179,7 +187,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
           // a Settings link), else the machine this tab works on. A cold first visit has neither, and draws no Back.
           {...(backTo === undefined ? {} : { onClose: () => navigate(backTo) })}
           onContinue={() => {
-            if (landing.current !== undefined) navigate(landing.current);
+            if (landing.current !== undefined) openDocument(landing.current);
           }}
           onPair={async (seed, deviceName, machineName) => {
             const paired = await exchangePairing({ ports, claims, store }, seed, deviceName, machineName);

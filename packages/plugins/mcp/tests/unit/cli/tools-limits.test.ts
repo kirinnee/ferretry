@@ -3,6 +3,8 @@ import should from 'should';
 import { askReference } from '../../../../../core/asks/contract/snapshot/ask-reference.ts';
 import { INPUT_MAX_EXPIRY_SECONDS, INPUT_PROMPT_MAX_LENGTH } from '../../../../../core/vault/contract/inputs.ts';
 import { INPUT_MAX_FIELDS } from '../../../../../core/vault/contract/targets.ts';
+import { AccountProposeCallSchema } from '../../../../accounts/contract/routes/accounts.ts';
+import { IDENTITY_KEY_PATTERN } from '../../../../accounts/contract/routes/identity-links.ts';
 import { LOGIN_RECIPE_MAX_LENGTH } from '../../../../accounts/contract/routes/login-recipes.ts';
 import { BROWSER_IDENTITY_KEY_PATTERN, BrowserIdentityKeySchema } from '../../../../browsers/contract/wire.ts';
 import {
@@ -68,6 +70,16 @@ describe('the tool schemas’ limits', () => {
     should(property('lessons_suggest', 'rule').maxLength).equal(LESSON_RULE_MAX_CHARS);
     // Accounts' propose tool is not listed (not built), but its literal is pinned the day it is.
     should(LOGIN_RECIPE_MAX_LENGTH).equal(4_000);
+  });
+
+  it('should let account_propose send every field its call schema takes, the browser identity key included', () => {
+    const row = MCP_TOOLS.find(candidate => candidate.name === 'account_propose');
+    const listed = Object.keys((row?.inputSchema.properties as object | undefined) ?? {}).sort();
+    const taken = Object.keys(AccountProposeCallSchema.shape)
+      .filter(key => key !== 'tool')
+      .sort();
+    should(listed).eql(taken);
+    should(property('account_propose', 'identity').pattern).equal(IDENTITY_KEY_PATTERN.source);
   });
 
   it('should cite the input card with core-asks’ attention sigil, never the shell-mode `!`', () => {

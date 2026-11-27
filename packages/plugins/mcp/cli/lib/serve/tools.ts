@@ -100,6 +100,8 @@ const INPUT_PROMPT_MAX_LENGTH = 280;
 /** Accounts' `LOGIN_RECIPE_MAX_LENGTH` and its proposal reason's limit. */
 const LOGIN_RECIPE_MAX_LENGTH = 4_000;
 const LOGIN_PROPOSAL_WHY_MAX_LENGTH = 280;
+/** Accounts' `IDENTITY_KEY_PATTERN` (a browser identity's key, as Browsers spells it); `tools-limits.test.ts` pins it. */
+const IDENTITY_KEY_PATTERN = '^[a-z][a-z0-9-]{0,31}$';
 
 const NAME = {
   type: 'string',
@@ -290,12 +292,18 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   {
     name: 'account_propose',
     description:
-      'After a sign-in, propose its recipe (Markdown steps, no values; [[ID]] names another account) and/or preapprove: suggest a standing rule. The owner decides.',
+      'After a sign-in, propose its recipe (Markdown steps, no values; [[ID]] names another account), preapprove: suggest a standing rule, and/or name the browser identity it lives in (saved for the owner to decide later). The owner decides.',
     inputSchema: object(
       {
         signIn: { type: 'string', description: 'Its id from account_hint, like si_3f2a….' },
         recipe: { type: 'string', maxLength: LOGIN_RECIPE_MAX_LENGTH, description: 'The whole new recipe.' },
         preapprove: { type: 'boolean', description: 'Also suggest a standing rule.' },
+        identity: {
+          type: 'string',
+          pattern: IDENTITY_KEY_PATTERN,
+          description:
+            'Also say this sign-in is live in this browser identity (a short key like work). Saved for the owner to decide later; it changes nothing now.',
+        },
         why: { type: 'string', maxLength: LOGIN_PROPOSAL_WHY_MAX_LENGTH, description: 'One line: what changed.' },
       },
       ['signIn', 'why'],

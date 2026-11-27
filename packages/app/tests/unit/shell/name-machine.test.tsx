@@ -11,7 +11,7 @@ import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
-import { memoryStore } from '../../../src/storage/records.ts';
+import { type KeyValueStore, memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { NameThisMachine } from '../../../src/shell/name-machine.tsx';
@@ -103,6 +103,9 @@ const settle = async (): Promise<void> => {
 };
 
 interface Options {
+  /** A replacement document restores the pairing from the same device storage. */
+  readonly pairedStorage?: KeyValueStore;
+  readonly reloadAfterPairing?: boolean;
   /** What `host.yaml` holds on the machine; `undefined` is no file. */
   readonly hostFile?: string;
   /** What the machine answers the write with. */
@@ -146,16 +149,20 @@ async function boot(options: Options = {}) {
     }
     return json({ ok: true });
   });
-  const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
-  list.add({
-    daemon: 'ws',
-    machine: HOST,
-    deviceId: 'dev',
-    address: 'http://127.0.0.1:40245',
-    ...options.pairing,
-  });
+  const pairedStorage = options.pairedStorage ?? memoryStore();
+  let list = new DaemonList({ storage: pairedStorage, now: () => 1 });
+  if (options.pairedStorage === undefined)
+    list.add({
+      daemon: 'ws',
+      machine: HOST,
+      deviceId: 'dev',
+      address: 'http://127.0.0.1:40245',
+      ...options.pairing,
+    });
   // A second machine, so the switcher (hidden while one machine is paired) is drawn and carries the offer.
-  list.add({ daemon: 'other', machine: 'other-host', deviceId: 'dev2', address: 'http://127.0.0.1:40246' });
+  if (options.pairedStorage === undefined)
+    list.add({ daemon: 'other', machine: 'other-host', deviceId: 'dev2', address: 'http://127.0.0.1:40246' });
+  if (options.reloadAfterPairing) list = new DaemonList({ storage: pairedStorage, now: () => 2 });
   if (options.learned !== undefined) list.learnMachine('ws', options.learned);
   const runtime = new ShellRuntime({
     appVersion: '5.0.0',
@@ -199,7 +206,7 @@ async function boot(options: Options = {}) {
   const recover = (): void => {
     machine.recovered = true;
   };
-  return { view, list, transport, step, writes, press, typeName, recover };
+  return { view, list, transport, step, writes, press, typeName, recover, pairedStorage };
 }
 
 let open: Awaited<ReturnType<typeof boot>> | undefined;
@@ -210,6 +217,20 @@ afterEach(async () => {
 });
 
 describe('Name this machine', () => {
+  test('V-B20 the fresh post-pair shell keeps the machine and offers its name once', async () => {
+    open = await boot({ pairing: { askName: true }, reloadAfterPairing: true });
+    expect(open.list.get('ws')?.machine).toBe(HOST);
+    expect(open.step()?.textContent).toContain('Name this machine');
+    // First show consumes the handoff; the current form stays open, but another document must not ask again.
+    expect(new DaemonList({ storage: open.pairedStorage, now: () => 2 }).namePending('ws')).toBe(false);
+    await open.press('[data-name-machine-skip]');
+    expect(open.step()).toBeNull();
+    const { pairedStorage } = open;
+    await open.view.unmount();
+    open = await boot({ pairedStorage });
+    expect(open.list.get('ws')?.machine).toBe(HOST);
+    expect(open.step()).toBeNull();
+  });
   test('a pairing of a machine with no name offers one, prefilled with the host name', async () => {
     open = await boot({ pairing: { askName: true } });
     expect(open.step()?.textContent).toContain('Name this machine');

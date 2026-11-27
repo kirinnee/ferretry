@@ -3,6 +3,7 @@ export * from './account-ids.ts';
 export * from './accounts.ts';
 export * from './common.ts';
 export * from './foreign.ts';
+export * from './identity-links.ts';
 export * from './login-entries.ts';
 export * from './login-recipes.ts';
 export * from './phone-approval.ts';
