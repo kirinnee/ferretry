@@ -14,7 +14,12 @@ import {
 } from '@ferretry/kernel/contract';
 import { device, ferret, owner, testArrival, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
-import { addTwoFactorKeySubject, padInputValue, TotpParametersSchema } from '../../../contract/routes/index.ts';
+import {
+  addTwoFactorKeySubject,
+  type IdentityLink,
+  padInputValue,
+  TotpParametersSchema,
+} from '../../../contract/routes/index.ts';
 import { AccountsPort } from '../../../contract/index.ts';
 import accounts from '../../../daemon/index.ts';
 import { accountRoutes } from '../../../daemon/routes/accounts.ts';
@@ -488,6 +493,61 @@ describe('saving a 2FA seed', () => {
     should(refused).match({ status: 403 });
     const groups = await w.call('GET /v1/accounts/look-alike', '', {});
     should(JSON.parse(String(groups.body))).match({ v: 1 });
+  });
+});
+
+describe('a ferret reading the hint: the browser identity', () => {
+  const AT = '2026-11-27T09:00:00.000Z';
+  /** `links` is made once the provider's sign-in id is known (it is assigned when saved). */
+  const hintWith = async (links: ((google: string) => { links(): Promise<readonly IdentityLink[]> }) | undefined) => {
+    const w = await seedWorld();
+    await w.directory.putAccount('GOOGLE', { label: 'Google' });
+    const google = await w.directory.addSignIn('GOOGLE', {
+      place: { kind: 'site', domains: ['idp.example'], match: [] },
+    });
+    await w.directory.addSignIn('GITHUB', {
+      place: { kind: 'site', domains: ['github.com'], match: ['github.com'] },
+      method: { kind: 'google', via: 'GOOGLE' },
+    });
+    const routes = accountRoutes({
+      accounts: w.directory,
+      ...(links === undefined ? {} : { links: links(google.id) }),
+    });
+    const answer = await routes['GET /v1/accounts/hint']({
+      request: { ...request('GET', '/v1/accounts/hint'), query: new Map([['site', ['github.com']]]) },
+      params: new Map(),
+      ...ferretStanding(F1),
+    } as CallContext);
+    return JSON.parse(String(answer.body)) as { identity?: unknown };
+  };
+
+  it('should name the identity the provider account is live in, and the account it goes through', async () => {
+    const body = await hintWith(google => ({
+      links: async () => [{ signIn: google, identity: 'work', seenAt: AT, how: 'filled' } as IdentityLink],
+    }));
+    should(body.identity).eql({ identity: 'work', via: ['GOOGLE'] });
+  });
+
+  it('should say ambiguous, never pick, when two identities hold the provider account', async () => {
+    const body = await hintWith(google => ({
+      links: async () =>
+        ['work', 'home'].map(identity => ({ signIn: google, identity, seenAt: AT, how: 'filled' }) as IdentityLink),
+    }));
+    should(body.identity).eql({ ambiguous: ['home', 'work'] });
+  });
+
+  it('should leave the identity out when there are no edges, no reader, or the edges cannot be read', async () => {
+    should((await hintWith(() => ({ links: async () => [] }))).identity).be.undefined();
+    should((await hintWith(undefined)).identity).be.undefined();
+    should(
+      (
+        await hintWith(() => ({
+          links: async () => {
+            throw new Error('damaged');
+          },
+        }))
+      ).identity,
+    ).be.undefined();
   });
 });
 

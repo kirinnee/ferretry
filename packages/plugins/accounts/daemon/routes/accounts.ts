@@ -29,6 +29,8 @@ import {
 } from '@ferretry/kernel/contract';
 import {
   type AccountHintList,
+  type IdentityAnswer,
+  type IdentityLink,
   type AccountId,
   AccountIdSchema,
   LoginRecipeProposalIdSchema,
@@ -66,6 +68,7 @@ import { AccountDefaultsNotWritten } from '../adapters/kernel-defaults-writer.ts
 import { AccountDefaultNotUsable, type AccountDefaults, AccountDefaultsFileBroken } from '../lib/account-defaults.ts';
 import { type AccountDirectory, type AccountListing, type AccountVault, LoginEntryError } from '../lib/accounts.ts';
 import { parseBody } from '../lib/body.ts';
+import { resolveIdentity } from '../lib/identity-graph.ts';
 import { SecretStoreError } from '../lib/seal.ts';
 import type { SignInChoicePort } from '../lib/sign-in-context.ts';
 import {
@@ -108,6 +111,8 @@ export interface AccountRoutesDeps {
   readonly choice?: SignInChoicePort;
   /** Staged 2FA seeds, waiting for the passkey bound to each. It never answers a seed. */
   readonly seeds?: TwoFactorSeedStages;
+  /** The graph's edges, for the browser identity a hint names. Unreadable edges leave the hint without one. */
+  readonly links?: { links(): Promise<readonly IdentityLink[]> };
 }
 
 const SECRETS_CONFIGURE: CapabilityDemand = { capability: CAPABILITIES.secrets, axis: 'configure' };
@@ -247,7 +252,7 @@ function callingSession(call: Call): string | undefined {
  * secret fields exist, a seed's existence, seals, "keep apart" pairs, look-alike groups, auto-apply or proposals (S13).
  */
 export async function accountHint(
-  deps: Pick<AccountRoutesDeps, 'accounts' | 'recipes' | 'choice'>,
+  deps: Pick<AccountRoutesDeps, 'accounts' | 'recipes' | 'choice' | 'links'>,
   siteText: string,
   session: string | undefined,
 ): Promise<AccountHintList> {
@@ -255,10 +260,27 @@ export async function accountHint(
   if (site === undefined) throw new ApiError(400, 'name a site: a host like github.com, or a URL', 'invalid_site');
   try {
     const order = await deps.choice?.of(session);
-    const hints = accountHintsFor(site, await servedAccounts(deps.accounts, deps.recipes), order);
-    return { v: 1, site, hints, passkeys: 'off' };
+    const listing = await servedAccounts(deps.accounts, deps.recipes);
+    const hints = accountHintsFor(site, listing, order);
+    const identity = hints.length === 0 ? undefined : await identityOf(deps.links, listing, site);
+    return { v: 1, site, hints, ...(identity === undefined ? {} : { identity }), passkeys: 'off' };
   } catch (error) {
     return reraise(error);
+  }
+}
+
+/** The browser identity holding a site's sign-in, or nothing: no reader, no edge, or edges that cannot be read. */
+async function identityOf(
+  links: AccountRoutesDeps['links'],
+  listing: Pick<AccountList, 'accounts' | 'signIns'>,
+  site: string,
+): Promise<IdentityAnswer | undefined> {
+  if (links === undefined) return undefined;
+  try {
+    const answer = resolveIdentity(await links.links(), listing, site);
+    return 'none' in answer ? undefined : answer;
+  } catch {
+    return undefined;
   }
 }
 

@@ -7,6 +7,7 @@ import {
   taskPlanAgentView,
 } from '../../contract/routes/index.ts';
 import { LoginEntryError } from './accounts.ts';
+import { type IdentityLinkFiled, IdentityLinkError } from './identity-links.ts';
 import { RecipeValueError } from './secrets/login-recipes.ts';
 import { SecureCopyError } from './secure-copy/errors.ts';
 import { SignInRuleSuggestionError } from './sign-in-rules/suggestions.ts';
@@ -41,6 +42,14 @@ export interface ProposalToolDeps {
       ask: { readonly signIn: SignInId; readonly why: string },
     ): Promise<{ readonly signIn: SignInId; readonly host: string; readonly agenda: string }>;
   };
+  /** Holds "S lives in I" for the owner's decision: a pending proposal, never an edge of the graph. */
+  readonly links?: {
+    propose(ask: {
+      readonly signIn: SignInId;
+      readonly identity: string;
+      readonly why: string;
+    }): Promise<IdentityLinkFiled>;
+  };
   readonly plans: Pick<TaskPlanService, 'propose'>;
   /** The vault redactor, over every sentence on its way out. */
   readonly redact: (text: string) => Promise<string>;
@@ -50,6 +59,14 @@ const NOT_AN_AGENT = 'Only an agent asks the owner this way: a person can make t
 const FAILED = 'The owner could not be asked right now; nothing was changed.';
 const RECIPE_FAILED = 'The recipe could not be filed right now; try again later.';
 const SUGGESTION_FAILED = 'The suggestion could not be raised right now; try again later.';
+
+const IDENTITY_FAILED = 'The browser identity could not be proposed right now; try again later.';
+
+/** What a "lives in" proposal says it did: held for the owner, or already known to the graph. */
+const identityWords = (signIn: SignInId, identity: string, kept: IdentityLinkFiled): string =>
+  kept === 'known'
+    ? `[${signIn}] is already known to live in browser identity '${identity}'.`
+    : `Proposed that [${signIn}] lives in browser identity '${identity}'; the owner decides. You do not need to wait.`;
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
@@ -67,6 +84,7 @@ const refusalWords = (error: unknown, fallback: string): string => {
     error instanceof LoginEntryError ||
     error instanceof RecipeValueError ||
     error instanceof SignInRuleSuggestionError ||
+    error instanceof IdentityLinkError ||
     error instanceof SecureCopyError ||
     error instanceof TaskPlanError
   )
@@ -128,6 +146,16 @@ export function proposalTools(deps: ProposalToolDeps): {
       const { signIn: _signIn, ...recipe } = proposed;
       filed = recipe;
       words = recipeWords(proposed);
+    }
+    if (call.identity !== undefined) {
+      if (deps.links === undefined) return await say(FAILED, true);
+      let kept: IdentityLinkFiled;
+      try {
+        kept = await deps.links.propose({ signIn: call.signIn, identity: call.identity, why: call.why });
+      } catch (error) {
+        return await say(refusalWords(error, IDENTITY_FAILED), true);
+      }
+      words = [words, identityWords(call.signIn, call.identity, kept)].filter(word => word !== '').join(' ');
     }
     if (call.preapprove !== true) return await say(words, false, { recipe: filed });
     // A refusal of the suggestion is said in the summary when a recipe was filed in the same call, so the filed recipe

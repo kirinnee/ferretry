@@ -13,6 +13,7 @@ import {
   TwoFactorStageIdSchema,
 } from './account-ids.ts';
 import { AgendaIdSchema, InstantSchema, PASSKEY_CHALLENGE_TTL_SECONDS, SecretStoreHealthSchema } from './foreign.ts';
+import { type IdentityAnswer, IdentityAnswerSchema, IdentityKeySchema } from './identity-links.ts';
 import {
   LOGIN_HINT_PASSKEYS_OFF,
   LOGIN_LABEL_MAX_LENGTH,
@@ -1274,6 +1275,8 @@ export const AccountHintListSchema = z.strictObject({
   v: z.literal(1),
   site: LoginMatchSchema,
   hints: z.array(AccountHintSchema).max(MAX_SIGN_INS).readonly(),
+  /** Which browser identity holds this site's sign-in (W-124), or several: never a silent pick. Absent: none known. */
+  identity: IdentityAnswerSchema.optional(),
   passkeys: z.literal('off'),
 });
 export type AccountHintList = z.infer<typeof AccountHintListSchema>;
@@ -1404,10 +1407,18 @@ export const ACCOUNT_HINT_PHONE =
   'Phone prompt (check your phone, tap Yes, a number): request input with push: true, which raises "Approve on your phone" with the number at once, then input_wait; never poll the page or ask_owner.';
 
 /** What `account_hint` says: each sign-in's line, or that none is saved, and the passkey rule. */
-export function accountHintSummary(site: string, hints: readonly AccountHint[]): string {
+export function accountHintSummary(site: string, hints: readonly AccountHint[], identity?: IdentityAnswer): string {
   return hints.length === 0
     ? `No account for ${site}; request the values as usual and the owner can save them. ${ACCOUNT_HINT_PHONE} ${LOGIN_HINT_PASSKEYS_OFF}`
-    : `Accounts for ${site}: ${hints.map(hint => accountHintLine(hint, site)).join(' ')} ${ACCOUNT_HINT_NEXT} ${ACCOUNT_HINT_PHONE} ${LOGIN_HINT_PASSKEYS_OFF}`;
+    : `Accounts for ${site}: ${hints.map(hint => accountHintLine(hint, site)).join(' ')}${identity === undefined ? '' : ` ${identityWords(identity)}`} ${ACCOUNT_HINT_NEXT} ${ACCOUNT_HINT_PHONE} ${LOGIN_HINT_PASSKEYS_OFF}`;
+}
+
+/** Which browser identity holds the site's sign-in, in words: one (and the accounts it goes through), or several. */
+export function identityWords(answer: IdentityAnswer): string {
+  if ('ambiguous' in answer)
+    return `Browser identity: held in more than one (${answer.ambiguous.join(', ')}); ask the owner which, never guess.`;
+  const through = answer.via.length === 0 ? '' : `, through ${answer.via.join(' → ')}`;
+  return `Browser identity: '${answer.identity}'${through}.`;
 }
 
 // ── `account.propose` ───────────────────────────────────────────────────────────────────────────
@@ -1427,10 +1438,12 @@ export const AccountProposeCallSchema = z
      * opens the owner's create sheet with nothing ticked. It creates, stages and widens nothing by itself.
      */
     preapprove: z.boolean().optional(),
+    /** Also say the sign-in is live in this browser identity ("S lives in I"). Held for the owner: not an edge until approved. */
+    identity: IdentityKeySchema.optional(),
     why: LoginRecipeProposeRequestSchema.shape.why,
   })
-  .refine(call => call.recipe !== undefined || call.preapprove === true, {
-    message: 'suggest a recipe, a standing rule (preapprove: true), or both',
+  .refine(call => call.recipe !== undefined || call.preapprove === true || call.identity !== undefined, {
+    message: 'suggest a recipe, a standing rule (preapprove: true), the browser identity it lives in, or any of them',
     path: ['recipe'],
   });
 
