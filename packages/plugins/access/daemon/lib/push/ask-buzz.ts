@@ -12,8 +12,11 @@ export interface AskBuzzLedger {
 
 export interface AskBuzzerOptions {
   readonly ledger: AskBuzzLedger;
-  /** Sends one push to every live enrolment; resolves how many devices it reached. */
-  readonly buzz: (words: BuzzWords) => Promise<number>;
+  /**
+   * Sends one push to every live enrolment; resolves how many devices it reached. `cancelled` says the ask closed meanwhile:
+   * the sender must read it right before it dispatches, AFTER its own enrolment lookup, and send nothing when it is true.
+   */
+  readonly buzz: (words: BuzzWords, cancelled: () => boolean) => Promise<number>;
   readonly now: () => Instant;
   /** Where a failed buzz is said. Buzzing stays total. */
   readonly warn?: (message: string) => void;
@@ -75,7 +78,7 @@ export class AskBuzzer {
       if ((await this.options.ledger.has(key)) || this.#settled.has(key)) return false;
       await this.options.ledger.append({ format: 1, key, at: this.options.now(), kind });
       if (this.#settled.has(key)) return false;
-      return (await this.options.buzz(askBuzzWords(ask))) > 0;
+      return (await this.options.buzz(askBuzzWords(ask), () => this.#settled.has(key))) > 0;
     } catch (error) {
       this.options.warn?.(`an ask's buzz could not be made: ${error instanceof Error ? error.message : String(error)}`);
       return false;
