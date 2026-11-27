@@ -145,6 +145,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
       skip,
       ticked,
       options.starters ?? NO_STARTERS,
+      options.kits?.get(harness),
     ),
   );
   const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
@@ -162,7 +163,10 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const notes: ImportNote[] = [];
   for (const entry of harvests) {
     const scan = scans.find(each => each.harness === entry.harness) as HostHarnessScan;
-    notes.push({ harness: entry.harness, text: loginNote(entry.harness, scan.login) });
+    notes.push({
+      harness: entry.harness,
+      text: loginNote(entry.harness, scan.login, options.kits?.get(entry.harness)),
+    });
     if (entry.secretKeys.length > 0) {
       notes.push({
         harness: entry.harness,
