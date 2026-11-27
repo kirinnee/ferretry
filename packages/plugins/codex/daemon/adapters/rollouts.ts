@@ -11,13 +11,15 @@ import type {
   TranscriptEntry,
   TurnUsage,
 } from '@ferretry/core-ferrets/contract';
-import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
+import type { FencedPath, FerretId, KernelPorts, RootHandle, RootOpenedBytes } from '@ferretry/kernel/contract';
 import { err, ok, seconds, type Instant, type JsonValue, type Result } from '@ferretry/std';
 import { CODEX_ROLLOUTS, type CodexRolloutBinding as Binding } from '../../contract/index.ts';
+import { cutRollout, rolloutName } from '../lib/fork.ts';
 import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
 import { ProofCache } from '../lib/transcript/proof-cache.ts';
 import { selectCodexRollout } from '../lib/transcript/rollout.ts';
 import { markCutWindow, tailRecordOf } from '../lib/transcript/tail-record.ts';
+import { forkSource, forkWindow, holdForkSource } from './fork-source.ts';
 
 /** The largest rollout copy-on-link copies: a copy is held whole in memory (the owner's rollouts are tens of MB at most). */
 const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
@@ -50,6 +52,8 @@ const scrubStrings = (value: unknown, mask: (text: string) => string): unknown =
 const sha256Hex = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 interface Rollout {
+  /** A fork's strict no-link proof keeps this descriptor from the header through the final snapshot. */
+  readonly opened?: RootOpenedBytes;
   readonly id: string;
   readonly file: FencedPath;
   readonly folder: string;
@@ -74,10 +78,14 @@ async function window(root: RootHandle, file: FencedPath, offset: number, length
  * could not be read, which the transcript reader takes as "no" and a recorded proof takes as doubt.
  */
 async function contains(root: RootHandle, rollout: Rollout, needle: string): Promise<boolean | undefined> {
-  const head = await window(root, rollout.file, 0, HEAD_BYTES);
+  const read = async (offset: number, length: number): Promise<string | undefined> =>
+    rollout.opened === undefined
+      ? await window(root, rollout.file, offset, length)
+      : await forkWindow(rollout.opened, offset, length);
+  const head = await read(0, HEAD_BYTES);
   if (head?.includes(needle) === true) return true;
   if (rollout.size <= HEAD_BYTES) return head === undefined ? undefined : false;
-  const tail = await window(root, rollout.file, Math.max(HEAD_BYTES, rollout.size - TAIL_BYTES), TAIL_BYTES);
+  const tail = await read(Math.max(HEAD_BYTES, rollout.size - TAIL_BYTES), TAIL_BYTES);
   if (tail?.includes(needle) === true) return true;
   return head === undefined || tail === undefined ? undefined : false;
 }
@@ -135,10 +143,12 @@ async function walkRollouts(
   directory: string,
   absent?: () => Promise<boolean>,
   only?: WalkFilter,
+  bindFiles?: Binding,
 ): Promise<{ readonly found: readonly Rollout[]; readonly complete: boolean }> {
   const pending = [directory];
   const found: Rollout[] = [];
   let visited = 0;
+  let inspected = 0;
   let complete = true;
   while (pending.length > 0 && found.length < MAX_ROLLOUTS && visited++ < MAX_DIRECTORIES) {
     const relative = pending.shift() as string;
@@ -169,16 +179,42 @@ async function walkRollouts(
       // Codex names a rollout `rollout-<time>-<id>.jsonl`: a walk for ONE conversation opens only the files that say it.
       // (The header is still what proves it; a name is never identity.)
       if (only?.id !== undefined && !name.endsWith(`-${only.id}.jsonl`)) continue;
+      if (bindFiles !== undefined && ++inspected > MAX_ROLLOUTS) {
+        complete = false;
+        break;
+      }
       const child = root.resolve(childRelative);
       if (!child.ok) {
         complete = false;
         continue;
       }
-      const head = await window(root, child.value, 0, HEAD_BYTES);
+      const opened = bindFiles === undefined ? undefined : await holdForkSource(root, child.value);
+      const head =
+        bindFiles === undefined
+          ? await window(root, child.value, 0, HEAD_BYTES)
+          : await forkWindow(opened, 0, HEAD_BYTES);
       const meta = head === undefined ? undefined : metadata(head);
-      if (meta === undefined) complete = false;
-      else {
-        found.push({ id: meta.id, folder: meta.cwd, file: child.value, modified: entry.modified, size: entry.size });
+      if (meta === undefined) {
+        complete = false;
+        await opened?.close();
+      } else {
+        const candidate: Rollout = {
+          id: meta.id,
+          folder: meta.cwd,
+          file: child.value,
+          modified: entry.modified,
+          size: entry.size,
+          ...(opened === undefined ? {} : { opened }),
+        };
+        if (bindFiles !== undefined && bindFiles.native === undefined) {
+          const correlated = await contains(root, candidate, `${bindFiles.home}/codex-correlation/unreachable`);
+          if (correlated !== true) {
+            if (correlated === undefined) complete = false;
+            await opened?.close();
+            continue;
+          }
+        }
+        found.push(candidate);
         if (found.length >= MAX_ROLLOUTS) break;
       }
     }
@@ -383,6 +419,7 @@ export class CodexRollouts {
   private async proveAfresh(
     ferret: FerretId,
     strict = false,
+    bindFiles = false,
   ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout; readonly binding: Binding } | undefined> {
     const where = await this.sessions(ferret);
     const root = where.root;
@@ -402,29 +439,36 @@ export class CodexRollouts {
       where.directory,
       where.pooled ? async () => false : async () => await this.sessionsAbsent(ferret),
       where.pooled ? { since: binding.since, id: binding.native } : undefined,
+      bindFiles ? binding : undefined,
     );
-    if (strict && !walked.complete) return undefined;
-    const candidates = walked.found;
-    let chosen: Rollout | undefined;
-    if (binding.native !== undefined) {
-      const matches = candidates.filter(candidate => candidate.id === binding.native);
-      chosen = matches.length === 1 ? matches[0] : undefined;
-    } else {
-      const needle = `${binding.home}/codex-correlation/unreachable`;
-      const evidence = [];
-      for (const candidate of candidates) {
-        const correlated = await contains(root, candidate, needle);
-        // A window that could not be read may hide this launch's marker: doubt, for a recorded proof.
-        if (strict && correlated === undefined) return undefined;
-        evidence.push({ id: candidate.id, file: candidate.file, correlated: correlated === true });
+    let held: Rollout | undefined;
+    try {
+      if (strict && !walked.complete) return undefined;
+      const candidates = walked.found;
+      let chosen: Rollout | undefined;
+      if (binding.native !== undefined) {
+        const matches = candidates.filter(candidate => candidate.id === binding.native);
+        chosen = matches.length === 1 ? matches[0] : undefined;
+      } else {
+        const needle = `${binding.home}/codex-correlation/unreachable`;
+        const evidence = [];
+        for (const candidate of candidates) {
+          const correlated = await contains(root, candidate, needle);
+          // A window that could not be read may hide this launch's marker: doubt, for a recorded proof.
+          if (strict && correlated === undefined) return undefined;
+          evidence.push({ id: candidate.id, file: candidate.file, correlated: correlated === true });
+        }
+        const selected = selectCodexRollout(evidence, { baseline: binding.baseline });
+        chosen = selected === undefined ? undefined : candidates.find(candidate => candidate.file === selected.file);
       }
-      const selected = selectCodexRollout(evidence, { baseline: binding.baseline });
-      chosen = selected === undefined ? undefined : candidates.find(candidate => candidate.file === selected.file);
+      if (chosen === undefined) return undefined;
+      // A proof older than PROOF_REUSE_MS is proved again before it is used, so it is dead weight: dropped here.
+      this.#proved.remember(ferret, { ...chosen, opened: undefined }, Date.parse(this.kernel.clock.now()));
+      held = chosen;
+      return { root, rollout: chosen, binding };
+    } finally {
+      for (const candidate of walked.found) if (candidate !== held) await candidate.opened?.close();
     }
-    if (chosen === undefined) return undefined;
-    // A proof older than PROOF_REUSE_MS is proved again before it is used, so it is dead weight: dropped here.
-    this.#proved.remember(ferret, chosen, Date.parse(this.kernel.clock.now()));
-    return { root, rollout: chosen, binding };
   }
 
   private async owned(ferret: FerretId): Promise<OwnedRollout | undefined> {
@@ -654,6 +698,53 @@ export class CodexRollouts {
       return refuse('The rollout could not be copied.');
     }
   }
+  /**
+   * Fork (`Harness.fork`): the ferret's PROVED rollout, cut at a turn into a NEW rollout in the shared pool, under a new id
+   * and today's day folder, keyed to the folder the new ferret works in. The source is only read: never written, moved or
+   * locked. The new file is created only if nothing is at its name. No discard is offered: a failed start keeps the copy
+   * for the owner, because a pathname identity check followed by removal cannot protect a concurrent replacement.
+   */
+  readonly fork: NonNullable<Harness['fork']> = async (from, at, into) => {
+    const found = await this.proveAfresh(from, true, true);
+    if (found === undefined)
+      throw new Error('this ferret has no conversation of its own yet, so there is nothing to fork');
+    const { binding } = found;
+    try {
+      if (found.rollout.size > MAX_IMPORT_BYTES) throw new Error('the conversation is too large to copy (over 256 MB)');
+      let pool: RootHandle;
+      try {
+        pool = this.kernel.roots.historyPool();
+      } catch {
+        throw new Error('this Codex keeps no shared history, so it cannot hold a forked conversation');
+      }
+      const id = crypto.randomUUID();
+      const text = await forkSource(found.rollout.opened, MAX_IMPORT_BYTES);
+      if (
+        metadata(text)?.id !== found.rollout.id ||
+        (binding.native === undefined && !text.includes(`${binding.home}/codex-correlation/unreachable`))
+      )
+        throw new Error('the source conversation no longer matches its proved header and binding');
+      const cut = cutRollout(text, at, {
+        id,
+        folder: into.folder,
+        marker: `${binding.home}/codex-correlation/unreachable`,
+      });
+      if (cut.kind === 'refused') throw new Error(cut.reason);
+      const name = rolloutName(id, new Date(this.kernel.clock.now()));
+      const file = pool.resolve(name);
+      const folder = pool.resolve(name.slice(0, name.lastIndexOf('/')));
+      if (!file.ok || !folder.ok) throw new Error('the forked conversation cannot be placed in the shared history');
+      await pool.makeDirectory(folder.value, { mode: 0o700 });
+      await pool.writeBytes(file.value, new TextEncoder().encode(cut.text), { exclusive: true });
+      return {
+        from,
+        ...(at === undefined ? {} : { at }),
+        harnessConversation: id,
+      };
+    } finally {
+      await found.rollout.opened?.close();
+    }
+  };
 
   readonly conversations: Harness['conversations'] = {
     list: async folder => {

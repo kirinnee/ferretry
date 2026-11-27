@@ -9,6 +9,7 @@ export * as conversation from './conversation.ts';
 export * as credentials from './credentials.ts';
 export * as deliver from './deliver.ts';
 export * as discover from './discover.ts';
+export * as fork from './fork.ts';
 export * as history from './history.ts';
 export * as home from './home.ts';
 export * as identity from './identity.ts';
