@@ -17,7 +17,7 @@ import {
   resolveDefaultRuntime,
   wouldIncludeItself,
 } from '../account/schema.ts';
-import { applyFixedLayer, type FixedEntry, fixedLayerFor } from '../account/fixed-layer.ts';
+import { applyFixedLayer, type FixedEntry, fixedLayerOf } from '../account/fixed-layer.ts';
 import {
   COMPONENT_KIND_WORDS,
   componentScope,
@@ -43,7 +43,7 @@ import { componentPartialSupport, describePartialSupport } from '../account/adap
 import { freeName } from '../account/import.ts';
 import { findFlagSecrets, looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 import { hooksDocumentRefusedLines } from './hooks-document-net.ts';
-import { byHarness, supportedKinds } from '../harness-kind.ts';
+import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -74,7 +74,7 @@ import type {
 } from '../../../contract/index.ts';
 import { MIN_SECRET_VALUE_LENGTH } from '@ferretry/core-vault/contract';
 import { WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
-import { claudeFastSupport, harnessKey, scopeKey } from './foreign.ts';
+import { fastSupportOf, harnessKey, scopeKey } from './foreign.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
 import { noModelReason, runtimeModels } from '../models/runtime.ts';
 import { runtimeDisabledView } from './disabled-view.ts';
@@ -1291,10 +1291,7 @@ function modelsView(
         ...model,
         efforts: [...model.efforts],
         // Claude's fast mode is a rule on the model id; Codex's is the live account's to say.
-        ...byHarness<{ fast?: ReturnType<typeof claudeFastSupport> }>(harness, {
-          claude: () => ({ fast: claudeFastSupport(model.id) }),
-          codex: () => ({}),
-        }),
+        ...fastSupportOf(harness, model.id),
       })),
       ...(derived.default === undefined ? {} : { default: derived.default }),
       ...(derived.local === undefined ? {} : { local: derived.local }),
@@ -1340,11 +1337,7 @@ function fixedLayerView(
   facts: CatalogFacts,
 ): { readonly view?: FixedLayerView; readonly refusal?: string } {
   const shared = { agentPermissions: model.machine.agentPermissions, cwd: VIEW_FOLDER, fyCommand: VIEW_FY_COMMAND };
-  const result = byHarness<ReturnType<typeof fixedLayerFor>>(harness, {
-    claude: () =>
-      fixedLayerFor({ harness: 'claude', ...shared, acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode }),
-    codex: () => fixedLayerFor({ harness: 'codex', ...shared }),
-  });
+  const result = fixedLayerOf(harness, { ...shared, acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode });
   if (!result.ok) return { refusal: result.refusal.message };
   const fixed = result.layer;
   const overridden =

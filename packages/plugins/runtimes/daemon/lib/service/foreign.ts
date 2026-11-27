@@ -10,6 +10,7 @@
  */
 import type { z } from 'zod';
 import {
+  byHarness,
   type HarnessKeyOfKind,
   harnessKeyOfKind,
   harnessKindOfKey,
@@ -42,6 +43,14 @@ export interface RuntimeRename {
 export function claudeFastSupport(model: string): boolean {
   const id = model.toLowerCase();
   return id.includes('opus-4-8') || id.includes('opus-5');
+}
+
+/** What a model choice says about fast mode for `harness`: Claude's is a rule on the model id, Codex's is the live account's to say (nothing here). */
+export function fastSupportOf(harness: string, model: string): { readonly fast?: boolean } {
+  return byHarness<{ readonly fast?: boolean }>(harness, {
+    claude: () => ({ fast: claudeFastSupport(model) }),
+    codex: () => ({}),
+  });
 }
 
 /**
