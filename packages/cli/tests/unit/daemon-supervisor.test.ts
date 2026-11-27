@@ -217,6 +217,16 @@ describe('the launchd supervisor', () => {
   });
 });
 
+describe('a service manager supervisor names a process by its start identity too', () => {
+  it('answers what the process port says, for the stop that precedes a signal', async () => {
+    const w = world('linux');
+    w.state.identities = ['start-A'];
+    should(await new SystemdSupervisor(w.l, w.processes, w.files, w.claims).identify(5)).equal('start-A');
+    should(await new LaunchdSupervisor(w.l, w.processes, w.files, w.claims).identify(5)).equal('start-A');
+    should(await new DirectSupervisor(w.l, w.processes, w.files, w.claims).identify(5)).equal('start-A');
+  });
+});
+
 describe('the direct supervisor', () => {
   const direct = (w: ReturnType<typeof world>) => new DirectSupervisor(w.l, w.processes, w.files, w.claims);
 
