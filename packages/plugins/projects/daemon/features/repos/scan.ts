@@ -15,6 +15,8 @@ const CONFIG_READ_LIMIT = 64 * 1024;
 
 /** Folders never entered: a dependency tree holds repositories that are not the owner's. */
 const SKIPPED = new Set(['node_modules']);
+/** A top-level clone must be a folder the scan will enter. */
+export const isScannableRepoName = (name: string): boolean => !name.startsWith('.') && !SKIPPED.has(name);
 
 export interface ScanDeps {
   /** B6's folder port: holds folders open, never lists a link, refuses a folder the verdict does not accept. */
@@ -128,7 +130,7 @@ export async function scanRepos(root: string, deps: ScanDeps): Promise<ScanResul
         }
         if (read.more) truncated = true;
         for (const entry of read.entries) {
-          if (entry.kind !== 'directory' || entry.name.startsWith('.') || SKIPPED.has(entry.name)) continue;
+          if (entry.kind !== 'directory' || !isScannableRepoName(entry.name)) continue;
           const abs = `${folder.real === '/' ? '' : folder.real}/${entry.name}`;
           // One disk only, told BEFORE anything of the folder is read: a folder on another device (a mount, a network or
           // cloud drive) is not entered, not probed and its names are not read for a sign-in file (a dead mount can hang a read).

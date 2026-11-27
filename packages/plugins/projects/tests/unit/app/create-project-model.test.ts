@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import { cloneFolderName } from '../../../contract/index.ts';
 import {
-  cloneFolderName,
   createVerdict,
   defaultProjectName,
   emptyCreateDraft,
