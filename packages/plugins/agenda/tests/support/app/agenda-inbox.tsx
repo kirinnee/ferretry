@@ -182,7 +182,7 @@ export function InboxHarness({
   readonly render: (inbox: AgendaInbox) => ReactElement;
 }) {
   const state = useSyncExternalStore(fake.deferred.subscribe, fake.deferred.getSnapshot);
-  const hidden = new Set([...state.pending.map(entry => entry.key), ...state.sending]);
+  const hidden = new Set([...state.pending.map(entry => entry.key), ...state.sending.map(entry => entry.key)]);
   const replied = useSyncExternalStore(fake.replied.subscribe, fake.replied.getSnapshot);
   const shown = withRepliedCards(
     cards.filter(card => !hidden.has(card.key)),

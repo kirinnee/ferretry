@@ -46,7 +46,8 @@ import { type AgendaTabFilter, agendaTabModel } from '../../lib/agenda-tab.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
-import { itemHistory } from '../../lib/agenda-history.ts';
+import { itemHistory, withDeviceEvents } from '../../lib/agenda-history.ts';
+import { pendingAnswerEvents } from '../../lib/pending-answer-history.ts';
 import { actionSentence, inboxCardKey, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sendAgendaAction } from '../../lib/agenda-send.ts';
@@ -561,15 +562,29 @@ export const useAgenda = ({
   const previous = paged > 0 ? openItems[paged - 1] : undefined;
   const next = paged >= 0 && paged < openItems.length - 1 ? openItems[paged + 1] : undefined;
   const lifecycle = useItemLifecycle({ connection, scope, client, item: cardItem, board: openItems, records });
-  const history = useMemo(
-    () =>
-      cardItem === undefined
-        ? []
-        : lifecycle.conversation === null
-          ? itemHistory(cardItem, entries)
-          : storedHistory(cardItem, lifecycle.conversation, lifecycle.conversationGap),
-    [cardItem, entries, lifecycle.conversation, lifecycle.conversationGap],
-  );
+  const deferredState = inbox?.deferredState;
+  const history = useMemo(() => {
+    if (cardItem === undefined) return [];
+    const spoken =
+      lifecycle.conversation === null
+        ? itemHistory(cardItem, entries)
+        : storedHistory(cardItem, lifecycle.conversation, lifecycle.conversationGap);
+    // An answer the Inbox still holds for its undo window is already said here, and leaves with Undo.
+    return deferredState === undefined
+      ? spoken
+      : withDeviceEvents(
+          spoken,
+          pendingAnswerEvents(deferredState, inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id), cardItem),
+        );
+  }, [
+    cardItem,
+    entries,
+    lifecycle.conversation,
+    lifecycle.conversationGap,
+    deferredState,
+    connection.daemonId,
+    scope.sessionId,
+  ]);
   const cardError = cardItem === undefined ? null : busy.get(cardItem.id);
   // A question the owner replied to is not answered by the reply: its options stay live under the "replied" line.
   const questionKept =

@@ -77,7 +77,8 @@ import { answerRowLayout, cardModel } from '../../lib/agenda-card-model.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
 import { storedHistory } from '../../lib/agenda-conversation.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
-import { itemHistory } from '../../lib/agenda-history.ts';
+import { itemHistory, withDeviceEvents } from '../../lib/agenda-history.ts';
+import { pendingAnswerEvents } from '../../lib/pending-answer-history.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -334,12 +335,16 @@ function OpenItem({
     board: inbox.boardOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
     records: inbox.recordsOf?.(card.daemonId, card.view.config.id) ?? NO_BOARD,
   });
+  const deferredState = inbox.deferredState;
   const history = useMemo(
     () =>
-      lifecycle.conversation === null
-        ? itemHistory(card.item, entries)
-        : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
-    [card.item, entries, lifecycle.conversation, lifecycle.conversationGap],
+      withDeviceEvents(
+        lifecycle.conversation === null
+          ? itemHistory(card.item, entries)
+          : storedHistory(card.item, lifecycle.conversation, lifecycle.conversationGap),
+        pendingAnswerEvents(deferredState, card.key, card.item),
+      ),
+    [card.item, card.key, entries, lifecycle.conversation, lifecycle.conversationGap, deferredState],
   );
   // A step's tick goes to the machine the task came from, through the one agenda client (as in the chat). Without a
   // client or a paired connection the list stays read-only, never a box that looks live and does nothing.

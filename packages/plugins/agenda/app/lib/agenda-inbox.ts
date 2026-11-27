@@ -581,6 +581,8 @@ export interface PendingAgendaAction {
   readonly key: string;
   readonly card: InboxCard;
   readonly action: InboxAction;
+  /** When the reader gave it: the instant its line in the item's conversation is stamped with. */
+  readonly at: number;
   readonly deadline: number;
 }
 
@@ -589,13 +591,14 @@ export interface FailedAgendaAction {
   readonly key: string;
   readonly card: InboxCard;
   readonly action: InboxAction;
+  readonly at: number;
   readonly message: string;
 }
 
 export interface DeferredAgendaState {
   readonly pending: readonly PendingAgendaAction[];
-  /** Keys whose answer is on its way to the daemon now: past undo, not yet settled. */
-  readonly sending: readonly string[];
+  /** Answers on their way to the daemon now: past undo, not yet settled. */
+  readonly sending: readonly PendingAgendaAction[];
   readonly failed: readonly FailedAgendaAction[];
 }
 
@@ -639,7 +642,7 @@ export class DeferredAgendaActions {
 
   /** Keys that should not be on the deck: held, being sent. A failed one comes back. */
   hiddenKeys(): ReadonlySet<string> {
-    return new Set([...this.#state.pending.map(entry => entry.key), ...this.#state.sending]);
+    return new Set([...this.#state.pending.map(entry => entry.key), ...this.#state.sending.map(entry => entry.key)]);
   }
 
   /**
@@ -653,6 +656,7 @@ export class DeferredAgendaActions {
       key: card.key,
       card,
       action: withAskVersion(action, card.item),
+      at: this.timers.now(),
       deadline: this.timers.now() + this.windowMs,
     };
     this.#timers.set(
@@ -692,7 +696,7 @@ export class DeferredAgendaActions {
     this.#publish({
       ...this.#state,
       pending: this.#state.pending.filter(pending => pending.key !== key),
-      sending: [...this.#state.sending, key],
+      sending: [...this.#state.sending, entry],
     });
     void this.commit(entry.card, entry.action).then(
       () => this.#settle(key, null),
@@ -701,6 +705,7 @@ export class DeferredAgendaActions {
           key,
           card: entry.card,
           action: entry.action,
+          at: entry.at,
           message: reason instanceof Error ? reason.message : 'The machine did not accept this answer.',
         }),
     );
@@ -709,7 +714,7 @@ export class DeferredAgendaActions {
   #settle(key: string, failure: FailedAgendaAction | null): void {
     this.#publish({
       ...this.#state,
-      sending: this.#state.sending.filter(sending => sending !== key),
+      sending: this.#state.sending.filter(sending => sending.key !== key),
       failed: failure === null ? this.#state.failed : [...this.#state.failed.filter(f => f.key !== key), failure],
     });
   }

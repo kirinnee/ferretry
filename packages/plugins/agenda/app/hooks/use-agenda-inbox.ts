@@ -303,7 +303,7 @@ export function useAgendaInboxModel(
     answeredSuggestions.getSnapshot,
   );
   const hidden = useMemo(
-    () => new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
+    () => new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending.map(entry => entry.key)]),
     [deferredState],
   );
   const derived = useMemo(
@@ -418,7 +418,7 @@ export function useAgendaInboxModel(
         inboxParked(
           sources,
           itemsOf,
-          new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
+          new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending.map(entry => entry.key)]),
         ),
         repliedState,
       ),
