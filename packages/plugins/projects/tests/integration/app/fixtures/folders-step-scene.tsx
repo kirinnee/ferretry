@@ -3,7 +3,9 @@
  * folder): the REAL step page and the REAL folder explorer inside the shell's step frame, with the footer the flow draws
  * (Back, "Skip for now", Next). The client answers from a tiny fake home and records every registration in `window.__registered`.
  *
- *   ?theme=<family>-<mode>   ?view=card|list
+ *   ?theme=<family>-<mode>   ?view=card|list   ?refuse=<folder name>  (the daemon refuses that folder)
+ *
+ * The scene's registry survives a reload (session storage), the way a real machine's does; the step's run memory does not.
  */
 import { StepPageFrame } from '@ferretry/app';
 import type { StepHost } from '@ferretry/kernel/contract';
@@ -28,6 +30,7 @@ declare global {
     __skipped: number;
     __memory: Record<string, string | number | boolean | undefined>;
     __error: string;
+    __passedOver: boolean;
   }
 }
 window.__registered = [];
@@ -36,6 +39,18 @@ window.__save = null;
 window.__skipped = 0;
 window.__memory = {};
 window.__error = '';
+window.__passedOver = false;
+const refuse = params.get('refuse');
+
+/** The registry this scene's fake daemon holds: what was registered, kept across a reload. */
+const REGISTRY_KEY = 'scene.registry';
+const held = (): string[] => {
+  try {
+    return JSON.parse(sessionStorage.getItem(REGISTRY_KEY) ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+};
 
 const at = '2026-08-01T10:00:00.000Z';
 const entry = (name: string, isRepo = false) => ({
@@ -58,25 +73,31 @@ const crumbsFor = (path: string) => {
   ];
 };
 
+const projectOf = (path: string, index: number) =>
+  ProjectInfoSchema.parse({
+    id: `${String(index + 1).padStart(8, '0')}-1111-4111-8111-111111111111`,
+    name: path.split('/').at(-1) ?? 'project',
+    path,
+    source: 'existing-folder',
+    createdAt: at,
+  });
+
 const client: ProjectsClient = {
   call: async <Answer,>(route: string, init?: { query?: Record<string, string>; body?: unknown }): Promise<Answer> => {
     window.__folderCalls.push(route);
-    if (route === 'GET /v1/projects') return [] as Answer;
+    if (route === 'GET /v1/projects') return held().map(projectOf) as Answer;
     if (route === 'GET /v1/projects/folders') {
       const path = init?.query?.path ?? HOME;
       return { path, crumbs: crumbsFor(path), entries: TREE[path] ?? [], truncated: false } as Answer;
     }
     if (route === 'POST /v1/projects') {
       const body = init?.body as { path: string };
+      if (refuse !== null && body.path.endsWith(`/${refuse}`))
+        throw Object.assign(new Error('that folder cannot be a project'), { status: 422 });
       window.__registered.push(body.path);
-      const name = body.path.split('/').at(-1) ?? 'project';
-      return ProjectInfoSchema.parse({
-        id: `${String(window.__registered.length).padStart(8, '0')}-1111-4111-8111-111111111111`,
-        name,
-        path: body.path,
-        source: 'existing-folder',
-        createdAt: at,
-      }) as Answer;
+      const rows = held();
+      if (!rows.includes(body.path)) sessionStorage.setItem(REGISTRY_KEY, JSON.stringify([...rows, body.path]));
+      return projectOf(body.path, held().indexOf(body.path)) as Answer;
     }
     throw new Error(`no route ${route}`);
   },
@@ -94,7 +115,9 @@ const host: StepHost = {
   remember: patch => void Object.assign(window.__memory, patch),
   ready: () => undefined,
   skip: () => undefined,
-  notNeeded: () => undefined,
+  notNeeded: () => {
+    window.__passedOver = true;
+  },
   commit: save => {
     window.__save = save;
     setNote('');

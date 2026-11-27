@@ -10,6 +10,9 @@
  * - What was registered is left in the step's memory (`openLabel`, `openHref`) so the last page can open it. A project is
  *   offered to the next page ("Connect GitHub") only when this run PROVED it made it: its id was not in the registry read just
  *   before registering. The daemon answers a folder it already holds with the record it held, which proves nothing.
+ * - The work is kept per save, not per batch: each folder picked or removed, and each project made, is written down at once
+ *   (this browser's storage, one draft per machine), so a refusal on the third folder, Back, or a reload finds the folders
+ *   still picked and the projects already made counted as this run's. A finished save clears the draft.
  * - Nothing here is about boards: a folder is registered, and the project's own page holds the rest.
  */
 import { daemonOfClient } from '@ferretry/app';
@@ -31,7 +34,39 @@ export interface FoldersStepProps {
   readonly daemon: string | undefined;
 }
 
-/** The place and the words the last page opens: the one project made, or the list when there are several. */
+/** What the page has written down so far: the folders still to register and the ids of the projects this run made. */
+interface Draft {
+  readonly picks: readonly string[];
+  readonly madeIds: readonly string[];
+}
+
+const draftKey = (daemon: string | undefined): string => `fy.projects.setup-folders.${daemon ?? 'machine'}`;
+
+const strings = (value: unknown): readonly string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+
+/** The saved draft; storage that is missing, refused or damaged is an empty draft. */
+const readDraft = (daemon: string | undefined): Draft => {
+  try {
+    const raw = globalThis.localStorage?.getItem(draftKey(daemon));
+    const parsed: unknown = raw === null || raw === undefined ? undefined : JSON.parse(raw);
+    const record = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    return { picks: strings(record.picks), madeIds: strings(record.madeIds) };
+  } catch {
+    return { picks: [], madeIds: [] };
+  }
+};
+
+/** Writes the draft down (an empty one removes it); a browser that refuses storage keeps it for this visit only. */
+const writeDraft = (daemon: string | undefined, draft: Draft): void => {
+  try {
+    if (draft.picks.length === 0 && draft.madeIds.length === 0) globalThis.localStorage?.removeItem(draftKey(daemon));
+    else globalThis.localStorage?.setItem(draftKey(daemon), JSON.stringify(draft));
+  } catch {
+    // Private mode or a full store: the draft lasts for this visit only.
+  }
+};
+
 /** The ids of the projects this run made, kept in the step's memory as one comma-joined string. */
 const idsOf = (memory: unknown): readonly string[] =>
   typeof memory === 'string' && memory !== '' ? memory.split(',').filter(id => id !== '') : [];
@@ -44,9 +79,12 @@ const openOf = (daemon: string, made: readonly ProjectInfo[]): Record<string, st
 };
 
 export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
-  const [picks, setPicks] = useState<readonly string[]>([]);
+  const [saved] = useState(() => readDraft(daemon));
+  const [picks, setPicks] = useState<readonly string[]>(saved.picks);
   /** The list as the save reads it (the save outlives the render it was made in). */
-  const picked = useRef<readonly string[]>([]);
+  const picked = useRef<readonly string[]>(saved.picks);
+  /** The projects made so far in this setup: what the step's memory holds plus what the draft held across a reload. */
+  const madeNow = useRef<ReadonlySet<string>>(new Set([...saved.madeIds, ...idsOf(step?.segment.madeIds)]));
   const host = useRef(step);
   host.current = step;
   const made = useRef<readonly ProjectInfo[]>([]);
@@ -58,7 +96,7 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
     fetchProjects(client).then(
       known => {
         if (!live) return;
-        const mine = new Set(idsOf(host.current?.segment.madeIds));
+        const mine = new Set([...madeNow.current, ...idsOf(host.current?.segment.madeIds)]);
         // Only what this run made is on the machine: the person came Back here, and the page stays.
         if (known.length > 0 && !known.every(project => mine.has(project.id))) host.current?.notNeeded();
         else {
@@ -78,9 +116,12 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
   // refusal's own trim of the list (below) must not clear the message it is raising.
   const save = useCallback(async (): Promise<void> => {
     const picks = picked.current;
-    const earlier = idsOf(host.current?.segment.madeIds);
+    const earlier = [...new Set([...madeNow.current, ...idsOf(host.current?.segment.madeIds)])];
     // Nothing new picked, but this run already made projects (Back brought the person here): keep them and move on.
-    if (picks.length === 0 && earlier.length > 0) return;
+    if (picks.length === 0 && earlier.length > 0) {
+      writeDraft(daemon, { picks: [], madeIds: [] });
+      return;
+    }
     if (picks.length === 0) throw new Error('Pick a folder, or choose Skip for now.');
     // What the registry held BEFORE: the only proof that a project was made here. A registry that cannot be read proves nothing.
     const held = await fetchProjects(client).then(
@@ -100,10 +141,15 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
         throw new Error(`${path}: ${reasonOf(cause)}`);
       }
       left.shift();
+      // Written down NOW, folder by folder: a refusal later in the batch, Back or a reload must find this one made.
+      madeNow.current = new Set(created);
+      writeDraft(daemon, { picks: left, madeIds: [...created] });
+      host.current?.remember({ madeIds: [...created].join(',') });
     }
     const [only] = made.current;
     if (daemon !== undefined) host.current?.remember(openOf(daemon, made.current));
     host.current?.remember({ madeIds: [...created].join(',') });
+    writeDraft(daemon, { picks: [], madeIds: [] });
     // The next page ("Connect GitHub") may offer to link an account to the one project made here, and only a project proven new.
     host.current?.remember(
       made.current.length === 1 && only !== undefined && created.has(only.id)
@@ -119,6 +165,7 @@ export function FoldersStep({ step, client, daemon }: FoldersStepProps) {
   const change = (next: readonly string[]): void => {
     picked.current = next;
     setPicks(next);
+    writeDraft(daemon, { picks: next, madeIds: [...madeNow.current] });
     host.current?.commit(save);
   };
   const add = (path: string): void => {

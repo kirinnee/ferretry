@@ -2,7 +2,7 @@
  * The setup flow's last page, "Add your projects" (C59 O8-13): the Add project explorer to pick one folder or several, the
  * same registration when Next saves, a pass-over on a machine that already has a project, and the words the end page opens.
  */
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { interact, type Mounted, mount, must, settleUntil } from '@ferretry/app/testing';
 import { FoldersStep } from '../../../app/views/folders-step.tsx';
 import { ANSWERED, type Call, clickEvent, PROJECT, refusal, scripted } from './support/client.ts';
@@ -209,5 +209,88 @@ describe('the Add your projects step', () => {
     expect(picks(mounted)).toHaveLength(0);
     expect(recorder.count('commit')).toBe(afterAdd + 1);
     await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('Skip for now');
+  });
+});
+
+describe('the Add your projects step keeps its work per save (E-257)', () => {
+  // The draft lives in the browser's storage; one test's draft must never answer another's.
+  afterEach(() => localStorage.clear());
+
+  const ATLAS = '/home/k/atlas';
+  /** `/home/k` registers; the atlas folder is refused. The registry holds the first once it is made. */
+  const halfRefused = () => {
+    let made = false;
+    return {
+      [LIST]: () => (made ? [ANSWERED] : []),
+      [REGISTER]: (call: Call) => {
+        if ((call.body as { path: string }).path === ATLAS) throw refusal(422, 'that folder cannot be a project');
+        made = true;
+        return ANSWERED;
+      },
+    };
+  };
+  const pickBoth = async (mounted: Mounted): Promise<void> => {
+    await settleUntil(
+      () => mounted.container.querySelector('[data-explorer-state="ready"]') !== null,
+      'the explorer',
+      interact,
+    );
+    await addThisFolder(mounted);
+    await press(must(mounted.container.querySelector('[data-explorer-entry="atlas"]'), 'atlas'));
+    await settleUntil(
+      () => mounted.container.querySelector('[data-explorer-state="ready"]') !== null,
+      'atlas',
+      interact,
+    );
+    await addThisFolder(mounted);
+  };
+  const reopen = async (recorder: ReturnType<typeof stepRecorder>, routes: Record<string, unknown>) => {
+    const again = await mount(
+      <FoldersStep step={recorder.host} client={scripted({ [FOLDERS]: listingFor, ...routes })} daemon="workstation" />,
+    );
+    await settleUntil(
+      () => recorder.calls.some(call => call === 'ready' || call === 'notNeeded'),
+      'the page decides',
+      interact,
+    );
+    return again;
+  };
+
+  it('a refusal on the second folder keeps the first made, the refused one still picked, when the page is drawn again', async () => {
+    const routes = halfRefused();
+    const { recorder, mounted } = await open(routes);
+    await pickBoth(mounted);
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    expect(recorder.segment.madeIds).toBe(ANSWERED.id);
+    await mounted.unmount();
+    const again = await reopen(recorder, routes);
+    expect(recorder.count('notNeeded')).toBe(0);
+    expect(picks(again)).toEqual([ATLAS]);
+    await again.unmount();
+  });
+
+  it('a reload (the run memory gone) keeps the refused folder picked and still does not pass the page over', async () => {
+    const routes = halfRefused();
+    const { recorder, mounted } = await open(routes);
+    await pickBoth(mounted);
+    await expect(must(recorder.committed, 'a save').call(null)).rejects.toThrow('cannot be a project');
+    await mounted.unmount();
+    const fresh = stepRecorder('client');
+    const again = await reopen(fresh, routes);
+    expect(fresh.count('notNeeded')).toBe(0);
+    expect(fresh.count('ready')).toBe(1);
+    expect(picks(again)).toEqual([ATLAS]);
+    await again.unmount();
+  });
+
+  it('a finished save leaves no draft: a later visit to a machine with a project passes the page over', async () => {
+    const { recorder, mounted } = await open({});
+    await pickBoth(mounted);
+    await must(recorder.committed, 'a save').call(null);
+    await mounted.unmount();
+    const fresh = stepRecorder('client');
+    const again = await reopen(fresh, { [LIST]: [ANSWERED], [REGISTER]: ANSWERED });
+    expect(fresh.count('notNeeded')).toBe(1);
+    await again.unmount();
   });
 });
