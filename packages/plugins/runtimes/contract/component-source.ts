@@ -29,6 +29,7 @@
  */
 import { defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import type { RuntimesHarnessKit } from './harness-kit.ts';
 
 /** One component, as its owner projects it for the account model (plain parsed data in the model's shape). */
 export type ProfileComponentDocument = Readonly<Record<string, unknown>>;
@@ -99,6 +100,11 @@ export interface ProfileComponentSource {
    * owner that offers none is read at the next change Runtimes does hear.
    */
   watch?(listener: () => void): () => void;
+  /**
+   * What the harness this source is for does inside Runtimes (`./harness-kit.ts`). Only a harness's own settings source
+   * (`ProfileClaudeSettingsSource`, `ProfileCodexSettingsSource`) gives one; every other source leaves it out.
+   */
+  readonly kit?: RuntimesHarnessKit;
   /**
    * Writes one component as the owner's own file. `documentText` is the component in the account model's shape, as a
    * YAML 1.2 document (JSON-formatted): the same projection `read` answers, so a `read` after a `put` gives it back. A
