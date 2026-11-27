@@ -1,4 +1,4 @@
-import { ApiError, type CallContext, jsonResponse } from '@ferretry/kernel/contract';
+import { type CallContext, jsonResponse } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import {
   type FerretId,
@@ -216,13 +216,9 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     },
   });
 
-  // THE FORK ROUTE is Conversation's (it owns the message selection, the attachments and the form); until that route lands
-  // the declared one answers 503 as the unbound fork always did. The cut and the start it will call are `forks.feature.ts`.
-  const forkRoute = async (call: CallContext) => {
-    mayAct(call, await pathFerret(call));
-    throw new ApiError(503, 'Fork is not wired yet in this version of Ferretry.', 'plugin_unavailable');
-  };
-  return { routes: { ...moveRoutes, 'POST /v1/ferrets/:ferretId/fork': forkRoute } };
+  // THE FORK ROUTE is Conversation's (it owns the message selection, the attachments and the form). The cut and the start it
+  // calls are `forks.feature.ts`.
+  return { routes: moveRoutes };
 }
 
 export default { id: 'moves', register } satisfies FerretsFeature;

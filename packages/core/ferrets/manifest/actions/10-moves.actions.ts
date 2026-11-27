@@ -7,15 +7,8 @@ export default fragment({
   routes: [
     // ── moves and forks (ferrets-c): today's descriptors from mounts/session-{fork,handover,migrate}.ts, field for
     // field; paths /v1/sessions/:sessionId/… → /v1/ferrets/:ferretId/…, migrate → move (§1.4).
-    // R-0344
-    route('POST /v1/ferrets/:ferretId/fork', {
-      minimum: 'operator',
-      caller: 'person',
-      capability: FLEET_CONFIGURE,
-      noStore: true,
-      audit: audit('session.opened'),
-      guard: { none: 'the fresh ferret summary and the public plan projection; no transcript text' },
-    }),
+    // R-0344 (the fork route) is Conversation's: it owns the message selection, the attachments and the form
+    // (`plugins/conversation/manifest/actions/52-fork.actions.ts`).
     // R-0345
     route('POST /v1/ferrets/:ferretId/handover', {
       minimum: 'operator',

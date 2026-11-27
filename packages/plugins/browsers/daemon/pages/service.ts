@@ -1,7 +1,12 @@
 import { openerGroup, sameOriginOrUnplaced } from './opener-group.ts';
 import { mergeTotals, type NavigationEvidence, type NavigationTotals } from '../target/lib/navigation-evidence.ts';
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import { BROWSER_MAX_MACHINE_PAGES, BROWSER_MAX_PAGES, type BrowserStateView } from '../../contract/index.ts';
+import {
+  BROWSER_MAX_MACHINE_PAGES,
+  BROWSER_MAX_PAGES,
+  type BrowserStateView,
+  DEFAULT_BROWSER_IDENTITY,
+} from '../../contract/index.ts';
 import {
   type BrowserAction,
   type BrowserActionResult,
@@ -48,9 +53,18 @@ export class BrowserSessionError extends Error {
   }
 }
 
-/** Starts the machine's one agent browser. */
+/** Starts one identity's browser (the default identity's when none is named). */
 export interface BrowserSessionLauncher {
-  launch(viewport: BrowserViewport): Promise<BrowserAutomation>;
+  launch(viewport: BrowserViewport, identity?: string): Promise<BrowserAutomation>;
+}
+
+/**
+ * How many pages are open across EVERY identity's browser: the caps are per session and per machine, not per identity, so
+ * an identity's service asks this before it opens one. Absent, a service counts only its own browser.
+ */
+export interface BrowserPageQuota {
+  session(sessionId: string): number;
+  machine(): number;
 }
 
 /** A timer the composition root owns. */
@@ -153,6 +167,8 @@ export interface BrowserActOptions {
    * no other screen's. A screen that is not attached to this session as this caller is refused before anything runs.
    */
   readonly viewer?: ViewerRef;
+  /** Which identity's browser a page this act opens goes to (`./identities.ts`); absent, the one the session already uses. */
+  readonly identity?: string;
 }
 
 /** Told when a page of a session closes, whoever closed it (a tool, the toolbar, the session's end, the browser stopping). */
@@ -235,6 +251,8 @@ export interface BrowserOpenOptions {
   readonly openedBy?: SurfaceOpener;
   /** A throwaway context with its own cookies and storage, discarded when the page closes. */
   readonly incognito?: boolean;
+  /** Which identity's browser opens it (`./identities.ts`); absent, the one the session already uses, else the default. */
+  readonly identity?: string;
 }
 
 export interface BrowserSubsystem {
@@ -401,6 +419,7 @@ export const MAX_VIEWERS_PER_SESSION = 64;
 export class BrowserSessionService implements BrowserSubsystem {
   private run: Running | undefined;
   private starting: Promise<Running> | undefined;
+  private stopping: Promise<void> | undefined;
   /** Page opens (and starts) that have been asked for and have not answered yet, whoever asked. */
   private opening = 0;
   private readonly serial = new Map<string, Promise<void>>();
@@ -416,7 +435,29 @@ export class BrowserSessionService implements BrowserSubsystem {
     private readonly signIns?: BrowserSignInWatch,
     /** Told when a page closes: the daemon half publishes `PageChanged` `closed`. A wake-up, so it never fails a close. */
     private readonly pageClosed?: BrowserPageClosed,
+    /** The identity whose ONE browser this service runs (`./identities.ts` holds one service per identity). */
+    private readonly identity: string = DEFAULT_BROWSER_IDENTITY,
+    private readonly quota?: BrowserPageQuota,
   ) {}
+
+  /** Whether this session has a page with this name or id in this identity's running browser. */
+  owns(sessionId: string, key: string): boolean {
+    return this.run !== undefined && this.page(this.run, sessionId, key) !== undefined;
+  }
+
+  ownsId(sessionId: string, key: string): boolean {
+    return this.run !== undefined && this.owned(this.run, sessionId).some(page => page.id === key);
+  }
+
+  /** How many pages this session has open in this identity's browser, as last reported. */
+  sessionPageCount(sessionId: string): number {
+    return this.run === undefined ? 0 : this.owned(this.run, sessionId).length;
+  }
+
+  /** How many session pages (popups included) this identity's browser has open, as last reported. */
+  machinePageCount(): number {
+    return this.run === undefined ? 0 : this.sessionPages(this.run);
+  }
 
   async status(sessionId: string, viewer?: ViewerRef): Promise<BrowserStatus> {
     await this.requireSession(sessionId);
@@ -793,6 +834,7 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   /** The machine browser as a whole: whether it runs, since when, and the proxy it started with. */
   overview(): BrowserStateView {
+    if (this.stopping !== undefined) return { state: 'stopping' };
     const run = this.run;
     if (run === undefined) return { state: this.starting === undefined ? 'stopped' : 'starting' };
     return {
@@ -815,6 +857,7 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   /** The machine's browser, started on first need; concurrent first needs share one launch. */
   private async ensure(): Promise<Running> {
+    if (this.stopping !== undefined) await this.stopping;
     if (this.run !== undefined) return this.run;
     this.starting ??= this.launch().finally(() => {
       this.starting = undefined;
@@ -823,9 +866,9 @@ export class BrowserSessionService implements BrowserSubsystem {
   }
 
   private async launch(): Promise<Running> {
-    let driver: BrowserAutomation;
+    let driver: BrowserAutomation | undefined;
     try {
-      driver = await this.launcher.launch(DEFAULT_BROWSER_VIEWPORT);
+      driver = await this.launcher.launch(DEFAULT_BROWSER_VIEWPORT, this.identity);
       const snapshot = pageOf(await driver.location());
       const run: Running = {
         driver,
@@ -845,6 +888,10 @@ export class BrowserSessionService implements BrowserSubsystem {
       this.touch(run);
       return run;
     } catch (error) {
+      // The launcher already handed us a live Chrome, even if its first snapshot never arrived. Its close also owns
+      // the private X display; finish that teardown before this launch settles or shutdown/admission can pass it.
+      await driver?.close().catch(() => undefined);
+      if (this.run?.driver === driver) this.run = undefined;
       throw error instanceof BrowserSessionError
         ? error
         : new BrowserSessionError('launch_failed', error instanceof Error ? error.message : 'browser launch failed');
@@ -860,13 +907,13 @@ export class BrowserSessionService implements BrowserSubsystem {
     return await this.exclusive('', async () => {
       // Read the pages fresh: a popup a click opened since the last act counts toward both caps.
       this.observe(run, pageOf(await run.driver.location()), true);
-      if (this.owned(run, sessionId).length >= BROWSER_MAX_PAGES)
+      if ((this.quota?.session(sessionId) ?? this.owned(run, sessionId).length) >= BROWSER_MAX_PAGES)
         throw new BrowserSessionError(
           'capacity',
           `this session already has ${String(BROWSER_MAX_PAGES)} browser pages open; close one before opening another`,
         );
       // Every page that belongs to a session counts — the popups an agent's clicks opened included.
-      if (this.sessionPages(run) >= BROWSER_MAX_MACHINE_PAGES)
+      if ((this.quota?.machine() ?? this.sessionPages(run)) >= BROWSER_MAX_MACHINE_PAGES)
         throw new BrowserSessionError(
           'capacity',
           `this machine's browser already has ${String(BROWSER_MAX_MACHINE_PAGES)} pages open; close one before opening another`,
@@ -1069,14 +1116,22 @@ export class BrowserSessionService implements BrowserSubsystem {
   }
 
   private async stop(): Promise<void> {
+    this.stopping ??= this.teardown().finally(() => {
+      this.stopping = undefined;
+    });
+    await this.stopping;
+  }
+
+  private async teardown(): Promise<void> {
+    await this.starting?.catch(() => undefined);
     const run = this.run;
     if (run === undefined) return;
-    this.run = undefined;
     run.closed = true;
     run.idle?.cancel();
     for (const viewer of run.viewers) viewer.terminal({ code: 1000, reason: 'browser stopped' });
     run.viewers.clear();
     await run.driver.close().catch(() => undefined);
+    if (this.run === run) this.run = undefined;
     this.toldAll(run);
   }
 
@@ -1110,7 +1165,8 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   /** This session's page with this name or id — never another session's. */
   private page(run: Running, sessionId: string, key: string): BrowserPageSummary | undefined {
-    return this.owned(run, sessionId).find(page => page.id === key || run.names.get(page.id) === key);
+    const pages = this.owned(run, sessionId);
+    return pages.find(page => page.id === key) ?? pages.find(page => run.names.get(page.id) === key);
   }
 
   private requirePage(run: Running, sessionId: string, key: string): BrowserPageSummary {

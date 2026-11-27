@@ -456,3 +456,50 @@ describe('ferretScopedAttachments', () => {
     should((await scoped.download('session-a', uploaded.id)).attachment.encrypted?.locked).be.true();
   });
 });
+
+describe('copying a fork’s attachments', () => {
+  const FROM = 'source';
+  const TO = 'forked';
+  const note = (name: string) => ({ filename: name, mime: 'text/plain', bytes: new TextEncoder().encode(name) });
+
+  it('copies what the source holds, byte for byte, skips what the fork already has, and never carries an unlock', async () => {
+    const { store, originals } = harness();
+    const a = await store.upload(FROM, note('a.txt'));
+    const b = await store.upload(FROM, note('b.txt'));
+    const locked = await store.upload(FROM, { filename: 'private.pdf', mime: 'application/pdf', bytes: encryptedPdf });
+    await store.unlock(FROM, locked.id, 'pw');
+    await store.upload(TO, note('a.txt'));
+
+    should(await store.copyAll(FROM, TO)).equal(2);
+
+    should((await store.list(TO)).map(each => each.id).sort()).eql([a.id, b.id, locked.id].sort());
+    should([...(await store.download(TO, b.id)).bytes]).eql([...new TextEncoder().encode('b.txt')]);
+    should((await store.download(TO, locked.id)).attachment.encrypted?.locked).be.true();
+    should(originals.trees.get(TO)?.get(b.id)?.manifest).equal(originals.trees.get(FROM)?.get(b.id)?.manifest);
+    should(await store.copyAll(FROM, TO)).equal(0);
+  });
+
+  it('refuses a destination that is not a usable ferret id, and a read that fails for any reason but absence', async () => {
+    const { store, originals } = harness();
+    await store.upload(FROM, note('a.txt'));
+
+    should(await refusal(store.copyAll(FROM, '../escape'))).have.property('failure', 'invalid');
+    originals.failManifest = true;
+    should(await refusal(store.copyAll(FROM, TO))).be.ok();
+  });
+
+  it('copies through the scoped store only between ferrets that both exist', async () => {
+    const { store } = harness();
+    const live = new Set([FROM, TO]);
+    const scoped = ferretScopedAttachments(store, async id => live.has(id));
+    await scoped.upload(FROM, note('a.txt'));
+
+    live.delete(TO);
+    should(await refusal(scoped.copy(FROM, TO))).have.property('failure', 'not_found');
+    live.add(TO);
+    live.delete(FROM);
+    should(await refusal(scoped.copy(FROM, TO))).have.property('failure', 'not_found');
+    live.add(FROM);
+    should(await scoped.copy(FROM, TO)).equal(1);
+  });
+});

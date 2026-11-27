@@ -36,7 +36,9 @@ async function journey(label: string) {
   const starts: StartRequest[] = [];
   const service = new ForkService({
     source: ferret =>
-      ferret === SOURCE ? { name: 'Quick Otter', harness: 'claude-code', folder: sourceFolder } : undefined,
+      ferret === SOURCE
+        ? { name: 'Quick Otter', harness: 'claude-code', folder: sourceFolder, running: false }
+        : undefined,
     mayTouch: () => true,
     harness: () => ({
       fork: async (from, at, into): Promise<ForkPlan> => {
@@ -87,12 +89,49 @@ describe('the fork journey over real Git', () => {
     expect(sourceFolder).not.toBe(forked.value.folder);
   });
 
+  test('should leave no worktree and no branch behind when the harness refuses the cut', async () => {
+    // Arrange: a harness that refuses the cut as Codex does for a writer version it has not tested.
+    const { world, cuts, starts, sourceFolder } = await journey('fork-refused-cut');
+    const service = new ForkService({
+      source: () => ({ name: 'Quick Otter', harness: 'codex', folder: sourceFolder, running: false }),
+      mayTouch: () => true,
+      harness: () => ({
+        fork: async (): Promise<ForkPlan> => {
+          throw new Error('the conversation was written by Codex 0.1, a rollout format Ferretry has not tested');
+        },
+      }),
+      start: async request => {
+        starts.push(request);
+        return ok(NEW);
+      },
+      worktrees: () => forkWorktrees(world.built),
+      newId: () => '0123456789abcdef',
+    });
+
+    // Act
+    const forked = await service.fork(SOURCE, { turn: 1 }, { worktree: 'new' }, { kind: 'person' });
+
+    // Assert: the refusal is the harness's own sentence, and Git itself holds nothing of the fork.
+    expect(forked.ok).toBe(false);
+    if (!forked.ok) {
+      expect(forked.error.code).toBe('cut');
+      expect(forked.error.reason).toContain('has not tested');
+      expect(forked.error.reason).not.toContain('left in place');
+    }
+    expect(cuts).toEqual([]);
+    expect(starts).toEqual([]);
+    expect((await setupGit(world.repository.root, 'branch', '--list', 'fork/*')).trim()).toBe('');
+    expect(await setupGit(world.repository.root, 'worktree', 'list', '--porcelain')).not.toContain('fork/');
+    const rows = (await world.built.service.list()).worktrees.filter(entry => entry.branch.startsWith('fork/'));
+    expect(rows.every(row => row.removedAt !== undefined)).toBe(true);
+  });
+
   test('should refuse a new worktree for a source that is not in a Git checkout, before the cut', async () => {
     // Arrange
     const { world, cuts, starts } = await journey('fork-not-git');
     const outside = await mkdirOutside(world.parent);
     const service = new ForkService({
-      source: () => ({ name: 'Quick Otter', harness: 'claude-code', folder: outside }),
+      source: () => ({ name: 'Quick Otter', harness: 'claude-code', folder: outside, running: false }),
       mayTouch: () => true,
       harness: () => ({
         fork: async (from): Promise<ForkPlan> => {
