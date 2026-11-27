@@ -375,8 +375,8 @@ export class FleetSetupService {
     if (options.fresh === true) await this.deps.tools.refresh?.();
     const catalog = this.deps.catalog;
     const reading = await this.#read();
-    const scans = await this.#scans();
-    const plan = planImport(scans, {
+    const plan = planImport(await this.#scans(), {
+      ...(catalog.kits === undefined ? {} : { kits: catalog.kits() }),
       ...(reading.format === 'none' ? {} : { existing: reading.model }),
       ...(await this.#recordOption()),
       starters: starterModelsOf(await this.deps.catalog.modelCatalogs?.()),
@@ -679,6 +679,7 @@ export class FleetSetupService {
       );
     }
     const planning = {
+      ...(catalog.kits === undefined ? {} : { kits: catalog.kits() }),
       ...(change.include === undefined ? {} : { include: change.include.map(harnessKind) }),
       ...(change.skip === undefined ? {} : { skip: change.skip }),
       ...(existing === undefined ? {} : { existing }),
@@ -704,12 +705,11 @@ export class FleetSetupService {
     );
     const raw = planImport(scans, { ...planning, reusableSecrets: reusableSecretsHeld });
     // The wire keys the names by the Ferrets harness key; the library keys them by its own word.
-    const given = change.names;
     const plan = this.#named(
       raw,
       {
-        ...(given?.['claude-code'] === undefined ? {} : { claude: given['claude-code'] }),
-        ...(given?.codex === undefined ? {} : { codex: given.codex }),
+        ...(change.names?.['claude-code'] === undefined ? {} : { claude: change.names['claude-code'] }),
+        ...(change.names?.codex === undefined ? {} : { codex: change.names.codex }),
       },
       reading.model,
     );

@@ -5,7 +5,7 @@ import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view
 import { AgendaTabs } from '../../../../app/features/agenda/agenda-tabs.tsx';
 import type { AgendaVersionsView } from '../../../../app/features/agenda/use-item-lifecycle.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 import { settleUntil } from '@ferretry/app/testing';
 
 /**
@@ -14,6 +14,9 @@ import { settleUntil } from '@ferretry/app/testing';
  */
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
+
+// The reads of `window` just below run at import: the DOM must exist first (a lone run has none until the first mount).
+ensureDom();
 
 const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia');
 const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');

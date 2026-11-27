@@ -18,7 +18,10 @@ import {
   TRANSCRIPT_INTENT_WINDOW_MS,
   TRANSCRIPT_REENGAGE_PX,
 } from '../../../../app/chat/transcript-follow.ts';
-import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount, must } from '@ferretry/app/testing';
+
+// This file reads `window` in its own hooks, so it owns its DOM (a lone run has none until the first mount).
+ensureDom();
 
 const inside = { id: 'inside' } as unknown as Node;
 const outside = { id: 'outside' } as unknown as Node;

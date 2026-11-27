@@ -11,6 +11,8 @@
 import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { HostHarnessScanner } from '../../../daemon/adapters/host-harness-scan.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetDocumentWrite, FleetLayout, FleetModelApplyPlan } from '../../../daemon/lib/provisioning.ts';
@@ -37,6 +39,10 @@ const MACHINE = {
 } as never;
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
+const kits = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 const reading = (): AccountDocumentReading =>
   ({
@@ -57,6 +63,7 @@ async function importOnce(include: readonly ('claude-code' | 'codex')[]) {
     sampleLogin('codex-host', { harness: 'codex', harnesses: ['codex'], email: 'codex@example.test' }),
   ]);
   const scanner = new HostHarnessScanner({
+    kits: () => kits,
     files: memoryHostFiles(HOSTS.both as never),
     userHome: HOST_HOME,
     commands: { resolve: command => `/opt/harness/bin/${command}` },
@@ -65,6 +72,7 @@ async function importOnce(include: readonly ('claude-code' | 'codex')[]) {
   });
   const deps = {
     catalog: {
+      kits: () => kits,
       document: async () => reading(),
       readAsset: async (path: string) => assets[path],
       documentRevision: async () => 'absent',
