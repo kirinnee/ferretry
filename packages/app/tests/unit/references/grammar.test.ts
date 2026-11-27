@@ -778,6 +778,56 @@ describe('surface references', () => {
       should(parseReferenceToken('%terminal:-lead')).be.null();
     });
 
+    test('should parse an attachment token by its attachment id and delivered file name', () => {
+      // Assert
+      should(parseReferenceToken('%attachment:att_01ab/report.final-v2.pdf')).deepEqual({
+        kind: 'surface',
+        surface: 'attachment',
+        key: 'att_01ab/report.final-v2.pdf',
+      });
+    });
+
+    test('should refuse an attachment without an id, or with a name that ends in a dot or a dash', () => {
+      // Assert
+      should(parseReferenceToken('%attachment:report.pdf')).be.null();
+      should(parseReferenceToken('%attachment:att_1/')).be.null();
+      should(parseReferenceToken('%attachment:att_1/report.')).be.null();
+      should(parseReferenceToken('%attachment:att_1/report-')).be.null();
+      should(parseReferenceToken('%attachment:att_1/.hidden')).be.null();
+      should(parseReferenceToken('%attachment:/report.pdf')).be.null();
+      should(parseReferenceToken('%terminal:ab.cd')).be.null();
+    });
+
+    test('should keep two attachments of one name apart, each token naming its own copy', () => {
+      // Act
+      const found = findReferences('compare %attachment:att_aa/report.pdf with %attachment:att_bb/report.pdf.');
+
+      // Assert
+      should(found.map(match => match.raw)).deepEqual([
+        '%attachment:att_aa/report.pdf',
+        '%attachment:att_bb/report.pdf',
+      ]);
+      should(found.map(match => (match.reference.kind === 'surface' ? match.reference.key : ''))).deepEqual([
+        'att_aa/report.pdf',
+        'att_bb/report.pdf',
+      ]);
+    });
+
+    test('should find an attachment token and leave the sentence full stop out of it', () => {
+      // Act
+      const found = findReferences('read %attachment:att_1/notes.md. Then %attachment:att_2/a.b.pdf, please.');
+
+      // Assert
+      should(found.map(match => match.raw)).deepEqual(['%attachment:att_1/notes.md', '%attachment:att_2/a.b.pdf']);
+    });
+
+    test('should format an attachment reference back to its authored token', () => {
+      // Assert
+      should(formatReference({ kind: 'surface', surface: 'attachment', key: 'att_1/My-Notes-1-.md' })).equal(
+        '%attachment:att_1/My-Notes-1-.md',
+      );
+    });
+
     test('should find a surface token in prose without swallowing the sentence', () => {
       // Act
       const found = findReferences('drive %terminal:ab12cd34ef56, then stop.');

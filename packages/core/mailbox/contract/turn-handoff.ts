@@ -177,3 +177,24 @@ export const HandoffDocumentSchema = z.strictObject({
   by: QueueAuthorSchema.optional(),
 });
 export type HandoffDocument = z.infer<typeof HandoffDocumentSchema>;
+
+/**
+ * The name a delivered attachment is written under: the uploaded file's own base name, reduced to characters
+ * that need no quoting in a prompt, never one of the store's reserved entry names, and short enough for any
+ * filesystem's name limit (the stem is cut, the extension kept: a harness decides what a file IS from its
+ * extension).
+ *
+ * ONE OWNER FOR BOTH ENDS: the daemon writes the copy under this name, and the app writes `%attachment:<name>`
+ * (docs/reference-standard.md) so the agent that was handed `…/<id>/<name>` can tell which file a token means.
+ */
+const MAX_DELIVERED_NAME = 120;
+export function deliveredFilename(filename: string): string {
+  const bare = (filename.replaceAll('\\', '/').replace(/\/+$/u, '').split('/').pop() ?? '')
+    .replace(/[^\w.-]+/gu, '-')
+    .replace(/^[-.]+/u, '');
+  if (bare === '' || bare === 'original' || bare === 'manifest.json') return `attachment-${bare || 'file'}`;
+  if (bare.length <= MAX_DELIVERED_NAME) return bare;
+  const dot = bare.lastIndexOf('.');
+  const extension = dot > 0 && bare.length - dot <= 16 ? bare.slice(dot) : '';
+  return `${bare.slice(0, MAX_DELIVERED_NAME - extension.length)}${extension}`;
+}
