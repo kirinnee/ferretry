@@ -1,14 +1,32 @@
 import { createInterface } from 'node:readline/promises';
 import type { TerminalIo } from '@ferretry/kernel/manifest';
 
+/**
+ * One write. A reader that has already gone (`fy --help | head`) is the reader's decision, not a failure of the command, so
+ * a broken pipe is dropped: the command carries on to its own exit code and prints no stack. Anything else still throws.
+ * The `error` listener covers a write the stream only fails later, which would otherwise be an uncaught exception.
+ */
+function writeTo(stream: NodeJS.WriteStream, text: string): void {
+  if (stream.listenerCount('error') === 0) stream.on('error', ignoreBrokenPipe);
+  try {
+    stream.write(text);
+  } catch (error: unknown) {
+    ignoreBrokenPipe(error);
+  }
+}
+
+function ignoreBrokenPipe(error: unknown): void {
+  if ((error as NodeJS.ErrnoException).code !== 'EPIPE') throw error;
+}
+
 /** The terminal port: stdout is a command's answer, stderr is everything else. No colour: scripts and agents read it too. */
 export class ConsoleIo implements TerminalIo {
   out(text: string): void {
-    process.stdout.write(text);
+    writeTo(process.stdout, text);
   }
 
   err(text: string): void {
-    process.stderr.write(text);
+    writeTo(process.stderr, text);
   }
 
   get stdinIsTty(): boolean {

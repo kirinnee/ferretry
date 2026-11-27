@@ -100,6 +100,23 @@ describe('signalling and probing a process', () => {
     should(processes.alive(child.pid)).be.false();
   });
 
+  it('should see a process that has exited but is not yet reaped as not alive', async () => {
+    // E-404: the grandchild exits at once and its parent (`sleep`, after the exec) never waits, so it stays a zombie:
+    // `kill(pid, 0)` still succeeds for it, yet it holds nothing, least of all the daemon lock.
+    const parent = Bun.spawn(['sh', '-c', 'sh -c "exit 0" & echo $!; exec sleep 30'], { stdout: 'pipe' });
+    try {
+      const reader = parent.stdout.getReader();
+      const zombie = Number.parseInt(new TextDecoder().decode((await reader.read()).value).trim(), 10);
+      await waitFor(
+        async () => (await readFile(`/proc/${String(zombie)}/stat`, 'utf8')).includes(') Z '),
+        'the child to exit',
+      );
+      should(processes.alive(zombie)).be.false();
+    } finally {
+      parent.kill('SIGKILL');
+    }
+  });
+
   it('should terminate a running child and say so, and say false for one already gone', async () => {
     const child = Bun.spawn(['sleep', '30']);
     should(processes.signal(child.pid, 'SIGTERM')).be.true();

@@ -478,9 +478,15 @@ export class DirectSupervisor implements IDaemonSupervisor {
    * this is the one place a pid that arrived over HTTP turns into a SIGKILL, so it is the place that
    * has to be unable to send one to a stranger. A host that cannot answer refuses too, because there
    * is no service manager behind this to stop the right thing instead.
+   *
+   * An ESCALATION is the one press that may find the lock already released. The pid was proved to hold it when this
+   * stop began, so a pid that no longer does is the daemon having finished exiting during the wait, not a stranger:
+   * there is nothing left to signal, and the caller's next check of the listener and the process settles it.
    */
   async stop(request: StopRequest): Promise<void> {
     if (request.pidHint === undefined) return;
+    if (request.escalate && (await this.processes.holdsOpen(request.pidHint, this.layout.daemonLockFile)) === false)
+      return;
     await this.assertServes(request.pidHint);
     this.processes.signal(request.pidHint, request.escalate ? 'SIGKILL' : 'SIGTERM');
   }

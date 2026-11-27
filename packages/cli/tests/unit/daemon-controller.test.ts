@@ -42,6 +42,8 @@ interface Options {
   readonly pinFails?: string;
   /** How many stop attempts (a signal, a manager stop or kill) the daemon ignores before it goes down. */
   readonly ignoreStops?: number;
+  /** The daemon finishes exiting while a stop waits on it: its lock is released and its listener closed by the next look. */
+  readonly exitsWhileStopping?: boolean;
   /** What the service manager says, call by call, over what the daemon would imply; `always` once the queue is spent. */
   readonly manager?: {
     readonly queue?: readonly ManagerSays[];
@@ -77,6 +79,7 @@ async function harness(options: Options = {}) {
       ? undefined
       : { protocol: options.protocol ?? 1, version: options.runningVersion ?? '5.0.0', pid: 4321 };
   let ignored = options.ignoreStops ?? 0;
+  let signalled = false;
   const managerQueue = [...(options.manager?.queue ?? [])];
   const stopOnce = (): void => {
     if (ignored > 0) ignored -= 1;
@@ -113,11 +116,18 @@ async function harness(options: Options = {}) {
     },
     signal: (pid, signal) => {
       trail.push(`signal:${String(pid)}:${signal}`);
+      signalled = true;
       stopOnce();
       return true;
     },
     alive: () => current !== undefined,
-    holdsOpen: async () => ('holdsOpen' in options ? options.holdsOpen : true),
+    holdsOpen: async () => {
+      if (options.exitsWhileStopping === true && signalled) {
+        current = undefined;
+        return false;
+      }
+      return 'holdsOpen' in options ? options.holdsOpen : true;
+    },
   };
   const files: IServiceFilePort = {
     exists: async path => disk.has(path),
@@ -700,6 +710,14 @@ describe('what the controller says when the host will not cooperate', () => {
     expect(h.out.text).toContain('warn: fyd has not stopped; escalating to an unconditional kill');
     expect(h.trail.filter(line => line.startsWith('signal'))).toEqual(['signal:4321:SIGTERM', 'signal:4321:SIGKILL']);
     expect(h.out.text).toContain('ok: fyd stopped');
+  });
+
+  test('E-404 a daemon that exits while the stop waits is a clean stop: no refusal, no kill, ok', async () => {
+    const h = await harness({ ignoreStops: 1, exitsWhileStopping: true });
+    await h.controller.stop();
+    expect(h.trail.filter(line => line.startsWith('signal'))).toEqual(['signal:4321:SIGTERM']);
+    expect(h.out.text).toContain('ok: fyd stopped');
+    expect(h.out.text).not.toContain('does not hold');
   });
 
   test('V-0244 a daemon that never stops is reported as not stopped, with where to look, and no success', async () => {

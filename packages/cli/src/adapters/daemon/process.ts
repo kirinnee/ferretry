@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { open, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import type { CommandOutcome, DaemonStartHandle, DetachedLaunch, IDaemonProcessPort } from '../../lib/daemon/ports.ts';
 
@@ -96,13 +97,18 @@ export class BunDaemonProcess implements IDaemonProcessPort {
     }
   }
 
+  /**
+   * Whether `pid` is a process that can still do anything. `kill(pid, 0)` also succeeds for a zombie, an exited
+   * process whose parent has not reaped it: it holds no lock and answers nothing, so a stop that took it for a daemon
+   * still running waited out its deadline and then refused the kill of a process that was already gone.
+   */
   alive(pid: number): boolean {
     try {
       process.kill(pid, 0);
-      return true;
     } catch {
       return false;
     }
+    return !isZombie(this.options.procDirectory ?? '/proc', pid);
   }
 
   /**
@@ -118,6 +124,19 @@ export class BunDaemonProcess implements IDaemonProcessPort {
     const listed = await this.run([this.options.lsof ?? 'lsof', '-t', '-a', '-p', String(pid), '--', path]);
     if (listed.code === 127) return undefined;
     return listed.code === 0 && listed.stdout.split('\n').some(line => line.trim() === String(pid));
+  }
+}
+
+/** `/proc/<pid>/stat` reads `pid (comm) S ...`; `comm` may hold anything, so the state is what follows the LAST `)`. Hosts with no `/proc` cannot tell. */
+function isZombie(proc: string, pid: number): boolean {
+  try {
+    const stat = readFileSync(`${proc}/${String(pid)}/stat`, 'utf8');
+    return stat
+      .slice(stat.lastIndexOf(')') + 1)
+      .trimStart()
+      .startsWith('Z');
+  } catch {
+    return false;
   }
 }
 
