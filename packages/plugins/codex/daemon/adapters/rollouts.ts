@@ -230,7 +230,55 @@ export class CodexRollouts {
     private readonly historyHome: () => Promise<string | undefined>,
     /** Whether the owner's own history may be read at all, asked live at each call (config `hostHistory`). */
     private readonly hostHistory: () => boolean = () => true,
+    /**
+     * The real path a name reaches, links followed (`undefined` when it reaches nothing): how a ferret's `sessions` link is
+     * proved to lead to this daemon's pool. A composition with none cannot prove it and takes the link as it is.
+     */
+    private readonly realPath?: (path: string) => Promise<string | undefined>,
   ) {}
+
+  /**
+   * What the ferret's `sessions` name is: `none` when it is not a link (the ferret's own folder, or nothing yet), `pool` when
+   * it is a link that leads to this daemon's history pool, `stale` when it is a link that leads anywhere else (or nowhere): a
+   * program that follows it would find none of what the pool holds, and a write through it would land outside the pool.
+   */
+  async sessionsLink(ferret: FerretId): Promise<'none' | 'pool' | 'stale'> {
+    const own = this.owner(ferret);
+    const at = own.resolve('sessions');
+    if (!at.ok) return 'none';
+    const found = await own.lstat(at.value).catch(() => undefined);
+    if (found?.kind !== 'symlink') return 'none';
+    if (this.realPath === undefined) return 'pool';
+    try {
+      const pool = this.kernel.roots.historyPool();
+      const sessions = pool.resolve('sessions');
+      if (!sessions.ok) return 'stale';
+      const expected = await pool.realPath(sessions.value);
+      return (await this.realPath(at.value)) === String(expected) ? 'pool' : 'stale';
+    } catch {
+      return 'stale';
+    }
+  }
+
+  /**
+   * Every rollout file this ferret's history holds for conversation `native` (a pooled ferret reads the pool), as the paths
+   * a root of that history names them; `undefined` when none was found and the walk did not see everything.
+   */
+  async filesOf(ferret: FerretId, native: string): Promise<readonly string[] | undefined> {
+    try {
+      const where = await this.sessions(ferret);
+      const walked = await walkRollouts(
+        where.root,
+        where.directory,
+        where.pooled ? async () => false : async () => await this.sessionsAbsent(ferret),
+        where.pooled ? { id: native } : undefined,
+      );
+      const files = walked.found.filter(rollout => rollout.id === native).map(rollout => String(rollout.file));
+      return files.length === 0 && !walked.complete ? undefined : files;
+    } catch {
+      return undefined;
+    }
+  }
 
   /** Asked at every call, so a switch turned off stops the next read; a setting that cannot be read counts as off. */
   private hostHistoryOn(): boolean {
@@ -352,6 +400,8 @@ export class CodexRollouts {
   async has(ferret: FerretId, native: string): Promise<boolean | undefined> {
     try {
       const where = await this.sessions(ferret);
+      // A link that does not lead to the pool finds none of the pool's conversations, whatever the pool holds.
+      if (where.pooled && (await this.sessionsLink(ferret)) === 'stale') return false;
       // A pooled ferret resumes a conversation any ferret on this harness wrote: it is looked for in the pool, by the one
       // id (the file name narrows the walk; the header still proves it).
       const walked = await walkRollouts(

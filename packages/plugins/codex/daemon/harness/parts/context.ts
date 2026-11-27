@@ -7,6 +7,7 @@ import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/ke
 import type { Harness, HarnessRuntimeSwitch, LaunchSpec, RuntimeSwitchPane } from '@ferretry/core-ferrets/contract';
 import { LaunchRefusal, poolHomeHistory } from '@ferretry/core-ferrets/contract';
 import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
+import { seconds } from '@ferretry/std';
 import type { CodexCredentialLinks } from '../../lib/index.ts';
 import {
   CODEX_HISTORY_ENTRIES,
@@ -112,7 +113,21 @@ export function harnessContext(options: CodexHarnessOptions): HarnessContext {
       return false;
     }
   };
-  const rollouts = new CodexRollouts(kernel, options.historyHome ?? (async () => undefined), hostHistoryNow);
+  const spawn = kernel.spawn;
+  const realPath =
+    spawn === undefined
+      ? undefined
+      : async (path: string): Promise<string | undefined> => {
+          try {
+            // `realpath` is one of the programs the manifest declares (`permissions.spawn`).
+            const result = await spawn.run('realpath', [path], { timeout: seconds(10) });
+            const resolved = result.exitCode === 0 ? result.stdout.trim() : '';
+            return resolved === '' ? undefined : resolved;
+          } catch {
+            return undefined;
+          }
+        };
+  const rollouts = new CodexRollouts(kernel, options.historyHome ?? (async () => undefined), hostHistoryNow, realPath);
 
   /**
    * The shared history pool for this ferret's home (docs/design/shared-history.md): each history entry becomes a link to
