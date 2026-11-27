@@ -17,6 +17,7 @@ import { definePlugin, implementDaemon, route, socket, tool } from '../../../man
 import { fixedClock } from '../../../testing/clock.ts';
 import { FakeDeviceMode, pairedDevice, settle, TestClient } from '../host-session/harness.ts';
 import { recordingAdmission, request, silentLog } from './fixtures.ts';
+import { relayCrypto, stubbedCrypto } from '../host-session/identities.ts';
 
 const roots: string[] = [];
 const hosts: RunningHost[] = [];
@@ -112,6 +113,87 @@ function clientFor(host: RunningHost): TestClient {
   if (id === null) throw new Error('fixture id');
   return new TestClient(host.sessionLayer.open('relay' as CarrierKey), id);
 }
+
+test('a rejected seal outbox still ends every session and stops carriers, listeners and plugins', async () => {
+  const w = await world();
+  const fx = accessFixture();
+  let rejectSeal!: (error: Error) => void;
+  let sealing!: () => void;
+  const entered = new Promise<void>(resolve => {
+    sealing = resolve;
+  });
+  let fail = false;
+  const signals: AbortSignal[] = [];
+  const connections = definePlugin({
+    ...base,
+    id: 'connections',
+    title: 'Connections',
+    hooks: { takes: [{ hook: Carriers, key: 'relay' }] },
+  });
+  const host = await w.boot(
+    [
+      ...fx.implementations,
+      implementDaemon(connections, {
+        build: ctx => {
+          ctx.kernel.lifecycle.onStop(() => {
+            w.trace.push('plugin:stop');
+          });
+          return {
+            hooks: {
+              'carriers:relay': {
+                start: async (_layer, signal) => {
+                  signals.push(signal);
+                  await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+                },
+                status: () => ({ state: 'ready', sentence: 'fixture' }),
+              },
+            },
+          };
+        },
+      }),
+    ],
+    {
+      sessionCrypto: stubbedCrypto({
+        seal: async (key, nonce, aad, plaintext) => {
+          if (!fail) return relayCrypto.seal(key, nonce, aad, plaintext);
+          if (JSON.parse(new TextDecoder().decode(plaintext)).t !== 'res')
+            throw new Error('synthetic terminal seal failure');
+          sealing();
+          return await new Promise<Uint8Array>((_resolve, reject) => {
+            rejectSeal = reject;
+          });
+        },
+      }),
+      listen: async () => ({
+        addresses: ['fixture'],
+        stop: async () => {
+          w.trace.push('listener:stop');
+        },
+      }),
+    },
+  );
+  const first = clientFor(host);
+  const second = clientFor(host);
+  await first.handshake(host.identity.daemonId);
+  await first.auth(await pairedDevice(fx.mode));
+  await second.handshake(host.identity.daemonId);
+  await second.auth(await pairedDevice(fx.mode, 'second'));
+  fail = true;
+  await first.send({ t: 'req', id: 1, method: 'GET', path: '/v1/access' });
+  await entered;
+  const stopped = host.stop();
+  rejectSeal(new Error('synthetic seal failure'));
+  await expect(stopped).resolves.toBeUndefined();
+  await first.pump();
+  await second.pump();
+  expect(first.end?.code).toBe(4440);
+  expect(second.end?.code).toBe(4440);
+  expect(host.sessionLayer.report().sessions).toBe(0);
+  expect(signals.every(signal => signal.aborted)).toBe(true);
+  expect(w.trace).toContain('listener:stop');
+  expect(w.trace).toContain('plugin:stop');
+  expect(w.trace.at(-1)).toBe('lock:stop');
+});
 
 function accessFixture() {
   const mode = new FakeDeviceMode();

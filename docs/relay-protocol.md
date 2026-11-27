@@ -336,8 +336,18 @@ Either endpoint may end one session without dropping its socket by sending
 an authenticated daemon verdict. Once §6's handshake has verified, every plain `closed`, `error`, other
 control or socket close — **any code**, including `4403`, `4404`, `4405`, `4426` and `4440` — means only
 **connection lost**. The browser reconnects with its normal backoff; it never enters a refused,
-replaced, update-required or other stop page from that input. Pre-handshake behavior is unchanged,
-including the relay's daemon-absent responses and the direct/tunnel replacement proof below.
+replaced, update-required or other stop page from that input. A plain `4403` is connection loss at
+**every phase**, including before `ready` or the handshake answer: device refusal now exists only
+inside authenticated ciphertext, so an unsealed `4403` can never discard a pending rotation key.
+Pre-handshake `4404` admission and the direct/tunnel replacement proof below stay unchanged.
+
+**Residual before keying:** a plain `4426` still draws the update-required page, since a daemon
+refusing an unsupported hello cannot establish session keys. A relay can forge that page, but it
+changes **no stored state**: device keys, pending rotation keys, pairing records and remembered
+grants remain intact. Background retries continue with backoff; a later genuine handshake and
+inventory read clear the page automatically. `packages/app/tests/unit/session/plain-close.test.ts`
+proves the stored pairing and grant bytes stay identical across repeated forged refusals, that no
+key mutation runs, and that the genuine reconnect clears the page without a reload or re-pair.
 
 The daemon's actual code and reason travel in the sealed `session-end` record (§7). The carrier
 teardown that follows it always uses `4440`, `the session concluded`. A browser likewise acknowledges

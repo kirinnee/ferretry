@@ -215,9 +215,9 @@ proof = Ed25519-Sign(device key,
   against the stored SPKI. An unknown id is verified against a fixed dummy key, so a known id and an
   unknown one cost the same Ed25519 verify. Unknown device, expired device and bad proof are **one**
   refusal, `4403`, uniform in wording, so the answer is not an oracle for which ids exist.
-- **The close code is not secret.** A close travels in the clear, so a relay operator sees `4403` and
-  `4441` and learns WHEN a session was refused, or when a device stopped renewing (asleep, locked,
-  revoked) — never which device, and never why. Only the sealed records are private.
+- **The session verdict is sealed.** `4403`, `4441` and their reasons travel inside authenticated
+  `session-end` records; the relay sees only generic `4440`, `the session concluded`, and traffic
+  timing. A plain `4403` at any phase means connection loss and cannot discard a rotation key.
 - Declared limit: an id that has just idle-expired also costs a revocation write on that request, so
   its timing differs. Ids carry 132 random bits, so this can only confirm an id that already leaked.
 - `TH` covers both ephemeral keys, both nonces, the daemon's identity and the session id, so a proof

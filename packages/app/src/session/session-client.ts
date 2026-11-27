@@ -1094,20 +1094,18 @@ export class RelayClientSession {
   }
 
   /**
-   * A plain carrier close after keying means connection loss. Let all previously delivered records finish
+   * A plain 4403 at any phase, or any carrier close after keying, means connection loss. Let delivered records finish
    * decrypting first: only a sealed outcome or session-end can establish the daemon's verdict.
    */
   carrierClosed(code: number, reason: string, replaced?: true, localFence?: true): void {
     if (this.#done()) return;
-    // A record may still be decrypting. Applying a close under it would drop the outcome that record
-    // carries — see `#receiving`.
-    //
-    // Every mode can receive a sealed session-end immediately before carrier teardown.
+    // Every mode must finish queued decryption before accepting carrier teardown.
     if (this.#receiving > 0) {
       this.#deferredClose ??= { code, reason, replaced, localFence };
       return;
     }
-    if (this.#channel !== undefined && !localFence) this.#fail(1006, 'the connection was lost', false);
+    if (code === RELAY_CLOSE_CODES.authRejected || (this.#channel !== undefined && !localFence))
+      this.#fail(1006, 'the connection was lost', false);
     else this.#fail(code, reason || 'the carrier closed this session', false, replaced);
   }
 
@@ -1787,7 +1785,8 @@ export class RelayClientSession {
 
   /** End without closing: for the two cases where the far end is already closing this socket. */
   #quietly(code: number, reason: string): void {
-    this.#fail(code, reason, false);
+    if (code === RELAY_CLOSE_CODES.authRejected) this.#connectionLost();
+    else this.#fail(code, reason, false);
   }
 
   #connectionLost(): void {

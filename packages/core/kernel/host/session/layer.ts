@@ -280,7 +280,7 @@ class LayerState {
     const sessions = [...this.sessions];
     for (const session of sessions) session.shutdown();
     this.sessions.clear();
-    await Promise.all(sessions.map(session => session.connection.outbox));
+    await Promise.allSettled(sessions.map(session => session.connection.outbox));
   }
 }
 

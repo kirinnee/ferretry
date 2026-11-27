@@ -34,22 +34,20 @@ export class SessionEnding {
     return (
       previous
         .then(async () => {
-          try {
-            if (gone()) return;
-            const sealed = await sealRecord(
-              this.crypto,
-              channel,
-              encodeDaemonRecord({ t: 'session-end', protocol: SESSION_PROTOCOL_ID, ...this.end }),
-            );
-            if (sealed.ok && !gone())
-              this.#frame = { sequence: sealed.frame.sequence, bytes: encodeFrame(sealed.frame) };
-          } finally {
-            this.#pending = false;
-            ready();
-          }
+          if (gone()) return;
+          const sealed = await sealRecord(
+            this.crypto,
+            channel,
+            encodeDaemonRecord({ t: 'session-end', protocol: SESSION_PROTOCOL_ID, ...this.end }),
+          );
+          if (sealed.ok && !gone()) this.#frame = { sequence: sealed.frame.sequence, bytes: encodeFrame(sealed.frame) };
         })
         // Without authenticated ciphertext the peer can establish only connection loss.
         .catch(() => undefined)
+        .finally(() => {
+          this.#pending = false;
+          ready();
+        })
     );
   }
 
