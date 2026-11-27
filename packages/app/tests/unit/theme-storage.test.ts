@@ -147,26 +147,24 @@ describe('theme items', () => {
   });
 });
 
-test('the app theme reader uses the authoritative Layouts schema and accepts the same families and tokens', async () => {
-  const { ThemeSchema, THEME_FAMILY_IDS } = await import('@ferretry/plugin-layouts/contract');
+test('the app theme reader uses the authoritative Layouts schema and accepts the same tokens', async () => {
+  const { ThemeSchema } = await import('@ferretry/plugin-layouts/contract');
   expect(ThemeItemSchema).toBe(ThemeSchema);
   expect(
     ThemeItemSchema.safeParse({
       id: 'probe',
       label: 'Probe',
-      base: 'studio',
+      style: 'studio',
       light: { bg: 'url(https://example.invalid/probe)' },
     }).success,
   ).toBe(false);
-  for (const base of THEME_FAMILY_IDS) {
-    for (const light of [
-      { accent: '#123456', 'font-body': 'sans-serif', 'flow-1': '2rem' },
-      { accent: 'red' },
-      { unknown: '#123456' },
-      { accent: 'url(https://example.com)' },
-    ]) {
-      const theme = { id: 'dusk', label: 'Dusk', base, light };
-      expect(ThemeItemSchema.safeParse(theme).success).toBe(ThemeSchema.safeParse(theme).success);
-    }
+  for (const light of [
+    { accent: '#123456', 'font-body': 'sans-serif', 'flow-1': '2rem' },
+    { accent: 'red' },
+    { unknown: '#123456' },
+    { accent: 'url(https://example.com)' },
+  ]) {
+    const theme = { id: 'dusk', label: 'Dusk', style: 'studio', light };
+    expect(ThemeItemSchema.safeParse(theme).success).toBe(ThemeSchema.safeParse(theme).success);
   }
 });

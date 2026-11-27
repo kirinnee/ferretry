@@ -6,9 +6,11 @@
  * app) lists them.
  */
 import { describe, expect, it } from 'bun:test';
-import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { ThemeSchema } from '@ferretry/plugin-layouts/contract';
+import { THEME_PACKS_DIR, THEME_PACKS_TS, themePackFiles } from '../../../../scripts/gen/lib/theme-packs.ts';
 import { memoryStore } from '../../src/storage/records.ts';
 import { APP_STORAGE } from '../../src/storage/names.ts';
 import {
@@ -31,6 +33,9 @@ import {
   themeStylesDir,
 } from '../../src/testing/theme-css.ts';
 
+const repoRoot = resolve(import.meta.dir, '../../../..');
+const SCRATCH_STYLE = 'zz-scratch-style';
+const SCRATCH_PALETTE = 'zz-scratch-palette';
 const withoutComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//gu, '');
 const declared = (css: string): Set<string> =>
   new Set([...withoutComments(css).matchAll(/(--[\w-]+)\s*:/gu)].map(match => match[1] as string));
@@ -255,7 +260,7 @@ describe('the catalogue, the files and themes.css agree', () => {
 describe('an id with no pack reads as the default and is never rewritten', () => {
   const stored = (value: unknown) => memoryStore({ [APP_STORAGE.theme]: JSON.stringify({ format: 1, value }) });
 
-  for (const gone of ['blueprint', 'phosphor', 'ledger', 'contrast-style', 'zz']) {
+  for (const gone of ['contrast-style', 'zz', 'nope-id']) {
     it(`a stored style and palette "${gone}" read as the default look`, () => {
       const read = new ThemePreferenceStore(
         stored({ style: gone, palette: gone, mode: 'dark', textScale: 'large' }),
@@ -274,7 +279,7 @@ describe('an id with no pack reads as the default and is never rewritten', () =>
     expect({ style: read.style, palette: read.palette }).toEqual({ style: DEFAULT_STYLE, palette: 'hacker' });
   });
 
-  it('a pre-split `family` is an unknown key: ignored, not read', () => {
+  it('a `family` that is not a pre-split family id is an unknown key: ignored, not read', () => {
     const read = new ThemePreferenceStore(stored({ family: 'hacker', mode: 'dark', textScale: 'default' })).snapshot();
     expect({ style: read.style, palette: read.palette }).toEqual({ style: DEFAULT_STYLE, palette: DEFAULT_PALETTE });
     expect(Object.keys(read)).not.toContain('family');
@@ -357,23 +362,66 @@ describe('a swatch wears the three axes', () => {
   });
 });
 
-describe('a theme item may name a style and a palette', () => {
-  it('accepts them, still accepts the legacy `base`, and refuses an unknown id', () => {
-    const item = { id: 'dusk', label: 'Dusk' };
-    expect(ThemeSchema.safeParse({ ...item, style: 'neo', palette: 'vintage' }).success).toBe(true);
-    expect(ThemeSchema.safeParse({ ...item, base: 'neo' }).success).toBe(true);
-    expect(ThemeSchema.safeParse({ ...item, base: 'phosphor' }).success).toBe(true);
+describe('a theme item names a style and a palette by pack id', () => {
+  const item = { id: 'dusk', label: 'Dusk' };
+
+  it('accepts any well-formed id, so a pack folder needs no edit to the Layouts contract', () => {
+    for (const style of STYLE_IDS) expect(ThemeSchema.parse({ ...item, style }).style).toBe(style);
+    for (const palette of PALETTE_IDS) expect(ThemeSchema.parse({ ...item, palette }).palette).toBe(palette);
+    // an id with no pack still parses (the app falls back to the default look and the saved item is left as it is)
+    expect(ThemeSchema.parse({ ...item, style: 'zz-gone', palette: 'zz-none' })).toMatchObject({
+      style: 'zz-gone',
+      palette: 'zz-none',
+    });
     expect(ThemeSchema.safeParse(item).success).toBe(true);
-    expect(ThemeSchema.safeParse({ ...item, style: 'ma' }).success).toBe(false);
-    expect(ThemeSchema.safeParse({ ...item, palette: 'nope' }).success).toBe(false);
   });
 
-  it('reads a removed palette and the removed contrast style as the ones the migration names', () => {
-    const item = { id: 'dusk', label: 'Dusk' };
-    expect(ThemeSchema.parse({ ...item, palette: 'phosphor' }).palette).toBe('hacker');
-    expect(ThemeSchema.parse({ ...item, palette: 'ma', style: 'contrast' })).toMatchObject({
-      palette: 'vaporwave',
-      style: 'studio',
-    });
+  it('refuses an id that is not shaped like a pack id', () => {
+    for (const bad of ['', 'A', 'x', '9lives', 'two words', 'a'.repeat(33), 'a;b', 'url(x)'])
+      expect(ThemeSchema.safeParse({ ...item, style: bad }).success).toBe(false);
+    expect(ThemeSchema.safeParse({ ...item, palette: 7 }).success).toBe(false);
+  });
+
+  it('ignores a top-level key it does not name (the old `base`), and still refuses an unknown token or value', () => {
+    expect(ThemeSchema.parse({ ...item, base: 'phosphor', note: 'x' })).toEqual({ ...item, light: {}, dark: {} });
+    expect(ThemeSchema.safeParse({ ...item, light: { unknown: '#123456' } }).success).toBe(false);
+    expect(ThemeSchema.safeParse({ ...item, dark: { bg: 'url(https://example.invalid/x)' } }).success).toBe(false);
+  });
+
+  it('round-trips a scratch style and palette that exist only as two folders in a private tree', () => {
+    const root = mkdtempSync(join(tmpdir(), 'fy-theme-item-ids-'));
+    try {
+      // A private copy of the shipped packs plus two scratch folders: the checkout is only read, never written.
+      cpSync(join(repoRoot, THEME_PACKS_DIR), join(root, THEME_PACKS_DIR), { recursive: true });
+      const palette = join(root, THEME_PACKS_DIR, 'palette', SCRATCH_PALETTE);
+      const style = join(root, THEME_PACKS_DIR, 'style', SCRATCH_STYLE);
+      mkdirSync(palette, { recursive: true });
+      mkdirSync(style, { recursive: true });
+      writeFileSync(
+        join(palette, 'palette.ts'),
+        `export default { id: '${SCRATCH_PALETTE}', label: 'Scratch Palette', blurb: 'Only a folder.', order: 9999, light: { bg: '#102030' }, dark: { bg: '#403020' } } as const;\n`,
+      );
+      writeFileSync(
+        join(style, 'style.ts'),
+        `export default { id: '${SCRATCH_STYLE}', label: 'Scratch Style', blurb: 'Only a folder.', order: 9999, defaultPalette: 'studio', fonts: { text: ['inter'], code: ['jetbrains-mono'] } } as const;\n`,
+      );
+      writeFileSync(join(style, 'style.css'), `:root[data-style='${SCRATCH_STYLE}'] { --radius-md: 3px; }\n`);
+      const generated = themePackFiles(root).get(THEME_PACKS_TS) ?? '';
+      const ids = (name: string): string[] =>
+        [
+          ...(new RegExp(`export const ${name} = \\[([^\\]]*)\\]`).exec(generated)?.[1] ?? '').matchAll(/"([^"]+)"/g),
+        ].map(match => match[1] as string);
+      // The generator found both folders (this is the id set the app builds with) ...
+      expect(ids('STYLE_IDS')).toContain(SCRATCH_STYLE);
+      expect(ids('PALETTE_IDS')).toContain(SCRATCH_PALETTE);
+      // ... and a layout theme item naming them parses, with both ids intact.
+      const parsed = ThemeSchema.parse({ ...item, style: SCRATCH_STYLE, palette: SCRATCH_PALETTE });
+      expect(parsed).toMatchObject({ style: SCRATCH_STYLE, palette: SCRATCH_PALETTE });
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+    // The checkout itself holds no scratch pack.
+    expect(STYLE_IDS as readonly string[]).not.toContain(SCRATCH_STYLE);
+    expect(PALETTE_IDS as readonly string[]).not.toContain(SCRATCH_PALETTE);
   });
 });

@@ -55,7 +55,7 @@ describe('the daemon layout channel', () => {
     expect(asked).toEqual([`d1/${LAYOUTS_PLUGIN}`]);
     expect(fake.calls).toEqual(['GET /v1/layouts/current']);
     expect(layouts.current('d1')?.layout.density).toBe('compact');
-    expect(layouts.current('d1')?.theme).toMatchObject({ id: 'default', base: 'studio' });
+    expect(layouts.current('d1')?.theme).toMatchObject({ id: 'default' });
 
     current = { layout: { ...owner, density: 'comfortable' }, theme };
     fake.wake();

@@ -270,8 +270,8 @@ for (const mode of ['light', 'dark'] as const) {
   });
 
   describe(`an id with no folder is the whole default look, ${mode}`, () => {
-    // A retired style and palette: well-formed ids no folder answers to.
-    const gone = stored('contrast', 'blueprint', mode);
+    // A style and a palette that are well-formed, no folder answers to, and the old-id table does not name.
+    const gone = stored('zz-gone-style', 'zz-gone-palette', mode);
 
     for (const width of [390, 1_280] as const) {
       it(`the first frame at ${width}px is what React publishes (Studio's own rules included)`, async () => {
@@ -284,6 +284,49 @@ for (const mode of ['light', 'dark'] as const) {
         expect(react.bubbleRadius).toBe('14px 14px 8px 14px');
         expect(look(first)).toEqual(look(react));
         expect(first.bg).not.toBe(PAINT[mode]);
+      });
+    }
+  });
+}
+
+/**
+ * OLD IDS. A theme this app stored under an id that has since been renamed reads as the pack it became, in BOTH places that
+ * read it (the first frame and React), and the stored record is not touched. Written out here, not derived from the table
+ * the product reads, so a wrong row in that table fails: `[stored value, the style and palette it must paint]`.
+ */
+const OLD_IDS: readonly (readonly [Record<string, unknown>, string, string])[] = [
+  [{ style: 'studio', palette: 'blueprint' }, 'studio', 'mission'],
+  [{ style: 'studio', palette: 'broadsheet' }, 'studio', 'vintage'],
+  [{ style: 'studio', palette: 'wayfinding' }, 'studio', 'geist'],
+  [{ style: 'studio', palette: 'phosphor' }, 'studio', 'hacker'],
+  [{ style: 'studio', palette: 'ledger' }, 'studio', 'hacker'],
+  [{ style: 'studio', palette: 'ma' }, 'studio', 'vaporwave'],
+  [{ style: 'studio', palette: 'retrofuture' }, 'studio', 'vintage'],
+  [{ style: 'studio', palette: 'cyberpunk' }, 'studio', 'vaporwave'],
+  [{ style: 'aqua', palette: 'neo' }, 'lucid', 'neo'],
+  [{ style: 'contrast', palette: 'neo' }, 'studio', 'contrast'],
+  [{ family: 'studio' }, 'studio', 'studio'],
+  [{ family: 'mission' }, 'mission', 'mission'],
+  [{ family: 'neo' }, 'neo', 'neo'],
+  [{ family: 'geist' }, 'geist', 'geist'],
+  [{ family: 'contrast' }, 'studio', 'contrast'],
+  [{ family: 'phosphor' }, 'pixel', 'hacker'],
+  [{ family: 'blueprint' }, 'mission', 'mission'],
+  [{ family: 'broadsheet' }, 'antiposh', 'vintage'],
+  [{ family: 'wayfinding' }, 'geist', 'geist'],
+  [{ family: 'ledger' }, 'pixel', 'hacker'],
+  [{ family: 'ma' }, 'genz', 'vaporwave'],
+];
+
+for (const mode of ['light', 'dark'] as const) {
+  describe(`an old id keeps its mapped look, first frame and React, 390px, ${mode}`, () => {
+    for (const [value, style, palette] of OLD_IDS) {
+      it(`${JSON.stringify(value)} paints ${style} / ${palette}`, async () => {
+        const record = { ...value, mode, textScale: 'default' };
+        const react = await hydrated(record, mode, 390);
+        const first = await firstPaint(record, mode, 390);
+        expect({ style: react.style, palette: react.palette }).toEqual({ style, palette });
+        expect(look(first)).toEqual(look(react));
       });
     }
   });

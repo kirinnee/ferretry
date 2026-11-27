@@ -21,7 +21,7 @@ import {
   MANIFEST_LINK_ID,
   themeColorFromComputedStyle,
 } from '../theme/preferences.ts';
-import type { PaletteId } from '../theme/catalog.ts';
+import { DEFAULT_PALETTE, DEFAULT_STYLE, isPaletteId, isStyleId, type PaletteId } from '../theme/catalog.ts';
 import type { ScrollMemory } from '../scroll/scroll-memory.ts';
 import { applyThemeItem, type ThemeItem } from '../theme/tokens.ts';
 import type { OwnerLayout } from '../layout/daemon-layout.ts';
@@ -155,11 +155,22 @@ function useAppliedTheme(
   useEffect(() => {
     const root = browser.document.documentElement;
     const resolved = resolveThemeMode(preference.mode, dark);
-    // The owner's theme item may name a style and/or a palette: then it wins over this device's pick for that axis.
+    // The owner's theme item may name a style and/or a palette: then it wins over this device's pick for that axis. An
+    // id with no pack is the default look, as everywhere (the saved item is left as it is).
     const look = {
       ...preference,
-      style: ownerTheme?.style ?? preference.style,
-      palette: ownerTheme?.palette ?? preference.palette,
+      style:
+        ownerTheme?.style === undefined
+          ? preference.style
+          : isStyleId(ownerTheme.style)
+            ? ownerTheme.style
+            : DEFAULT_STYLE,
+      palette:
+        ownerTheme?.palette === undefined
+          ? preference.palette
+          : isPaletteId(ownerTheme.palette)
+            ? ownerTheme.palette
+            : DEFAULT_PALETTE,
     };
     applyThemeAxes(root, look, resolved);
     root.dataset.density = density;
