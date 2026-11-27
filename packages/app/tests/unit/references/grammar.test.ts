@@ -778,6 +778,38 @@ describe('surface references', () => {
       should(parseReferenceToken('%terminal:-lead')).be.null();
     });
 
+    test('should parse an attachment token by its delivered file name, dots and all', () => {
+      // Assert
+      should(parseReferenceToken('%attachment:report.final-v2.pdf')).deepEqual({
+        kind: 'surface',
+        surface: 'attachment',
+        key: 'report.final-v2.pdf',
+      });
+    });
+
+    test('should refuse an attachment name that ends in a dot or a dash, and a dotted terminal still', () => {
+      // Assert
+      should(parseReferenceToken('%attachment:report.')).be.null();
+      should(parseReferenceToken('%attachment:report-')).be.null();
+      should(parseReferenceToken('%attachment:.hidden')).be.null();
+      should(parseReferenceToken('%terminal:ab.cd')).be.null();
+    });
+
+    test('should find an attachment token and leave the sentence full stop out of it', () => {
+      // Act
+      const found = findReferences('read %attachment:notes.md. Then %attachment:a.b.pdf, please.');
+
+      // Assert
+      should(found.map(match => match.raw)).deepEqual(['%attachment:notes.md', '%attachment:a.b.pdf']);
+    });
+
+    test('should format an attachment reference back to its authored token', () => {
+      // Assert
+      should(formatReference({ kind: 'surface', surface: 'attachment', key: 'My-Notes-1-.md' })).equal(
+        '%attachment:My-Notes-1-.md',
+      );
+    });
+
     test('should find a surface token in prose without swallowing the sentence', () => {
       // Act
       const found = findReferences('drive %terminal:ab12cd34ef56, then stop.');

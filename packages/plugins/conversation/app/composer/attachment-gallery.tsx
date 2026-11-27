@@ -35,6 +35,12 @@ import {
   type DaemonAttachmentScope,
   daemonAttachmentScope,
 } from './attachment-blob-cache.ts';
+import {
+  AttachmentPlusButton,
+  AttachmentPlusNote,
+  AttachmentThumbnailPlus,
+  useAttachmentPlus,
+} from './attachment-plus.tsx';
 import { loadAttachmentBlob } from './attachment-source.ts';
 import {
   attachmentTypeLabel,
@@ -193,6 +199,7 @@ interface AttachmentCardProps {
 }
 
 const AttachmentDocumentCard = ({ daemon, attachment }: AttachmentCardProps) => {
+  const plus = useAttachmentPlus({ daemon, attachment });
   const { cache, load } = useAttachmentCache();
   const host = useRef<HTMLDivElement | null>(null);
   const visible = useNearViewport(host, false);
@@ -282,7 +289,13 @@ const AttachmentDocumentCard = ({ daemon, attachment }: AttachmentCardProps) => 
             </span>
           </>
         )}
+        <AttachmentPlusNote note={plus.note} />
       </div>
+      <AttachmentPlusButton
+        add={plus.add}
+        filename={attachment.filename}
+        className="shrink-0 self-start border border-border-soft bg-surface"
+      />
     </div>
   );
 };
@@ -392,21 +405,24 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
           </span>
         </div>
       ) : src ? (
-        <button
-          type="button"
-          className="block min-h-[44px] min-w-[44px] max-w-full overflow-hidden rounded-control border border-border-soft bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          onClick={onOpen}
-          aria-label={`Expand ${alt}`}
-          data-transcript-image-state={transcript ? 'loaded' : undefined}
-        >
-          <img
-            src={src}
-            alt={alt}
-            loading="lazy"
-            className={cn('max-w-full object-contain', transcript ? 'max-h-[360px]' : 'max-h-[280px]')}
-            onError={() => setFailed(transcript ? transcriptImageErrorMessage(undefined) : '')}
-          />
-        </button>
+        <div className="relative w-fit max-w-full">
+          <button
+            type="button"
+            className="block min-h-[44px] min-w-[44px] max-w-full overflow-hidden rounded-control border border-border-soft bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            onClick={onOpen}
+            aria-label={`Expand ${alt}`}
+            data-transcript-image-state={transcript ? 'loaded' : undefined}
+          >
+            <img
+              src={src}
+              alt={alt}
+              loading="lazy"
+              className={cn('max-w-full object-contain', transcript ? 'max-h-[360px]' : 'max-h-[280px]')}
+              onError={() => setFailed(transcript ? transcriptImageErrorMessage(undefined) : '')}
+            />
+          </button>
+          {image.kind === 'attachment' && <AttachmentThumbnailPlus daemon={daemon} attachment={image} />}
+        </div>
       ) : (
         <div
           className={cn(
