@@ -8,7 +8,8 @@
   "accounts":
     [
       {
-        "available": false
+        "autoRefusal": "Claude Code on this machine does not accept Auto mode (--permission-mode auto), so Ferretry won't launch this agent runtime. Update Claude Code, or switch this machine's Agent permissions to Skip all permission checks."
+        "available": true
         "defaultModel": "claude-opus-5-5"
         "displayName": "claude-golden"
         "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
@@ -29,7 +30,7 @@
         "secretEnv":
           "FILES_TOKEN": "${secret:GOLDEN_FILES}"
           "FY_MCP_NOTES_7866F28AAAFD7E54_TOKEN": "${secret:MCP_NOTES_7866F28AAAFD7E54_ACCESS}"
-        "unavailableReason": "Claude Code on this machine does not accept Auto mode (--permission-mode auto), so Ferretry won't launch this agent runtime. Update Claude Code, or switch this machine's Agent permissions to Skip all permission checks."
+        "unavailableReason": null
         "wrapper": "/fy/fleet/bin/claude-golden"
       }
     ]
