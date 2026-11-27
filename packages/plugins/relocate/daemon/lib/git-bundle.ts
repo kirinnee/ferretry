@@ -129,6 +129,14 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
     };
     for (const revision of revisions) check(await ok(['ls-tree', '-r', '-z', revision], 8 * 1024 * 1024, deadline));
     check(await ok(['ls-files', '--stage', '-z'], 8 * 1024 * 1024, deadline));
+    for (const path of paths) {
+      if (kernel.clock.nowMs() >= deadline) throw new WorkingTreeError('git exceeded the move’s read deadline');
+      const fenced = handle.resolve(path);
+      if (!fenced.ok) throw new WorkingTreeError('a tracked path cannot be confined to this working tree');
+      const stat = await handle.lstat(fenced.value);
+      if (stat !== undefined && (stat.kind !== 'file' || stat.links > 1))
+        throw new WorkingTreeError('a tracked path is not a plain file with one name and cannot move safely');
+    }
     return [...paths];
   };
   const verifiedHead = async () => {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { kernelWorkingTree } from '../../daemon/lib/git-bundle.ts';
 import { assertSnapshotSize, plan } from '../../daemon/lib/snapshot.ts';
@@ -243,6 +243,14 @@ test('MUST 1 replacement refs cannot conceal a credential-bearing historical tre
   git(folder, 'rm', '-q', 'tokens.json');
   git(folder, 'commit', '-qm', 'remove private file');
   git(folder, 'replace', privateCommit, clean);
+  expect((await w.relocation.preflight(FERRET, w.targetIdentity.daemonId)).ok).toBe(false);
+  await expect(w.relocation.export(FERRET, (await w.offer()).offer)).rejects.toThrow();
+  expect(w.ferrets.calls).toEqual([]);
+});
+
+test('MUST 1 tracked files with a second name outside the tree cannot enter a diff', async () => {
+  const w = await world();
+  linkSync(join(w.fixture.folder, 'tracked.txt'), join(w.fixture.folder, '..', 'synthetic-second-name'));
   expect((await w.relocation.preflight(FERRET, w.targetIdentity.daemonId)).ok).toBe(false);
   await expect(w.relocation.export(FERRET, (await w.offer()).offer)).rejects.toThrow();
   expect(w.ferrets.calls).toEqual([]);
