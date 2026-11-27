@@ -272,7 +272,7 @@ export interface BrowserSubsystem {
     caller: string,
   ): Promise<ViewerAttachment>;
   /** A person's input goes to the page the NAMED live display is showing, and nowhere else. */
-  dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewer: ViewerRef): Promise<void>;
+  dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewer: ViewerRef, page?: string): Promise<void>;
   /** A person's toolbar: everything acts on the page this session's person is viewing. */
   /**
    * One toolbar act. `options` carries the ferret's whole-browser guard and the page its caller resolved; `content` is the
@@ -823,9 +823,17 @@ export class BrowserSessionService implements BrowserSubsystem {
    * A person's input goes to the page the NAMED live display is showing — the very page its screencast is on, read from the
    * attachment itself and never worked out again from what the session or a newer page says — and nowhere else.
    */
-  async dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewer: ViewerRef): Promise<void> {
+  async dispatchHumanInput(
+    sessionId: string,
+    input: BrowserInputEvent,
+    viewer: ViewerRef,
+    page?: string,
+  ): Promise<void> {
     const run = this.requireRunning();
     const { pageId } = this.requireScreen(run, sessionId, viewer);
+    // `page` is the page the person was looking at: a screen that has just been moved to another page, or to another
+    // identity's Chrome, is not showing it any more, so what was meant for it is dropped and lands nowhere else.
+    if (page !== undefined && page !== pageId) return;
     // A person typing or pressing in the live view (an account tile in a chooser, the "pick the account" hand-off) may be
     // signing someone else in: who the session's pages sign in is no longer known. A move, a wheel or a release is not.
     if (input.kind !== 'mouse' || input.type === 'mousePressed') this.signIns?.forget(sessionId);

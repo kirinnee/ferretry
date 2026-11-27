@@ -15,7 +15,8 @@
  */
 
 import type { BrowserPageSummary, BrowserStatus } from '../../../contract/wire/browser.ts';
-import { EyeOff, Globe2, Plus, X } from 'lucide-react';
+import { EyeOff, Globe2, Plus, UserRound, X } from 'lucide-react';
+import { DEFAULT_BROWSER_IDENTITY } from '../../../contract/index.ts';
 import { remotePageLabel } from '../../lib/remote-browser.ts';
 /** An agent acting on a page right now, by the name a person calls it. */
 interface AgentControlDriver {
@@ -56,6 +57,14 @@ export const groupBrowserPages = (
 /** What a chip calls a page: the name a reference uses, else the page's own title or host. */
 export const browserPageLabel = (page: BrowserPageSummary): string => page.name ?? remotePageLabel(page);
 
+/**
+ * Whether the list names each page's identity: once any page is in a Chrome other than the built-in one, every page says
+ * which it is in — an unlabelled page would read as "the same browser as the rest". With only the built-in identity the
+ * list is as it always was.
+ */
+const namesIdentities = (pages: readonly BrowserPageSummary[]): boolean =>
+  pages.some(page => page.identity !== undefined && page.identity !== DEFAULT_BROWSER_IDENTITY);
+
 /** A chip's hover text: its name and title when it has a name, and always where it is. */
 const pageDescription = (page: BrowserPageSummary): string =>
   page.name === undefined
@@ -82,11 +91,13 @@ function PageChip({
   selected,
   driver,
   held,
+  showIdentity,
   onOpen,
   onClose,
 }: {
   readonly page: BrowserPageSummary;
   readonly selected: boolean;
+  readonly showIdentity: boolean;
   readonly driver: AgentControlDriver | null;
   readonly held: boolean;
   readonly onOpen: () => void;
@@ -113,6 +124,17 @@ function PageChip({
           >
             <EyeOff aria-hidden="true" size={11} />
             Incognito
+          </span>
+        )}
+        {showIdentity && page.identity !== undefined && (
+          <span
+            className="fy-ws-page-badge"
+            data-browser-identity={page.identity}
+            data-tone="identity"
+            title={`Opened in the ${page.identity} browser identity: its own sign-ins and cookies`}
+          >
+            <UserRound aria-hidden="true" size={11} />
+            <span>{page.identity}</span>
           </span>
         )}
         {driver !== null && (
@@ -152,6 +174,7 @@ export function BrowserSurfaceList({
   onNewPage,
 }: BrowserSurfaceListProps) {
   const groups = status === null ? [] : groupBrowserPages(status.pages, sessionName);
+  const showIdentity = status !== null && namesIdentities(status.pages);
   const newPage =
     onNewPage === undefined ? null : (
       <button
@@ -192,6 +215,7 @@ export function BrowserSurfaceList({
                   onOpen={() => onOpenPage(page)}
                   page={page}
                   selected={page.id === selectedPageId}
+                  showIdentity={showIdentity}
                 />
               ))}
             </ul>

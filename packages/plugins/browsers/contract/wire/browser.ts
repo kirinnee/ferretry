@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   type BROWSER_PROXY_SCHEMES,
   BrowserActorKindSchema,
+  BrowserIdentityKeySchema,
   BROWSER_MAX_PAGE_ID_LENGTH,
   BrowserPageStateSchema,
   BrowserProfileKindSchema,
@@ -178,6 +179,8 @@ export const BrowserPageSummarySchema = z.object({
   incognito: z.literal(true).optional(),
   /** The page that opened this one, when it is a popup. */
   openerId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
+  /** The browser identity whose Chrome holds the page (its own profile, sign-ins and proxy). Told by the daemon; absent only on a status that predates identities. */
+  identity: BrowserIdentityKeySchema.optional(),
   /** The page appears to be asking the person to prove they are human. Absent when nothing was seen. */
   challenge: BrowserChallengeSchema.optional(),
   /**
