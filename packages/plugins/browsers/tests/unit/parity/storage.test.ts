@@ -46,12 +46,12 @@ describe('the agent browser files', () => {
     const { state, subject } = await store();
 
     // Act
-    const lease = await subject.acquire({ sessionId: 'agent-browser', chromeVersion: 'Google Chrome 150.0' });
+    const lease = await subject.acquire('agent', { sessionId: 'agent-browser', chromeVersion: 'Google Chrome 150.0' });
 
     // Assert — the folder and the profile are the owner's alone.
     expect((await stat(state)).mode & 0o777).toBe(0o700);
-    expect(subject.profile).toBe(join(state, 'data', 'agent'));
-    expect((await stat(subject.profile)).mode & 0o777).toBe(0o700);
+    expect(subject.paths('agent').profile).toBe(join(state, 'data', 'agent'));
+    expect((await stat(subject.paths('agent').profile)).mode & 0o777).toBe(0o700);
     expect(JSON.parse(await readFile(join(state, 'profile.lock'), 'utf8'))).toMatchObject({
       sessionId: 'agent-browser',
       daemonPid: 1001,
@@ -59,7 +59,9 @@ describe('the agent browser files', () => {
     expect(JSON.parse(await readFile(join(state, 'profile.metadata.json'), 'utf8'))).toMatchObject({
       createdChromeVersion: 'Google Chrome 150.0',
     });
-    const preferences = JSON.parse(await readFile(join(subject.profile, 'Default', 'Preferences'), 'utf8'));
+    const preferences = JSON.parse(
+      await readFile(join(subject.paths('agent').profile, 'Default', 'Preferences'), 'utf8'),
+    );
     expect(preferences.credentials_enable_service).toBe(false);
     expect(await lease.release()).toBe(true);
     expect(await exists(join(state, 'profile.lock'))).toBe(false);
@@ -75,7 +77,7 @@ describe('the agent browser files', () => {
     );
 
     // Act
-    const lease = await subject.acquire({ sessionId: 'agent-browser' });
+    const lease = await subject.acquire('agent', { sessionId: 'agent-browser' });
 
     // Assert
     expect(lease.recoveredDeadOwner).toBe(true);
@@ -86,15 +88,15 @@ describe('the agent browser files', () => {
   test('F-0120 priming writes profile.primed.json, and only that makes the profile primed', async () => {
     // Arrange
     const { state, subject } = await store();
-    const lease = await subject.acquire({ sessionId: 'agent-browser' });
-    expect(await subject.isPrimed()).toBe(false);
+    const lease = await subject.acquire('agent', { sessionId: 'agent-browser' });
+    expect(await subject.isPrimed('agent')).toBe(false);
 
     // Act
     await lease.markPrimed('Google Chrome 150.0');
 
     // Assert
     expect(await exists(join(state, 'profile.primed.json'))).toBe(true);
-    expect(await subject.isPrimed()).toBe(true);
+    expect(await subject.isPrimed('agent')).toBe(true);
     await lease.release();
   });
 
@@ -102,21 +104,23 @@ describe('the agent browser files', () => {
     // Arrange — Chrome pid 4242 on this host left its locks in the profile.
     let chromeAlive = true;
     const { subject } = await store(pid => pid === 4242 && chromeAlive);
-    await mkdir(subject.profile, { recursive: true });
-    await symlink('test-host-4242', join(subject.profile, 'SingletonLock'));
-    await writeFile(join(subject.profile, 'SingletonSocket'), '');
+    await mkdir(subject.paths('agent').profile, { recursive: true });
+    await symlink('test-host-4242', join(subject.paths('agent').profile, 'SingletonLock'));
+    await writeFile(join(subject.paths('agent').profile, 'SingletonSocket'), '');
 
     // Act + Assert — while that Chrome runs, the profile is its.
-    await expect(subject.acquire({ sessionId: 'agent-browser' })).rejects.toBeInstanceOf(BrowserProfileBusyError);
+    await expect(subject.acquire('agent', { sessionId: 'agent-browser' })).rejects.toBeInstanceOf(
+      BrowserProfileBusyError,
+    );
 
     // Act — Chrome is gone.
     chromeAlive = false;
-    const lease = await subject.acquire({ sessionId: 'agent-browser' });
+    const lease = await subject.acquire('agent', { sessionId: 'agent-browser' });
     const removed = await lease.cleanupStaleChromeLocks();
 
     // Assert
     expect(removed).toEqual(['SingletonLock', 'SingletonSocket']);
-    expect(await readdir(subject.profile)).not.toContain('SingletonLock');
+    expect(await readdir(subject.paths('agent').profile)).not.toContain('SingletonLock');
     await lease.release();
   });
 
