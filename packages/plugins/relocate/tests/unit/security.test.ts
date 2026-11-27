@@ -231,3 +231,19 @@ test('MUST 4 an untracked file growing after lstat is refused instead of truncat
   });
   await expect(kernelWorkingTree(kernel, w.fixture.folder).read('new.txt', 4)).rejects.toThrow('new.txt');
 });
+
+test('MUST 1 replacement refs cannot conceal a credential-bearing historical tree from the audit', async () => {
+  const w = await world();
+  const folder = w.fixture.folder;
+  const clean = git(folder, 'rev-parse', 'HEAD').trim();
+  writeFileSync(join(folder, 'tokens.json'), 'SYNTHETIC');
+  git(folder, 'add', 'tokens.json');
+  git(folder, 'commit', '-qm', 'synthetic private file');
+  const privateCommit = git(folder, 'rev-parse', 'HEAD').trim();
+  git(folder, 'rm', '-q', 'tokens.json');
+  git(folder, 'commit', '-qm', 'remove private file');
+  git(folder, 'replace', privateCommit, clean);
+  expect((await w.relocation.preflight(FERRET, w.targetIdentity.daemonId)).ok).toBe(false);
+  await expect(w.relocation.export(FERRET, (await w.offer()).offer)).rejects.toThrow();
+  expect(w.ferrets.calls).toEqual([]);
+});

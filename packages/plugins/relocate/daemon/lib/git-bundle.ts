@@ -106,6 +106,8 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
   // Bounded enumeration fails closed for large/unsupported histories, links and submodules.
   const audit = async (head: string): Promise<readonly string[]> => {
     const deadline = kernel.clock.nowMs() + 10_000;
+    if ((await ok(['for-each-ref', '--format=%(refname)', 'refs/replace/'], 4096, deadline)).length > 0)
+      throw new WorkingTreeError('replacement history cannot be verified safely for a move');
     const revisions = decoder
       .decode(await ok(['rev-list', '--max-count=513', head], 64 * 1024, deadline))
       .trim()
