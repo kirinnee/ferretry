@@ -296,8 +296,7 @@ function requireContext(): BrowserContext {
 function pageId(page: Page): string {
   const known = pageIds.get(page);
   if (known) return known;
-  pageSerial += 1;
-  const id = browserPageId(PAGE_PREFIX, pageSerial);
+  const id = browserPageId(PAGE_PREFIX, ++pageSerial);
   pageIds.set(page, id);
   return id;
 }
