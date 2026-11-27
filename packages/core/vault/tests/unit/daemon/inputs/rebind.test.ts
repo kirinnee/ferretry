@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { InputTargetFacts } from '../../../../contract/index.ts';
-import { bindingOf, mayRebind } from '../../../../daemon/lib/inputs/rebind.ts';
+import { actionOriginsOf, bindingOf, mayRebind } from '../../../../daemon/lib/inputs/rebind.ts';
 import { FACTS } from './support.ts';
 
 const secret = (exists: boolean): InputTargetFacts => ({ kind: 'secret', name: 'TOKEN', exists });
@@ -44,5 +44,29 @@ describe('when a changed target is still the same target', () => {
   it('should rebind a page only while every field is visible to the owner', () => {
     should(mayRebind(bindingOf(page(true)), page(true))).be.true();
     should(mayRebind(bindingOf(page(true)), page(false))).be.false();
+  });
+});
+
+describe('where a page sends what is typed, as origins (E-314)', () => {
+  const sending = (formAction?: string): InputTargetFacts => {
+    const facts = page(true);
+    if (facts.kind !== 'page') throw new Error('page');
+    const field = facts.fields[0]!;
+    return {
+      ...facts,
+      fields: [{ ...field, field: { ...field.field, ...(formAction === undefined ? {} : { formAction }) } }],
+    };
+  };
+
+  it('should name the origin of a form action, whatever its path, and nothing for a form-less field or a terminal', () => {
+    should(actionOriginsOf(sending('https://a.example/x/y'))).equal('https://a.example');
+    should(actionOriginsOf(sending('https://a.example/other'))).equal(actionOriginsOf(sending('https://a.example/x')));
+    should(actionOriginsOf(sending('https://b.example/x'))).not.equal(actionOriginsOf(sending('https://a.example/x')));
+    should(actionOriginsOf(sending())).equal('');
+    should(actionOriginsOf(FACTS)).equal('');
+  });
+
+  it('should keep an action that is not an address as it is, so a change in it still differs', () => {
+    should(actionOriginsOf(sending('not an address'))).equal('not an address');
   });
 });
