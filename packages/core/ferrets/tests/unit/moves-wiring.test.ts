@@ -3,8 +3,6 @@ import { subtreeHost } from '../support/round-two.ts';
 
 /** Each declared route, a body that reaches its handler, and the answer THAT handler gives a ferret the session store does not hold. */
 const ROUTES: readonly (readonly [method: string, path: string, body: unknown, status: number, code?: string])[] = [
-  // Conversation's route (a later unit); until it lands the declared one says so, whoever asks.
-  ['POST', '/v1/ferrets/lead/fork', {}, 503, 'plugin_unavailable'],
   ['POST', '/v1/ferrets/lead/handover', {}, 400],
   ['GET', '/v1/ferrets/lead/handover', undefined, 404],
   ['POST', '/v1/ferrets/lead/handover/cancel', {}, 400, 'missing_request_id'],
@@ -23,8 +21,6 @@ test('moves wiring: every declared fork, handover and move route is built once a
   for (const [method, path, body] of ROUTES) {
     const response = await h.request(method, path, body === undefined ? {} : { body });
     answered.push([`${method} ${path}`, response.status, response.json<{ code?: string }>().code]);
-    if (path.endsWith('/fork'))
-      expect(response.json<{ error: string }>().error).toBe('Fork is not wired yet in this version of Ferretry.');
   }
 
   // Assert

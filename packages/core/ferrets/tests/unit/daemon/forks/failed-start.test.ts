@@ -39,7 +39,7 @@ test('a failed fork start whose pane cannot stop retains its cut and the live co
   const launch = new FerretsService(base.registry, base.tokens, { ...base.ports, runner: () => runner, leases });
   let discarded = false;
   const forks = new ForkService({
-    source: () => ({ name: 'source', harness: 'claude-code', folder: '/work' }),
+    source: () => ({ name: 'source', harness: 'claude-code', folder: '/work', running: false }),
     mayTouch: () => true,
     harness: () => ({
       fork: async from => ({

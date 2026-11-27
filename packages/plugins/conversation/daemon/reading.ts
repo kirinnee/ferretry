@@ -126,6 +126,13 @@ export interface ReadingHalf {
     readonly attachment: { readonly id: string; readonly filename: string; readonly mime: string };
     readonly bytes: Uint8Array;
   }>;
+  /**
+   * A fork's selection, proved against the conversation as it reads now: the number of owner turns up to and including the
+   * chosen message. Rejects with a `TranscriptReadError` (`selection_stale`, `not_a_turn`) and writes nothing.
+   */
+  forkTurn(ferret: string, point: string, selectionBinding: string): Promise<number>;
+  /** A fork's attachments: every one `from` holds, copied into `to` with Conversation's own store; the number copied. */
+  copyAttachments(from: string, to: string): Promise<number>;
   /** A ferret stopped or is gone: its attachment plaintext is zeroed and forgotten, and its transcript handle is closed. */
   release(ferret: string): void;
   /** The daemon is stopping: nothing more is scheduled. */
@@ -368,6 +375,8 @@ export function buildReading(deps: {
     api,
     stage: async ({ harness, conversation }) => await links.service.stage(harness, conversation),
     download: async (ferret, id) => await attachments.scoped.download(ferret, id),
+    forkTurn: async (ferret, point, binding) => await reader.reads.forkTurn(ferret, point, binding),
+    copyAttachments: async (from, to) => await attachments.scoped.copy(from, to),
     release: ferret => {
       // Attachments first (their plaintext is the case worth failing closed for), then the ferret's transcript handle.
       try {
