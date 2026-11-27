@@ -145,7 +145,7 @@ describe('the mutation journal', () => {
     expect(outcome.unrestored[0]?.reason).toMatch(/changed after this apply wrote it/u);
   });
 
-  it('seals a file too large to hash by its size, and restores the original when nothing changed it', async () => {
+  it('keeps an oversized file it cannot fully hash, and names the original backup', async () => {
     const world = await fleetWorld();
     const file = join(world.fleet, 'big.bin');
     await writeFile(file, 'original');
@@ -157,8 +157,9 @@ describe('the mutation journal', () => {
 
     const outcome = await journal.rollback();
 
-    expect(outcome).toEqual({ unrestored: [], displaced: [] });
-    expect(await readFile(file, 'utf8')).toBe('original');
+    expect(outcome.unrestored).toHaveLength(1);
+    expect(await readFile(outcome.unrestored[0]?.backup as string, 'utf8')).toBe('original');
+    expect((await readFile(file)).length).toBe(4 * 1024 * 1024 + 1);
   });
 
   it('refuses to set the mode of a folder that is a link, since the mode would change what it points at', async () => {
