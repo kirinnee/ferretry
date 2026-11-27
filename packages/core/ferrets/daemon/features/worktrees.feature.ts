@@ -1,9 +1,16 @@
 import { randomUUID } from 'node:crypto';
+import type { FerretId } from '@ferretry/kernel/contract';
 import { createKernelWorktreeHostIo } from '../adapters/worktrees/kernel-host-io.ts';
 import { liveTerminalRoots, withTerminalRemoval } from '../lib/worktrees/terminal-roots.ts';
 import { refuse } from '../lib/runtime/mounts/worktrees.ts';
 import { buildWorktrees } from '../modules/worktrees.ts';
-import { GuardedWorktreeRemovalRequestSchema, TerminalRoots, type FerretsApi } from '../../contract/index.ts';
+import {
+  GuardedWorktreeRemovalRequestSchema,
+  LAUNCH_ROOTS_KEY,
+  LaunchRoots,
+  TerminalRoots,
+  type FerretsApi,
+} from '../../contract/index.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
 function register(f: FerretsContext): FeatureContribution | undefined {
@@ -11,14 +18,26 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   // Managed worktrees (today's worktrees module). Its Git and disk IO is the kernel's roots and spawn: the `worktrees` root
   // (`<home>-worktrees`) is the managed folder, and a repository a checkout is made from is reached through the `work`
   // root of the ferret standing in it. A host whose `worktrees` root names no folder hosts none, and every route says so.
-  const worktreeIo = createKernelWorktreeHostIo({
+  const hostInputs = {
     worktrees: kernel.roots.root('worktrees'),
-    work: ferret => kernel.roots.root('work', { ferret }),
+    work: (ferret: FerretId) => kernel.roots.root('work', { ferret }),
     ferrets: () => registry.list().map(ferret => ({ id: ferret.id, folder: ferret.folder })),
     spawn: kernel.spawn,
-  });
+  };
+  const worktreeIo = createKernelWorktreeHostIo(hostInputs);
   const worktrees = buildWorktrees({
     ...(worktreeIo === undefined ? {} : { io: worktreeIo }),
+    // A listing asked about a registered project may also read the folders its record names (read-only, `imports`).
+    ioFor: folders =>
+      createKernelWorktreeHostIo({
+        ...hostInputs,
+        registered: { folders, root: folder => kernel.roots.root('imports', { subfolder: folder }) },
+      }),
+    // The project registry is Projects'; Ferrets asks it by id through `launch.roots` and never reads a path from the caller.
+    projectRepository: async project => {
+      const found = hooks.provider(LaunchRoots, LAUNCH_ROOTS_KEY);
+      return found === 'unavailable' ? undefined : await found.repository?.(project);
+    },
     state: kernel.state,
     clock: kernel.clock,
     stateHomeHolding: async folder => await kernel.paths.stateHomeHolding(folder),

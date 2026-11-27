@@ -60,6 +60,7 @@ class FakeWorktrees implements WorktreeSubsystem {
   readonly removals: WorktreeRemovalRequest[] = [];
   readonly creations: CreateWorktreeRequest[] = [];
   readonly listings: string[] = [];
+  readonly projectListings: string[] = [];
 
   constructor(private readonly failure?: WorktreeError) {}
 
@@ -90,6 +91,12 @@ class FakeWorktrees implements WorktreeSubsystem {
     this.listings.push(commonDirectory);
     if (this.failure) throw this.failure;
     return { commonDirectory, worktrees: [], total: 0, truncated: false };
+  }
+
+  async listProjectRepo(project: string): Promise<RepoWorktreeListResponse> {
+    this.projectListings.push(project);
+    if (this.failure) throw this.failure;
+    return { commonDirectory: '/recorded/.git', worktrees: [], total: 0, truncated: false };
   }
 }
 
@@ -214,6 +221,23 @@ describe('the managed-worktree mount', () => {
     should(response.status).equal(200);
     should(jsonOf(response)).match({ commonDirectory: '/work/ferretry/.git', total: 0, truncated: false });
     should(worktrees.listings).eql(['/work/ferretry/.git']);
+  });
+
+  it('should list a repository named by a project id, and take no directory beside it', async () => {
+    // Arrange
+    const worktrees = new FakeWorktrees();
+
+    // Act
+    const response = await call(worktrees, 'GET /v1/worktrees/repo', { query: { project: ' p1 ' } });
+    const both = await refusalOf(
+      call(worktrees, 'GET /v1/worktrees/repo', { query: { project: 'p1', commonDir: '/etc/.git' } }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(worktrees.projectListings).eql(['p1']);
+    should(both).match({ status: 400, code: 'invalid_common_directory' });
+    should(worktrees.listings).be.empty();
   });
 
   it('should refuse a repository listing that names no common directory, before asking anyone', async () => {
@@ -391,6 +415,7 @@ describe('the managed-worktree mount', () => {
       create: async () => ({ worktree: VIEW, cwd: PATH }),
       adopt: async () => ({ worktree: VIEW, cwd: PATH }),
       listRepo: async () => ({ commonDirectory: '/r/.git', worktrees: [], total: 0, truncated: false }),
+      listProjectRepo: async () => ({ commonDirectory: '/r/.git', worktrees: [], total: 0, truncated: false }),
     };
 
     // Act

@@ -60,6 +60,8 @@ export interface WorktreeSubsystem {
   create(request: CreateWorktreeRequest): Promise<CreatedWorktree>;
   /** Every worktree of the repository whose git common directory this is, hand-made ones included. */
   listRepo(commonDirectory: string): Promise<RepoWorktreeListResponse>;
+  /** The same list for the repository a REGISTERED project records, named by the project's id. */
+  listProjectRepo(project: string): Promise<RepoWorktreeListResponse>;
 }
 
 /**
@@ -135,8 +137,15 @@ async function remove(worktrees: WorktreeSubsystem, context: RouteContext): Prom
  */
 async function listRepo(worktrees: WorktreeSubsystem, context: RouteContext): Promise<ApiResponse> {
   const commonDirectory = queryValue(context.request, 'commonDir')?.trim();
+  const project = queryValue(context.request, 'project')?.trim();
+  if (project !== undefined && project !== '') {
+    // A project is named by its id and its directory is the registry's, so a path beside it would be a second answer.
+    if (commonDirectory !== undefined && commonDirectory !== '')
+      throw new ApiError(400, 'name a project or a "commonDir", not both', 'invalid_common_directory');
+    return jsonResponse(await worktrees.listProjectRepo(project).catch(refuse));
+  }
   if (commonDirectory === undefined || commonDirectory === '') {
-    throw new ApiError(400, 'query parameter "commonDir" is required', 'invalid_common_directory');
+    throw new ApiError(400, 'query parameter "commonDir" or "project" is required', 'invalid_common_directory');
   }
   return jsonResponse(await worktrees.listRepo(commonDirectory).catch(refuse));
 }

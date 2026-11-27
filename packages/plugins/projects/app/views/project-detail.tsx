@@ -5,6 +5,7 @@ import {
   Bot,
   FolderTree,
   GitBranch,
+  GitFork,
   GitPullRequest,
   KanbanSquare,
   LayoutList,
@@ -24,6 +25,7 @@ import { ferretPath, projectLanesPath, projectsPath } from '../lib/paths.ts';
 import { startFerretHref } from '../lib/start-href.ts';
 import { ProjectAccountLinks } from '../features/create-project/account-links.tsx';
 import { ProjectRepos } from '../features/clone-repo/project-repos.tsx';
+import { ProjectWorktrees } from '../features/worktrees/project-worktrees.tsx';
 import { ProjectBoardSwitch } from './project-board-switch.tsx';
 import { useProjectsSlice } from '../hooks/use-projects.ts';
 import { ProjectFiles } from './project-files.tsx';
@@ -221,6 +223,10 @@ function ProjectDetailView({
                 )}
               </>
             )}
+          </Section>
+          <Section icon={<GitFork className="text-muted" size={16} aria-hidden="true" />} title="Branches & worktrees">
+            {/* Keyed by project, as the repositories beside it: same-daemon navigation reuses this tree. */}
+            <ProjectWorktrees key={project.id} client={client} project={project} />
           </Section>
           <Section icon={<FolderTree className="text-muted" size={16} aria-hidden="true" />} title="Files">
             {/* THE FINDER READS THE PROJECT'S FOLDER, NOT THE FERRET LIST, so a failed or unread ferret list no longer
