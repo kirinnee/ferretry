@@ -3,6 +3,7 @@
  * and the fake pass the same suite.
  */
 import { err, ok, type Result } from '@ferretry/std';
+export { forkReaderCases } from './fork-inputs.ts';
 import {
   type CodexApi,
   type ProjectServerApprovals,
