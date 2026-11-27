@@ -50,8 +50,15 @@ export class InstalledSkillAssets implements RuntimeSkillAssets {
 
   async remove(name: string, expected: ReadonlyMap<string, string | null>): Promise<void> {
     const now = await this.#hashes(name);
-    for (const [path, hash] of expected) if ((now.get(path) ?? null) !== hash) throw new SkillFolderChanged();
-    await this.store.removePaths(name, [...expected.keys()]);
+    const gone: string[] = [];
+    for (const [path, hash] of expected) {
+      const found = now.get(path) ?? null;
+      // A file already absent is what removal wants, so it is done, not a folder that changed under the person.
+      if (found === null && hash !== null) continue;
+      if (found !== hash) throw new SkillFolderChanged();
+      gone.push(path);
+    }
+    await this.store.removePaths(name, gone);
   }
 
   async #hashes(name: string): Promise<Map<string, string>> {
