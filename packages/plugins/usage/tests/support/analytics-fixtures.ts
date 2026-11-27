@@ -15,6 +15,7 @@ export function storedSession(overrides: Partial<AnalyticsStoredSession> = {}): 
       cwd: '/work',
       parent: null,
       tree: null,
+      purpose: null,
       day: '2026-08-01',
       week: '2026-07-27',
       createdAt: '2026-08-01T00:00:00.000Z',

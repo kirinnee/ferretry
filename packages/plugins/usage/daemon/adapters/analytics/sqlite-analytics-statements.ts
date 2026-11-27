@@ -69,6 +69,7 @@ export const COLUMNS = [
   'rate_output',
   'signature',
   'ingested_at',
+  'purpose',
 ] as const;
 
 function values(session: AnalyticsStoredSession): readonly (string | number | null)[] {
@@ -138,6 +139,7 @@ function values(session: AnalyticsStoredSession): readonly (string | number | nu
     rates?.output ?? null,
     session.signature,
     session.ingestedAt,
+    raw.purpose ?? null,
   ];
 }
 

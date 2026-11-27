@@ -39,7 +39,7 @@ export const TOP_SESSION_ORDERS = ['tokens', 'duration', 'cost'] as const;
 export type TopSessionOrder = (typeof TOP_SESSION_ORDERS)[number];
 
 /** The groupings the overview splits a period by. */
-export const OVERVIEW_SPLITS = ['model', 'runtime', 'machine', 'project'] as const;
+export const OVERVIEW_SPLITS = ['model', 'runtime', 'machine', 'project', 'purpose'] as const;
 export type OverviewSplit = (typeof OVERVIEW_SPLITS)[number];
 
 const DAY_MS = 86_400_000;
@@ -127,6 +127,8 @@ export interface OverviewRow {
   readonly runtime: string | null;
   readonly model: string | null;
   readonly project: string | null;
+  /** What the ferret was started for (comms, review, planning, implementation, other); null when it named none. */
+  readonly purpose: string | null;
   readonly parent: string | null;
   readonly tree: string;
   readonly day: string | null;
@@ -171,6 +173,7 @@ export const overviewRow = (row: AnalyticsRawSession, machine: OverviewMachine):
   runtime: row.agent,
   model: row.model,
   project: projectName(row.cwd),
+  purpose: row.purpose ?? null,
   parent: row.parent,
   tree: row.tree ?? row.id,
   day: row.day,
@@ -293,7 +296,7 @@ export interface OverviewBucket {
   readonly countedSessions: number;
 }
 
-/** A group of a split: one model, runtime, machine or project. */
+/** A group of a split: one model, runtime, machine, project or purpose. */
 export interface OverviewGroup {
   readonly key: string;
   readonly totals: OverviewTotals;
@@ -387,6 +390,7 @@ const SPLIT_KEY: Readonly<Record<OverviewSplit, (row: OverviewRow) => string | n
   runtime: row => row.runtime,
   machine: row => row.machine,
   project: row => row.project,
+  purpose: row => row.purpose,
 };
 
 const UNKNOWN_GROUP: Readonly<Record<OverviewSplit, string>> = {
@@ -394,6 +398,7 @@ const UNKNOWN_GROUP: Readonly<Record<OverviewSplit, string>> = {
   runtime: 'unknown runtime',
   machine: 'unknown machine',
   project: 'no project',
+  purpose: 'Unlabelled',
 };
 
 /** The rows grouped by one label, largest first by `metric`; a fully unknown group sorts last. */

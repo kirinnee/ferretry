@@ -232,6 +232,20 @@ describe('splits and top sessions', () => {
     expect(overviewGroups(rows, 'runtime', 'cost').map(group => group.key)).toEqual(['unknown runtime', 'Marin']);
     expect(overviewGroups(rows, 'machine', 'turns').map(group => group.key)).toEqual(['studio-mac', 'kirin-box']);
     expect(overviewGroups(rows, 'project', 'cost').map(group => group.key)).toEqual(['ferretry', 'no project']);
+    // What a ferret was started for splits too: a session that named none is Unlabelled, and the groups hold every session.
+    const purposed = [
+      row({ id: 'p', purpose: 'review' }),
+      row({ id: 'q', purpose: 'implementation' }),
+      row({ id: 'r', purpose: 'implementation' }),
+      row({ id: 's', purpose: null }),
+    ];
+    const byPurpose = overviewGroups(purposed, 'purpose', 'turns');
+    expect(byPurpose.map(group => [group.key, group.totals.sessions])).toEqual([
+      ['implementation', 2],
+      ['review', 1],
+      ['Unlabelled', 1],
+    ]);
+    expect(byPurpose.reduce((sum, group) => sum + group.totals.sessions, 0)).toBe(purposed.length);
     // Equal values with equal gaps fall back to the name.
     expect(
       overviewGroups([row({ id: 'y', model: 'b' }), row({ id: 'z', model: 'a' })], 'model', 'cost').map(

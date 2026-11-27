@@ -81,6 +81,7 @@ function labelValues(record: AnalyticsRawSession, timeZone: string | undefined):
     repo: record.cwd,
     parent: record.parent,
     tree: record.tree ?? null,
+    purpose: record.purpose ?? null,
     day: zoned ? zonedDay(record.createdAt!, timeZone) : record.day,
     week: zoned ? zonedWeek(record.createdAt!, timeZone) : record.week,
     token_data: record.tokens === null ? 'unknown' : 'known',
