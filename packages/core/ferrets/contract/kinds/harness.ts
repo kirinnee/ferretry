@@ -404,17 +404,17 @@ export interface Harness {
    */
   packConversation?(ferret: FerretId): Promise<Result<PackedConversation, { readonly reason: string }>>;
   /**
-   * Additive (C-45, the move to another machine, TARGET side): writes a conversation {@link packConversation} packed on the
-   * other machine into THIS ferret's home, under this machine's own spelling of `spec.folder` (the new worktree), with every
-   * folder the source recorded rewritten to it and, when `spec.harnessConversation` names another id than the packed one,
-   * every self id too. It refuses with one plain sentence, NOTHING written, for a harness version it was not tested on, a
-   * pack it cannot read, or a conversation that does not prove (`hasConversation`) once written. Absent: the harness cannot
-   * be moved to.
+   * Additive (C-45, the move to another machine, TARGET side): writes `packed` (what the source's `packConversation` gave)
+   * into THIS ferret's own home, in this harness's own format, and answers the conversation id the new ferret resumes
+   * (the packed one, unless this machine already holds a conversation of that id). The work folder and every self id the
+   * harness writes are moved to this ferret's; nothing of the source's is left in a field the harness reads. It proves
+   * `hasConversation` before it answers. Refuses with one plain sentence, NOTHING written, for a harness version it was
+   * not tested on or a conversation it cannot move. Absent: the harness cannot be moved to another machine.
    */
   unpackConversation?(
     spec: LaunchSpec,
     packed: PackedConversation,
-  ): Promise<Result<UnpackedConversation, { readonly reason: string }>>;
+  ): Promise<Result<{ readonly conversation: string }, { readonly reason: string }>>;
   /**
    * Additive (c58-37, the cross-harness move, SOURCE side): this ferret's conversation in the harness-neutral form
    * ({@link PortableConversation}), at most `budgetTokens` of it (the oldest turns are left out and counted), or one
@@ -515,9 +515,4 @@ export interface PackedConversation {
   readonly bytes: Uint8Array;
   /** Where it sits relative to the harness's conversation store: a plain relative path, no `..`, no leading `/`. */
   readonly relPath: string;
-}
-
-/** What {@link Harness.unpackConversation} made: the id this harness resumes the unpacked conversation by. */
-export interface UnpackedConversation {
-  readonly conversation: string;
 }

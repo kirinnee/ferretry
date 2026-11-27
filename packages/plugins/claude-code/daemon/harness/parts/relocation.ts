@@ -1,4 +1,4 @@
-import type { LaunchSpec, PackedConversation, UnpackedConversation } from '@ferretry/core-ferrets/contract';
+import type { LaunchSpec, PackedConversation } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { claudeProjectFolder, claudeTranscriptPath, isConversationId } from '../../lib/harness/claude-path.ts';
@@ -105,7 +105,7 @@ export const relocationPart = (core: ClaudeCore): Serves<'packConversation' | 'u
     async unpackConversation(
       spec: LaunchSpec,
       packed: PackedConversation,
-    ): Promise<Result<UnpackedConversation, { readonly reason: string }>> {
+    ): Promise<Result<{ readonly conversation: string }, { readonly reason: string }>> {
       try {
         const named = PACKED_PATH.exec(packed.relPath);
         if (named === null) return refuse('that is not the path of a Claude Code conversation file');
