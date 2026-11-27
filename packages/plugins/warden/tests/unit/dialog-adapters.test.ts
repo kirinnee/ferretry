@@ -127,10 +127,12 @@ describe('a ferret’s own pane', () => {
       }),
     };
     should(await ferretClearPane(throws as unknown as Pick<FerretsApi, 'harness'>).frame('f1')).equal(undefined);
-    should(await ferretClearPane(throws as unknown as Pick<FerretsApi, 'harness'>).key('f1', 'Enter')).equal(false);
+    should(
+      await ferretClearPane(throws as unknown as Pick<FerretsApi, 'harness'>).key('f1', 'Enter', () => true),
+    ).equal(false);
     const none = ferretClearPane({} as Pick<FerretsApi, 'harness'>);
     should(await none.frame('f1')).equal(undefined);
-    should(await none.key('f1', 'Enter')).equal(false);
+    should(await none.key('f1', 'Enter', () => true)).equal(false);
   });
 
   it('should press a key through the form, and say false when the runner refuses it', async () => {
@@ -139,9 +141,35 @@ describe('a ferret’s own pane', () => {
     const refused = formOf({ key: false });
 
     // Assert
-    should(await ferretClearPane(ok.ferrets).key('f1', 'Escape')).equal(true);
+    should(await ferretClearPane(ok.ferrets).key('f1', 'Escape', () => true)).equal(true);
     should(ok.pressed).eql(['Escape']);
-    should(await ferretClearPane(refused.ferrets).key('f1', 'Escape')).equal(false);
+    should(await ferretClearPane(refused.ferrets).key('f1', 'Escape', () => true)).equal(false);
+  });
+
+  it('should re-read the pane at the write, and press nothing unless the frame it reads passes the guard', async () => {
+    // Arrange
+    const guarded = formOf();
+    const seen: unknown[] = [];
+
+    // Act
+    const declined = await ferretClearPane(guarded.ferrets).key('f1', 'Escape', frame => {
+      seen.push(frame);
+      return false;
+    });
+
+    // Assert
+    should(declined).equal(false);
+    should(guarded.pressed).eql([]);
+    should(seen).eql([{ visible: 'the screen', blocking: 'dialog' }]);
+  });
+
+  it('should press nothing when the write-time read fails', async () => {
+    // Arrange
+    const blind = formOf({ capture: { ok: false, error: { refused: 'no_pane' } } });
+
+    // Assert
+    should(await ferretClearPane(blind.ferrets).key('f1', 'Escape', () => true)).equal(false);
+    should(blind.pressed).eql([]);
   });
 });
 
