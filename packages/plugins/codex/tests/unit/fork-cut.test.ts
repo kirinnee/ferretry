@@ -1,0 +1,59 @@
+import { describe, expect, test } from 'bun:test';
+import { cutRollout, rolloutName } from '../../daemon/lib/fork.ts';
+
+/** The pure cut of a synthetic rollout: nothing is read from disk and nothing is real. */
+const ID = '019fab95-c49a-7843-b42f-40a6390eefc3';
+const NEW = {
+  id: '11111111-2222-3333-4444-555555555555',
+  folder: '/work/new',
+  marker: '/h/f1/codex-correlation/unreachable',
+};
+const row = (type: string, payload: object) => `${JSON.stringify({ type, payload })}\n`;
+const head = (extra: object = { cli_version: '0.145.0' }) =>
+  row('session_meta', { id: ID, cwd: '/work/old', ...extra });
+const turn = (n: number) =>
+  row('event_msg', { type: 'user_message', message: `asked ${n}` }) +
+  row('response_item', { type: 'message', role: 'assistant', content: [{ text: `said ${n}` }] });
+const file = (turns: number, extra?: object) =>
+  head(extra) + Array.from({ length: turns }, (_, index) => turn(index + 1)).join('');
+const text = (cut: ReturnType<typeof cutRollout>) => (cut.kind === 'cut' ? cut.text : `refused: ${cut.reason}`);
+
+describe('cutting a rollout at a turn', () => {
+  test('keeps the header and turns 1..N, and counts them', () => {
+    const cut = cutRollout(file(5), { turn: 2 }, NEW);
+    expect(cut).toMatchObject({ kind: 'cut', turns: 2 });
+    expect(text(cut).split('\n').length).toBe(1 + 2 * 2 + 1);
+    expect(text(cut)).toContain('said 2');
+    expect(text(cut)).not.toContain('asked 3');
+  });
+
+  test('an entry names a line inside the turn, or the cut refuses', () => {
+    // Lines: 1 header, 2-3 turn 1, 4-5 turn 2, 6-7 turn 3.
+    expect(cutRollout(file(3), { turn: 2, entry: `${ID}:5:0:message` }, NEW).kind).toBe('cut');
+    for (const entry of [`${ID}:3:0:message`, `${ID}:6:0:message`, `other:5:0:message`, 'nonsense'])
+      expect(text(cutRollout(file(3), { turn: 2, entry }, NEW))).toMatch(/is not in turn 2/u);
+  });
+
+  test('the unflushed last line is not carried, and a line that is no record refuses the cut', () => {
+    expect(text(cutRollout(`${file(2)}{"type":"event_msg","torn`, { turn: 2 }, NEW))).not.toContain('torn');
+    expect(text(cutRollout(`${head()}not json\n${turn(1)}`, { turn: 1 }, NEW))).toMatch(/line 2 .* not a record/u);
+  });
+
+  test('a header Ferretry cannot read, or no header, refuses', () => {
+    expect(text(cutRollout(turn(1), { turn: 1 }, NEW))).toMatch(/no header/u);
+    expect(text(cutRollout(row('session_meta', { cwd: '/x' }) + turn(1), { turn: 1 }, NEW))).toMatch(/no header/u);
+  });
+
+  test('the new header carries the new id and folder, and no copy carries the source home’s correlation path', () => {
+    const marked = file(2).replace('asked 2', `see ${NEW.marker}`);
+    const cut = cutRollout(marked, undefined, NEW);
+    expect(text(cut)).not.toContain(NEW.marker);
+    expect(JSON.parse(text(cut).split('\n')[0] as string).payload).toMatchObject({ id: NEW.id, cwd: '/work/new' });
+  });
+
+  test('a rollout is filed under the day folder and name Codex uses', () => {
+    expect(rolloutName(NEW.id, new Date('2026-11-27T09:05:07.000Z'))).toBe(
+      `sessions/2026/11/27/rollout-2026-11-27T09-05-07-${NEW.id}.jsonl`,
+    );
+  });
+});

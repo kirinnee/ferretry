@@ -14,6 +14,7 @@ import type {
 import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
 import { err, ok, seconds, type Instant, type JsonValue, type Result } from '@ferretry/std';
 import { CODEX_ROLLOUTS, type CodexRolloutBinding as Binding } from '../../contract/index.ts';
+import { cutRollout, rolloutName } from '../lib/fork.ts';
 import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
 import { ProofCache } from '../lib/transcript/proof-cache.ts';
 import { selectCodexRollout } from '../lib/transcript/rollout.ts';
@@ -654,6 +655,50 @@ export class CodexRollouts {
       return refuse('The rollout could not be copied.');
     }
   }
+  /**
+   * Fork (`Harness.fork`): the ferret's PROVED rollout, cut at a turn into a NEW rollout in the shared pool, under a new id
+   * and today's day folder, keyed to the folder the new ferret works in. The source is only read: never written, moved or
+   * locked. The new file is created only if nothing is at its name; `discard` takes back that one file (the one this call
+   * made, checked by identity), so a start that never happens leaves nothing behind but what `discard` removes.
+   */
+  readonly fork: NonNullable<Harness['fork']> = async (from, at, into) => {
+    const found = await this.proved(from);
+    const binding = await this.binding(from);
+    if (found === undefined || binding === undefined)
+      throw new Error('this ferret has no conversation of its own yet, so there is nothing to fork');
+    if (found.rollout.size > MAX_IMPORT_BYTES) throw new Error('the conversation is too large to copy (over 256 MB)');
+    let pool: RootHandle;
+    try {
+      pool = this.kernel.roots.historyPool();
+    } catch {
+      throw new Error('this Codex keeps no shared history, so it cannot hold a forked conversation');
+    }
+    const id = crypto.randomUUID();
+    const cut = cutRollout(await found.root.readText(found.rollout.file, MAX_IMPORT_BYTES), at, {
+      id,
+      folder: into.folder,
+      marker: `${binding.home}/codex-correlation/unreachable`,
+    });
+    if (cut.kind === 'refused') throw new Error(cut.reason);
+    const name = rolloutName(id, new Date(this.kernel.clock.now()));
+    const file = pool.resolve(name);
+    const folder = pool.resolve(name.slice(0, name.lastIndexOf('/')));
+    if (!file.ok || !folder.ok) throw new Error('the forked conversation cannot be placed in the shared history');
+    await pool.makeDirectory(folder.value, { mode: 0o700 });
+    await pool.writeBytes(file.value, new TextEncoder().encode(cut.text), { exclusive: true });
+    const made = await pool.fileIdentity(file.value);
+    return {
+      from,
+      ...(at === undefined ? {} : { at }),
+      harnessConversation: id,
+      discard: async () => {
+        // Only the very file this fork made: gone already, or a different file at the name, is left as it is.
+        const now = await pool.fileIdentity(file.value);
+        if (made !== undefined && now?.device === made.device && now.inode === made.inode)
+          await pool.remove(file.value);
+      },
+    };
+  };
 
   readonly conversations: Harness['conversations'] = {
     list: async folder => {
