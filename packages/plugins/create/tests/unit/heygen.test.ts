@@ -15,6 +15,8 @@ const AVATAR = 'Daisy-inskirt-20220818';
 const VOICE = '2d5b0e6cf36f460aa7fc47e3eee4ba54';
 
 interface Made {
+  /** The finished video's length, as HeyGen reports it on `GET /v3/videos/{id}` once it is made. */
+  duration?: number;
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'strange' | 'gone';
   url: string | null;
 }
@@ -74,7 +76,14 @@ class FakeHeygen {
         const video = this.videos.get(id);
         if (video === undefined || video.status === 'gone')
           return Response.json({ error: { code: 'not_found', message: 'Video not found.' } }, { status: 404 });
-        return Response.json({ data: { id, status: video.status, video_url: video.url } });
+        return Response.json({
+          data: {
+            id,
+            status: video.status,
+            video_url: video.url,
+            ...(video.duration === undefined ? {} : { duration: video.duration }),
+          },
+        });
       }
       return new Response('no such path', { status: 404 });
     }
@@ -163,13 +172,13 @@ async function world(
 }
 
 const SHORT = 'Hello, and welcome to the show.';
-/** 300 characters: 20 s of speech. */
+/** 300 characters: 30 s at the slowest pace (10 characters a second) plus the 3 s allowance. */
 const LONG = 'a'.repeat(300);
 /** Avatar IV, pinned in the request, at HeyGen's dearest avatar type: $4.83 a minute, billed by the second: 80 500 micro-dollars each. */
 const PER_SECOND = 80_500;
-/** 31 characters: 3 s. */
-const SHORT_COST = 3 * PER_SECOND;
-const LONG_COST = 20 * PER_SECOND;
+/** 31 characters: 4 s at the slowest pace plus the 3 s allowance. */
+const SHORT_COST = 7 * PER_SECOND;
+const LONG_COST = 33 * PER_SECOND;
 
 const avatar = (w: World, input: Record<string, unknown> = {}) =>
   w.host.tool('generate_avatar_video', { script: SHORT, avatar: AVATAR, voice: VOICE, ...input });
@@ -190,14 +199,11 @@ describe('HeyGen avatar video is priced from a table, by the second, at the pinn
   test('Avatar IV’s $4.83 a minute is billed per second on the estimated duration, rounded UP', () => {
     expect(priceAvatarVideo(SHORT)).toEqual({ ok: true, microUsd: SHORT_COST, from: 'table' });
     expect(priceAvatarVideo(LONG)).toEqual({ ok: true, microUsd: LONG_COST, from: 'table' });
-    // 15 characters a second: 16 characters is a started second, so two
-    expect(priceAvatarVideo('a'.repeat(15))).toEqual({ ok: true, microUsd: PER_SECOND, from: 'table' });
-    expect(priceAvatarVideo('a'.repeat(16))).toEqual({ ok: true, microUsd: 2 * PER_SECOND, from: 'table' });
-    // a minute of speech is exactly HeyGen's published $4.83 a minute; never less
-    expect(priceAvatarVideo('a'.repeat(900))).toEqual({ ok: true, microUsd: 4_830_000, from: 'table' });
-    expect(priceAvatarVideo('a'.repeat(901))).toEqual({ ok: true, microUsd: 61 * PER_SECOND, from: 'table' });
-    // the longest script allowed is $8.05: over the default $5 daily limit, so it is refused until the owner raises the limit
-    expect(priceAvatarVideo('a'.repeat(1_500))).toEqual({ ok: true, microUsd: 100 * PER_SECOND, from: 'table' });
+    // 10 characters a second at the slowest: 11 characters are a started second, so two, plus the 3 s allowance
+    expect(priceAvatarVideo('a'.repeat(10))).toEqual({ ok: true, microUsd: 4 * PER_SECOND, from: 'table' });
+    expect(priceAvatarVideo('a'.repeat(11))).toEqual({ ok: true, microUsd: 5 * PER_SECOND, from: 'table' });
+    // the longest script allowed is over the default $5 daily limit, so it is refused until the owner raises the limit
+    expect(priceAvatarVideo('a'.repeat(1_500))).toEqual({ ok: true, microUsd: 153 * PER_SECOND, from: 'table' });
   });
 
   test('the video is fetched from HeyGen’s own storage over https and nowhere else', () => {
@@ -211,7 +217,7 @@ describe('HeyGen avatar video is priced from a table, by the second, at the pinn
 });
 
 describe('generate_avatar_video: priced before it is sent, reserved at submit, under the one cap and ask', () => {
-  test('a short script costs $0.25 (3 s at Avatar IV’s $4.83 a minute), reserved once, sent with the key placed by the kernel, and answers a job id', async () => {
+  test('a short script reserves $0.57 (7 s at Avatar IV’s $4.83 a minute), reserved once, sent with the key placed by the kernel, and answers a job id', async () => {
     const w = await world();
     const answer = await avatar(w);
     expect(answer.isError).toBeUndefined();
@@ -238,7 +244,7 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
     });
     const job = jobOf(answer.text);
     expect(answer.text).toContain('avatar_video_status');
-    expect(answer.text).toContain('$0.25');
+    expect(answer.text).toContain('$0.57');
     expect(answer.text).toContain('Do NOT call generate_avatar_video again');
     expect(jobLines(w)).toEqual([
       expect.objectContaining({
@@ -289,10 +295,10 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
     expect(everything).not.toContain(HEYGEN_KEY);
   });
 
-  test('a $1.61 video (20 s) is over the $1 limit: it asks and sends nothing; once approved the same request goes, once', async () => {
+  test('a $2.66 video (33 s) is over the $1 limit: it asks and sends nothing; once approved the same request goes, once', async () => {
     const w = await world();
     const answer = await avatar(w, { script: LONG });
-    expect(answer.text).toContain('$1.61');
+    expect(answer.text).toContain('$2.66');
     expect(answer.text).toContain('Nothing was spent');
     expect(w.fake.seen).toHaveLength(0);
     expect(ledgerLines(w)).toHaveLength(0);
@@ -397,7 +403,7 @@ describe('generate_avatar_video: priced before it is sent, reserved at submit, u
     expect(net(w)).toBe(SHORT_COST);
     await avatar(w, { script: 'Another script.' });
     expect(w.fake.to('api.heygen.com', 'POST')).toHaveLength(2);
-    expect(net(w)).toBe(SHORT_COST + 80_500);
+    expect(net(w)).toBe(SHORT_COST + 5 * PER_SECOND);
   });
 });
 
@@ -424,7 +430,7 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
     ]);
     expect(ready.text).toContain('type: video');
     expect(ready.text).toContain(`src: media:create-avatar-${job.slice(4)}.mp4`);
-    expect(ready.text).toContain('avatar video, 16:9 · $0.25');
+    expect(ready.text).toContain('avatar video, 16:9 · $0.57');
     expect(jobLines(w).at(-1)).toMatchObject({ kind: 'finished', job, outcome: 'delivered' });
     expect(net(w)).toBe(SHORT_COST);
 
@@ -549,6 +555,101 @@ describe('avatar_video_status: checking is free; the video is fetched once it is
   });
 });
 
+describe('the reservation is an upper bound, so the spend gates cannot be undercut; it is settled to the real length', () => {
+  // The two scripts a reviewer showed the old estimate (15 characters a second, no allowance) slipping under the gates with.
+  const ONE_THIRTEEN = 'a'.repeat(180); // old reserve $0.966 (12 s) under the $1 ask; a 13 s render bills $1.0465
+  const SIXTY_THREE = 'a'.repeat(930); // old reserve $4.991 (62 s) under the $5 cap; a 63 s render bills $5.0715
+
+  test('a 180-character script that renders 13 s ($1.0465) hits the $1 ask: nothing is sent until the owner approves', async () => {
+    const w = await world();
+    const answer = await avatar(w, { script: ONE_THIRTEEN });
+    expect(answer.text).toContain('Nothing was spent');
+    expect(w.fake.seen).toHaveLength(0);
+    expect(ledgerLines(w)).toHaveLength(0);
+    expect(await w.asks.open({})).toHaveLength(1);
+  });
+
+  test('a 930-character script that renders 63 s ($5.0715) hits the $5 daily limit: refused, nothing is sent', async () => {
+    const w = await world();
+    const answer = await avatar(w, { script: SIXTY_THREE });
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain('daily limit');
+    expect(w.fake.seen).toHaveLength(0);
+    expect(ledgerLines(w)).toHaveLength(0);
+  });
+
+  test('the reserved cost is never below the cost of speaking the script at 10 characters a second plus the allowance', () => {
+    for (let chars = 1; chars <= 1_500; chars += 1) {
+      const reserved = priceAvatarVideo('a'.repeat(chars));
+      if (!reserved.ok) throw new Error('priced');
+      expect(reserved.microUsd).toBeGreaterThanOrEqual(Math.ceil(chars / 10 + 2) * PER_SECOND);
+    }
+  });
+
+  test('a made video is settled to the length HeyGen reports: the difference is given back once, and the answer says so', async () => {
+    const w = await world();
+    await avatar(w, { script: ONE_THIRTEEN });
+    const [open] = await w.asks.open({});
+    w.asks.answerAs({ ferret: 'test-ferret', id: open!.id }, 'approve');
+    const job = jobOf((await avatar(w, { script: ONE_THIRTEEN })).text);
+    expect(net(w)).toBe(21 * PER_SECOND);
+
+    w.fake.finish('hv1', { duration: 12.4 });
+    const ready = await status(w, job);
+    expect(ready.isError).toBeUndefined();
+    expect(net(w)).toBe(13 * PER_SECOND);
+    expect(ledgerLines(w).at(-1)).toMatchObject({
+      refund: true,
+      microUsd: 8 * PER_SECOND,
+      tool: 'generate_avatar_video',
+    });
+    expect(ready.text).toContain('13 s made');
+    expect(ready.text).toContain('$1.05');
+    expect(jobLines(w).at(-1)).toMatchObject({
+      kind: 'finished',
+      outcome: 'delivered',
+      seconds: 12.4,
+      settledMicroUsd: 13 * PER_SECOND,
+    });
+
+    // asked again: the same settled answer, no second refund
+    expect((await status(w, job)).text).toContain('13 s made');
+    expect(net(w)).toBe(13 * PER_SECOND);
+    expect(ledgerLines(w)).toHaveLength(2);
+  });
+
+  test('a video HeyGen made longer than the bound is charged the excess, so the ledger never undercounts', async () => {
+    const w = await world();
+    const job = jobOf((await avatar(w)).text);
+    w.fake.finish('hv1', { duration: 20 });
+    expect((await status(w, job)).isError).toBeUndefined();
+    expect(net(w)).toBe(20 * PER_SECOND);
+    expect(ledgerLines(w).at(-1)).not.toHaveProperty('refund');
+  });
+
+  test('a video with no reported length stays at the reservation', async () => {
+    const w = await world();
+    const job = jobOf((await avatar(w)).text);
+    w.fake.finish('hv1');
+    await status(w, job);
+    expect(net(w)).toBe(SHORT_COST);
+    expect(ledgerLines(w)).toHaveLength(1);
+  });
+
+  test('an end that cannot be saved is retried without a second refund', async () => {
+    const w = await world();
+    const job = jobOf((await avatar(w)).text);
+    w.fake.finish('hv1', { duration: 2 });
+    w.jobsWrite.fails = true;
+    expect((await status(w, job)).isError).toBe(true);
+    expect(net(w)).toBe(2 * PER_SECOND);
+    w.jobsWrite.fails = false;
+    expect((await status(w, job)).isError).toBeUndefined();
+    expect(net(w)).toBe(2 * PER_SECOND);
+    expect(ledgerLines(w)).toHaveLength(2);
+  });
+});
+
 describe('avatar_video_status: the edges of the shared queue and the job file', () => {
   test('a status request that names no valid job is refused before anything is read', async () => {
     const w = await world();
@@ -604,7 +705,7 @@ describe('avatar_video_status: the edges of the shared queue and the job file', 
     expect(turnedAway.every(answer => answer.text.includes('Nothing more was spent'))).toBe(true);
     expect(answers.filter(answer => answer.text.includes('type: video'))).toHaveLength(4);
     expect(w.delivered).toHaveLength(4);
-    expect(net(w)).toBe(6 * 80_500);
+    expect(net(w)).toBe(6 * 5 * PER_SECOND);
   });
 });
 

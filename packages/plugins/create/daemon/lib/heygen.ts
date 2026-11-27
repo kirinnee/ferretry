@@ -12,6 +12,8 @@
  * THE MONEY. Reserved at submit; given back only when the submit was refused with a definite no-charge (a 4xx). Every other
  * ending (a failed video, a result that cannot be fetched) stays counted and the ferret is told not to ask again: HeyGen
  * documents no refund Create can rely on, so money that may have been spent is money recorded. Checking never charges. The
+ * reservation is an UPPER BOUND on the seconds (see `priceAvatarVideo`); once a made video's real length is read it is
+ * SETTLED to that length (a refund of the difference, or a charge for any excess), after the job's end is written. The
  * order that matters is the one `generate_video` keeps: the reservation is written before HeyGen is called and a job's end
  * before anything else, so a crash can only OVER-count.
  *
@@ -27,8 +29,11 @@ import { z } from 'zod';
 import {
   AVATAR_ENGINE,
   AVATAR_JOBS,
+  SPEND_LEDGER,
+  type SpendRecord,
   type AvatarJobRecord,
   AVATAR_RESOLUTION,
+  avatarCostOf,
   AvatarVideoStatusInputSchema,
   GenerateAvatarVideoInputSchema,
   HEYGEN_API_HOST,
@@ -106,13 +111,15 @@ const StatusReplySchema = z.object({
   data: z.object({
     status: z.string().max(32),
     video_url: z.string().max(2048).nullish(),
+    /** The length of the finished video, in seconds. */
+    duration: z.number().positive().max(86_400).nullish(),
     error: z.unknown().optional(),
   }),
 });
 
 type Poll =
   | { readonly kind: 'waiting' }
-  | { readonly kind: 'completed'; readonly url: string }
+  | { readonly kind: 'completed'; readonly url: string; readonly seconds: number | undefined }
   /** HeyGen ended it with no video, or has no such video any more: it may have been billed. */
   | { readonly kind: 'failed'; readonly sentence: string }
   /** A check that did not answer: never a verdict on the video. */
@@ -137,12 +144,12 @@ async function pollAvatar(secrets: SecretsPort, videoId: string): Promise<Poll> 
   if ('code' in answer) return { kind: 'retry', sentence: answer.sentence };
   const parsed = StatusReplySchema.safeParse(answer.payload);
   if (!parsed.success) return { kind: 'retry', sentence: 'HeyGen’s answer about the video could not be read' };
-  const { status, video_url: url } = parsed.data.data;
+  const { status, video_url: url, duration } = parsed.data.data;
   if (status === 'pending' || status === 'waiting' || status === 'processing') return { kind: 'waiting' };
   if (status === 'failed') return { kind: 'failed', sentence: 'HeyGen could not make the video' };
   if (status !== 'completed') return { kind: 'retry', sentence: 'HeyGen’s answer about the video could not be read' };
   return typeof url === 'string' && url !== ''
-    ? { kind: 'completed', url }
+    ? { kind: 'completed', url, seconds: duration ?? undefined }
     : { kind: 'failed', sentence: 'HeyGen’s finished answer held no video' };
 }
 
@@ -187,9 +194,15 @@ async function loadJobs(state: StatePort): Promise<ReadonlyMap<string, Job>> {
   return jobs;
 }
 
-const pasteOf = (job: Submitted, where: string): string[] => [
+/** The cost line a finished video is shown with: the settled cost once HeyGen reported the length, else what was reserved. */
+const costLineOf = (job: Submitted, finished?: Finished): string =>
+  finished?.settledMicroUsd === undefined || finished.seconds === undefined
+    ? job.costLine
+    : `${job.label} · ${usdWords(finished.settledMicroUsd)} (${Math.ceil(finished.seconds)} s made; ${usdWords(job.microUsd)} was held)`;
+
+const pasteOf = (job: Submitted, where: string, costLine: string = job.costLine): string[] => [
   'Put these lines in your reply:',
-  job.costLine,
+  costLine,
   '```fy-render',
   'type: video',
   `alt: ${job.alt}`,
@@ -295,6 +308,42 @@ async function closeJob(
   }
 }
 
+/** The digest the settlement line is kept under: its own, so a settled video never gives back or spends the REQUEST's approval. */
+const settlementRequest = (job: Submitted): string => requestDigest('generate_avatar_video', { settles: job.job });
+
+/**
+ * Brings the reservation to what the made video really cost: `seconds` (as HeyGen reported them) at Avatar IV's per-second
+ * rate. A smaller cost gives the difference back; a larger one (HeyGen made it longer than the upper bound) is charged, so
+ * the ledger never undercounts. Written ONCE per job (a line already kept for it is found and left), appended never rewritten.
+ * Without a reported length the reservation stands. Answers what the job file keeps of it.
+ */
+async function settle(
+  deps: AvatarVideoDeps,
+  submitted: Submitted,
+  seconds: number | undefined,
+): Promise<{ readonly seconds: number; readonly settledMicroUsd: number } | undefined> {
+  if (seconds === undefined) return undefined;
+  const settledMicroUsd = avatarCostOf(seconds);
+  const request = settlementRequest(submitted);
+  const kept = (await deps.state.records(SPEND_LEDGER)).records.some(line => line.request === request);
+  const difference = settledMicroUsd - submitted.microUsd;
+  if (!kept && difference !== 0) {
+    const line: SpendRecord = {
+      at: submitted.at,
+      day: submitted.day,
+      tool: 'generate_avatar_video',
+      model: 'avatar',
+      ferret: submitted.ferret,
+      microUsd: Math.abs(difference),
+      priced: 'table',
+      request,
+    };
+    if (difference < 0) await deps.ledger.refund(line);
+    else await deps.ledger.record(line);
+  }
+  return { seconds, settledMicroUsd };
+}
+
 /** A job that ended without a video stays counted (it may have been billed): its end is written, then said. */
 async function endCounted(deps: AvatarVideoDeps, submitted: Submitted, sentence: string): Promise<ToolAnswer> {
   const notClosed = await closeJob(deps, submitted, { outcome: 'counted', sentence });
@@ -304,12 +353,18 @@ async function endCounted(deps: AvatarVideoDeps, submitted: Submitted, sentence:
   );
 }
 
+/** What was paid, in a sentence: the settled cost when HeyGen reported the length, else what the reservation held. */
+const paidOf = (job: Submitted, finished?: Finished): string =>
+  finished?.settledMicroUsd === undefined || finished.seconds === undefined
+    ? job.paid
+    : `${usdWords(finished.settledMicroUsd)} for ${Math.ceil(finished.seconds)} s at the listed price; ${usdWords(job.microUsd)} was held and the difference was settled`;
+
 const answerFinished = (submitted: Submitted, finished: Finished): ToolAnswer =>
   finished.outcome === 'delivered' && finished.where !== undefined
     ? {
         text: [
-          `The avatar video is ready (job ${submitted.job}, ${submitted.label}), paid for once: ${submitted.paid}.`,
-          ...pasteOf(submitted, finished.where),
+          `The avatar video is ready (job ${submitted.job}, ${submitted.label}), paid for once: ${paidOf(submitted, finished)}.`,
+          ...pasteOf(submitted, finished.where, costLineOf(submitted, finished)),
         ].join('\n'),
       }
     : refusal(`Job ${submitted.job} ended without a video: ${finished.sentence ?? 'it was not made'}`);
@@ -318,6 +373,7 @@ const answerFinished = (submitted: Submitted, finished: Finished): ToolAnswer =>
 interface ToFetch {
   readonly submitted: Submitted;
   readonly url: string;
+  readonly seconds: number | undefined;
 }
 
 /** THE CHECK IS SERIAL, THE DOWNLOAD IS NOT (as for `generation_status`): a two-minute fetch must not hold the other tools. */
@@ -357,7 +413,7 @@ function avatarVideoStatus(deps: AvatarVideoDeps) {
           );
         case 'completed':
           fetching.add(submitted.job);
-          return { submitted, url: poll.url };
+          return { submitted, url: poll.url, seconds: poll.seconds };
       }
     });
 
@@ -389,12 +445,23 @@ function avatarVideoStatus(deps: AvatarVideoDeps) {
               text: `The video for job ${submitted.job} was made and paid for (${submitted.paid}), but it could not be saved for you yet. Nothing more is charged for checking; call avatar_video_status again in a minute.`,
               isError: true,
             };
-          const notClosed = await closeJob(deps, submitted, { outcome: 'delivered', where });
+          // Settled to the real length BEFORE the end is written: the ledger line is idempotent, so an end that fails to
+          // save is retried without a second refund, and the job file only ever says what the ledger holds.
+          const settlement = await settle(deps, submitted, checked.seconds).catch(() => undefined);
+          const notClosed = await closeJob(deps, submitted, { outcome: 'delivered', where, ...settlement });
           if (notClosed !== undefined) return notClosed;
+          const finished: Finished = {
+            kind: 'finished',
+            job: submitted.job,
+            at: deps.now().toISOString(),
+            outcome: 'delivered',
+            where,
+            ...settlement,
+          };
           return {
             text: [
-              `The avatar video is ready (job ${submitted.job}, ${submitted.label}), paid for: ${submitted.paid}.`,
-              ...pasteOf(submitted, where),
+              `The avatar video is ready (job ${submitted.job}, ${submitted.label}), paid for: ${paidOf(submitted, finished)}.`,
+              ...pasteOf(submitted, where, costLineOf(submitted, finished)),
             ].join('\n'),
           };
         });

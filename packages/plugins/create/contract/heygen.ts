@@ -2,7 +2,8 @@
  * HeyGen avatar video: the key's one spelling, the two tools' inputs, the job file and the price. HeyGen has no price
  * endpoint, so the table here is the whole price (always `table`). HeyGen bills per generated second and per engine, so
  * the request PINS the engine and the price is that engine's published per-second rate on the estimated duration,
- * rounded up: a reservation never undercounts, and the ask threshold still triggers.
+ * rounded up. The estimate is an upper bound (a slow speaking rate plus a fixed allowance), so a reservation never undercounts
+ * and the ask threshold cannot be skipped; once HeyGen reports the real length the reservation is settled to it.
  */
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
@@ -66,15 +67,28 @@ export const AvatarVideoStatusInputSchema = z.strictObject({
  * avatar. Create does not know which kind the owner's avatar id is, so it reserves the dearer, per second: $4.83 / 60.
  */
 export const AVATAR_IV_MICRO_USD_PER_SECOND: MicroUsd = 80_500;
-/** Speaking pace the length is guessed from: about 15 characters a second (150 words a minute). */
-export const AVATAR_CHARS_PER_SECOND = 15;
+/**
+ * The slowest pace a script is assumed to be spoken at: 10 characters a second (about 100 words a minute, slower than a
+ * deliberate presenter). The reservation is an UPPER BOUND on the seconds HeyGen will bill, because it is made before the
+ * video exists and a gate that undercounts is a gate that can be skipped. A faster read only makes the video shorter and
+ * the reservation is settled down to the length HeyGen reports.
+ */
+export const AVATAR_SLOWEST_CHARS_PER_SECOND = 10;
+/** Silence HeyGen adds around the speech (a lead-in and a tail), whole seconds, on top of the speaking time. */
+export const AVATAR_PADDING_SECONDS = 3;
 export const AVATAR_PRICE_SOURCE =
   'https://help.heygen.com/en/articles/10060327-heygen-api-pricing-credits-explained (Avatar IV, up to $4.83 a minute billed by the second; an estimate, not an invoice)';
 
-/** The cost of a script: its speaking time guessed from its length, rounded UP to whole seconds, at Avatar IV's per-second rate. */
+/** The most seconds a script can take: its speaking time at the slowest pace plus the padding, rounded UP to whole seconds. */
+export const avatarSecondsUpperBound = (script: string): number =>
+  Math.ceil([...script].length / AVATAR_SLOWEST_CHARS_PER_SECOND) + AVATAR_PADDING_SECONDS;
+
+/** What `seconds` of video cost at Avatar IV's per-second rate; HeyGen bills whole seconds, so a fraction counts as the next. */
+export const avatarCostOf = (seconds: number): MicroUsd => Math.ceil(seconds) * AVATAR_IV_MICRO_USD_PER_SECOND;
+
+/** The cost reserved for a script: the upper bound on its seconds, at Avatar IV's per-second rate. */
 export function priceAvatarVideo(script: string): Priced {
-  const seconds = Math.max(1, Math.ceil([...script].length / AVATAR_CHARS_PER_SECOND));
-  return { ok: true, microUsd: seconds * AVATAR_IV_MICRO_USD_PER_SECOND, from: 'table' };
+  return { ok: true, microUsd: avatarCostOf(avatarSecondsUpperBound(script)), from: 'table' };
 }
 
 // ─── the job file (state/create/avatar-jobs.jsonl) ───────────────────────────────────────────────────────────────
@@ -106,6 +120,9 @@ export const AvatarJobRecordSchema = z.discriminatedUnion('kind', [
     at: z.iso.datetime(),
     /** `delivered`: the file is in the media folder. `counted`: it failed or could not be fetched and may have been billed (HeyGen documents no refund Create can rely on). */
     outcome: z.enum(['delivered', 'counted']),
+    /** A delivered video's length as HeyGen reported it, and the cost it was settled to. */
+    seconds: z.number().positive().optional(),
+    settledMicroUsd: z.number().int().nonnegative().optional(),
     where: z.string().max(300).optional(),
     sentence: z.string().max(400).optional(),
   }),

@@ -190,10 +190,13 @@ line. The job is kept in `state/create/avatar-jobs.jsonl` (owner-only) so a rest
 **The price is a table** (HeyGen has no price endpoint). HeyGen bills per generated second and per engine, so the request
 **pins the engine** (`avatar_iv`) and the reservation is that engine's per-second rate: Avatar IV's **$4.83 a minute**
 (a digital twin or studio avatar; a photo avatar is $2.31, and Create does not know which the owner's avatar is, so it
-reserves the dearer), billed by the second. The speaking time is guessed from the script at 15 characters a second and
-**rounded up to the whole second**, so a 31-character script is 3 s = $0.25, 300 characters is 20 s = $1.61, 900 is a
-minute = $4.83 and 1 500 is 100 s = $8.05, over the default $5 daily limit until the owner raises it. A reservation never
-undercounts the engine's rate, and the ask over $1 still triggers on a longer script. A reservation is given back only when HeyGen refused the submit with a 4xx. A video HeyGen
+reserves the dearer), billed by the second. The reservation is made before the video exists, so it is an **upper bound**
+on the length: the script at a slow **10 characters a second** plus a fixed **3 s** for the lead-in and tail, rounded up to
+the whole second. A 31-character script reserves 7 s = $0.57, 180 characters 21 s = $1.69 (over the $1 ask), 300 characters
+33 s = $2.66, 930 characters 96 s = $7.73 (over the default $5 daily limit) and 1 500 characters 153 s = $12.31, refused
+until the owner raises the limit. A faster read only makes the video shorter: once HeyGen reports the made video's length
+the reservation is **settled** to it (a refund line for the difference, or a charge if HeyGen ran longer than the bound),
+once, and the cost line shows the settled cost. A video that reports no length stays at the reservation. A reservation is given back only when HeyGen refused the submit with a 4xx. A video HeyGen
 fails, no longer knows, or finishes with no file stays **counted** (HeyGen's refund rules are not something Create relies
 on), and the ferret is told not to ask again.
 
