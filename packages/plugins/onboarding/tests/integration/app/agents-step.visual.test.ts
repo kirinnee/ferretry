@@ -16,6 +16,8 @@ setDefaultTimeout(60_000);
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_AGENTS_STEP_SHOTS_DIR ?? '';
+// Which look the shots are taken in: studio is the default rounding, neumorphism the highest.
+const style = process.env.FY_AGENTS_STEP_STYLE ?? 'studio';
 
 let browser: Browser;
 let directory = '';
@@ -56,8 +58,8 @@ afterAll(async () => {
 });
 
 const VARIANTS = [
-  { name: '1280-light', width: 1_280, height: 800, phone: false, scheme: 'light' },
-  { name: '1280-dark', width: 1_280, height: 800, phone: false, scheme: 'dark' },
+  { name: '1440-light', width: 1_440, height: 900, phone: false, scheme: 'light' },
+  { name: '1440-dark', width: 1_440, height: 900, phone: false, scheme: 'dark' },
   { name: '390-light', width: 390, height: 844, phone: true, scheme: 'light' },
   { name: '390-dark', width: 390, height: 844, phone: true, scheme: 'dark' },
 ] as const;
@@ -79,7 +81,7 @@ const open = async (variant: Variant, query = '') => {
   tab.setDefaultTimeout(8_000);
   const problems: string[] = [];
   tab.on('pageerror', error => problems.push(error.message));
-  await tab.goto(`${origin}/?theme=studio-${variant.scheme}${query}`);
+  await tab.goto(`${origin}/?theme=${style}-${variant.scheme}${query}`);
   await tab.waitForSelector('[data-agent-row="claude-code"]');
   await tab.waitForTimeout(400);
   return { tab, problems, close: async () => await context.close() };
@@ -148,6 +150,7 @@ for (const variant of VARIANTS)
           'provider-custom-gateway',
           'provider-openai-api-key',
           'provider-azure-openai',
+          'provider-mistral',
           'provider-ollama-codex',
         ]);
         // The harness question offers exactly what the catalog's halves say.
@@ -160,7 +163,12 @@ for (const variant of VARIANTS)
           await tab.locator(`[data-agent-row="provider-${provider}"] > label`).click();
           expect(await choices(provider), `${provider} offers Claude Code and Codex`).toEqual(['claude-code', 'codex']);
         }
+        for (const provider of ['mistral']) {
+          await tab.locator(`[data-agent-row="provider-${provider}"] > label`).click();
+          expect(await choices(provider), `${provider} offers Codex alone`).toEqual(['codex']);
+        }
         expect(opened.overflow).toBeLessThanOrEqual(0);
+        await tab.locator('[data-agent-row="provider-mistral"]').scrollIntoViewIfNeeded();
         await shot(tab, variant, 'others-harness');
         expect(problems).toEqual([]);
       } finally {

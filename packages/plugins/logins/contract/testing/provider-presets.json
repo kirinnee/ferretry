@@ -5,8 +5,8 @@
       "label": "Anthropic API key",
       "harness": "claude-code",
       "summary": "Claude Code with an API key from the Claude Platform console, billed per token.",
-      "docs": "https://code.claude.com/docs/en/model-config",
       "group": "popular",
+      "docs": "https://code.claude.com/docs/en/model-config",
       "origin": "built-in",
       "variables": [
         {
@@ -54,8 +54,8 @@
       "label": "Amazon Bedrock (AWS profile)",
       "harness": "claude-code",
       "summary": "Claude Code through Amazon Bedrock, using an AWS profile from ~/.aws on this machine. The profile is named, never copied.",
-      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
       "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
       "origin": "built-in",
       "variables": [
         {
@@ -116,8 +116,8 @@
       "label": "Amazon Bedrock (API key)",
       "harness": "claude-code",
       "summary": "Claude Code through Amazon Bedrock with a Bedrock API key, which skips the AWS credential chain.",
-      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
       "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
       "origin": "built-in",
       "variables": [
         {
@@ -183,8 +183,8 @@
       "label": "Bedrock Mantle (AWS profile)",
       "harness": "claude-code",
       "summary": "Claude Code through Bedrock Mantle, using an AWS profile from ~/.aws on this machine. Mantle model ids have no version suffix.",
-      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
       "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/amazon-bedrock",
       "origin": "built-in",
       "variables": [
         {
@@ -242,8 +242,8 @@
       "label": "Google Vertex AI",
       "harness": "claude-code",
       "summary": "Claude Code through Vertex AI in your Google Cloud project, using application-default credentials or a credentials file on this machine — named, never copied.",
-      "docs": "https://code.claude.com/docs/en/google-vertex-ai",
       "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/google-vertex-ai",
       "origin": "built-in",
       "variables": [
         {
@@ -313,8 +313,8 @@
       "label": "Microsoft Foundry (API key)",
       "harness": "claude-code",
       "summary": "Claude Code through your Microsoft Foundry resource with its API key. The model variables are your deployment names.",
-      "docs": "https://code.claude.com/docs/en/microsoft-foundry",
       "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/microsoft-foundry",
       "origin": "built-in",
       "variables": [
         {
@@ -405,8 +405,8 @@
       "label": "Microsoft Foundry (Azure CLI)",
       "harness": "claude-code",
       "summary": "Claude Code through your Microsoft Foundry resource, signed in with the Azure CLI on this machine (Entra ID). Nothing is copied.",
-      "docs": "https://code.claude.com/docs/en/microsoft-foundry",
       "group": "cloud",
+      "docs": "https://code.claude.com/docs/en/microsoft-foundry",
       "origin": "built-in",
       "variables": [
         {
@@ -492,8 +492,8 @@
       "label": "GLM / Z.ai",
       "harness": "claude-code",
       "summary": "Claude Code on GLM models with a Z.ai Coding Plan key.",
-      "docs": "https://docs.z.ai/devpack/tool/claude",
       "group": "popular",
+      "docs": "https://docs.z.ai/devpack/tool/claude",
       "origin": "built-in",
       "variables": [
         {
@@ -567,8 +567,8 @@
       "label": "Kimi / Moonshot",
       "harness": "claude-code",
       "summary": "Claude Code and Codex on Kimi models with one Moonshot platform key (platform.kimi.ai; keys from platform.kimi.com are a separate system).",
-      "docs": "https://platform.kimi.ai/docs/guide/claude-code-kimi",
       "group": "popular",
+      "docs": "https://platform.kimi.ai/docs/guide/claude-code-kimi",
       "origin": "built-in",
       "variables": [
         {
@@ -647,8 +647,8 @@
       "label": "MiniMax (Token Plan)",
       "harness": "claude-code",
       "summary": "Claude Code and Codex on MiniMax models with one Token Plan subscription key (a pay-as-you-go key is a different key). Codex 0.146.0 or newer is recommended.",
-      "docs": "https://platform.minimax.io/docs/api-reference/text-anthropic-api.md",
       "group": "popular",
+      "docs": "https://platform.minimax.io/docs/api-reference/text-anthropic-api.md",
       "origin": "built-in",
       "variables": [
         {
@@ -720,8 +720,8 @@
       "label": "DeepSeek",
       "harness": "claude-code",
       "summary": "Claude Code and Codex on DeepSeek models with one DeepSeek platform key.",
-      "docs": "https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code",
       "group": "popular",
+      "docs": "https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code",
       "origin": "built-in",
       "variables": [
         {
@@ -855,8 +855,8 @@
       "label": "OpenRouter",
       "harness": "claude-code",
       "summary": "Claude Code and Codex through OpenRouter with one key, on Anthropic and OpenAI models or any other it routes to.",
-      "docs": "https://openrouter.ai/docs/guides/guides/claude-code-integration",
       "group": "popular",
+      "docs": "https://openrouter.ai/docs/guides/guides/claude-code-integration",
       "origin": "built-in",
       "variables": [
         {
@@ -1010,8 +1010,8 @@
       "label": "LiteLLM proxy",
       "harness": "claude-code",
       "summary": "Claude Code through your own LiteLLM proxy, with a master or virtual key.",
-      "docs": "https://docs.litellm.ai/docs/tutorials/claude_responses_api",
       "group": "self-hosted",
+      "docs": "https://docs.litellm.ai/docs/tutorials/claude_responses_api",
       "origin": "built-in",
       "variables": [
         {
@@ -1078,8 +1078,8 @@
       "label": "Custom gateway",
       "harness": "claude-code",
       "summary": "Claude Code through any gateway that speaks the Anthropic Messages API. Fill in its address and the model it serves.",
-      "docs": "https://code.claude.com/docs/en/llm-gateway",
       "group": "self-hosted",
+      "docs": "https://code.claude.com/docs/en/llm-gateway",
       "origin": "built-in",
       "variables": [
         {
@@ -1147,8 +1147,8 @@
       "label": "OpenAI API key",
       "harness": "codex",
       "summary": "Codex with an OpenAI platform API key, billed per token, through the Responses API.",
-      "docs": "https://developers.openai.com/codex/config-advanced",
       "group": "popular",
+      "docs": "https://developers.openai.com/codex/config-advanced",
       "origin": "built-in",
       "variables": [
         {
@@ -1195,8 +1195,8 @@
       "label": "Azure OpenAI",
       "harness": "codex",
       "summary": "Codex on your Azure OpenAI resource with its API key. The model is your deployment name. Entra ID sign-in is not supported by Codex.",
-      "docs": "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex",
       "group": "cloud",
+      "docs": "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/codex",
       "origin": "built-in",
       "variables": [
         {
@@ -1250,12 +1250,63 @@
       }
     },
     {
+      "id": "mistral",
+      "label": "Mistral",
+      "harness": "codex",
+      "summary": "Codex on Mistral models with one Mistral API key, through Mistral's Responses API.",
+      "docs": "https://docs.mistral.ai/studio/conversations/responses",
+      "origin": "built-in",
+      "variables": [
+        {
+          "name": "MISTRAL_API_KEY",
+          "kind": "secret",
+          "secret": "MISTRAL_API_KEY",
+          "required": true,
+          "allowEmpty": false,
+          "harnesses": ["codex"]
+        }
+      ],
+      "models": [],
+      "test": {
+        "available": true,
+        "spends": "nothing",
+        "note": "Lists the models the key can use. Spends nothing."
+      },
+      "quota": {
+        "source": "transcript-pricing",
+        "note": "Mistral reports no balance to an API key, so cost is counted from the transcript where the model has a price."
+      },
+      "unverified": [
+        "Mistral's Responses API is stateless, so Codex features that resume a response on the server do not work.",
+        "Mistral's docs show the Responses endpoint on https://api.mistral.ai/v1 and also describe an OpenAI-compatible route under /openai/v1; this preset uses the first, as the Responses reference does.",
+        "The default model is Mistral Large 4 (`mistral-large-4`, the id its Responses API page uses); no Codex run against Mistral was made when this preset was written."
+      ],
+      "verified": "2026-11-27",
+      "offered": {
+        "available": true
+      },
+      "halves": [
+        {
+          "harness": "codex",
+          "offered": {
+            "available": true
+          },
+          "models": []
+        }
+      ],
+      "detect": {
+        "hosts": ["api.mistral.ai"],
+        "variables": ["MISTRAL_*"],
+        "keyPrefixes": []
+      }
+    },
+    {
       "id": "ollama-codex",
       "label": "Ollama (local)",
       "harness": "codex",
       "summary": "Codex on a model Ollama serves on this machine, through Codex's own Ollama provider. Nothing leaves the machine.",
-      "docs": "https://docs.ollama.com/integrations/codex",
       "group": "self-hosted",
+      "docs": "https://docs.ollama.com/integrations/codex",
       "origin": "built-in",
       "variables": [],
       "models": [],
