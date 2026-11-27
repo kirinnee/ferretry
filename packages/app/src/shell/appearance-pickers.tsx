@@ -135,9 +135,45 @@ function Chip({ palette, style }: { readonly palette: PaletteId; readonly style:
   );
 }
 
-/** Roving radios like `Segmented`: the checked chip is the one tab stop, the arrow keys move AND select. */
+/** One chip: a radio carrying its swatch and name. */
+function PaletteChip({
+  option,
+  checked,
+  group,
+  style,
+  onChange,
+}: {
+  readonly option: PaletteEntry;
+  readonly checked: boolean;
+  readonly group: string;
+  readonly style: StyleId;
+  readonly onChange: (palette: PaletteId) => void;
+}) {
+  return (
+    <label className="fy-ap-chip" data-selected={checked} data-palette-chip={option.id} title={option.blurb}>
+      <input
+        type="radio"
+        name={`${group}-palette`}
+        value={option.id}
+        checked={checked}
+        aria-label={`${option.label} — ${option.blurb}`}
+        tabIndex={checked ? 0 : -1}
+        onChange={() => onChange(option.id)}
+        className="sr-only"
+      />
+      <Chip palette={option.id} style={style} />
+      <span className="fy-ap-chip__name">{option.label}</span>
+    </label>
+  );
+}
+
+/**
+ * Roving radios like `Segmented`: the checked chip is the one tab stop, the arrow keys move AND select. Palettes whose pack
+ * paints a gradient mesh (`mesh`) sit after the flat ones under a "Gradient" subheading, a labelled `fieldset` (a group named by its legend) inside the one
+ * radiogroup, and the arrow keys walk the order on screen: flat, then gradient.
+ */
 export function PalettePicker({
-  palettes,
+  palettes: offered,
   value,
   style,
   onChange,
@@ -149,6 +185,9 @@ export function PalettePicker({
 }) {
   const group = useId();
   const ref = useRef<HTMLDivElement>(null);
+  const flat = offered.filter(option => !option.mesh);
+  const gradient = offered.filter(option => option.mesh);
+  const palettes = [...flat, ...gradient];
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!KEYS.includes(event.key)) return;
     event.preventDefault();
@@ -179,31 +218,33 @@ export function PalettePicker({
       className="fy-ap-chips"
       data-palette-chips=""
     >
-      {palettes.map(option => {
-        const checked = option.id === value;
-        return (
-          <label
-            key={option.id}
-            className="fy-ap-chip"
-            data-selected={checked}
-            data-palette-chip={option.id}
-            title={option.blurb}
-          >
-            <input
-              type="radio"
-              name={`${group}-palette`}
-              value={option.id}
-              checked={checked}
-              aria-label={`${option.label} — ${option.blurb}`}
-              tabIndex={checked ? 0 : -1}
-              onChange={() => onChange(option.id)}
-              className="sr-only"
-            />
-            <Chip palette={option.id} style={style} />
-            <span className="fy-ap-chip__name">{option.label}</span>
-          </label>
-        );
-      })}
+      {flat.map(option => (
+        <PaletteChip
+          key={option.id}
+          option={option}
+          checked={option.id === value}
+          group={group}
+          style={style}
+          onChange={onChange}
+        />
+      ))}
+      {gradient.length > 0 && (
+        <fieldset className="fy-ap-chips__group">
+          <legend className="fy-ap-chips__sub">Gradient</legend>
+          <div className="fy-ap-chips__row">
+            {gradient.map(option => (
+              <PaletteChip
+                key={option.id}
+                option={option}
+                checked={option.id === value}
+                group={group}
+                style={style}
+                onChange={onChange}
+              />
+            ))}
+          </div>
+        </fieldset>
+      )}
     </div>
   );
 }
