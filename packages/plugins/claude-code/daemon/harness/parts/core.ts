@@ -43,6 +43,11 @@ export interface ClaudeHarnessDeps {
   readonly historyHome: () => Promise<string>;
   /** The `fy` the Ferretry tools server runs as when a ferret gets the channel (default `fy`, found on the ferret's PATH). */
   readonly fyCommand?: string;
+  /**
+   * Where a link really leads (its fully resolved path), or `undefined` when it leads nowhere. The kernel's roots refuse to
+   * follow a link, so this is the one question about a home's `projects` link they cannot answer. Default: `readlink -f` through the spawn port.
+   */
+  readonly resolveLink?: (path: string) => Promise<string | undefined>;
   /** Says one plain sentence in the daemon log (a pooling that was skipped, a file kept aside); absent: nothing is said. */
   readonly warn?: (message: string) => void;
 }

@@ -23,6 +23,7 @@ const SERVED = {
   identityPart: ['accepts', 'facts', 'key', 'turnStop'],
   launchSettingsPart: ['launchSettings'],
   lifecyclePart: ['discover', 'resume', 'start', 'stop', 'update'],
+  relocationPart: ['packConversation', 'unpackConversation'],
   runtimeSwitchPart: ['runtimeSwitch'],
   transcriptPart: ['transcript', 'transcriptBytes', 'transcriptStamp', 'transcriptTail'],
   usagePart: ['usage'],
@@ -33,7 +34,6 @@ const NOT_SERVED = [
   'screenReader',
   'adoptConversation',
   'exportConversation',
-  'packConversation',
   'inject',
   'provedConversation',
   'runtime',
@@ -98,6 +98,7 @@ describe('the Claude harness parts', () => {
       transcriptTail: true,
       turnStop: true,
       update: true,
+      unpackConversation: true,
       usage: true,
     };
     const unsaid = Object.keys(ABSENT).filter(
