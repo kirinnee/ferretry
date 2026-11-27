@@ -35,6 +35,9 @@ const REFUSALS: Readonly<Record<TranscriptReadFailure, { readonly status: number
   event_evidence_mismatch: { status: 500, code: 'event_evidence_mismatch' },
   // 409 rather than 400: the cursor was well formed and this daemon issued it; what changed is the conversation under it.
   message_cursor_stale: { status: 409, code: 'message_cursor_stale' },
+  // A fork's selection (its binding) no longer holds, or names a message no fork can cut at.
+  selection_stale: { status: 409, code: 'selection_stale' },
+  not_a_turn: { status: 400, code: 'not_a_turn' },
   // R266 (kept half): the offsets were fine, and the transcript under them is another one.
   log_cursor_stale: { status: 409, code: 'log_cursor_stale' },
 };

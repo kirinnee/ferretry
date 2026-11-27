@@ -29,6 +29,7 @@ import { AllQueuesScreen } from './queue/all-queues-screen.tsx';
 import { QueuePanel } from './queue/queue-page.tsx';
 import { AgendaConversationPanel } from './slots/agenda-conversation-panel.tsx';
 import { FilesSearchPanel } from './slots/files-search-panel.tsx';
+import { ForkRowPanel } from './slots/fork-row-panel.tsx';
 import { InterruptRowPanel } from './slots/interrupt-row-panel.tsx';
 import { NewFerretContinuePanel } from './slots/new-ferret-continue-panel.tsx';
 import { StuckMessagesRowPanel } from './slots/stuck-messages-row-panel.tsx';
@@ -57,6 +58,7 @@ export interface ConversationSurfaces {
     readonly turn: AppComponent<PanelProps>;
     readonly 'files-search': AppComponent<PanelProps>;
     readonly 'interrupt-row': AppComponent<PanelProps>;
+    readonly 'fork-row': AppComponent<PanelProps>;
     readonly 'stuck-messages-row': AppComponent<PanelProps>;
     readonly 'agenda-conversation': AppComponent<PanelProps>;
     readonly 'new-ferret-continue': AppComponent<PanelProps>;
@@ -94,6 +96,7 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     turn: scoped<PanelProps>(client, TurnPanel),
     'files-search': scoped<PanelProps>(client, FilesSearchPanel),
     'interrupt-row': scoped<PanelProps>(client, InterruptRowPanel),
+    'fork-row': scoped<PanelProps>(client, ForkRowPanel),
     'stuck-messages-row': scoped<PanelProps>(client, StuckMessagesRowPanel),
     'agenda-conversation': scoped<PanelProps>(client, AgendaConversationPanel),
     'new-ferret-continue': scoped<PanelProps>(client, NewFerretContinuePanel),

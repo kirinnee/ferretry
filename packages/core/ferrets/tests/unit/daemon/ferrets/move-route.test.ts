@@ -5,8 +5,7 @@ import { as, host, record } from './route-fixture.ts';
 const MOVE_ROUTES = [
   ['POST', 'move'],
   ['POST', 'move/ask-to-stop-jobs'],
-  // A person's route (`caller: 'person'`): the kernel refuses a ferret before the handler, and `mayAct` guards it too.
-  ['POST', 'fork'],
+  // Fork is Conversation's route now (a person's, refused to a ferret by the kernel): its own tests hold that.
   ['POST', 'handover'],
   ['GET', 'handover'],
   ['POST', 'handover/cancel'],
@@ -20,12 +19,12 @@ test('a ferret reaches the move routes of itself and its helpers only, as the re
     // Another ferret's move is refused before the moves module is asked anything.
     const refused = await h.request(method, `/v1/ferrets/stranger/${route}`, { ...as('lead'), body: {} });
     expect(refused.status).toBe(403);
-    expect(refused.json<{ code: string }>().code).toBe(route === 'fork' ? 'owner_only' : 'forbidden');
+    expect(refused.json<{ code: string }>().code).toBe('forbidden');
     const upward = await h.request(method, `/v1/ferrets/lead/${route}`, { ...as('child'), body: {} });
     expect(upward.status).toBe(403);
     // Its own and its helper's reach the moves module, which answers in its own words: never Ferrets' own `forbidden`
     // (the handover module keeps its own owner-only rule for a helper, which is a different refusal).
-    for (const target of route === 'fork' ? [] : ['lead', 'child']) {
+    for (const target of ['lead', 'child']) {
       const reached = await h.request(method, `/v1/ferrets/${target}/${route}`, { ...as('lead'), body: {} });
       expect(reached.json<{ code?: string }>().code).not.toBe('forbidden');
     }
