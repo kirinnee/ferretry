@@ -1,3 +1,5 @@
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { TEST_STARTERS } from '../../support/starters.ts';
@@ -10,6 +12,11 @@ import {
   type ImportPlan,
 } from '../../../daemon/lib/account/import.ts';
 import { mergeImport, mergeImportRecord, planImport } from '../../../daemon/lib/account/import-plan.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 /** Placeholder secret values: shaped like real ones so detection fires, worthless as credentials. */
 const FAKE_KEY = 'sk-placeholder-not-a-real-key-0000';
@@ -89,6 +96,7 @@ const everything = (plan: ImportPlan): string => JSON.stringify(plan);
 describe('planImport — items the person skipped', () => {
   it('should leave a skipped MCP server out of the plan', () => {
     const plan = planImport([claude()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importNamedItemId('claude-code', 'mcp', 'notes')],
@@ -101,6 +109,7 @@ describe('planImport — items the person skipped', () => {
 
   it('should leave a skipped skill out of the plan, its folder copy included', () => {
     const plan = planImport([claude()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importNamedItemId('claude-code', 'skill', 'deploy')],
@@ -116,6 +125,7 @@ describe('planImport — items the person skipped', () => {
 
   it('should leave skipped instructions out of the plan', () => {
     const plan = planImport([claude()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('claude-code', 'instructions')],
@@ -128,6 +138,7 @@ describe('planImport — items the person skipped', () => {
 
   it('should leave skipped settings out but still import the env, and the reverse', () => {
     const noSettings = planImport([claude()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('claude-code', 'settings')],
@@ -140,6 +151,7 @@ describe('planImport — items the person skipped', () => {
     should(settings.env).deepEqual({ LOG_LEVEL: 'debug', ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}' });
 
     const noEnv = planImport([claude()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('claude-code', 'env')],
@@ -151,6 +163,7 @@ describe('planImport — items the person skipped', () => {
 
   it('should move no secret when the env that held it is skipped', () => {
     const claudeSkipped = planImport([claude()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('claude-code', 'env')],
@@ -160,6 +173,7 @@ describe('planImport — items the person skipped', () => {
     should(everything(claudeSkipped)).not.containEql(FAKE_KEY);
 
     const codexSkipped = planImport([codex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('codex', 'env')],
@@ -167,12 +181,13 @@ describe('planImport — items the person skipped', () => {
     should(codexSkipped.secrets).deepEqual([]);
     should(everything(codexSkipped)).not.containEql(FAKE_KEY);
 
-    const kept = planImport([claude(), codex()], { digest, starters: TEST_STARTERS });
+    const kept = planImport([claude(), codex()], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
     should(kept.secrets.length).be.above(0);
   });
 
   it('should leave the other harness alone when one harness item is skipped', () => {
     const plan = planImport([claude(), codex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importNamedItemId('codex', 'skill', 'review')],
@@ -185,8 +200,9 @@ describe('planImport — items the person skipped', () => {
   });
 
   it('should ignore an item that is not there', () => {
-    const base = planImport([claude()], { digest, starters: TEST_STARTERS });
+    const base = planImport([claude()], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
     const same = planImport([claude()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importNamedItemId('claude-code', 'mcp', 'nothing')],
@@ -198,7 +214,7 @@ describe('planImport — items the person skipped', () => {
 
 describe('planImport — hooks are never imported', () => {
   it('should make no hooks component and no profile layer, for either harness', () => {
-    const plan = planImport([claude(), codex()], { digest, starters: TEST_STARTERS });
+    const plan = planImport([claude(), codex()], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
 
     should(kinds(plan).some(reference => reference.startsWith('hooks/'))).be.false();
     should(plan.files.some(file => file.path.includes('hooks'))).be.false();
@@ -210,7 +226,7 @@ describe('planImport — hooks are never imported', () => {
   });
 
   it('should still count them for the screen, by where they are', () => {
-    const plan = planImport([claude(), codex()], { digest, starters: TEST_STARTERS });
+    const plan = planImport([claude(), codex()], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
 
     should(plan.preview.harnesses[0]?.settings?.hooks).equal(1);
     should(plan.preview.harnesses[1]?.settings?.hooks).equal(2);
@@ -225,7 +241,7 @@ describe('planImport — hooks are never imported', () => {
           skills: [],
         }),
       ],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
 
     should(Object.keys(plan.profiles)).deepEqual(['codex-starter']);
@@ -235,7 +251,7 @@ describe('planImport — hooks are never imported', () => {
 
 describe('planImport — hints that are listed, not imported', () => {
   it('should list the Codex profiles with only their name, model and effort', () => {
-    const plan = planImport([codex()], { digest, starters: TEST_STARTERS });
+    const plan = planImport([codex()], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
 
     should(plan.preview.harnesses[0]?.codexProfiles).deepEqual([
       { name: 'fast', model: 'gpt-5.6-mini', effort: 'low' },
@@ -249,15 +265,16 @@ describe('planImport — hints that are listed, not imported', () => {
       '/h/.codex/config.toml',
       ['[profiles]', 'odd = 1', '[profiles.plain]', 'model = "m"'].join('\n'),
     );
-    const plan = planImport([codex({ settings })], { digest, starters: TEST_STARTERS });
+    const plan = planImport([codex({ settings })], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS });
 
     should(plan.preview.harnesses[0]?.codexProfiles).deepEqual([{ name: 'plain', model: 'm' }]);
   });
 
   it('should list no Codex profiles for Claude', () => {
-    should(planImport([claude()], { digest, starters: TEST_STARTERS }).preview.harnesses[0]?.codexProfiles).deepEqual(
-      [],
-    );
+    should(
+      planImport([claude()], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS }).preview.harnesses[0]
+        ?.codexProfiles,
+    ).deepEqual([]);
   });
 
   it('should name the project folders Claude keeps, absolute and printable only, and read nothing in them', () => {
@@ -269,7 +286,11 @@ describe('planImport — hints that are listed, not imported', () => {
 
   it('should carry the hints a scan was given into the preview, and make nothing of them', () => {
     const hints = [{ path: '/work/app', file: 'CLAUDE.md', verified: false }];
-    const plan = planImport([claude({ projectInstructions: hints })], { digest, starters: TEST_STARTERS });
+    const plan = planImport([claude({ projectInstructions: hints })], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+    });
 
     should(plan.preview.harnesses[0]?.projectInstructions).deepEqual(hints);
     should(kinds(plan).some(reference => reference.includes('work'))).be.false();
@@ -306,7 +327,7 @@ describe('the wire contract for skip and the scan', () => {
   it('should round-trip a plan preview through the scan schema without a value', () => {
     const plan = planImport(
       [claude({ projectInstructions: [{ path: '/work/app', file: 'CLAUDE.md', verified: true }] }), codex()],
-      { digest, starters: TEST_STARTERS },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS },
     );
     const body = {
       machine: 'm',
@@ -360,7 +381,12 @@ describe('planImport — a skip is applied before models and settings are derive
   ];
 
   it('should not take the default model from skipped Codex settings', () => {
-    const plan = planImport([hostCodex()], { digest, starters: TEST_STARTERS, skip: wizardSkip('codex') });
+    const plan = planImport([hostCodex()], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      skip: wizardSkip('codex'),
+    });
 
     const set = modelsOf(plan, 'codex');
     should(set.models).not.containEql('gpt-host-1');
@@ -370,6 +396,7 @@ describe('planImport — a skip is applied before models and settings are derive
 
   it('should keep the profiles still selected when Codex settings are skipped, and drop the skipped ones', () => {
     const plan = planImport([hostCodex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: wizardSkip('codex', importNamedItemId('codex', 'profile', 'deep')),
@@ -387,6 +414,7 @@ describe('planImport — a skip is applied before models and settings are derive
 
   it('should write no settings file when Codex settings and every profile are skipped', () => {
     const plan = planImport([hostCodex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [
@@ -402,6 +430,7 @@ describe('planImport — a skip is applied before models and settings are derive
 
   it('should leave an accepted Codex profile out of the model set and the written settings', () => {
     const plan = planImport([hostCodex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importNamedItemId('codex', 'profile', 'fast')],
@@ -419,6 +448,7 @@ describe('planImport — a skip is applied before models and settings are derive
 
   it('should keep every profile when none is skipped, and when the skipped name is not there', () => {
     const plan = planImport([hostCodex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importNamedItemId('codex', 'profile', 'nope')],
@@ -430,6 +460,7 @@ describe('planImport — a skip is applied before models and settings are derive
 
   it('should drop the profiles table when every profile is skipped', () => {
     const plan = planImport([hostCodex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importNamedItemId('codex', 'profile', 'fast'), importNamedItemId('codex', 'profile', 'deep')],
@@ -443,12 +474,20 @@ describe('planImport — a skip is applied before models and settings are derive
       '/h/.claude/settings.json',
       JSON.stringify({ model: 'claude-host-1', env: { ANTHROPIC_MODEL: 'claude-sonnet-5' } }),
     );
-    const base = modelsOf(planImport([claude({ settings })], { digest, starters: TEST_STARTERS }), 'claude');
+    const base = modelsOf(
+      planImport([claude({ settings })], { kits: IMPORT_KITS, digest, starters: TEST_STARTERS }),
+      'claude',
+    );
     should(base.models).containEql('claude-host-1');
     should(base.models).containEql('claude-sonnet-5');
 
     const noSettings = modelsOf(
-      planImport([claude({ settings })], { digest, starters: TEST_STARTERS, skip: wizardSkip('claude-code') }),
+      planImport([claude({ settings })], {
+        kits: IMPORT_KITS,
+        digest,
+        starters: TEST_STARTERS,
+        skip: wizardSkip('claude-code'),
+      }),
       'claude',
     );
     should(noSettings.models).not.containEql('claude-host-1');
@@ -456,6 +495,7 @@ describe('planImport — a skip is applied before models and settings are derive
 
     const noEnv = modelsOf(
       planImport([claude({ settings })], {
+        kits: IMPORT_KITS,
         digest,
         starters: TEST_STARTERS,
         skip: [importItemId('claude-code', 'env')],
@@ -479,7 +519,12 @@ describe('Import again after a skill was left out', () => {
     });
   const skipDeploy = [importNamedItemId('claude-code', 'skill', 'deploy')];
   const first = () => {
-    const plan = planImport([claudeEdited('# Claude words\n')], { digest, starters: TEST_STARTERS, skip: skipDeploy });
+    const plan = planImport([claudeEdited('# Claude words\n')], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      skip: skipDeploy,
+    });
     return { model: mergeImport(undefined, plan), record: mergeImportRecord(plan) };
   };
 
@@ -489,12 +534,14 @@ describe('Import again after a skill was left out', () => {
 
     // Act — the scan sends no skip list; only CLAUDE.md changed.
     const scan = planImport([claudeEdited('# Claude words, edited\n')], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: model,
       record,
     });
     const applied = planImport([claudeEdited('# Claude words, edited\n')], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       existing: model,
@@ -514,7 +561,7 @@ describe('Import again after a skill was left out', () => {
     // Act
     const scan = planImport(
       [claudeEdited('# Claude words\n', [{ item: 'lint', source: '/h/.claude/skills/lint', digest: 'c' }])],
-      { digest, starters: TEST_STARTERS, existing: model, record },
+      { kits: IMPORT_KITS, digest, starters: TEST_STARTERS, existing: model, record },
     );
 
     // Assert
@@ -534,6 +581,7 @@ describe('planImport — the model set can be left out on its own (r10 O8)', () 
 
   it('should take the models the settings name when the model set is kept', () => {
     const plan = planImport([claude({ settings: text('/h/.claude/settings.json', NAMED) })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
     });
@@ -542,6 +590,7 @@ describe('planImport — the model set can be left out on its own (r10 O8)', () 
 
   it('should give the starter model set when the model set is skipped, settings and the rest still imported', () => {
     const plan = planImport([claude({ settings: text('/h/.claude/settings.json', NAMED) })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('claude-code', 'model-set')],
@@ -556,6 +605,7 @@ describe('planImport — the model set can be left out on its own (r10 O8)', () 
 
   it('should keep the models the settings name when only Settings is skipped (the onboarding choices are independent)', () => {
     const plan = planImport([claude({ settings: text('/h/.claude/settings.json', NAMED) })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('claude-code', 'settings')],
@@ -567,9 +617,15 @@ describe('planImport — the model set can be left out on its own (r10 O8)', () 
   });
 
   it('should keep a Codex model set when only Settings is skipped, and give the starter when both are skipped', () => {
-    const only = planImport([codex()], { digest, starters: TEST_STARTERS, skip: [importItemId('codex', 'settings')] });
+    const only = planImport([codex()], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      skip: [importItemId('codex', 'settings')],
+    });
     should(modelSet(only, 'codex-models')).deepEqual({ models: ['gpt-5.6', 'gpt-5.6-mini'], default: 'gpt-5.6' });
     const both = planImport([claude({ settings: text('/h/.claude/settings.json', NAMED) })], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('claude-code', 'settings'), importItemId('claude-code', 'model-set')],
@@ -581,12 +637,18 @@ describe('planImport — the model set can be left out on its own (r10 O8)', () 
   });
 
   it('should leave a Codex profile its own model when only the model set is skipped', () => {
-    const plan = planImport([codex()], { digest, starters: TEST_STARTERS, skip: [importItemId('codex', 'model-set')] });
+    const plan = planImport([codex()], {
+      kits: IMPORT_KITS,
+      digest,
+      starters: TEST_STARTERS,
+      skip: [importItemId('codex', 'model-set')],
+    });
     should(modelSet(plan, 'codex-models')).deepEqual({ models: ['gpt-5.6-mini'], default: 'gpt-5.6-mini' });
   });
 
   it('should skip only the named harness’s model set', () => {
     const plan = planImport([claude(), codex()], {
+      kits: IMPORT_KITS,
       digest,
       starters: TEST_STARTERS,
       skip: [importItemId('claude-code', 'model-set')],
