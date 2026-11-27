@@ -647,6 +647,92 @@ describe('W2-a auto-resume, mounted', () => {
       await h.stop();
     });
 
+    // D-89 review r1 MUST 1: the wait before asking again is the pass's own, so the daemon stopping ends it.
+    test('W2-a D-89 a host stop after the first timeout asks nothing more and launches nothing, and the pass ends at once', async () => {
+      const runtimes = fakeRuntimes(input => (input.ask === 'switch' ? { allow: true } : new Promise(() => undefined)));
+      let { h, runner } = await boot([runtimes.plugin]);
+      const id = await start(h, 'tamarind');
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      let done = false;
+      const pass = h.runJob(AUTO_RESUME_JOB).finally(() => {
+        done = true;
+      });
+      // The first ask hangs past its bound; the pass is now waiting before it asks again.
+      await advance(h, DECIDE_ASK_TIMEOUT_MS + 1_000);
+      expect(runtimes.asked.filter(input => input.ask === 'runtime')).toHaveLength(1);
+      expect(done).toBe(false);
+      await h.stop();
+      await advance(h, 0);
+      expect(done).toBe(true);
+      await advance(h, 30_000);
+      await pass;
+      expect(runtimes.asked.filter(input => input.ask === 'runtime')).toHaveLength(1);
+      expect(runner.starts).toBe(launches);
+      expect(types(h, id)).not.toContain('session.auto_resumed');
+    });
+
+    // The other half: the ferret's own Stop while the pass waits wins, and the pass asks nothing more about it.
+    test('W2-a D-89 a ferret Stop while the pass waits to ask again leaves no second ask and no launch', async () => {
+      let lost = true;
+      const runtimes = fakeRuntimes(input => {
+        if (input.ask === 'runtime' && lost) {
+          lost = false;
+          return new Promise(() => undefined);
+        }
+        return { allow: true };
+      });
+      let { h, runner } = await boot([runtimes.plugin]);
+      const id = await start(h, 'quince');
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      const pass = h.runJob(AUTO_RESUME_JOB);
+      await advance(h, DECIDE_ASK_TIMEOUT_MS + 1_000);
+      expect(runtimes.asked.filter(input => input.ask === 'runtime')).toHaveLength(1);
+      expect((await h.request('POST', `/v1/ferrets/${id}/stop`)).status).toBe(200);
+      for (let step = 0; step < 30; step += 1) await advance(h, 1_000);
+      await pass;
+      expect(runtimes.asked.filter(input => input.ask === 'runtime')).toHaveLength(1);
+      expect(runner.starts).toBe(launches);
+      expect((await view(h, id)).state).toBe('stopped');
+      expect(types(h, id)).not.toContain('session.auto_resumed');
+      await h.stop();
+    });
+
+    // D-89 review r1 MUST 2: the wait must not hold one of the two worker slots, or two silent ferrets stall every other.
+    test('W2-a D-89 two ferrets whose answer is lost do not hold up a third: it is resumed when it always was', async () => {
+      // The pass orders its ferrets itself: the first two it asks about hang, the third it asks about is answered.
+      const askedFirst: FerretId[] = [];
+      const runtimes = fakeRuntimes(input => {
+        if (input.ask !== 'runtime') return { allow: true };
+        if (!askedFirst.includes(input.ferret)) askedFirst.push(input.ferret);
+        return askedFirst.indexOf(input.ferret) < 2 ? new Promise(() => undefined) : { allow: true };
+      });
+      let { h, runner } = await boot([runtimes.plugin]);
+      const ids = [await start(h, 'sumac'), await start(h, 'tupelo'), await start(h, 'ulmus')];
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      let done = false;
+      const pass = h.runJob(AUTO_RESUME_JOB).finally(() => {
+        done = true;
+      });
+      // One worker is held 10 s by the first ferret's ask and the stagger is 4 s: with no retry the third launches at 14 s.
+      for (let step = 0; step < 16; step += 1) await advance(h, 1_000);
+      expect(askedFirst).toHaveLength(3);
+      expect(runner.starts).toBe(launches + 1);
+      const [first, second, third] = askedFirst as [FerretId, FerretId, FerretId];
+      expect(new Set(ids)).toEqual(new Set([first, second, third]));
+      expect((await view(h, third)).state).not.toBe('stopped');
+      for (let step = 0; step < 120 && !done; step += 1) await advance(h, 1_000);
+      await pass;
+      for (const id of [first, second]) {
+        expect(runtimes.asked.filter(input => input.ask === 'runtime' && input.ferret === id)).toHaveLength(3);
+        expect((await view(h, id)).state).toBe('stopped');
+        expect(types(h, id).filter(type => type === 'session.auto_resume_skipped')).toHaveLength(1);
+      }
+      await h.stop();
+    });
+
     test("W2-a D-89 Runtimes' own no is never asked again", async () => {
       const runtimes = fakeRuntimes(input =>
         input.ask === 'switch' ? { allow: true } : { allow: false, reason: 'no' },
