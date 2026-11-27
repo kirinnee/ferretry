@@ -186,12 +186,12 @@
 [data-swatch][data-style='neumorphism'][data-mode='dark'] {
   --panel-bg: color-mix(in srgb, color-mix(in srgb, var(--surface) 50%, var(--surface-2)) 99%, var(--fg));
   --shadow-sm:
-    6px 6px 13px var(--scrim), -6px -6px 13px color-mix(in srgb, var(--fg) 24%, transparent),
+    6px 6px 13px var(--scrim), -6px -6px 13px color-mix(in srgb, var(--fg) 40%, transparent),
     inset 1px 1px 1px color-mix(in srgb, var(--fg) 12%, transparent);
   --shadow-md:
-    10px 10px 24px var(--scrim), -10px -10px 24px color-mix(in srgb, var(--fg) 24%, transparent),
+    10px 10px 24px var(--scrim), -10px -10px 24px color-mix(in srgb, var(--fg) 40%, transparent),
     inset 1px 1px 1px color-mix(in srgb, var(--fg) 12%, transparent);
-  --shadow-lg: 16px 16px 38px var(--scrim), -16px -16px 38px color-mix(in srgb, var(--fg) 26%, transparent);
+  --shadow-lg: 16px 16px 38px var(--scrim), -16px -16px 38px color-mix(in srgb, var(--fg) 42%, transparent);
   --shadow-active: inset 7px 7px 14px var(--scrim), inset -5px -5px 11px color-mix(in srgb, var(--fg) 11%, transparent);
   --nav-sel-shadow: inset 3px 3px 7px var(--scrim), inset -3px -3px 7px color-mix(in srgb, var(--fg) 8%, transparent);
 }
