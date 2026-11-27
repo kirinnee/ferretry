@@ -44,9 +44,8 @@ import {
   type FleetModelApplyPlan,
   type FleetProvisioner,
 } from '../provisioning.ts';
-import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { type MaterialiseBodies, type MaterialiseInput, materialiseFleet } from '../account/materialise.ts';
+import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { nextDisableExpiry } from '../account/disabled.ts';
 import type { BudgetHolds } from '../account/disabled-runtime.ts';
 import { parseSettings, SETTINGS_FORMAT, type SettingsObject } from '../settings.ts';
@@ -91,6 +90,7 @@ import {
   runtimesUsingCredential,
 } from './catalog.ts';
 import type { RuntimeRename, SessionStatus } from './foreign.ts';
+import { harnessFactsOf } from './harness-facts.ts';
 import { failedApplySentence } from './failed-apply.ts';
 import { expandAssetPath, joinPath } from '../paths.ts';
 import type { ModelCatalogSources } from '../models/catalog.ts';
@@ -377,26 +377,6 @@ const countRunningSessions = (statuses: readonly SessionStatus[]): number => sta
  * Whether a planned manifest says what the published one already says, the moment it was made
  * aside. Anything else that differs — a model, a default, a catalog — is worth publishing again.
  */
-/** The absolute path each located harness resolved to, which a wrapper execs instead of a bare name. */
-function harnessCommandsOf(locate: (harness: HarnessKind) => string | undefined): Partial<Record<HarnessKind, string>> {
-  return Object.fromEntries(
-    supportedKinds().flatMap(kind => {
-      const command = locate(kind);
-      return command === undefined ? [] : [[kind, command] as const];
-    }),
-  );
-}
-
-/** What the harnesses themselves give a materialisation: where each one lives, and what each one's plugin hands Runtimes. */
-export function harnessFactsOf(
-  deps: Pick<FleetCatalogServiceDeps, 'locate' | 'kits'>,
-): Pick<MaterialiseInput, 'harnessCommands' | 'kits'> {
-  return {
-    harnessCommands: harnessCommandsOf(harness => deps.locate(harness)),
-    ...(deps.kits === undefined ? {} : { kits: deps.kits() }),
-  };
-}
-
 function sameManifest(planned: { readonly generatedAt: string }, published: unknown): boolean {
   if (published === null || typeof published !== 'object') return false;
   const { generatedAt: _planned, ...next } = planned;

@@ -141,8 +141,8 @@ import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
   type FleetCatalogServiceDeps,
-  harnessFactsOf,
 } from './catalog-service.ts';
+import { harnessFactsOf } from './harness-facts.ts';
 import { assertMayFileSecrets, reusableSecrets, secretSentences, uniqueByName } from './setup-secrets.ts';
 import { type ToolInstallOutcome, type ToolInstallPreview, ToolInstallRefusal } from './tool-install.ts';
 import { toolOutcomeOnWire } from './tool-install-wire.ts';
