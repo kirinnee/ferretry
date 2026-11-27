@@ -189,6 +189,7 @@ const SWEEP: readonly Entry[] = [
   ['create', 'jobs.jsonl', false],
   ['accounts', 'login-secrets.json', false],
   ['accounts', 'accounts.json', false],
+  ['accounts', 'identity-links.json', false],
   ['git-accounts', 'keys.json', false],
   ['git-accounts', 'tokens.json', false],
   ['pulls', 'cache', true],

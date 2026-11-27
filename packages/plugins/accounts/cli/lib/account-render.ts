@@ -10,6 +10,7 @@ import {
   accountDefaultScopeWords,
   accountHintLine,
   accountHintSummary,
+  identityWords,
   LOGIN_HINT_PASSKEYS_OFF,
   loginMethodSentence,
   type Place,
@@ -125,7 +126,8 @@ export function renderAccountLine(account: AccountSummary): string {
 export function renderAccountHint(hint: AccountHintList): string {
   if (hint.hints.length === 0) return accountHintSummary(hint.site, []);
   const lines = hint.hints.map((entry: AccountHint) => `  ${accountHintLine(entry, hint.site)}`);
-  return [`Sign-ins for ${hint.site}:`, ...lines, '', LOGIN_HINT_PASSKEYS_OFF].join('\n');
+  const identity = hint.identity === undefined ? [] : ['', identityWords(hint.identity)];
+  return [`Sign-ins for ${hint.site}:`, ...lines, ...identity, '', LOGIN_HINT_PASSKEYS_OFF].join('\n');
 }
 
 /** The lines of `account-defaults.yaml` in effect, in the owner's words. */

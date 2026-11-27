@@ -60,6 +60,8 @@ export const PairedDaemonSchema = z.strictObject({
    * going back to the pairing's, so a name the device has learned is never lost to a read that is refused or slow.
    */
   learned: z.literal(true).optional(),
+  /** The naming offer, kept across the post-pair load until first shown or settled. No credential. */
+  askName: z.literal(true).optional(),
   deviceId: z.string().min(1).max(128),
   address: OriginSchema,
   /**
@@ -161,7 +163,7 @@ export interface PairingInput {
   readonly address: string;
   readonly pairedOver?: 'direct';
   readonly carriers?: readonly unknown[];
-  /** Ask, once this app shows the machine, whether to name it (set by a pairing; never stored, never set by a re-read). */
+  /** Ask, once this app shows the machine, whether to name it (kept until settled, never set by a re-read). */
   readonly askName?: true;
   /** The name the person typed on the pair screen: saved with the new grant as soon as the machine answers, so no step asks. */
   readonly chosenName?: string;
@@ -182,7 +184,7 @@ export class DaemonList {
   readonly #listeners = new Set<() => void>();
   readonly #unpaired = new Set<(daemon: string) => void>();
   readonly #caches = new Set<DaemonScopedCache>();
-  /** Machines just paired that may still be asked for a name. In memory only: a reload does not ask again. */
+  /** The open offer stays in memory after its stored handoff is consumed on first show. */
   readonly #naming = new Set<string>();
   /** Names typed at pairing, from the pair until saved (or until the step shows why not). In memory only. */
   readonly #chosen = new Map<string, ChosenName>();
@@ -193,6 +195,7 @@ export class DaemonList {
     this.#now = options.now;
     this.#forget = options.forget ?? (() => {});
     this.#snapshot = parseList(readRecord(this.#storage, APP_STORAGE.daemons, ListSchema));
+    for (const entry of this.#snapshot.daemons) if (entry.askName === true) this.#naming.add(entry.daemon);
   }
 
   snapshot = (): DaemonListSnapshot => this.#snapshot;
@@ -241,6 +244,7 @@ export class DaemonList {
       daemon: input.daemon,
       machine: kept ? existing.machine : input.machine,
       ...(kept ? { learned: true } : {}),
+      ...(input.askName === true || existing?.askName === true ? { askName: true } : {}),
       deviceId: input.deviceId,
       address: input.address,
       ...(input.pairedOver === 'direct' ? { pairedOver: 'direct' } : {}),
@@ -307,6 +311,15 @@ export class DaemonList {
     return this.#naming.has(daemon);
   }
 
+  /** The offer is visible: consume its stored handoff, keeping the current form open in memory. */
+  nameShown(daemon: string): void {
+    this.#replace(daemon, entry => {
+      if (entry.askName !== true) return entry;
+      const { askName: _askName, ...shown } = entry;
+      return shown;
+    });
+  }
+
   /** The name typed at pairing for this machine, until it is saved: where its save stands, and why it failed. */
   chosenName(daemon: string): ChosenName | undefined {
     return this.#chosen.get(daemon);
@@ -344,7 +357,10 @@ export class DaemonList {
   nameSettled(daemon: string): void {
     this.#chosen.delete(daemon);
     if (!this.#naming.delete(daemon)) return;
-    for (const listener of this.#listeners) listener();
+    this.#replace(daemon, entry => {
+      const { askName: _askName, ...settled } = entry;
+      return settled;
+    });
   }
 
   #replace(daemon: string, edit: (entry: PairedDaemon) => PairedDaemon, selected = this.#snapshot.selected): void {
