@@ -52,7 +52,11 @@ export function pairingScreenGuard(
   return guardWith(
     () => new BrowserToolError('forbidden', PAIRING_SCREEN_REFUSAL),
     windows,
-    call.tool === 'browser.eval' ? 'script' : 'content',
+    call.tool === 'browser.eval'
+      ? 'script'
+      : call.tool === 'browser.console' || call.tool === 'browser.network'
+        ? 'history'
+        : 'content',
     () => new BrowserToolError('forbidden', APP_EVAL_REFUSAL),
   );
 }

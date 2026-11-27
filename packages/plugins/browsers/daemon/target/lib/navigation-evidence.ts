@@ -91,6 +91,14 @@ export interface NavigationEvidence {
   readonly linked: boolean;
   /** Epoch milliseconds the ledger began watching: a commit before it is not in `origins`. */
   readonly watchedSince: number;
+  /**
+   * Epoch milliseconds the OLDEST document a frame of this target shows NOW began (a real commit: a same-document move
+   * such as a hash change or a pushState leaves it alone). A frame that appeared and has committed nothing began when it
+   * appeared. It lets the daemon say whether a credential was live at any instant this page's current documents existed,
+   * which is what separates a document a pairing link opened (still there) from the app's own page a real navigation
+   * brought in after the pairing was over.
+   */
+  readonly documentAt: number;
   /** The worker's totals over every page (see {@link NavigationTotals}); the same whichever page is asked. */
   readonly totals: NavigationTotals;
 }
@@ -148,6 +156,8 @@ export class NavigationLedger {
   #taintSeq = 0;
   /** The frames whose current document was entered by a link. */
   readonly #linkedFrames = new Set<string>();
+  /** When each frame's current document began. */
+  readonly #documentAt = new Map<string, number>();
   readonly #watchedSince: number;
 
   constructor(
@@ -169,6 +179,7 @@ export class NavigationLedger {
     const origin = originOf(address);
     if (main === true) this.#mainFrame = frameId;
     this.#frames.set(frameId, origin);
+    if (!sameDocument || !this.#documentAt.has(frameId)) this.#documentAt.set(frameId, this.now());
     const known = this.#origins.get(origin);
     if (known !== undefined) known.lastSeq = this.#seq;
     else if (this.#origins.size >= MAX_COMMITTED_ORIGINS) this.#overflow = true;
@@ -184,7 +195,10 @@ export class NavigationLedger {
   /** A frame appeared. Its address is not known until it commits one. */
   attached(frameId: string): void {
     this.#seq += 1;
-    if (!this.#frames.has(frameId)) this.#frames.set(frameId, 'null');
+    if (!this.#frames.has(frameId)) {
+      this.#frames.set(frameId, 'null');
+      this.#documentAt.set(frameId, this.now());
+    }
   }
 
   /** A frame went away: its documents are gone, and this ledger is what is left of what they were. */
@@ -192,6 +206,7 @@ export class NavigationLedger {
     this.#seq += 1;
     this.#frames.delete(frameId);
     this.#linkedFrames.delete(frameId);
+    this.#documentAt.delete(frameId);
   }
 
   evidence(): NavigationEvidence {
@@ -206,6 +221,7 @@ export class NavigationLedger {
       taintSeq: this.#taintSeq,
       linked: this.#linkedFrames.size > 0,
       watchedSince: this.#watchedSince,
+      documentAt: this.#documentAt.size === 0 ? this.now() : Math.min(...this.#documentAt.values()),
       totals: this.totals.snapshot(),
     };
   }
@@ -278,12 +294,25 @@ const hasOnly = (value: Record<string, unknown>, keys: readonly string[]): boole
  */
 export function parseNavigationEvidence(raw: unknown): NavigationEvidence | undefined {
   const value = objectOf(raw);
-  if (!hasOnly(value, ['seq', 'origins', 'overflow', 'frames', 'taintSeq', 'linked', 'watchedSince', 'totals']))
+  if (
+    !hasOnly(value, [
+      'seq',
+      'origins',
+      'overflow',
+      'frames',
+      'taintSeq',
+      'linked',
+      'watchedSince',
+      'documentAt',
+      'totals',
+    ])
+  )
     return undefined;
-  const { seq, origins, overflow, frames, taintSeq, linked, watchedSince } = value;
+  const { seq, origins, overflow, frames, taintSeq, linked, watchedSince, documentAt } = value;
   const totals = parseTotals(value.totals);
   if (totals === undefined) return undefined;
-  if (!isCount(seq) || !isCount(watchedSince) || !isCount(taintSeq) || taintSeq > seq) return undefined;
+  if (!isCount(seq) || !isCount(watchedSince) || !isCount(documentAt) || !isCount(taintSeq) || taintSeq > seq)
+    return undefined;
   if (typeof overflow !== 'boolean' || typeof linked !== 'boolean') return undefined;
   if (!Array.isArray(origins) || origins.length > MAX_COMMITTED_ORIGINS) return undefined;
   if (!Array.isArray(frames) || frames.length > MAX_FRAMES || !frames.every(isOrigin)) return undefined;
@@ -298,7 +327,17 @@ export function parseNavigationEvidence(raw: unknown): NavigationEvidence | unde
     seen.add(each.origin);
     parsed.push({ origin: each.origin, firstAt: each.firstAt, lastSeq: each.lastSeq });
   }
-  return { seq, origins: parsed, overflow, frames: [...(frames as string[])], taintSeq, linked, watchedSince, totals };
+  return {
+    seq,
+    origins: parsed,
+    overflow,
+    frames: [...(frames as string[])],
+    taintSeq,
+    linked,
+    watchedSince,
+    documentAt,
+    totals,
+  };
 }
 
 /** The worker's {@link NavigationTotals}: only the exact shape, every count a safe whole number, the list bounded. */

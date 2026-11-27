@@ -67,6 +67,7 @@ import {
   type SecretVaultDocument,
 } from './seal.ts';
 import type { RecipeAsk, RecipeGuard } from './secrets/login-recipes.ts';
+import { providerOwnSignIn } from './provider-hosts.ts';
 import { totpCode } from './totp.ts';
 
 /** What a directory reads the time from: an instant, as text. */
@@ -317,8 +318,7 @@ function signInSummary(
   const viaKey = signIn.method?.viaKey;
   const viaHandle = viaKey === undefined ? undefined : handles.get(viaKey);
   const viaAccount = viaHandle === undefined ? undefined : accounts[viaHandle];
-  const viaSite =
-    viaKey === undefined ? undefined : signInsOf(signIns, viaKey).find(([, other]) => other.place.kind === 'site');
+  const viaSite = viaKey === undefined ? undefined : providerOwnSignIn(signIn.method?.kind, signInsOf(signIns, viaKey));
   const method: LoginMethod = {
     kind: signIn.method?.kind ?? 'password',
     ...(signIn.method?.name === undefined ? {} : { name: signIn.method.name }),

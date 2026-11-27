@@ -14,6 +14,7 @@ import { accountHintSummary, placeHosts } from '../contract/routes/index.ts';
 import { machineName } from './adapters/host.ts';
 import { KernelAccountDefaultsWriter } from './adapters/kernel-defaults-writer.ts';
 import { StateAccountIndexStore } from './adapters/state-account-index-store.ts';
+import { StateIdentityLinksStore } from './adapters/state-identity-links-store.ts';
 import {
   boardProjectOf,
   ownerFerretOf,
@@ -25,6 +26,7 @@ import { MemoryCipher, vaultSealedStore } from './adapters/vault-sealed.ts';
 import { LOGIN_SECRETS } from '../contract/routes/sealed.ts';
 import { AccountDefaults } from './lib/account-defaults.ts';
 import { AccountVault, LoginStoreLock, narrowAccountVault } from './lib/accounts.ts';
+import { IdentityLinks } from './lib/identity-links.ts';
 import { LoginDirectory } from './lib/logins.ts';
 import type { AccountSealedStore } from './lib/seal.ts';
 import { SessionSignInContext } from './lib/sign-in-context.ts';
@@ -42,6 +44,8 @@ export interface AccountsCore {
   /** The plaintext side: handed only to the Vault's redactor and input service, never to a route (S10). */
   readonly vault?: AccountVault;
   readonly lock: LoginStoreLock;
+  /** The identity graph's edges and a ferret's "S lives in I" proposals (W-124). */
+  readonly links: IdentityLinks;
   /** Who is asking, for the order of a sign-in card (`input.saved`). */
   readonly choice: SessionSignInContext;
 }
@@ -130,6 +134,12 @@ export function buildAccounts(
     ownerSession: async () => await ownerFerretOf(ctx.uses.ferrets),
   });
   const recipes = (): RecipeMasking | undefined => options.recipes?.();
+  const links = new IdentityLinks({
+    store: new StateIdentityLinksStore(kernel.state, stateFile(ctx, 'identity-links')),
+    accounts: { listing: async () => await logins.accounts.list() },
+    clock: { now: () => kernel.clock.now() as string },
+    redact: async text => await kernel.redaction.read(scope => scope.text(text)),
+  });
 
   kernel.jobs.add({
     id: 'accounts.sweep',
@@ -148,6 +158,7 @@ export function buildAccounts(
     ...(narrowed === undefined ? {} : { lookAlike: narrowed.lookAlike }),
     defaults,
     choice,
+    links,
     ...(seeds === undefined ? {} : { seeds }),
   });
 
@@ -177,11 +188,11 @@ export function buildAccounts(
     try {
       const recipesNow = recipes();
       const hint = await accountHint(
-        { accounts, choice, ...(recipesNow === undefined ? {} : { recipes: recipesNow }) },
+        { accounts, choice, links, ...(recipesNow === undefined ? {} : { recipes: recipesNow }) },
         site,
         ferret,
       );
-      return { text: accountHintSummary(hint.site, hint.hints) };
+      return { text: accountHintSummary(hint.site, hint.hints, hint.identity) };
     } catch (error) {
       if (error instanceof ApiError && error.code === 'invalid_site')
         return { text: 'Name a site as a host like github.com, or a URL.', isError: true };
@@ -199,7 +210,7 @@ export function buildAccounts(
     },
   };
 
-  const core: AccountsCore = { logins, lock, choice, ...(vault === undefined ? {} : { vault }) };
+  const core: AccountsCore = { logins, lock, choice, links, ...(vault === undefined ? {} : { vault }) };
   return {
     routes,
     tools: { account_hint: accountHintTool },

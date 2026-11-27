@@ -19,7 +19,7 @@ export { hostFileIsNamed, readHostFile } from './machine-name-file.ts';
  * A name the person already typed ON THE PAIR SCREEN is saved first, through the same call, and then this step never
  * shows. Only when that save fails does the step come back, prefilled with the typed name, and says what went wrong.
  *
- * It is only offered by a pairing (`PairingInput.askName`), once per pairing and never again after a reload, and it
+ * A pairing (`PairingInput.askName`) keeps the offer across document loads until first shown or settled, and it
  * stays out of the way when it cannot tell whether the machine is named (the read was refused or failed).
  */
 
@@ -215,8 +215,10 @@ export function NameThisMachine({
   const shown =
     client !== undefined && paired !== undefined && (chosen === undefined ? ready : chosen.state === 'failed');
   useEffect(() => {
-    if (shown) decided.current?.('asking');
-  }, [shown]);
+    if (!shown) return;
+    runtime.daemons.nameShown(daemon);
+    decided.current?.('asking');
+  }, [shown, runtime, daemon]);
   // The footer's Next saves what is typed: the flow calls the latest save, never one from an earlier render.
   const typed = useRef<string | undefined>(undefined);
   const footerSave = useRef<() => Promise<void>>(async () => undefined);
