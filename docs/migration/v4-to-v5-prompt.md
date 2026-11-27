@@ -110,10 +110,15 @@ run the check again.
 `rollback` needs no `fy` check: it runs no `fy` itself and chooses v4 or v5 from the notes. After a rollback, `fy --version`
 must print 4.291.x (v4 is back), and any `fy` after that is the v4 one.
 
-The cutover lock stays held between `backup` and `convert`. The lock-owning process performs the rename and leaves a
-regular file at the original home path, saying where the backup is, so v4 cannot bootstrap an empty home there. `convert`
+The cutover lock stays held between `backup` and `convert`. The lock-owning process stages beside the original home
+(even if the notes are on another filesystem) and atomically exchanges it with a regular file saying where the backup is,
+so the home path is never absent and v4 cannot bootstrap an empty home there. If the filesystem cannot exchange entries,
+the move refuses: stop v4's service manager first and inspect before retrying. `convert`
 atomically exchanges that file for an already locked target and holds both SQLite locks through conversion. Rollback
-removes the placeholder only if its identity and contents still match. If the lease is lost, stop and roll back before trying again.
+removes the placeholder only if its identity and contents still match. Every exchange checks the displaced entry too;
+an unexpected entry is kept at the reported path and the operation stops. Lease release never recursively deletes entries,
+and keeps the placeholder identity record so rollback still works if the lease was released before conversion.
+If the lease is lost, stop and roll back before trying again.
 The dry run and real conversion both resolve absolute v4 asset paths against the original home. A disk-space shortfall
 or failed copy verification refuses the move; partial recovery copies stay available for inspection.
 

@@ -54,7 +54,14 @@ export function moveNoReplace(from: string, to: string): void {
 
 /** Atomically exchange a blocking placeholder with an already locked new home: there is no absent-home window. */
 export function exchangePaths(from: string, to: string): void {
-  renamePaths(from, to, true);
+  try {
+    renamePaths(from, to, true);
+  } catch {
+    // Includes a missing platform primitive, not just a filesystem that rejects exchange.
+    throw new Error(
+      'cannot atomically exchange the cutover home; stop v4’s service manager first and inspect before retrying',
+    );
+  }
 }
 
 function renamePaths(from: string, to: string, exchange: boolean): void {
@@ -85,7 +92,7 @@ function renamePaths(from: string, to: string, exchange: boolean): void {
   if (result !== 0)
     throw new Error(
       exchange
-        ? 'cannot exchange the cutover placeholder and locked new home'
+        ? 'cannot atomically exchange the cutover home; stop v4’s service manager first and inspect before retrying'
         : 'cannot move home without replacing a destination; nothing was moved',
     );
 }
@@ -121,8 +128,11 @@ export async function recoveryCopy(
   if ((await copy.exited) !== 0) throw new Error('recovery copy failed; nothing was moved (the partial copy was kept)');
   verifyManifests(before, await manifest(copied));
   verifyManifests(before, await manifest(from));
-  await writeFile(`${to}.manifest.json`, `${JSON.stringify(before, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
   await chmod(copied, 0o700);
+  // The published root is private; verify and record that final mode, not its pre-chmod source mode.
+  const published = before.map(entry => (entry.path === '' ? { ...entry, mode: 0o700 } : entry));
+  verifyManifests(published, await manifest(copied));
+  await writeFile(`${to}.manifest.json`, `${JSON.stringify(published, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
   moveNoReplace(copied, to);
 }
 

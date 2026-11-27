@@ -614,7 +614,8 @@ backup)
   (cd "${CONVERTER_DIR}" && bun install --frozen-lockfile) || fail "bun install failed in ${CONVERTER_DIR}. Nothing was moved"
   # v4 owns an exclusive SQLite transaction on daemon.lock. Keep that same exclusion across BOTH phases, including
   # the dependency-install/restart race, dry pass, verified copy, rename and real conversion. flock is not sufficient.
-  lease="$(dirname "${NOTES}")/v4-v5-lease-$(note_get STAMP)"
+  # Both exchanges must stay on H's filesystem even when the notes live on a different mount.
+  lease="$(dirname "${H}")/v4-v5-lease-$(note_get STAMP)"
   (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts start "${H}" "${lease}") || fail "cannot prove v4 stopped and exclusively locked; nothing was moved. Run quiet again"
   note_set LEASE "${lease}"
   trap '(cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts release "${lease}") >/dev/null 2>&1 || true' EXIT
@@ -639,8 +640,8 @@ backup)
   # A chmod failure must happen while the original home is still in place.
   chmod 700 "${H}" || fail "chmod 700 ${H} failed; nothing was moved"
   mark backing-up
-  # The lock keeper verifies and renames in its own process, plants the blocking file at H, and marks success.
-  # It restores H under the lock if anything after its rename fails.
+  # The keeper atomically swaps H with a prepared blocking file, then publishes the displaced home at B.
+  # It restores H under the lock if a later step fails; H is never absent during backup.
   (cd "${CONVERTER_DIR}" && bun src/cutover-lease.ts move "${lease}" "${B}" "${NOTES}") || fail "cutover exclusion was lost or the move failed; inspect the original home before retrying"
   trap - EXIT # The lease remains held until convert finishes or rollback releases it.
   say "✅ backed up: ${B} (mode 700). Send nothing to any ferret and type into no pane until v5 is started"

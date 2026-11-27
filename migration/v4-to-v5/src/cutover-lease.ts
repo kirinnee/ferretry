@@ -1,7 +1,7 @@
 /** A cutover owns the SAME SQLite transaction v4 owns, across the backup and convert shell invocations. */
 import { Database } from 'bun:sqlite';
 import { mkdirSync, unlinkSync } from 'node:fs';
-import { chmod, lstat, mkdir, rm, stat } from 'node:fs/promises';
+import { chmod, lstat, mkdir, rmdir, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { assertPlaceholder, moveHome, restoreHome, sameLock } from './cutover-home.ts';
 import { exchangePaths } from './recovery-copy.ts';
@@ -36,7 +36,17 @@ export async function releaseLease(dir: string): Promise<void> {
     signal: AbortSignal.timeout(2000),
   });
   if (!response.ok) throw new Error('cutover lease could not be released');
-  await rm(dir, { recursive: true });
+  await removeEmptyLease(dir);
+}
+
+/** Never recurse: recovery proof and any unexpected entry stay available for inspection. */
+async function removeEmptyLease(dir: string): Promise<void> {
+  try {
+    await rmdir(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      console.error(`Cutover records or unrecognised entries kept at ${dir}; inspect before removing anything.`);
+  }
 }
 
 async function changeHome(dir: string, action: string, args: readonly string[]): Promise<void> {
@@ -47,7 +57,7 @@ async function changeHome(dir: string, action: string, args: readonly string[]):
     body: JSON.stringify(args),
     signal: AbortSignal.timeout(5000),
   });
-  if (!response.ok) throw new Error('cutover home operation refused; nothing was moved by this request');
+  if (!response.ok) throw new Error(await response.text());
 }
 
 async function takeV4Lock(home: string) {
@@ -108,14 +118,24 @@ async function serve(home: string, dir: string): Promise<void> {
             // Recheck after the asynchronous lock acquisition; swap never exposes an absent or unlocked home.
             assertPlaceholder(dir, home, backup);
             exchangePaths(staged, home);
+            // The last check is not proof of what the exchange actually displaced.
+            try {
+              assertPlaceholder(dir, staged, backup);
+            } catch {
+              throw new Error(
+                `home changed during cutover; displaced entry kept at ${staged}; inspect before retrying`,
+              );
+            }
           } else {
             if (!sameLock(join(backup, 'daemon.lock'), identity) || notesOrMode === undefined)
               throw new Error('backup lock changed');
             restoreHome(dir, home, backup, parseInt(notesOrMode, 8));
           }
           return new Response(null, { status: 204 });
-        } catch {
-          return new Response(null, { status: 409 });
+        } catch (error) {
+          return new Response(error instanceof Error ? error.message : 'cutover home operation refused', {
+            status: 409,
+          });
         }
       }
       if (url.pathname === '/release' && request.method === 'POST') {
@@ -124,6 +144,16 @@ async function serve(home: string, dir: string): Promise<void> {
         target?.db.close();
         if (target !== undefined && sameLock(join(home, 'daemon.lock'), target.identity))
           unlinkSync(join(home, 'daemon.lock')); // Only the empty lock created for this conversion, never v4 data.
+        if (target !== undefined && movedTo !== undefined) {
+          const displaced = join(dir, 'new-home');
+          try {
+            assertPlaceholder(dir, displaced, movedTo);
+            unlinkSync(displaced);
+          } catch {
+            // In particular this may be a replacement v4 home with its only copy of a session.
+            // Leave it and the identity proof in place. The caller reports the retained directory.
+          }
+        }
         // Stop accepting now, letting this response finish. A delayed stop could unlink a new keeper's socket.
         void server.stop();
         return new Response(null, { status: 204 });
@@ -151,7 +181,7 @@ async function start(home: string, dir: string): Promise<void> {
   }
   child.kill();
   await child.exited;
-  await rm(dir, { recursive: true, force: true });
+  await removeEmptyLease(dir);
   throw new Error('cannot prove v4 stopped or hold its daemon lock; stop v4 and run quiet again. Nothing was moved');
 }
 
@@ -181,7 +211,8 @@ if (import.meta.main) {
         }
       }
     } else throw new Error('invalid cutover lease command');
-  } catch {
+  } catch (error) {
+    if (error instanceof Error) console.error(error.message);
     console.error(
       'Cannot prove v4 stopped and exclusively locked. Nothing was moved by this command. Stop v4 and run quiet again, or roll back if backup already moved.',
     );
