@@ -99,6 +99,8 @@ class FakeHost implements BrowserViewerHost {
   /** The viewer id this host minted on attach, and the one each input was dispatched for. */
   readonly minted = 'minted-viewer-1';
   readonly dispatchedAs: string[] = [];
+  /** The page each input claimed to be for (`undefined` for the stream's own held-key releases). */
+  readonly dispatchedFor: (string | undefined)[] = [];
 
   attachViewer(
     _sessionId: string,
@@ -117,8 +119,9 @@ class FakeHost implements BrowserViewerHost {
     });
   }
 
-  dispatchHumanInput(_sessionId: string, input: BrowserInputEvent, viewerId: string): Promise<void> {
+  dispatchHumanInput(_sessionId: string, input: BrowserInputEvent, viewerId: string, page?: string): Promise<void> {
     this.dispatchedAs.push(viewerId);
+    this.dispatchedFor.push(page);
     if (this.failNextDispatch) {
       this.failNextDispatch = false;
       return Promise.reject(new Error('page detached'));
@@ -136,7 +139,9 @@ const frame = (overrides: Partial<BrowserScreencastFrame> = {}): BrowserScreenca
   ...overrides,
 });
 
-const message = (value: unknown): string => JSON.stringify(value);
+/** What the screen sends: the input and the page whose frame it is painted over. */
+const message = (value: unknown, pageId: string | null = 'page-1'): string =>
+  JSON.stringify(pageId === null ? value : { ...(value as object), pageId });
 
 const mouseMove = { kind: 'mouse', type: 'mouseMoved', x: 4, y: 5 } as const;
 
@@ -397,6 +402,23 @@ describe('browser viewer stream — upstream input', () => {
       { kind: 'insertText', text: 'hi' },
       { kind: 'insertText', text: 'there' },
     ]);
+  });
+
+  it('should hand the host the page each input claims, and drop input that names none without ending the stream', async () => {
+    // Arrange
+    const { host, downstream, stream } = await connect();
+
+    // Act
+    stream.fromClient(message(mouseMove, 'page-7'));
+    stream.fromClient(message(mouseMove, null));
+    stream.fromClient(message({ kind: 'insertText', text: 'hi' }, 'page-8'));
+    await stream.settled;
+
+    // Assert — the bare input never reached the host; the others carry the page they were sent for
+    should(host.dispatchedFor).deepEqual(['page-7', 'page-8']);
+    should(host.dispatched).have.length(2);
+    should(stream.finished).be.false();
+    should(downstream.closes).deepEqual([]);
   });
 
   it('B1 should be the viewer the host minted on attach, and type as that viewer alone', async () => {

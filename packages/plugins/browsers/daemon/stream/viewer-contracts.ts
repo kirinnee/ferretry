@@ -42,8 +42,11 @@ export interface BrowserViewerHost {
     onFrame: (frame: BrowserScreencastFrame) => void,
     onTerminal: (signal: ViewerTerminalSignal) => void,
   ): Promise<ViewerAttachment>;
-  /** Input for the display `viewerId` (the attachment's own): it lands on the page that display is showing. */
-  dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewerId: string): Promise<void>;
+  /**
+   * Input for the display `viewerId` (the attachment's own): it lands on the page that display is showing. `page` is the page
+   * the screen says it was painting when the person acted: input meant for any other page is dropped, never redirected.
+   */
+  dispatchHumanInput(sessionId: string, input: BrowserInputEvent, viewerId: string, page?: string): Promise<void>;
 }
 
 /**

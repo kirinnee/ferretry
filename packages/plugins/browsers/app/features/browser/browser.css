@@ -157,6 +157,20 @@
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
 }
+.fy-ws-page-badge[data-tone='identity'] {
+  min-width: 0;
+  max-width: 8em;
+  border-color: var(--border-strong);
+  background: transparent;
+  color: var(--muted);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.fy-ws-page-badge[data-tone='identity'] > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fy-ws-page-badge[data-tone='held'] {
   border-color: var(--accent-border);
   background: var(--accent-soft);

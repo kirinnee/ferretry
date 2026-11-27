@@ -15,11 +15,15 @@ import type { BrowserProfileLease } from './profile.ts';
  */
 export type { BrowserLoginConnection, BrowserLoginState, BrowserLoginStatus };
 
+/**
+ * The sign-in window of each browser identity: one window per identity, each on that identity's own profile and screen,
+ * so signing in to one never closes, or shows, another's. An absent `identity` is the built-in `agent` one.
+ */
 export interface BrowserLoginLifecycle {
-  status(): Promise<BrowserLoginStatus>;
-  start(options?: { readonly minutes?: number }): Promise<BrowserLoginStatus>;
-  stop(options?: { readonly primed?: boolean }): Promise<BrowserLoginStatus>;
-  confirm(): Promise<BrowserLoginStatus>;
+  status(identity?: string): Promise<BrowserLoginStatus>;
+  start(options?: { readonly minutes?: number; readonly identity?: string }): Promise<BrowserLoginStatus>;
+  stop(options?: { readonly primed?: boolean; readonly identity?: string }): Promise<BrowserLoginStatus>;
+  confirm(identity?: string): Promise<BrowserLoginStatus>;
 }
 
 export interface BrowserLoginWindow {

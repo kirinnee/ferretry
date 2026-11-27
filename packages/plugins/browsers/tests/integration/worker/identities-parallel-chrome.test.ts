@@ -235,6 +235,7 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
     );
     pages = new IdentityBrowsers({
       maxRunning: () => maxRunning,
+      configured: () => true,
       make: (identity, quota) =>
         new BrowserSessionService(
           { get: async id => (sessions.has(id) ? {} : undefined) },
@@ -506,6 +507,7 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
       let launchedBrowser: BrowserAutomation | undefined;
       const local = new IdentityBrowsers({
         maxRunning: () => 1,
+        configured: () => true,
         make: (identity, quota) =>
           new BrowserSessionService(
             { get: async () => ({}) },

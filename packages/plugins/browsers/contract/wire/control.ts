@@ -1,6 +1,6 @@
 import { InstantSchema } from '@ferretry/std';
 import { z } from 'zod';
-import { SurfaceNameSchema } from '../wire.ts';
+import { BrowserIdentityKeySchema, SurfaceNameSchema } from '../wire.ts';
 import { AGENT_TOOL_MAX_URL_CHARS, AskOwnerMessageSchema } from './limits.ts';
 
 /**
@@ -29,6 +29,8 @@ export const AgentSurfaceSchema = z.strictObject({
   available: z.boolean().optional(),
   /** A popup: the page that opened it. Listed so an agent can tell which tabs are its own pages' popups. */
   openerId: z.string().min(1).max(128).optional(),
+  /** A browser page: the identity whose Chrome (profile, sign-ins, proxy) holds it. */
+  identity: BrowserIdentityKeySchema.optional(),
 });
 export type AgentSurface = z.infer<typeof AgentSurfaceSchema>;
 /**

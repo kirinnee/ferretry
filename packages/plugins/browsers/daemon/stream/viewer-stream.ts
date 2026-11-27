@@ -1,3 +1,4 @@
+import { BROWSER_MAX_PAGE_ID_LENGTH } from '../../contract/wire.ts';
 import { type BrowserInputEvent, type BrowserScreencastFrame } from '../../contract/wire/browser.ts';
 import { encodeBrowserStreamChunks, nextBrowserStreamSerial } from '../../contract/wire/stream.ts';
 import type { FrameClock, FrameTimer } from './contracts.ts';
@@ -164,11 +165,15 @@ export class BrowserViewerStream {
       this.finish(VIEWER_CLOSE_TOO_LARGE, 'browser input queue exceeded');
       return;
     }
-    const decoded = this.parseInput(bytes);
-    if (decoded === undefined) {
+    const parsed = this.parseInput(bytes);
+    if (parsed === undefined) {
       this.finish(VIEWER_CLOSE_POLICY, 'invalid browser input');
       return;
     }
+    // Input that does not say which page it was painted over cannot be told apart from input for the page the screen has
+    // just been moved to, so it goes nowhere (a screen that is switching is normal, so the stream stays open).
+    if (parsed.page === undefined) return;
+    const { input: decoded, page } = parsed;
     // Held keys are recorded on admission, not on dispatch. kteam recorded them inside the serial
     // task, so a viewer that vanished before its keyDown ran left the page with the key stuck down.
     if (decoded.kind === 'key') {
@@ -180,7 +185,7 @@ export class BrowserViewerStream {
     this.serial = this.serial
       .then(async () => {
         if (this.closed) return;
-        await this.host.dispatchHumanInput(this.sessionId, decoded, this.attachment.viewerId);
+        await this.host.dispatchHumanInput(this.sessionId, decoded, this.attachment.viewerId, page);
       })
       .catch((error: unknown) => {
         if (error instanceof ViewerInputRefused) this.finish(VIEWER_CLOSE_POLICY, 'browser input not permitted');
@@ -196,7 +201,10 @@ export class BrowserViewerStream {
     this.finish(VIEWER_CLOSE_NORMAL, 'browser viewer disconnected', false);
   }
 
-  private parseInput(bytes: Uint8Array): BrowserInputEvent | undefined {
+  /** The input a screen sent and the page its frame was painted for (`undefined` when it named none). */
+  private parseInput(
+    bytes: Uint8Array,
+  ): { readonly input: BrowserInputEvent; readonly page: string | undefined } | undefined {
     let payload: unknown;
     try {
       payload = JSON.parse(new TextDecoder().decode(bytes));
@@ -204,7 +212,13 @@ export class BrowserViewerStream {
       return undefined;
     }
     const result = normalizeBrowserInput(payload);
-    return result.ok ? result.value : undefined;
+    if (!result.ok) return undefined;
+    const claimed = (payload as { readonly pageId?: unknown }).pageId;
+    const page =
+      typeof claimed === 'string' && claimed.length > 0 && claimed.length <= BROWSER_MAX_PAGE_ID_LENGTH
+        ? claimed
+        : undefined;
+    return { input: result.value, page };
   }
 
   private acceptFrame(frame: BrowserScreencastFrame): void {
