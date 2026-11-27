@@ -30,6 +30,7 @@ export const sceneInputPatterns: readonly string[] = [
   'packages/plugins/*/{app,contract}/**',
   'packages/plugins/*/*.ts',
   'packages/plugins/*/package.json',
+  'packages/core/*/tests/integration/app/**',
   'packages/plugins/*/tests/integration/app/**',
   'packages/plugins/*/tests/support/**',
   'packages/app/tests/integration/fixtures/**',
