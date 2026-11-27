@@ -237,6 +237,13 @@ async function readCapped(
   return bytes;
 }
 
+/** Whose storage a made file may come from: its name for a sentence, and the one test a link must pass. */
+export interface Store {
+  readonly name: string;
+  readonly allows: (url: string) => boolean;
+}
+const FAL_STORE: Store = { name: 'fal', allows: isFalCdn };
+
 /** One file from fal's storage, of one of the `types` asked for, or why it was not taken. */
 export async function download(
   fetcher: FetchPort,
@@ -247,27 +254,28 @@ export async function download(
     maxBytes: MAX_DOWNLOAD_BYTES,
     timeoutMs: DOWNLOAD_TIMEOUT_MS,
   },
+  store: Store = FAL_STORE,
 ): Promise<{ readonly bytes: Uint8Array; readonly type: string } | Unfetched> {
-  if (!isFalCdn(url))
-    return { why: `the ${noun} was not on fal’s own storage, so it was not fetched`, hostRefused: true };
+  if (!store.allows(url))
+    return { why: `the ${noun} was not on ${store.name}’s own storage, so it was not fetched`, hostRefused: true };
   try {
     const response = await fetcher.request(url, {
       method: 'GET',
       redirect: 'error',
       signal: AbortSignal.timeout(limits.timeoutMs),
     });
-    if (!response.ok) return { why: `fal’s storage answered ${response.status}` };
+    if (!response.ok) return { why: `${store.name}’s storage answered ${response.status}` };
     const declared = Number(response.headers.get('content-length') ?? 0);
     if (declared > limits.maxBytes) return { why: `the ${noun} is larger than Create will fetch`, permanent: true };
     // The cap holds while the body comes down (a missing or wrong Content-Length proves nothing): past it the read stops.
     const bytes = await readCapped(response.body, limits.maxBytes);
     if (bytes === 'too-large') return { why: `the ${noun} is larger than Create will fetch`, permanent: true };
-    if (bytes.byteLength === 0) return { why: 'fal’s storage sent an empty file' };
+    if (bytes.byteLength === 0) return { why: `${store.name}’s storage sent an empty file` };
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
-    if (!types.includes(type)) return { why: `what fal’s storage sent was not a ${noun}`, permanent: true };
+    if (!types.includes(type)) return { why: `what ${store.name}’s storage sent was not a ${noun}`, permanent: true };
     return { bytes, type };
   } catch {
-    return { why: `the ${noun} could not be fetched from fal’s storage` };
+    return { why: `the ${noun} could not be fetched from ${store.name}’s storage` };
   }
 }
 
