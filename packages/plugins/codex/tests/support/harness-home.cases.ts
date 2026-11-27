@@ -328,6 +328,33 @@ export function harnessHomeCases(): void {
       expect(await present()).toBe(false);
     });
 
+    test('C-115 a stale link at config.toml is removed and the default config written: launch succeeds, the link’s target is untouched', async () => {
+      const home = join(AGENT_HOMES(), 'f2');
+      const target = join(fixture, 'elsewhere.toml');
+      await writeFile(target, 'person = "theirs"\n');
+      await symlink(target, join(home, 'config.toml'));
+      const { harness } = build();
+
+      await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+
+      expect((await lstat(join(home, 'config.toml'))).isSymbolicLink()).toBe(false);
+      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('check_for_update_on_startup = false\n');
+      expect(await readFile(target, 'utf8')).toBe('person = "theirs"\n');
+    });
+
+    test('C-115 with nothing to say, a stale link at config.toml is removed and its target is left alone', async () => {
+      const home = join(AGENT_HOMES(), 'f2');
+      const target = join(fixture, 'elsewhere.toml');
+      await writeFile(target, 'person = "theirs"\n');
+      await symlink(target, join(home, 'config.toml'));
+      const { harness } = build(new Map([['quiet', { settings: { check_for_update_on_startup: null } }]]));
+
+      await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+
+      expect(await lstat(join(home, 'config.toml')).catch(() => undefined)).toBeUndefined();
+      expect(await readFile(target, 'utf8')).toBe('person = "theirs"\n');
+    });
+
     test('S42 first launch on a fresh FY_HOME: the kernel made the agent-homes base 0700 at boot, the launch makes the ferret home under it', async () => {
       const fy = join(fixture, 'fy-home');
       await rm(fy, { recursive: true });

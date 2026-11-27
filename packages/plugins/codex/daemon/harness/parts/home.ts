@@ -108,11 +108,14 @@ export const homePart: HarnessPart<'homeFor' | 'prepareHome'> = ({
       ] as const) {
         const target = root.resolve(name);
         if (!target.ok) throw new Error(`Codex's ${name} could not be placed in the ferret's home: ${target.error}`);
+        // Agent homes are Ferretry's only, so a LINK at the name is a stale one of ours: remove the link, never what it
+        // points at (the kernel refuses to write through it, which would fail every default launch with `link_escape`).
+        const found = await root.lstat(target.value);
+        if (found?.kind === 'symlink') await root.unlink(target.value);
         if (text === '') {
           // Nothing to say now: a config.toml an earlier launch of this reused home left must not stay applied (the
-          // settings this profile no longer selects). Agent homes are Ferretry's only, so a FILE there is ours to clear.
-          if (name === CODEX_FACTS.mcp.file && (await root.lstat(target.value))?.kind === 'file')
-            await root.remove(target.value);
+          // settings this profile no longer selects). A FILE there is ours to clear too.
+          if (name === CODEX_FACTS.mcp.file && found?.kind === 'file') await root.remove(target.value);
           continue;
         }
         await root.writeText(target.value, text);
