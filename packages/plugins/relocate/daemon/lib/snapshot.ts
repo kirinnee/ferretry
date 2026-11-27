@@ -101,6 +101,26 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
   const withheld: string[] = [...untravelled];
   let ignored: string[] = [];
   let head: Plan['head'];
+  const finish = (): Plan => ({
+    refusals,
+    files,
+    untracked,
+    withheld,
+    ignored,
+    ...(head === undefined ? {} : { head }),
+    bytes,
+    largest: refusals.length > 0 ? [...sizes].sort((a, b) => b.size - a.size).slice(0, 5) : [],
+  });
+  const overBudget = (): boolean => {
+    const tooBig = sizes.find(file => file.size > RELOCATE_MAX_FILE_BYTES);
+    if (tooBig !== undefined) refusals.push(`${tooBig.path} is larger than one file of a move can be`);
+    if (bytes > RELOCATE_MAX_BUNDLE_BYTES)
+      refusals.push(
+        `this ferret holds ${String(Math.ceil(bytes / 1024 / 1024))} MB; a move carries at most ${String(RELOCATE_MAX_BUNDLE_BYTES / 1024 / 1024)} MB`,
+      );
+    return refusals.length > 0;
+  };
+  if (overBudget()) return finish();
   if (inputs.tree !== undefined) {
     try {
       head = await inputs.tree.head();
@@ -111,40 +131,35 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
             withheld.push(path);
             continue;
           }
-          const content = await inputs.tree.read(path, RELOCATE_MAX_FILE_BYTES);
-          if (content === undefined)
-            throw new Error(`${path} is not a readable plain file within the move’s file limit`);
-          untracked.push({ path, size: content.length });
+          const size = await inputs.tree.size(path);
+          if (size === undefined) throw new Error(`${path} is not a readable plain file within the move’s file limit`);
+          untracked.push({ path, size });
+          sizes.push({ path, size });
+          bytes += size;
+          if (overBudget()) return finish();
         }
-        const commits = await inputs.tree.commits(RELOCATE_MAX_BUNDLE_BYTES);
-        const changes = await inputs.tree.changes(RELOCATE_MAX_BUNDLE_BYTES);
-        bytes += (commits?.length ?? 0) + changes.length + untracked.reduce((sum, file) => sum + file.size, 0);
-        sizes.push(...untracked);
-        if (commits !== undefined) sizes.push({ path: 'commits', size: commits.length });
-        if (changes.length > 0) sizes.push({ path: 'changes', size: changes.length });
+        // The known files fit before git constructs anything. Each bounded output spends the remaining budget before
+        // the next operation starts, so even a source near the cap cannot read another whole bundle after refusing.
+        const remaining = () => Math.min(RELOCATE_MAX_FILE_BYTES, RELOCATE_MAX_BUNDLE_BYTES - bytes);
+        const commits = await inputs.tree.commits(remaining());
+        if (commits !== undefined) {
+          sizes.push({ path: 'commits', size: commits.length });
+          bytes += commits.length;
+          if (overBudget()) return finish();
+        }
+        const changes = await inputs.tree.changes(remaining());
+        if (changes.length > 0) {
+          sizes.push({ path: 'changes', size: changes.length });
+          bytes += changes.length;
+          overBudget();
+        }
       }
     } catch (error) {
       refusals.push(refuse(error));
     }
   }
 
-  const largest = [...sizes].sort((a, b) => b.size - a.size).slice(0, 5);
-  const tooBig = sizes.filter(file => file.size > RELOCATE_MAX_FILE_BYTES);
-  for (const file of tooBig) refusals.push(`${file.path} is larger than one file of a move can be`);
-  if (bytes > RELOCATE_MAX_BUNDLE_BYTES)
-    refusals.push(
-      `this ferret holds ${String(Math.ceil(bytes / 1024 / 1024))} MB; a move carries at most ${String(RELOCATE_MAX_BUNDLE_BYTES / 1024 / 1024)} MB`,
-    );
-  return {
-    refusals,
-    files,
-    untracked,
-    withheld,
-    ignored,
-    ...(head === undefined ? {} : { head }),
-    bytes,
-    largest: refusals.length > 0 ? largest : [],
-  };
+  return finish();
 }
 
 /** The preflight answer: the table, the counts and the refusals, never a file's content. */

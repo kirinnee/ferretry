@@ -106,3 +106,41 @@ test('MUST 5 daemon clock expiry recovers an abandoned source without another re
     await host.stop();
   }
 });
+
+test('R4 the preparation deadline recovers a stalled read without another request and cancels further reads', async () => {
+  let release!: (bytes: Uint8Array) => void;
+  let started!: () => void;
+  const stalled = new Promise<Uint8Array>(resolve => {
+    release = resolve;
+  });
+  const reading = new Promise<void>(resolve => {
+    started = resolve;
+  });
+  const source = fakeSource();
+  let reads = 0;
+  source.read = async () => {
+    reads++;
+    started();
+    return await stalled;
+  };
+  const ferrets = fakeFerrets({ source });
+  const host = await testHost({ plugins: [relocate], fakes: { ferrets: ferrets.port } });
+  try {
+    const made = await openOffer(await newIdentity(), { expiresAtMs: host.clock.nowMs() + 120_000 });
+    const pending = host.request('POST', `/v1/relocate/${FERRET}/export`, { as: owner(), body: { offer: made.offer } });
+    await reading;
+    expect(ferrets.state).toBe('stopped');
+    // A preparing export has a one-minute deadline, shorter than the fifteen-minute ciphertext retention.
+    await host.clock.advance(61_000);
+    expect((await pending).status).toBe(409);
+    expect(ferrets.state).toBe('idle');
+    release(new Uint8Array());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(reads).toBe(1);
+    expect(ferrets.calls.filter(call => call === 'resume')).toHaveLength(1);
+  } finally {
+    release(new Uint8Array());
+    await host.stop();
+  }
+});

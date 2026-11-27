@@ -40,12 +40,22 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     budget: { names: number },
   ): Promise<void> => {
     const fenced = root.resolve(folder);
-    if (!fenced.ok) return;
+    if (!fenced.ok) throw new Error(`${folder} cannot be confined to the session folder for a move`);
     let entries: readonly RootEntry[];
     try {
       entries = await root.entries(fenced.value);
-    } catch {
-      return; // a folder that is not there yet (a ferret that never received an attachment) holds nothing
+    } catch (error) {
+      // Only an absent optional top-level folder is empty. A known folder disappearing, a failed probe or an IO/permission
+      // error must refuse the whole move, otherwise a successful export could silently drop attachments.
+      if (
+        depth === 1 &&
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'ENOENT' &&
+        (await root.lstat(fenced.value)) === undefined
+      )
+        return;
+      throw new Error(`${folder} could not be listed for a move`, { cause: error });
     }
     for (const entry of [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       if (++budget.names > MAX_NAMES) throw new Error('the session has too many files to move without loss');

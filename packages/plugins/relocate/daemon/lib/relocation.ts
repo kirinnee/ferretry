@@ -1,5 +1,5 @@
 import type { FerretId, FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
-import type { Log } from '@ferretry/kernel/contract';
+import type { Clock, Log } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { type CloneCrypto, toBase64Url } from '@ferretry/std/sealing';
 import {
@@ -14,6 +14,7 @@ import {
   type RelocateOffer,
 } from '../../contract/index.ts';
 import type { WorkingTree } from './git-bundle.ts';
+import { Preparation } from './preparation.ts';
 import { OfferRefused, sealBundle, verifiedOfferKey } from './seal.ts';
 import {
   assertSnapshotSize,
@@ -53,7 +54,7 @@ export interface RelocationDeps {
   readonly ferrets: Pick<FerretsApi, 'get' | 'workFolder' | 'relocationSource' | 'stop' | 'resume'>;
   readonly treeOf: (folder: string) => WorkingTree;
   readonly daemonId: string;
-  readonly clock: { readonly now: () => Instant; readonly nowMs: () => number };
+  readonly clock: Pick<Clock, 'now' | 'nowMs' | 'after'>;
   readonly moved: MovedLedger;
   readonly log: Pick<Log, 'warn'>;
 }
@@ -76,7 +77,7 @@ export class Relocation {
   readonly #spent = new Map<string, number>();
 
   #reserved = 0;
-  readonly #recovery = new Set<FerretId>();
+  readonly #recovery = new Map<FerretId, Preparation | undefined>();
   readonly #resuming = new Map<FerretId, Promise<boolean>>();
 
   constructor(private readonly deps: RelocationDeps) {}
@@ -108,32 +109,41 @@ export class Relocation {
     this.#reserved += 1;
     let id: FerretId | undefined;
     let wasRunning = false;
+    let preparing: Preparation | undefined;
     try {
       const { inputs, summary } = await this.#inputs(ferretId);
       const first = await this.#planned(ferretId, inputs);
       if (first.refusals.length > 0) throw new RelocateRefused(409, first.refusals.join('; '), 'move_refused');
       id = summary.id;
       wasRunning = summary.state === 'idle';
+      const preparation = new Preparation(this.deps.clock);
+      preparing = preparation;
       if (wasRunning) {
-        await this.deps.ferrets.stop(id, 'polite', 'moving to another machine');
+        // Recovery exists before stop can partially succeed or stall. Expiry never waits for the stalled read.
+        this.#recovery.set(id, preparation);
+        await preparation.wait(() => this.deps.ferrets.stop(summary.id, 'polite', 'moving to another machine'));
       }
-      const stopped = (await this.deps.ferrets.get(id)) ?? summary;
-      const after: SnapshotInputs = { ...inputs, summary: stopped };
-      const found = await plan(after);
+      const stopped = (await preparation.wait(() => this.deps.ferrets.get(summary.id))) ?? summary;
+      const after = preparation.inputs({ ...inputs, summary: stopped });
+      const found = await preparation.wait(() => plan(after));
       if (found.refusals.length > 0) throw new RelocateRefused(409, found.refusals.join('; '), 'move_refused');
-      const entries = await gather(after, found);
-      const manifest = await manifestOf(this.deps.crypto, { id, name: stopped.name }, found, entries);
+      const entries = await preparation.wait(() => gather(after, found));
+      const manifest = await preparation.wait(() =>
+        manifestOf(this.deps.crypto, { id: summary.id, name: stopped.name }, found, entries),
+      );
       const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
       const length = new Uint8Array(4);
       new DataView(length.buffer).setUint32(0, manifestBytes.length, false);
       assertSnapshotSize(entries, length.length + manifestBytes.length);
-      const sealed = await sealBundle(this.deps.crypto, {
-        offer,
-        offerKey,
-        sourceDaemonId: this.deps.daemonId,
-        parts: [length, manifestBytes, ...entries.map(entry => entry.bytes)],
-        chunkBytes: RELOCATE_CHUNK_BYTES,
-      });
+      const sealed = await preparation.wait(() =>
+        sealBundle(this.deps.crypto, {
+          offer,
+          offerKey,
+          sourceDaemonId: this.deps.daemonId,
+          parts: [length, manifestBytes, ...entries.map(entry => entry.bytes)],
+          chunkBytes: RELOCATE_CHUNK_BYTES,
+        }),
+      );
       const exportId = newId(this.deps.crypto, 'fy_relocate_export_');
       this.#exports.set(exportId, {
         ferret: id,
@@ -147,8 +157,10 @@ export class Relocation {
     } catch (error) {
       // Any failure before the move completes: the source runs its ferret again, and nothing was changed.
       if (wasRunning && id !== undefined) {
-        this.#recovery.add(id);
-        await this.#resume(id);
+        if (this.#recovery.has(id)) {
+          this.#recovery.set(id, undefined);
+          await this.#resume(id);
+        }
       }
       if (error instanceof OfferRefused) throw new RelocateRefused(400, error.message, error.code);
       if (!(error instanceof RelocateRefused))
@@ -159,6 +171,7 @@ export class Relocation {
         );
       throw error;
     } finally {
+      preparing?.close();
       this.#reserved -= 1;
     }
   }
@@ -229,7 +242,7 @@ export class Relocation {
         this.#recovery.delete(ferret);
         return true;
       } catch {
-        this.#recovery.add(ferret);
+        this.#recovery.set(ferret, undefined);
         this.deps.log.warn('a ferret whose move failed could not be resumed', { ferret });
         return false;
       }
@@ -249,7 +262,13 @@ export class Relocation {
       if (open.completing === true || nowMs - open.createdAtMs < RELOCATE_EXPORT_TTL_MS) continue;
       if (!open.resumeOnExpiry || (await this.#resume(open.ferret))) this.#exports.delete(id);
     }
-    for (const ferret of [...this.#recovery]) await this.#resume(ferret);
+    for (const [ferret, preparation] of [...this.#recovery]) {
+      if (preparation !== undefined) {
+        if (!preparation.expired) continue;
+        preparation.expire();
+      }
+      await this.#resume(ferret);
+    }
     for (const [id, expiresAtMs] of this.#spent) if (expiresAtMs + 60_000 <= nowMs) this.#spent.delete(id);
   }
 }

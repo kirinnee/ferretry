@@ -18,6 +18,8 @@ export interface WorkingTree {
   untracked(): Promise<readonly string[]>;
   /** The top-level names git ignores (`node_modules/`, `.env`): shown to the person, never read. */
   ignoredTopLevel(): Promise<readonly string[]>;
+  /** A plain untracked file's size without reading its contents, or undefined for an unsafe/missing path. */
+  size(path: string): Promise<number | undefined>;
   /** One untracked file's bytes (a plain file, no link, at most `limitBytes`), or `undefined` when it is not one. */
   read(path: string, limitBytes: number): Promise<Uint8Array | undefined>;
 }
@@ -223,6 +225,12 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
       const bytes = await handle.readBytes(fenced.value, limitBytes + 1);
       if (bytes.length > limitBytes) throw new WorkingTreeError(`${path} grew beyond the move’s file limit`);
       return bytes;
+    },
+    size: async path => {
+      const fenced = handle.resolve(path);
+      if (!fenced.ok) return undefined;
+      const stat = await handle.lstat(fenced.value);
+      return stat?.kind === 'file' && stat.links <= 1 ? stat.size : undefined;
     },
   };
 }

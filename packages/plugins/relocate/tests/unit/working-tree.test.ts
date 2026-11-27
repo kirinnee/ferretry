@@ -55,5 +55,9 @@ describe('the working tree, through real git', () => {
     expect(await tree.read('big.txt', 10)).toBeUndefined();
     expect(await tree.read('../outside.txt', 1024)).toBeUndefined();
     expect(await tree.read('missing.txt', 1024)).toBeUndefined();
+    expect(await tree.size('tracked.txt')).toBe('one\nchanged\n'.length);
+    expect(await tree.size('big.txt')).toBe(100);
+    for (const path of ['link.txt', 'new.txt', 'dir', '../outside.txt', 'missing.txt'])
+      expect(await tree.size(path)).toBeUndefined();
   });
 });

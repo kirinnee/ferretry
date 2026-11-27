@@ -113,6 +113,7 @@ test('MUST 4 refuses an unreadable or oversize untracked file by name', async ()
     changes: async () => new Uint8Array(),
     untracked: async () => ['huge.bin'],
     ignoredTopLevel: async () => [],
+    size: async () => undefined,
     read: async () => undefined,
   };
   const found = await plan({ summary: summaryOf('idle'), source, tree });

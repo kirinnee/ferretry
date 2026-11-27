@@ -111,6 +111,7 @@ test('HEAD changing after the working files were gathered refuses the snapshot',
     changes: async () => new Uint8Array(),
     untracked: async () => [],
     ignoredTopLevel: async () => [],
+    size: async () => undefined,
     read: async () => undefined,
   };
   const inputs = { source: fakeSource(), summary: summaryOf('stopped'), tree };

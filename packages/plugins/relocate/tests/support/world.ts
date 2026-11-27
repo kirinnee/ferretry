@@ -63,7 +63,14 @@ export async function world(
       ferrets: ferrets.port,
       treeOf: folder => kernelWorkingTree(kernel, folder),
       daemonId: sourceIdentity.daemonId,
-      clock: { now: () => new Date(self.now).toISOString() as Instant, nowMs: () => self.now },
+      clock: {
+        now: () => new Date(self.now).toISOString() as Instant,
+        nowMs: () => self.now,
+        after: (delay, fn) => {
+          const timer = setTimeout(fn, delay);
+          return () => clearTimeout(timer);
+        },
+      },
       moved,
       log: { warn: () => {} },
     }),

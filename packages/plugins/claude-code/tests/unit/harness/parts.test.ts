@@ -12,11 +12,12 @@ import { CLAUDE_PARTS } from '../../../daemon/harness/parts/list.ts';
 /**
  * Every member of `Harness` the Claude Code harness serves, and the ONE part that serves it. A member in two parts, a
  * member in none, or a part that grows one this table does not name fails here; the members `Harness` offers that Claude
- * Code deliberately does not (`fork`, `inject`, ...) are listed so a new one is a decision, not an accident.
+ * Code deliberately does not (`inject`, ...) are listed so a new one is a decision, not an accident.
  */
 const SERVED = {
   deliverPart: ['deliver'],
   dialogsPart: ['dialogs'],
+  forkPart: ['fork'],
   historyPart: ['conversations', 'hasConversation', 'historySources', 'importConversation'],
   homePart: ['homeFor', 'prepareHome'],
   identityPart: ['accepts', 'facts', 'key', 'turnStop'],
@@ -32,7 +33,6 @@ const NOT_SERVED = [
   'screenReader',
   'adoptConversation',
   'exportConversation',
-  'fork',
   'packConversation',
   'inject',
   'provedConversation',

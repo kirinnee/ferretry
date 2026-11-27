@@ -30,7 +30,7 @@ function sessionFolder(files: Readonly<Record<string, Node>>) {
           const head = rest.split('/')[0] as string;
           direct.set(head, rest.includes('/') ? { kind: 'directory' } : (files[name] as Node));
         }
-      if (direct.size === 0) throw new Error('no such folder');
+      if (direct.size === 0) throw Object.assign(new Error('no such folder'), { code: 'ENOENT' });
       return [...direct].map(([name, node]) => ({
         name,
         kind: node.kind,
@@ -41,7 +41,8 @@ function sessionFolder(files: Readonly<Record<string, Node>>) {
       }));
     },
     lstat: async (path: string) => {
-      const node = files[path];
+      const node =
+        files[path] ?? (names.some(name => name.startsWith(`${path}/`)) ? { kind: 'directory' as const } : undefined);
       return node === undefined
         ? undefined
         : { kind: node.kind, size: node.bytes?.length ?? 0, links: node.links ?? 1, mode: 0o600, modified: '' };
@@ -74,9 +75,16 @@ function build(options: {
   readonly jobs?: readonly { readonly state: string }[];
   readonly packConversation?: () => Promise<unknown>;
   readonly known?: boolean;
+  readonly listingError?: { readonly path: string; readonly code: string };
 }) {
   const harness = { packConversation: options.packConversation };
   const folder = sessionFolder(options.files ?? SESSION);
+  const entries = folder.entries;
+  folder.entries = async path => {
+    if (options.listingError?.path === path)
+      throw Object.assign(new Error(`synthetic ${options.listingError.code}`), { code: options.listingError.code });
+    return await entries(path);
+  };
   const context = {
     hooks: {
       contributions: (token: unknown) =>
@@ -212,4 +220,22 @@ test('MUST 4 session listing refuses count overflow instead of dropping files', 
 test('MUST 4 a session file over the read limit is refused, never truncated by the root', async () => {
   const source = await build({})(ID);
   await expect(source?.read({ area: 'session', path: 'turns/turn-001.md' }, 1)).rejects.toThrow();
+});
+
+test.each(['EIO', 'EACCES', 'ENOENT'])(
+  'R3 a known attachment directory failing with %s refuses instead of losing files',
+  async code => {
+    const source = await build({ listingError: { path: 'attachments', code } })(ID);
+    await expect(source?.files()).rejects.toThrow('attachments');
+  },
+);
+
+test('R3 a nested attachment directory disappearing refuses instead of losing files', async () => {
+  const source = await build({ listingError: { path: 'attachments/a1', code: 'ENOENT' } })(ID);
+  await expect(source?.files()).rejects.toThrow('attachments/a1');
+});
+
+test('R3 ENOENT on an absent optional root is the only listing error treated as empty', async () => {
+  const source = await build({ files: { 'turns/turn-001.md': SESSION['turns/turn-001.md'] as Node } })(ID);
+  expect((await source?.files())?.map(file => file.path)).toEqual(['turns/turn-001.md', 'history.jsonl']);
 });

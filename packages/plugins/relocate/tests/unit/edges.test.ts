@@ -115,6 +115,7 @@ describe('a working tree that cannot be read is a refusal, not a crash', () => {
     changes: async () => new Uint8Array(),
     untracked: async () => [],
     ignoredTopLevel: async () => [],
+    size: async () => undefined,
     read: async () => undefined,
     ...rest,
   });
