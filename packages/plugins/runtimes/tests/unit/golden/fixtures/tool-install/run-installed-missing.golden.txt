@@ -1,0 +1,54 @@
+"outcomes":
+  [
+    {
+      "cause": "not-found-after-install"
+      "harness": "claude"
+      "manualCommand": "npm install -g @anthropic-ai/claude-code"
+      "outcome": "failed"
+      "output":
+        [
+          "added 1 package"
+        ]
+      "reason": "npm finished, but this daemon still cannot find `claude`. It was probably installed somewhere outside this daemon's PATH: tell the daemon where it is with FY_CLAUDE_BIN or the harness block in config/daemon.json, then restart it."
+    }
+    {
+      "cause": "not-found-after-install"
+      "harness": "codex"
+      "manualCommand": "npm install -g @openai/codex"
+      "outcome": "failed"
+      "output":
+        [
+          "added 1 package"
+        ]
+      "reason": "npm finished, but this daemon still cannot find `codex`. It was probably installed somewhere outside this daemon's PATH: tell the daemon where it is with FY_CODEX_BIN or the harness block in config/daemon.json, then restart it."
+    }
+  ]
+"runs":
+  [
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@anthropic-ai/claude-code"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@openai/codex"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+  ]

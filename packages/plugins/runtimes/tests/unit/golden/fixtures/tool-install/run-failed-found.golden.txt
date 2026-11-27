@@ -1,0 +1,54 @@
+"outcomes":
+  [
+    {
+      "cause": "failed"
+      "harness": "claude"
+      "manualCommand": "npm install -g @anthropic-ai/claude-code"
+      "outcome": "failed"
+      "output":
+        [
+          "something broke"
+        ]
+      "reason": "npm stopped with exit code 1. It said: something broke"
+    }
+    {
+      "cause": "failed"
+      "harness": "codex"
+      "manualCommand": "npm install -g @openai/codex"
+      "outcome": "failed"
+      "output":
+        [
+          "something broke"
+        ]
+      "reason": "npm stopped with exit code 1. It said: something broke"
+    }
+  ]
+"runs":
+  [
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@anthropic-ai/claude-code"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+    {
+      "args":
+        [
+          "install"
+          "-g"
+          "@openai/codex"
+        ]
+      "environment":
+        "NONINTERACTIVE": "1"
+        "PATH": "/usr/bin:/usr/bin"
+      "executable": "/usr/bin/npm"
+      "timeoutMs": 900000
+    }
+  ]

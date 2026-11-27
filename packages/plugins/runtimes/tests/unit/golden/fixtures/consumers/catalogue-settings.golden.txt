@@ -1,0 +1,456 @@
+"components":
+  "format": "present"
+  "kinds":
+    [
+      {
+        "components": []
+        "description": "Guidance every session reads first."
+        "kind": "instructions"
+        "label": "Instructions"
+      }
+      {
+        "components": []
+        "description": "Tools a session can call."
+        "kind": "mcp"
+        "label": "MCP servers"
+      }
+      {
+        "components": []
+        "description": "Named abilities a session can use."
+        "kind": "skills"
+        "label": "Skills"
+      }
+      {
+        "components":
+          [
+            {
+              "detail":
+                "env": []
+                "file": "components/settings/cl-bad.json"
+                "kind": "settings"
+              "editNote": "Nothing uses it yet."
+              "harness": "claude-code"
+              "kind": "settings"
+              "name": "cl-bad"
+              "partial": []
+              "reference": "settings/cl-bad"
+              "remove": "available": true
+              "scope": "claude-code"
+              "usedBy":
+                "profiles": []
+                "runtimes": []
+              "warnings": []
+            }
+            {
+              "content":
+                "entries":
+                  [
+                    {
+                      "key": "permissions.allow"
+                      "value": "[\"Bash(ls)\"]"
+                    }
+                    {
+                      "key": "theme"
+                      "value": "dark"
+                    }
+                  ]
+                "form": "entries"
+              "detail":
+                "env":
+                  [
+                    {
+                      "name": "MODE"
+                      "value": "x"
+                    }
+                  ]
+                "file": "components/settings/cl-settings.json"
+                "flags":
+                  [
+                    "--verbose"
+                  ]
+                "flagsEtag": "c579ac009dadbb5eba6bf1831dd993609945878a9ee6d4fcd3811d9ee91ee9f9"
+                "kind": "settings"
+              "editNote": "Used by 1 profile and 0 runtimes. Saving changes it everywhere. Running sessions keep the old version until restarted."
+              "harness": "claude-code"
+              "kind": "settings"
+              "name": "cl-settings"
+              "partial": []
+              "reference": "settings/cl-settings"
+              "remove":
+                "available": false
+                "reason": "It is a layer in default. Remove it from that profile first."
+              "scope": "claude-code"
+              "usedBy":
+                "profiles":
+                  [
+                    "default"
+                  ]
+                "runtimes": []
+              "warnings": []
+            }
+            {
+              "detail":
+                "env": []
+                "file": "components/settings/cl-wrong.json"
+                "kind": "settings"
+              "editNote": "Nothing uses it yet."
+              "harness": "claude-code"
+              "kind": "settings"
+              "name": "cl-wrong"
+              "partial": []
+              "reference": "settings/cl-wrong"
+              "remove": "available": true
+              "scope": "claude-code"
+              "usedBy":
+                "profiles": []
+                "runtimes": []
+              "warnings": []
+            }
+            {
+              "detail":
+                "env": []
+                "file": "components/settings/cx-bad.toml"
+                "kind": "settings"
+              "editNote": "Nothing uses it yet."
+              "harness": "codex"
+              "kind": "settings"
+              "name": "cx-bad"
+              "partial": []
+              "reference": "settings/cx-bad"
+              "remove": "available": true
+              "scope": "codex"
+              "usedBy":
+                "profiles": []
+                "runtimes": []
+              "warnings": []
+            }
+            {
+              "content":
+                "entries":
+                  [
+                    {
+                      "key": "model"
+                      "value": "gpt-6"
+                    }
+                    {
+                      "key": "shell_environment_policy.inherit"
+                      "value": "core"
+                    }
+                  ]
+                "form": "entries"
+              "detail":
+                "env": []
+                "file": "components/settings/cx-settings.toml"
+                "kind": "settings"
+              "editNote": "Nothing uses it yet."
+              "harness": "codex"
+              "kind": "settings"
+              "name": "cx-settings"
+              "partial": []
+              "reference": "settings/cx-settings"
+              "remove": "available": true
+              "scope": "codex"
+              "usedBy":
+                "profiles": []
+                "runtimes": []
+              "warnings": []
+            }
+            {
+              "detail":
+                "env": []
+                "file": "components/settings/cx-wrong.toml"
+                "kind": "settings"
+              "editNote": "Nothing uses it yet."
+              "harness": "codex"
+              "kind": "settings"
+              "name": "cx-wrong"
+              "partial": []
+              "reference": "settings/cx-wrong"
+              "remove": "available": true
+              "scope": "codex"
+              "usedBy":
+                "profiles": []
+                "runtimes": []
+              "warnings": []
+            }
+          ]
+        "description": "Flags, environment and options for one tool."
+        "kind": "settings"
+        "label": "Settings"
+      }
+      {
+        "components": []
+        "description": "Commands that run at points in a session, for one tool."
+        "kind": "hooks"
+        "label": "Hooks"
+      }
+      {
+        "components": []
+        "description": "The models a runtime offers, and its default."
+        "kind": "modelSets"
+        "label": "Model sets"
+      }
+    ]
+"drafts":
+  "settings/cl-bad":
+    "harnesses":
+      [
+        {
+          "applied":
+            [
+              "settings/cl-bad"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped": []
+        }
+        {
+          "applied": []
+          "available":
+            "available": false
+            "reason": "Only Claude Code settings. Nothing here applies on Codex."
+          "conflicts": []
+          "harness": "codex"
+          "partial": []
+          "skipped":
+            [
+              {
+                "reference": "settings/cl-bad"
+                "sentence": "Settings cl-bad is for Claude Code only, so it is skipped on Codex."
+              }
+            ]
+        }
+      ]
+    "resolved": []
+    "scope":
+      "kind": "scoped"
+      "scope": "claude-code"
+  "settings/cl-settings":
+    "harnesses":
+      [
+        {
+          "applied":
+            [
+              "settings/cl-settings"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped": []
+        }
+        {
+          "applied": []
+          "available":
+            "available": false
+            "reason": "Only Claude Code settings. Nothing here applies on Codex."
+          "conflicts": []
+          "harness": "codex"
+          "partial": []
+          "skipped":
+            [
+              {
+                "reference": "settings/cl-settings"
+                "sentence": "Settings cl-settings is for Claude Code only, so it is skipped on Codex."
+              }
+            ]
+        }
+      ]
+    "resolved":
+      [
+        {
+          "field": "settings"
+          "from": "settings/cl-settings"
+          "harness": "claude-code"
+          "key": "theme"
+          "overridden": []
+          "value": "dark"
+        }
+        {
+          "field": "settings"
+          "from": "settings/cl-settings"
+          "harness": "claude-code"
+          "key": "permissions.allow"
+          "overridden": []
+          "value": "[\"Bash(ls)\"]"
+        }
+        {
+          "field": "env"
+          "from": "settings/cl-settings"
+          "harness": "claude-code"
+          "key": "env.MODE"
+          "overridden": []
+          "value": "x"
+        }
+        {
+          "field": "flags"
+          "from": "settings/cl-settings"
+          "harness": "claude-code"
+          "key": "flag"
+          "overridden": []
+          "value": "--verbose"
+        }
+      ]
+    "scope":
+      "kind": "scoped"
+      "scope": "claude-code"
+  "settings/cl-wrong":
+    "harnesses":
+      [
+        {
+          "applied":
+            [
+              "settings/cl-wrong"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped": []
+        }
+        {
+          "applied": []
+          "available":
+            "available": false
+            "reason": "Only Claude Code settings. Nothing here applies on Codex."
+          "conflicts": []
+          "harness": "codex"
+          "partial": []
+          "skipped":
+            [
+              {
+                "reference": "settings/cl-wrong"
+                "sentence": "Settings cl-wrong is for Claude Code only, so it is skipped on Codex."
+              }
+            ]
+        }
+      ]
+    "resolved": []
+    "scope":
+      "kind": "scoped"
+      "scope": "claude-code"
+  "settings/cx-bad":
+    "harnesses":
+      [
+        {
+          "applied": []
+          "available":
+            "available": false
+            "reason": "Only Codex settings. Nothing here applies on Claude Code."
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped":
+            [
+              {
+                "reference": "settings/cx-bad"
+                "sentence": "Settings cx-bad is for Codex only, so it is skipped on Claude Code."
+              }
+            ]
+        }
+        {
+          "applied":
+            [
+              "settings/cx-bad"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "codex"
+          "partial": []
+          "skipped": []
+        }
+      ]
+    "resolved": []
+    "scope":
+      "kind": "scoped"
+      "scope": "codex"
+  "settings/cx-settings":
+    "harnesses":
+      [
+        {
+          "applied": []
+          "available":
+            "available": false
+            "reason": "Only Codex settings. Nothing here applies on Claude Code."
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped":
+            [
+              {
+                "reference": "settings/cx-settings"
+                "sentence": "Settings cx-settings is for Codex only, so it is skipped on Claude Code."
+              }
+            ]
+        }
+        {
+          "applied":
+            [
+              "settings/cx-settings"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "codex"
+          "partial": []
+          "skipped": []
+        }
+      ]
+    "resolved":
+      [
+        {
+          "field": "settings"
+          "from": "settings/cx-settings"
+          "harness": "codex"
+          "key": "model"
+          "overridden": []
+          "value": "gpt-6"
+        }
+        {
+          "field": "settings"
+          "from": "settings/cx-settings"
+          "harness": "codex"
+          "key": "shell_environment_policy.inherit"
+          "overridden": []
+          "value": "core"
+        }
+      ]
+    "scope":
+      "kind": "scoped"
+      "scope": "codex"
+  "settings/cx-wrong":
+    "harnesses":
+      [
+        {
+          "applied": []
+          "available":
+            "available": false
+            "reason": "Only Codex settings. Nothing here applies on Claude Code."
+          "conflicts": []
+          "harness": "claude-code"
+          "partial": []
+          "skipped":
+            [
+              {
+                "reference": "settings/cx-wrong"
+                "sentence": "Settings cx-wrong is for Codex only, so it is skipped on Claude Code."
+              }
+            ]
+        }
+        {
+          "applied":
+            [
+              "settings/cx-wrong"
+            ]
+          "available": "available": true
+          "conflicts": []
+          "harness": "codex"
+          "partial": []
+          "skipped": []
+        }
+      ]
+    "resolved": []
+    "scope":
+      "kind": "scoped"
+      "scope": "codex"

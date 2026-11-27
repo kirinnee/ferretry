@@ -1,0 +1,170 @@
+"layer":
+  "agentPermissions": "skip"
+  "args":
+    [
+      "-c"
+      "approval_policy=\"never\""
+      "-c"
+      "sandbox_mode=\"danger-full-access\""
+      "-c"
+      "projects={\"/golden/launch-folder\"={trust_level=\"trusted\"}}"
+      "--no-alt-screen"
+      "-c"
+      "notice={hide_full_access_warning=true,hide_world_writable_warning=true,hide_rate_limit_model_nudge=true,hide_gpt5_1_migration_prompt=true,\"hide_gpt-5.1-codex-max_migration_prompt\"=true}"
+      "-c"
+      "mcp_servers.ferretry.command=\"/opt/ferretry/bin/fy\""
+      "-c"
+      "mcp_servers.ferretry.args=[\"mcp\",\"serve\"]"
+      "-c"
+      "mcp_servers.ferretry.env_vars=[\"FY_HOME\",\"FY_URL\",\"FY_SESSION_ID\",\"FY_SESSION_TOKEN\",\"FY_SESSION_BOARD_CAPABILITY\"]"
+      "-c"
+      "developer_instructions=\"Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.\\u000a\\u000aFerretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (`fy config path`). Before changing any, read `fy config guide` and follow it: never write a secret value into a file (the owner runs `fy secret set NAME`; then ${secret:NAME}), run `fy config check` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.\""
+    ]
+  "codexRules":
+    <<<
+      prefix_rule(pattern=["pkill"], decision="forbidden", justification="pkill can stop other ferrets' processes; stop the one process you started instead")
+      prefix_rule(pattern=["killall"], decision="forbidden", justification="killall can stop other ferrets' processes; stop the one process you started instead")
+
+    >>>
+  "entries":
+    [
+      {
+        "key": "approval_policy"
+        "path":
+          [
+            "approval_policy"
+          ]
+        "purpose": "permission-mode"
+        "target": "settings"
+        "value": "never"
+      }
+      {
+        "key": "sandbox_mode"
+        "path":
+          [
+            "sandbox_mode"
+          ]
+        "purpose": "permission-mode"
+        "target": "settings"
+        "value": "danger-full-access"
+      }
+      {
+        "key": "projects.\"/golden/launch-folder\".trust_level"
+        "path":
+          [
+            "projects"
+            "/golden/launch-folder"
+            "trust_level"
+          ]
+        "purpose": "trust"
+        "target": "settings"
+        "value": "trusted"
+      }
+      {
+        "key": "--no-alt-screen"
+        "path":
+          [
+            "--no-alt-screen"
+          ]
+        "purpose": "no-alt-screen"
+        "target": "launch"
+        "value": true
+      }
+      {
+        "key": "notice.hide_full_access_warning"
+        "path":
+          [
+            "notice"
+            "hide_full_access_warning"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "settings"
+        "value": true
+      }
+      {
+        "key": "notice.hide_world_writable_warning"
+        "path":
+          [
+            "notice"
+            "hide_world_writable_warning"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "settings"
+        "value": true
+      }
+      {
+        "key": "notice.hide_rate_limit_model_nudge"
+        "path":
+          [
+            "notice"
+            "hide_rate_limit_model_nudge"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "settings"
+        "value": true
+      }
+      {
+        "key": "notice.hide_gpt5_1_migration_prompt"
+        "path":
+          [
+            "notice"
+            "hide_gpt5_1_migration_prompt"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "settings"
+        "value": true
+      }
+      {
+        "key": "notice.\"hide_gpt-5.1-codex-max_migration_prompt\""
+        "path":
+          [
+            "notice"
+            "hide_gpt-5.1-codex-max_migration_prompt"
+          ]
+        "purpose": "one-time-prompts"
+        "target": "settings"
+        "value": true
+      }
+      {
+        "key": "mcp_servers.ferretry"
+        "path":
+          [
+            "mcp_servers"
+            "ferretry"
+          ]
+        "purpose": "tools"
+        "target": "settings"
+        "value":
+          "args":
+            [
+              "mcp"
+              "serve"
+            ]
+          "command": "/opt/ferretry/bin/fy"
+          "env_vars":
+            [
+              "FY_HOME"
+              "FY_URL"
+              "FY_SESSION_ID"
+              "FY_SESSION_TOKEN"
+              "FY_SESSION_BOARD_CAPABILITY"
+            ]
+      }
+      {
+        "key": "developer_instructions"
+        "path":
+          [
+            "developer_instructions"
+          ]
+        "purpose": "instructions"
+        "target": "settings"
+        "value":
+          <<<
+            Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code). The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never create passkeys or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.
+
+            Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (`fy config path`). Before changing any, read `fy config guide` and follow it: never write a secret value into a file (the owner runs `fy secret set NAME`; then ${secret:NAME}), run `fy config check` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.
+          >>>
+      }
+    ]
+  "harness": "codex"
+"ok": true

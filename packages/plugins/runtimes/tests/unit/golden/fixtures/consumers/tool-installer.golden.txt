@@ -1,0 +1,300 @@
+"both installed":
+  "lookedUpAtInstall":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+    ]
+  "outcome":
+    [
+      {
+        "harness": "claude"
+        "outcome": "already-installed"
+        "path": "/bin/claude"
+      }
+      {
+        "harness": "codex"
+        "outcome": "already-installed"
+        "path": "/bin/codex"
+      }
+    ]
+  "plans":
+    [
+      {
+        "harness": "claude"
+        "installed": true
+        "path": "/bin/claude"
+      }
+      {
+        "harness": "codex"
+        "installed": true
+        "path": "/bin/codex"
+      }
+    ]
+  "primed": 1
+  "ran": []
+"claude installed, codex absent, only npm":
+  "lookedUpAtInstall":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+    ]
+  "outcome":
+    [
+      {
+        "harness": "claude"
+        "outcome": "already-installed"
+        "path": "/bin/claude"
+      }
+      {
+        "command": "npm install -g @openai/codex"
+        "harness": "codex"
+        "outcome": "installed"
+        "output": []
+        "path": "/bin/codex"
+      }
+    ]
+  "plans":
+    [
+      {
+        "harness": "claude"
+        "installed": true
+        "path": "/bin/claude"
+      }
+      {
+        "harness": "codex"
+        "installed": false
+        "plan":
+          "args":
+            [
+              "install"
+              "-g"
+              "@openai/codex"
+            ]
+          "command": "npm install -g @openai/codex"
+          "executable": "/bin/npm"
+          "harness": "codex"
+          "kind": "runnable"
+          "manager": "npm"
+      }
+    ]
+  "primed": 2
+  "ran":
+    [
+      "/bin/npm install -g @openai/codex"
+    ]
+"no manager at all":
+  "lookedUpAtInstall":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+    ]
+  "outcome":
+    [
+      {
+        "cause": "no-package-manager"
+        "harness": "claude"
+        "manualCommand": "npm install -g @anthropic-ai/claude-code"
+        "outcome": "failed"
+        "output": []
+        "reason": "Claude Code is installed with npm, and this machine has neither; install npm first, then run the command yourself"
+      }
+      {
+        "cause": "no-package-manager"
+        "harness": "codex"
+        "manualCommand": "npm install -g @openai/codex"
+        "outcome": "failed"
+        "output": []
+        "reason": "Codex is installed with npm, and this machine has neither; install npm first, then run the command yourself"
+      }
+    ]
+  "plans":
+    [
+      {
+        "harness": "claude"
+        "installed": false
+        "plan":
+          "harness": "claude"
+          "kind": "no-package-manager"
+          "manualCommand": "npm install -g @anthropic-ai/claude-code"
+          "reason": "Claude Code is installed with npm, and this machine has neither; install npm first, then run the command yourself"
+      }
+      {
+        "harness": "codex"
+        "installed": false
+        "plan":
+          "harness": "codex"
+          "kind": "no-package-manager"
+          "manualCommand": "npm install -g @openai/codex"
+          "reason": "Codex is installed with npm, and this machine has neither; install npm first, then run the command yourself"
+      }
+    ]
+  "primed": 1
+  "ran": []
+"nothing installed on linux with npm":
+  "lookedUpAtInstall":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+    ]
+  "outcome":
+    [
+      {
+        "command": "npm install -g @anthropic-ai/claude-code"
+        "harness": "claude"
+        "outcome": "installed"
+        "output": []
+        "path": "/bin/claude"
+      }
+      {
+        "command": "npm install -g @openai/codex"
+        "harness": "codex"
+        "outcome": "installed"
+        "output": []
+        "path": "/bin/codex"
+      }
+    ]
+  "plans":
+    [
+      {
+        "harness": "claude"
+        "installed": false
+        "plan":
+          "args":
+            [
+              "install"
+              "-g"
+              "@anthropic-ai/claude-code"
+            ]
+          "command": "npm install -g @anthropic-ai/claude-code"
+          "executable": "/bin/npm"
+          "harness": "claude"
+          "kind": "runnable"
+          "manager": "npm"
+      }
+      {
+        "harness": "codex"
+        "installed": false
+        "plan":
+          "args":
+            [
+              "install"
+              "-g"
+              "@openai/codex"
+            ]
+          "command": "npm install -g @openai/codex"
+          "executable": "/bin/npm"
+          "harness": "codex"
+          "kind": "runnable"
+          "manager": "npm"
+      }
+    ]
+  "primed": 3
+  "ran":
+    [
+      "/bin/npm install -g @anthropic-ai/claude-code"
+      "/bin/npm install -g @openai/codex"
+    ]
+"nothing installed on macOS with brew and npm":
+  "lookedUpAtInstall":
+    [
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+      "claude"
+      "codex"
+      "npm"
+      "brew"
+      "apt-get"
+    ]
+  "outcome":
+    [
+      {
+        "command": "brew install --cask claude-code"
+        "harness": "claude"
+        "outcome": "installed"
+        "output": []
+        "path": "/bin/claude"
+      }
+      {
+        "command": "brew install --cask codex"
+        "harness": "codex"
+        "outcome": "installed"
+        "output": []
+        "path": "/bin/codex"
+      }
+    ]
+  "plans":
+    [
+      {
+        "harness": "claude"
+        "installed": false
+        "plan":
+          "args":
+            [
+              "install"
+              "--cask"
+              "claude-code"
+            ]
+          "command": "brew install --cask claude-code"
+          "executable": "/bin/brew"
+          "harness": "claude"
+          "kind": "runnable"
+          "manager": "brew"
+      }
+      {
+        "harness": "codex"
+        "installed": false
+        "plan":
+          "args":
+            [
+              "install"
+              "--cask"
+              "codex"
+            ]
+          "command": "brew install --cask codex"
+          "executable": "/bin/brew"
+          "harness": "codex"
+          "kind": "runnable"
+          "manager": "brew"
+      }
+    ]
+  "primed": 3
+  "ran":
+    [
+      "/bin/brew install --cask claude-code"
+      "/bin/brew install --cask codex"
+    ]

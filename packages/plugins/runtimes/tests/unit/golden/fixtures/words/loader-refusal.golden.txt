@@ -1,0 +1,20 @@
+"parsed":
+  [
+    "parsed"
+    "parsed"
+  ]
+"third":
+  "threw":
+    <<<
+      [
+        {
+          "code": "custom",
+          "path": [
+            "credentials",
+            "golden",
+            "harness"
+          ],
+          "message": "opencode is not supported here"
+        }
+      ]
+    >>>
