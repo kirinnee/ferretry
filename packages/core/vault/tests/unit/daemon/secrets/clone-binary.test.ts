@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { utf8Bytes, utf8Text } from '../../../../daemon/lib/secrets/clone-binary.ts';
+import { utf8Bytes, utf8Text } from '@ferretry/std/sealing';
 
 describe('clone transcript text', () => {
   it('should round-trip valid UTF-8 text', () => {

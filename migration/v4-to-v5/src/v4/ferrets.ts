@@ -35,6 +35,8 @@ export const Config = z.object({
   credentialRevoked: z.literal(true).optional(),
 });
 export type V4Config = z.infer<typeof Config>;
+/** The legacy transcript pointer the converter rebases; the product no longer exports this v4 type. */
+export type TranscriptProvenance = z.infer<typeof TranscriptProvenanceSchema>;
 
 export const RuntimeIds = z
   .object({

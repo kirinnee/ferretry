@@ -72,10 +72,13 @@ async function transcriptFile(
   return found;
 }
 
-async function resolveTranscriptFile(
+export async function resolveTranscriptFile(
   core: ClaudeCore,
   ferret: FerretId,
-): Promise<{ readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat } | undefined> {
+): Promise<
+  | { readonly home: RootHandle; readonly file: FencedPath; readonly stat: RootStat; readonly conversation: string }
+  | undefined
+> {
   const home = claudeHome(core, ferret);
   const binding = home.resolve(HOME_FILES.conversation);
   if (!binding.ok) return undefined;
@@ -97,7 +100,7 @@ async function resolveTranscriptFile(
   if (!file.ok) return undefined;
   const stat = await root.stat(file.value);
   if (stat?.kind !== 'file') return undefined;
-  return { home: root, file: file.value, stat };
+  return { home: root, file: file.value, stat, conversation: id };
 }
 
 /** Read only the assigned id in its encoded cwd, including after a daemon restart. */

@@ -6,7 +6,6 @@ import {
   FerretHistoryFiles,
   FerretRecordSchema,
   FerretSummarySchema,
-  ForkFiles,
   NamesFile,
   SessionProvenanceSchema,
   SessionTransferEdgeSchema,
@@ -22,7 +21,7 @@ import {
 const AT = '2026-08-06T07:00:00.000Z';
 const folder = () => new MemoryStateFolder();
 const port = (state: MemoryStateFolder) =>
-  state.port([FerretFiles, FerretHistoryFiles, NamesFile, ArchiveFile, WorktreesFile, ForkFiles]);
+  state.port([FerretFiles, FerretHistoryFiles, NamesFile, ArchiveFile, WorktreesFile]);
 const stamped = (body: object) => JSON.stringify({ format: 1, ...body });
 
 const PROVENANCE = {
@@ -174,104 +173,6 @@ describe('worktrees.json', () => {
       const state = folder();
       state.plant(WorktreesFile, stamped(body));
       expect((await port(state).read(WorktreesFile)).ok).toBe(false);
-    }
-  });
-});
-
-describe('forks/<planId>.json', () => {
-  const planId = 'a'.repeat(64);
-  const plan = {
-    v: 1,
-    planId,
-    preparedAt: AT,
-    source: {
-      sessionId: 'source-a',
-      incarnation: 'inc-1',
-      runtimeGeneration: 3,
-      harness: 'claude',
-      agent: 'account-a',
-      model: 'opus',
-      teammate: null,
-      name: 'zelda',
-      label: 'teammate',
-      transcriptProvenance: PROVENANCE,
-      cutMessagePoint: { v: 1, byteOffset: 512, blockIndex: 0 },
-    },
-    target: {
-      accountId: 'account-b',
-      agent: 'account-b',
-      harness: 'codex',
-      model: 'gpt',
-      effort: 'high',
-      contextWindow: 200_000,
-    },
-    durable: {
-      cwd: '/work/repo',
-      mode: 'auto',
-      parentSessionId: null,
-      label: 'teammate',
-      harnessFlags: [],
-      remoteControl: true,
-      intervalSeconds: 30,
-      timeoutSeconds: 600,
-      nudgeAfterSeconds: 120,
-      killAfterSeconds: 900,
-      directSendMaxChars: 4000,
-      resumeMenuChoice: 'full',
-      maxSnapshots: 5,
-      retry: { transientAttempts: 2, stalledAttempts: 1, waitForQuotaReset: true, allowAccountFailover: false },
-    },
-    facets: {
-      conversation: {
-        messages: [{ point: { v: 1, byteOffset: 512, blockIndex: 0 }, role: 'user', text: 'ship it', timestamp: AT }],
-      },
-      attachments: { attachments: [] },
-      references: { counts: { agent: 0, file: 0, task: 0, attention: 0, skill: 0, terminal: 0, browser: 0 } },
-      workspace: { cwd: '/work/repo', head: 'abc123', status: null, repositorySnapshot: null },
-      lineage: { wardenLineage: false, warden: null },
-    },
-    notCarried: [],
-  };
-  const LATER = '2026-08-06T07:05:00.000Z';
-  const receipt = {
-    v: 1,
-    planId,
-    sourceSessionId: 'source-a',
-    requestId: 'req-1',
-    requestFingerprint: 'b'.repeat(64),
-    fingerprint: 'c'.repeat(64),
-    targetSessionId: 'target-1',
-    plan,
-    phase: 'imported',
-    phaseHistory: [
-      { phase: 'claimed', at: AT },
-      { phase: 'target_created', at: AT },
-      { phase: 'plan_persisted', at: AT },
-      { phase: 'imported', at: LATER },
-    ],
-    report: { briefPath: '/state/sessions/target-1/turns/turn-001.md', copiedAttachmentIds: [`att_${'a'.repeat(64)}`] },
-    createdAt: AT,
-    updatedAt: LATER,
-  };
-
-  test('today’s fork receipt reads back', async () => {
-    const state = folder();
-    state.plant(ForkFiles, stamped(receipt), planId);
-    const read = await port(state).read(ForkFiles, planId);
-    expect(read.ok).toBe(true);
-  });
-
-  test('a skipped phase, a report before the import, a fork into its own source or a plan without its cut is damage', async () => {
-    for (const bad of [
-      { ...receipt, phaseHistory: [receipt.phaseHistory[0], receipt.phaseHistory[3]] },
-      { ...receipt, phase: 'plan_persisted', phaseHistory: receipt.phaseHistory.slice(0, 3), updatedAt: AT },
-      { ...receipt, targetSessionId: 'source-a' },
-      { ...receipt, plan: { ...plan, source: { ...plan.source, cutMessagePoint: null } } },
-      { ...receipt, plan: { ...plan, durable: { ...plan.durable, boardAccess: 'all' } } },
-    ]) {
-      const state = folder();
-      state.plant(ForkFiles, stamped(bad), planId);
-      expect((await port(state).read(ForkFiles, planId)).ok).toBe(false);
     }
   });
 });

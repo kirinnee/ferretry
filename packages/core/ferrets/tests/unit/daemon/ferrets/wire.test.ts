@@ -142,3 +142,12 @@ test('two different tasks in one start are refused naming the task key', () => {
     { path: ['task'], message: 'name one task: `task` and its former key differ' },
   ]);
 });
+
+test('W-09 a start may say what the ferret is for, from the fixed list only', () => {
+  expect(parseStartBody({ mode: 'interactive', folder: '/work', purpose: 'review' }).options).toMatchObject({
+    purpose: 'review',
+  });
+  const error = refused(() => parseStartBody({ mode: 'interactive', folder: '/work', purpose: 'chores' }));
+  expect(error.status).toBe(400);
+  expect(error.validationIssues?.map(issue => issue.path)).toEqual([['purpose']]);
+});

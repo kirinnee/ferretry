@@ -85,6 +85,7 @@ const start = (role: 'start' | 'new', { api, environment, env, readText, readByt
             : undefined;
     const title = text(invocation, 'name');
     const label = text(invocation, 'label');
+    const purpose = text(invocation, 'purpose');
     // `--task` is the flag's former name: still read, no longer declared or listed.
     const task = text(invocation, 'task', 'card');
     const model = text(invocation, 'model');
@@ -106,6 +107,7 @@ const start = (role: 'start' | 'new', { api, environment, env, readText, readByt
       ...(on(invocation, 'teammate-fallback') ? { teammateFallback: true } : {}),
       ...(title === undefined ? {} : { title }),
       ...(label === undefined ? {} : { label }),
+      ...(purpose === undefined ? {} : { purpose }),
       ...(task === undefined ? {} : { card: task }),
       ...(model === undefined ? {} : { model }),
       ...(effort === undefined ? {} : { effort }),

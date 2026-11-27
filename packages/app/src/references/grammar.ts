@@ -100,7 +100,7 @@ interface AgendaReference {
  * the kind now is what stops a second surface grammar being invented next to
  * this one.
  */
-const SURFACE_KINDS = ['terminal', 'browser'] as const;
+const SURFACE_KINDS = ['terminal', 'browser', 'attachment'] as const;
 export type SurfaceKind = (typeof SURFACE_KINDS)[number];
 
 /**
@@ -199,6 +199,19 @@ const AGENDA_TOKEN = new RegExp(`^${ATTENTION_SIGIL_CLASS}(${AGENDA_ID_BODY})$`,
  */
 const SURFACE_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const SURFACE_TOKEN = /^%(terminal|browser):([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/iu;
+/**
+ * An attachment is named by the folder and the file name the agent was delivered it under
+ * (`…/attachments/<attachment id>/<delivered name>`, `deliveredFilename`), so the key is `<attachment id>/<name>` and
+ * two delivered files of one name are two keys. The id is a word-character run (a real one is `att_` and 64 hex
+ * digits); the name keeps the dots a file name has, and starts and ends on a word character: a closing full stop or
+ * dash would be the sentence's, never the name's, and a name that cannot end that way is a file this grammar cannot
+ * point at.
+ */
+const ATTACHMENT_ID_BODY = '[A-Za-z0-9][A-Za-z0-9_-]{0,79}';
+const ATTACHMENT_NAME_BODY = '[A-Za-z0-9_](?:[A-Za-z0-9_.-]{0,126}[A-Za-z0-9_])?';
+const ATTACHMENT_KEY_BODY = `${ATTACHMENT_ID_BODY}/${ATTACHMENT_NAME_BODY}`;
+const ATTACHMENT_KEY = new RegExp(`^${ATTACHMENT_KEY_BODY}$`, 'u');
+const ATTACHMENT_TOKEN = new RegExp(`^%(attachment):(${ATTACHMENT_KEY_BODY})$`, 'iu');
 // LOWERCASE ONLY, unlike an agent callsign. A skill name is a directory name,
 // not a daemon-normalised identity, and `$HOME`/`$PATH` are far more common in
 // prose and in code than a capitalised skill invocation is. Reading `$HOME` as
@@ -230,6 +243,7 @@ const CANDIDATE_ALTERNATIVES = [
   `&${TASK_ID_BODY}${BOUNDARY_AFTER}`,
   `${ATTENTION_SIGIL_CLASS}${AGENDA_ID_BODY}${BOUNDARY_AFTER}`,
   `%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63}${BOUNDARY_AFTER}`,
+  `%attachment:${ATTACHMENT_KEY_BODY}${BOUNDARY_AFTER}`,
   `[/$]${SKILL_NAME_BODY}${BOUNDARY_AFTER}`,
   `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
 ];
@@ -319,7 +333,10 @@ function safeSessionId(value: string): boolean {
 const surfaceKind = (value: string): value is SurfaceKind => (SURFACE_KINDS as readonly string[]).includes(value);
 
 function validSurfaceReference(reference: SurfaceReference): boolean {
-  return surfaceKind(reference.surface) && SURFACE_KEY.test(reference.key);
+  return (
+    surfaceKind(reference.surface) &&
+    (reference.surface === 'attachment' ? ATTACHMENT_KEY : SURFACE_KEY).test(reference.key)
+  );
 }
 
 function validCodeReference(reference: CodeReference): boolean {
@@ -349,6 +366,9 @@ export function parseReferenceToken(raw: string): Reference | null {
   // two.
   if (surface?.[1] && surface[2])
     return { kind: 'surface', surface: surface[1].toLowerCase() as SurfaceKind, key: surface[2] };
+
+  const attachment = raw.match(ATTACHMENT_TOKEN);
+  if (attachment?.[1] && attachment[2]) return { kind: 'surface', surface: 'attachment', key: attachment[2] };
 
   const skill = raw.match(SKILL_TOKEN);
   if (skill?.[1]) return { kind: 'skill', name: skill[1] };

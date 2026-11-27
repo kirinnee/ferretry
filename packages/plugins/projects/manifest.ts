@@ -1,4 +1,10 @@
-import { FerretsChanged, FerretsPort, LaunchRoots, NEW_FERRET_PROJECT_SLOT } from '@ferretry/core-ferrets/contract';
+import {
+  FerretsChanged,
+  FerretsPort,
+  FerretStarted,
+  LaunchRoots,
+  NEW_FERRET_PROJECT_SLOT,
+} from '@ferretry/core-ferrets/contract';
 import { appAction, definePlugin, panel, route, screen, verb } from '@ferretry/kernel/manifest';
 import {
   filesystemConfigure,
@@ -38,9 +44,9 @@ export default definePlugin({
 
   provides: { projects: ProjectsPort },
 
-  // The one taker of `launch.roots`: which folders are known projects decides whether a governed device's start is an
-  // ordinary act or terminal access. It grants nothing itself.
-  hooks: { takes: [{ hook: LaunchRoots, key: 'projects' }] },
+  // `launch.roots`: which folders are known projects decides whether a governed device's start is an ordinary act or
+  // terminal access. `ferret.started`: a ferret started in an unregistered repository registers it. Neither grants anything.
+  hooks: { takes: [{ hook: LaunchRoots, key: 'projects' }, { hook: FerretStarted }] },
 
   actions: {
     routes: [
