@@ -131,9 +131,21 @@ describe('an answer given in the real Inbox, in the item conversation', () => {
             );
           const shoot = async (step: string, refused = false): Promise<void> => {
             if (!refused) expect(await tab.textContent('body'), 'clean reads').not.toContain('Not sent:');
+            if (refused) {
+              for (const receipt of await tab.$$('.fy-attn-deck__top [data-send-receipt="failed"]'))
+                if ((await receipt.getAttribute('aria-expanded')) !== 'true') await receipt.click();
+              for (const reason of await tab.$$('[data-agenda-history] [data-send-reason]'))
+                expect(await reason.textContent()).not.toContain(' · sent ');
+            }
             await tab.evaluate(() =>
               document.querySelector('[data-agenda-history]')?.scrollIntoView({ block: 'center' }),
             );
+            if (refused)
+              await tab.evaluate(() =>
+                document
+                  .querySelector('[data-agenda-history] [data-history="owner"]:last-child')
+                  ?.scrollIntoView({ block: 'end' }),
+              );
             await settle();
             if (shotsDir !== '')
               await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-${rounding}-${step}.png`) });

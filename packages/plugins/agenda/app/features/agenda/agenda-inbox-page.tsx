@@ -183,8 +183,8 @@ interface CardHostProps {
 }
 
 /**
- * Answers a task into the undo window. Edit on a lane-proposal task also opens the lane editor: leaving the page
- * flushes the held answer, so the task is still resolved.
+ * Answers a task into the undo window. Edit on a lane-proposal task also opens the lane editor; the answer's
+ * timer keeps running across that navigation.
  */
 const answerCard = (
   { inbox, onNavigate }: Pick<CardHostProps, 'inbox' | 'onNavigate'>,
