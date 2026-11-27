@@ -34,6 +34,7 @@ import {
   swipeTargets,
   withAskVersion,
 } from './agenda-answers.ts';
+import { AnswerReceipts } from './answer-receipts.ts';
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import { type DaemonId, daemonHomeHref, daemonId as toDaemonId } from '../shell.ts';
@@ -576,8 +577,9 @@ export const actionSentence = (action: InboxAction, id: AgendaId, now = Date.now
 /** How long an answer waits, undoable, before it is sent. */
 export const UNDO_WINDOW_MS = 5_000;
 
-/** An answer the reader gave and may still take back. */
+/** An answer the reader gave and may still take back. `id` is its SEND: the receipt is per send, not per task. */
 export interface PendingAgendaAction {
+  readonly id: string;
   readonly key: string;
   readonly card: InboxCard;
   readonly action: InboxAction;
@@ -588,6 +590,7 @@ export interface PendingAgendaAction {
 
 /** An answer the daemon refused, kept so the task can come back with the reason. */
 export interface FailedAgendaAction {
+  readonly id: string;
   readonly key: string;
   readonly card: InboxCard;
   readonly action: InboxAction;
@@ -619,40 +622,44 @@ type Commit = (card: InboxCard, action: InboxAction) => Promise<void>;
 
 /**
  * Answers held for their undo window, then sent. NOTHING IS POSTED BEFORE THE WINDOW CLOSES: undo is
- * a real undo, not a second request that hopes to cancel the first. `flush` sends everything held at
+ * a real undo, not a second request that hopes to cancel the first. `flush` sends everything THIS instance holds at
  * once — what leaving the page does, because an answer the reader gave is not lost by navigating.
+ *
+ * The receipts (`AnswerReceipts`) are not this instance's: they outlive it, so what it was still sending when its
+ * Inbox went away settles into them and is there when the reader is back.
  */
 export class DeferredAgendaActions {
-  #state: DeferredAgendaState = { pending: [], sending: [], failed: [] };
+  /** The window timers of the sends this instance still holds, by send. */
   readonly #timers = new Map<string, unknown>();
-  readonly #listeners = new Set<() => void>();
 
   constructor(
     private readonly commit: Commit,
     private readonly timers: DeferredTimers = browserDeferredTimers,
     private readonly windowMs: number = UNDO_WINDOW_MS,
+    private readonly receipts: AnswerReceipts = new AnswerReceipts(),
   ) {}
 
-  subscribe = (listener: () => void): (() => void) => {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  };
+  subscribe = (listener: () => void): (() => void) => this.receipts.subscribe(listener);
 
-  getSnapshot = (): DeferredAgendaState => this.#state;
+  getSnapshot = (): DeferredAgendaState => this.receipts.getSnapshot();
 
   /** Keys that should not be on the deck: held, being sent. A failed one comes back. */
   hiddenKeys(): ReadonlySet<string> {
-    return new Set([...this.#state.pending.map(entry => entry.key), ...this.#state.sending.map(entry => entry.key)]);
+    const { pending, sending } = this.receipts.getSnapshot();
+    return new Set([...pending.map(entry => entry.key), ...sending.map(entry => entry.key)]);
   }
 
   /**
    * Holds `action` for `task`, stamped with the ask version the task SHOWS now, so an undo window that outlasts the
    * ferret's replacing the ask still sends the answer to the ask it was given to. Answering the same task again
-   * replaces what was held.
+   * replaces what was HELD; an answer already on its way keeps its own receipt.
    */
   schedule(card: InboxCard, action: InboxAction): void {
-    this.#cancelTimer(card.key);
+    const replaced = this.receipts.getSnapshot().pending.filter(pending => pending.key === card.key);
+    for (const entry of replaced) this.#cancelTimer(entry.id);
+    const id = this.receipts.nextId();
     const entry: PendingAgendaAction = {
+      id,
       key: card.key,
       card,
       action: withAskVersion(action, card.item),
@@ -660,49 +667,51 @@ export class DeferredAgendaActions {
       deadline: this.timers.now() + this.windowMs,
     };
     this.#timers.set(
-      card.key,
-      this.timers.setTimeout(() => this.#send(card.key), this.windowMs),
+      id,
+      this.timers.setTimeout(() => this.#send(id), this.windowMs),
     );
-    this.#publish({
-      ...this.#state,
-      pending: [...this.#state.pending.filter(pending => pending.key !== card.key), entry],
-      failed: this.#state.failed.filter(failed => failed.key !== card.key),
-    });
+    this.receipts.update(state => ({
+      ...state,
+      pending: [...state.pending.filter(pending => pending.key !== card.key), entry],
+      failed: state.failed.filter(failed => failed.key !== card.key),
+    }));
   }
 
   /** Takes back the named answer, or the most recent one. Returns what was undone, if anything. */
   undo(key?: string): PendingAgendaAction | null {
-    const target = key === undefined ? this.#state.pending.at(-1) : this.#state.pending.find(p => p.key === key);
+    const { pending } = this.receipts.getSnapshot();
+    const target = key === undefined ? pending.at(-1) : pending.find(each => each.key === key);
     if (target === undefined) return null;
-    this.#cancelTimer(target.key);
-    this.#publish({ ...this.#state, pending: this.#state.pending.filter(pending => pending.key !== target.key) });
+    this.#cancelTimer(target.id);
+    this.receipts.update(state => ({ ...state, pending: state.pending.filter(each => each.id !== target.id) }));
     return target;
   }
 
   /** Forgets a refusal once the reader has seen it. */
   clearFailure(key: string): void {
-    this.#publish({ ...this.#state, failed: this.#state.failed.filter(failed => failed.key !== key) });
+    this.receipts.update(state => ({ ...state, failed: state.failed.filter(failed => failed.key !== key) }));
   }
 
-  /** Sends everything still held, now. */
+  /** Sends everything this instance still holds, now. */
   flush(): void {
-    for (const pending of [...this.#state.pending]) this.#send(pending.key);
+    for (const id of [...this.#timers.keys()]) this.#send(id);
   }
 
-  #send(key: string): void {
-    const entry = this.#state.pending.find(pending => pending.key === key);
-    this.#cancelTimer(key);
+  #send(id: string): void {
+    const entry = this.receipts.getSnapshot().pending.find(pending => pending.id === id);
+    this.#cancelTimer(id);
     if (entry === undefined) return;
-    this.#publish({
-      ...this.#state,
-      pending: this.#state.pending.filter(pending => pending.key !== key),
-      sending: [...this.#state.sending, entry],
-    });
+    this.receipts.update(state => ({
+      ...state,
+      pending: state.pending.filter(pending => pending.id !== id),
+      sending: [...state.sending, entry],
+    }));
     void this.commit(entry.card, entry.action).then(
-      () => this.#settle(key, null),
+      () => this.#settle(id, null),
       (reason: unknown) =>
-        this.#settle(key, {
-          key,
+        this.#settle(id, {
+          id,
+          key: entry.key,
           card: entry.card,
           action: entry.action,
           at: entry.at,
@@ -711,23 +720,19 @@ export class DeferredAgendaActions {
     );
   }
 
-  #settle(key: string, failure: FailedAgendaAction | null): void {
-    this.#publish({
-      ...this.#state,
-      sending: this.#state.sending.filter(sending => sending.key !== key),
-      failed: failure === null ? this.#state.failed : [...this.#state.failed.filter(f => f.key !== key), failure],
-    });
+  /** One send is over: ITS receipt goes, and only its. A refusal replaces the task's earlier refusal. */
+  #settle(id: string, failure: FailedAgendaAction | null): void {
+    this.receipts.update(state => ({
+      ...state,
+      sending: state.sending.filter(sending => sending.id !== id),
+      failed: failure === null ? state.failed : [...state.failed.filter(f => f.key !== failure.key), failure],
+    }));
   }
 
-  #cancelTimer(key: string): void {
-    const handle = this.#timers.get(key);
+  #cancelTimer(id: string): void {
+    const handle = this.#timers.get(id);
     if (handle !== undefined) this.timers.clearTimeout(handle);
-    this.#timers.delete(key);
-  }
-
-  #publish(state: DeferredAgendaState): void {
-    this.#state = state;
-    for (const listener of this.#listeners) listener();
+    this.#timers.delete(id);
   }
 }
 

@@ -10,6 +10,8 @@ import {
 } from '../../../app/hooks/use-agenda-inbox.ts';
 import type { DaemonAgendaClient } from '../../../app/lib/agenda-client.ts';
 import { type DeferredTimers, DISMISS_ACTION } from '../../../app/lib/agenda-inbox.ts';
+import { AnswerReceipts } from '../../../app/lib/answer-receipts.ts';
+import { pendingAnswerEvents } from '../../../app/lib/pending-answer-history.ts';
 import { DaemonAgendaStore } from '../../../app/lib/agenda-store.ts';
 import { AgendaRollupStore } from '../../../app/lib/agenda-rollup.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../../../app/shell.ts';
@@ -155,15 +157,17 @@ function Probe({
   machines,
   timers,
   withdraw,
+  receipts,
   onInbox,
 }: {
   readonly client: DaemonAgendaClient;
   readonly machines: readonly AgendaInboxMachine[];
   readonly timers: DeferredTimers;
   readonly withdraw?: Parameters<typeof useAgendaInboxModel>[3];
+  readonly receipts?: AnswerReceipts;
   readonly onInbox: (inbox: AgendaInbox) => void;
 }) {
-  onInbox(useAgendaInboxModel(client, machines, timers, withdraw));
+  onInbox(useAgendaInboxModel(client, machines, timers, withdraw, receipts));
   return null;
 }
 
@@ -175,6 +179,70 @@ const settle = async (): Promise<void> => {
 };
 
 describe('useAgendaInboxModel', () => {
+  describe('when the Inbox goes away while an answer is on its way', () => {
+    test('should still say Not sent when the Inbox comes back, a refusal that landed after it left included', async () => {
+      const boards = new Map([['studio/a', board('a', [item('A1', 1)])]]);
+      const offline = fakeClient(boards);
+      // The machine cannot be reached: the answer is refused, but only after the Inbox that sent it is gone.
+      let refuse: (reason: Error) => void = () => undefined;
+      (offline.client as unknown as { dismiss: () => Promise<void> }).dismiss = () =>
+        new Promise<void>((_resolve, reject) => (refuse = reject));
+      const receipts = new AnswerReceipts();
+      const machines: readonly AgendaInboxMachine[] = [
+        { connection: studio, name: 'Studio', sessions: [waiting('a', summary(1, 1))] },
+      ];
+      let inbox: AgendaInbox | null = null;
+      const { timers } = manualTimers();
+      view = await mount(
+        <Probe
+          client={offline.client}
+          machines={machines}
+          onInbox={value => (inbox = value)}
+          receipts={receipts}
+          timers={timers}
+        />,
+      );
+      await settle();
+      const [only] = (inbox as unknown as AgendaInbox).cards;
+      await interact(() => {
+        if (only !== undefined) (inbox as unknown as AgendaInbox).deferred.schedule(only, DISMISS_ACTION);
+      });
+      // The page goes (pagehide), and the Inbox unmounts with the answer on its way.
+      await interact(() => window.dispatchEvent(new Event('pagehide')));
+      await view.unmount();
+      view = null;
+      await interact(async () => {
+        refuse(new Error('Offline'));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      // The Inbox is mounted again: it opens on what happened to the answer, not on nothing.
+      view = await mount(
+        <Probe
+          client={offline.client}
+          machines={machines}
+          onInbox={value => (inbox = value)}
+          receipts={receipts}
+          timers={timers}
+        />,
+      );
+      await settle();
+      const back = inbox as unknown as AgendaInbox;
+      expect(back.deferredState.failed.map(failed => failed.message)).toEqual(['Offline']);
+      expect(back.deferredState.sending).toEqual([]);
+      expect(
+        back.cards.map(card => card.item.id),
+        'the card is back on the deck',
+      ).toEqual(['A1']);
+      const [card] = back.cards;
+      expect(
+        pendingAnswerEvents(back.deferredState, card?.key ?? '', card?.item as AgendaItem).map(event =>
+          event.kind === 'owner' ? event.reached?.outbox : undefined,
+        ),
+      ).toEqual([{ reason: 'Offline', refused: true }]);
+    });
+  });
+
   describe('when the page goes to the background', () => {
     const setVisibility = (state: DocumentVisibilityState) =>
       Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });

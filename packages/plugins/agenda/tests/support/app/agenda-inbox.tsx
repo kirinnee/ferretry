@@ -27,6 +27,7 @@ import {
   inboxCardKey,
   isOnOwner,
 } from '../../../app/lib/agenda-inbox.ts';
+import type { AnswerReceipts } from '../../../app/lib/answer-receipts.ts';
 import { type DaemonId, daemonId } from '../../../app/shell.ts';
 import { sessionView } from './sessions.ts';
 
@@ -108,6 +109,9 @@ export interface FakeInbox {
   readonly commits: Commit[];
   /** Makes the next commit fail with this message. */
   failNext: string | null;
+  /** While true a commit waits for the test to settle it, through `gates`, in the order they were sent. */
+  holdCommits: boolean;
+  readonly gates: { readonly resolve: () => void; readonly reject: (reason: Error) => void }[];
   /** The replies the owner sent from an Inbox card, held for their Undo like the shell holds them. */
   readonly replied: RepliedAgenda;
   /** What the queue says to the next withdrawal: it was waiting (`withdrawn`), the ferret has it (`taken`), or a refusal. */
@@ -118,13 +122,16 @@ export interface FakeInbox {
   readonly unsnoozed: InboxCard[];
 }
 
-export const fakeInbox = (): FakeInbox => {
+/** `receipts` shared with the app's (`answerReceipts`) puts a chat line beside this Inbox on the same answers. */
+export const fakeInbox = (receipts?: AnswerReceipts): FakeInbox => {
   const clock = manualClock();
   const commits: Commit[] = [];
   const fake: FakeInbox = {
     clock,
     commits,
     failNext: null,
+    holdCommits: false,
+    gates: [],
     withdrawal: 'withdrawn',
     withdrawn: [],
     unsnoozed: [],
@@ -144,12 +151,18 @@ export const fakeInbox = (): FakeInbox => {
       },
       clock,
     ),
-    deferred: new DeferredAgendaActions(async (card, action) => {
-      commits.push({ card, action });
-      const failure = fake.failNext;
-      fake.failNext = null;
-      if (failure !== null) throw new Error(failure);
-    }, clock),
+    deferred: new DeferredAgendaActions(
+      async (card, action) => {
+        commits.push({ card, action });
+        const failure = fake.failNext;
+        fake.failNext = null;
+        if (failure !== null) throw new Error(failure);
+        if (fake.holdCommits) await new Promise<void>((resolve, reject) => fake.gates.push({ resolve, reject }));
+      },
+      clock,
+      undefined,
+      receipts,
+    ),
   };
   return fake;
 };

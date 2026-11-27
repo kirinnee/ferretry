@@ -52,6 +52,7 @@ import {
   type RepliedState,
   withRepliedParked,
 } from '../lib/agenda-replied.ts';
+import { type AnswerReceipts, answerReceipts } from '../lib/answer-receipts.ts';
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import { answeredSuggestions } from '../lib/answered-suggestions.ts';
 import { ruleClientOf } from '../lib/rule-client.ts';
@@ -217,6 +218,7 @@ export function useAgendaInboxModel(
   machines: readonly AgendaInboxMachine[],
   timers?: DeferredTimers,
   withdraw?: RepliedPorts['withdraw'],
+  receipts: AnswerReceipts = answerReceipts,
 ): AgendaInbox {
   const latest = useRef(machines);
   latest.current = machines;
@@ -231,12 +233,17 @@ export function useAgendaInboxModel(
   );
   const deferred = useMemo(
     () =>
-      new DeferredAgendaActions(async (card, action) => {
-        const connection = connectionFor(card.daemonId);
-        if (connection === undefined) throw new Error('That machine is no longer paired with this browser.');
-        await runInboxAction(client, connection, card, action);
-      }, timers),
-    [client, connectionFor, timers],
+      new DeferredAgendaActions(
+        async (card, action) => {
+          const connection = connectionFor(card.daemonId);
+          if (connection === undefined) throw new Error('That machine is no longer paired with this browser.');
+          await runInboxAction(client, connection, card, action);
+        },
+        timers,
+        undefined,
+        receipts,
+      ),
+    [client, connectionFor, timers, receipts],
   );
   // An answer the reader gave is sent, not dropped, when the page goes away. A phone does not always fire
   // `pagehide` when the reader swipes to another app — it hides the page and may kill it later — so the page

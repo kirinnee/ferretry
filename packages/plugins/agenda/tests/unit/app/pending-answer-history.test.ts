@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgendaItem } from '@ferretry/core-asks/contract';
+import { type AgendaItem, taskAskReference } from '@ferretry/core-asks/contract';
 import { itemHistory, withDeviceEvents } from '../../../app/lib/agenda-history.ts';
 import {
   DeferredAgendaActions,
@@ -9,6 +9,7 @@ import {
   UNDO_WINDOW_MS,
 } from '../../../app/lib/agenda-inbox.ts';
 import type { InboxAction } from '../../../app/lib/agenda-answers.ts';
+import { AnswerReceipts } from '../../../app/lib/answer-receipts.ts';
 import { pendingAnswerEvents } from '../../../app/lib/pending-answer-history.ts';
 import type { DaemonId } from '../../../app/shell.ts';
 import { sessionView } from '../../support/app/sessions.ts';
@@ -151,5 +152,148 @@ describe('what the line says of the answer', () => {
     const deferred = new DeferredAgendaActions(async () => undefined, timers);
     deferred.schedule(card(), { kind: 'snooze', label: 'Snooze', until: '2026-10-24T09:00:00.000Z' });
     expect(pendingAnswerEvents(deferred.getSnapshot(), card().key, item())).toEqual([]);
+  });
+});
+
+const HOLD: InboxAction = { kind: 'respond', label: 'Hold', response: { kind: 'multiple-choice', choice: 'Hold' } };
+const response = (action: InboxAction) => (action.kind === 'respond' ? action.response : undefined);
+const asOwnerAnswer = (action: InboxAction, at: string) =>
+  ({ ownerAnswer: { at, response: response(action), request: 1 } }) as Partial<AgendaItem>;
+
+describe('the machine’s echo is told by WHAT it says and to WHICH ask, never by a clock', () => {
+  const sending = () => {
+    const { timers, advance } = fakeTimers();
+    const deferred = new DeferredAgendaActions(() => new Promise<void>(() => undefined), timers);
+    deferred.schedule(card(), SHIP);
+    advance(UNDO_WINDOW_MS);
+    return deferred;
+  };
+
+  test('another answer stamped in the machine’s future does not hide the Ship still waiting to be sent', () => {
+    const deferred = sending();
+    const elsewhere = item(asOwnerAnswer(HOLD, '2030-01-01T00:00:00.000Z'));
+    expect(conversation(deferred, elsewhere)).toEqual([{ text: 'Ship', via: 'device', refused: false }]);
+  });
+
+  test('a refusal is not hidden by another answer stamped later than this device’s clock', async () => {
+    const { timers, advance } = fakeTimers();
+    const deferred = new DeferredAgendaActions(async () => {
+      throw new Error('The ask was replaced.');
+    }, timers);
+    deferred.schedule(card(), SHIP);
+    advance(UNDO_WINDOW_MS);
+    await Promise.resolve();
+    await Promise.resolve();
+    const elsewhere = item(asOwnerAnswer(HOLD, '2030-01-01T00:00:00.000Z'));
+    expect(conversation(deferred, elsewhere)).toEqual([{ text: 'Ship', via: 'device', refused: true }]);
+  });
+
+  test('the matching echo, stamped a millisecond BEFORE the answer was given on this device, is drawn once — by the item', () => {
+    const deferred = sending();
+    const echoed = item(asOwnerAnswer(SHIP, new Date(1_000 - 1).toISOString()));
+    expect(conversation(deferred, echoed)).toEqual([]);
+  });
+
+  test('the matching echo, stamped long before this device’s clock, is still the echo', () => {
+    const deferred = sending();
+    expect(conversation(deferred, item(asOwnerAnswer(SHIP, '2020-01-01T00:00:00.000Z')))).toEqual([]);
+  });
+
+  test('the same words to an ask the ferret has since replaced are not this answer’s echo', () => {
+    const deferred = sending();
+    const replaced = item({ ...asOwnerAnswer(SHIP, '2026-10-23T12:00:00.000Z'), askVersion: 2 } as Partial<AgendaItem>);
+    expect(conversation(deferred, replaced)).toEqual([{ text: 'Ship', via: 'device', refused: false }]);
+  });
+
+  test('a task ask’s echo is that ask’s own answer, found by its reference', () => {
+    const { timers, advance } = fakeTimers();
+    const gate = {
+      cardId: 'F12',
+      laneId: 'verify',
+      entry: 1,
+      options: [{ label: 'Ship' }, { label: 'Hold' }],
+    };
+    const ask = (answer: InboxAction) =>
+      ({
+        gate,
+        at: '2026-10-23T12:00:00.000Z',
+        answer: { at: '2020-01-01T00:00:00.000Z', response: response(answer), receipt: 'a'.repeat(64) },
+      }) as never;
+    const reference = taskAskReference(ask(SHIP));
+    const deferred = new DeferredAgendaActions(() => new Promise<void>(() => undefined), timers);
+    deferred.schedule(card(), { ...SHIP, gate: true, cardAsk: reference } as InboxAction);
+    advance(UNDO_WINDOW_MS);
+    expect(conversation(deferred, item({ cardAsks: [ask(SHIP)] } as Partial<AgendaItem>))).toEqual([]);
+    expect(conversation(deferred, item({ cardAsks: [ask(HOLD)] } as Partial<AgendaItem>))).toEqual([
+      { text: 'Ship', via: 'device', refused: false },
+    ]);
+  });
+});
+
+describe('a receipt is per SEND, so settling one never takes another’s', () => {
+  const settled = async (): Promise<void> => {
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  const twoSends = () => {
+    const { timers, advance } = fakeTimers();
+    const commits: { resolve: () => void; reject: (reason: Error) => void }[] = [];
+    const deferred = new DeferredAgendaActions(
+      () => new Promise<void>((resolve, reject) => commits.push({ resolve, reject })),
+      timers,
+    );
+    deferred.schedule(card(), SHIP);
+    advance(UNDO_WINDOW_MS);
+    deferred.schedule(card(), HOLD);
+    advance(UNDO_WINDOW_MS);
+    return { deferred, commits };
+  };
+  const sent = (deferred: DeferredAgendaActions) => deferred.getSnapshot().sending.map(entry => entry.action.label);
+
+  test('the first send settling leaves the second still on its way, and still drawn', async () => {
+    const { deferred, commits } = twoSends();
+    expect(sent(deferred)).toEqual(['Ship', 'Hold']);
+    commits[0]?.resolve();
+    await settled();
+    expect(sent(deferred)).toEqual(['Hold']);
+    expect([...deferred.hiddenKeys()]).toEqual([card().key]);
+    expect(conversation(deferred)).toEqual([{ text: 'Hold', via: 'device', refused: false }]);
+  });
+
+  test('the second settling first leaves the first', async () => {
+    const { deferred, commits } = twoSends();
+    commits[1]?.resolve();
+    await settled();
+    expect(sent(deferred)).toEqual(['Ship']);
+  });
+
+  test('a refusal of the first keeps its Not sent while the second is still on its way', async () => {
+    const { deferred, commits } = twoSends();
+    commits[0]?.reject(new Error('The ask was replaced.'));
+    await settled();
+    expect(sent(deferred)).toEqual(['Hold']);
+    expect(deferred.getSnapshot().failed.map(entry => entry.action.label)).toEqual(['Ship']);
+  });
+
+  test('two instances over the same receipts keep each other’s sends apart', async () => {
+    const receipts = new AnswerReceipts();
+    const { timers, advance } = fakeTimers();
+    const gates: (() => void)[] = [];
+    const make = () =>
+      new DeferredAgendaActions(
+        () => new Promise<void>(resolve => gates.push(resolve)),
+        timers,
+        UNDO_WINDOW_MS,
+        receipts,
+      );
+    const first = make();
+    const second = make();
+    first.schedule(card(), SHIP);
+    second.schedule(card(item({ id: 'A2' })), HOLD);
+    advance(UNDO_WINDOW_MS);
+    expect(first.getSnapshot().sending.map(entry => entry.action.label)).toEqual(['Ship', 'Hold']);
+    gates[0]?.();
+    await settled();
+    expect(second.getSnapshot().sending.map(entry => entry.action.label)).toEqual(['Hold']);
   });
 });

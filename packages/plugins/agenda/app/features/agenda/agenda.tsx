@@ -39,6 +39,7 @@ import type {
 import { CircleAlert, CircleCheck, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAgendaInbox } from '../../hooks/use-agenda-inbox.ts';
+import { useAnswerReceipts } from '../../hooks/use-answer-receipts.ts';
 import { type InboxAction, withAskVersion } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
@@ -562,26 +563,26 @@ export const useAgenda = ({
   const previous = paged > 0 ? openItems[paged - 1] : undefined;
   const next = paged >= 0 && paged < openItems.length - 1 ? openItems[paged + 1] : undefined;
   const lifecycle = useItemLifecycle({ connection, scope, client, item: cardItem, board: openItems, records });
-  const deferredState = inbox?.deferredState;
+  // The answers this device has given and not yet seen settle: read where they live, so the chat line (which mounts no
+  // Inbox) says them too.
+  const receipts = useAnswerReceipts();
   const history = useMemo(() => {
     if (cardItem === undefined) return [];
     const spoken =
       lifecycle.conversation === null
         ? itemHistory(cardItem, entries)
         : storedHistory(cardItem, lifecycle.conversation, lifecycle.conversationGap);
-    // An answer the Inbox still holds for its undo window is already said here, and leaves with Undo.
-    return deferredState === undefined
-      ? spoken
-      : withDeviceEvents(
-          spoken,
-          pendingAnswerEvents(deferredState, inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id), cardItem),
-        );
+    // An answer still inside its undo window, or on its way, is already said here, and leaves with Undo.
+    return withDeviceEvents(
+      spoken,
+      pendingAnswerEvents(receipts, inboxCardKey(connection.daemonId, scope.sessionId, cardItem.id), cardItem),
+    );
   }, [
     cardItem,
     entries,
     lifecycle.conversation,
     lifecycle.conversationGap,
-    deferredState,
+    receipts,
     connection.daemonId,
     scope.sessionId,
   ]);
