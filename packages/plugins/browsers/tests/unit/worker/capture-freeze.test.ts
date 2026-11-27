@@ -1,0 +1,179 @@
+import { expect, it } from 'bun:test';
+import type { BrowserContext, CDPSession, Page } from 'playwright-core';
+import { BrowserCapture } from '../../../daemon/worker/capture/index.ts';
+
+type Tab = 'first' | 'survivor';
+type State = 'active' | 'frozen';
+const INSPECTION_FAILURE = 'fixture stopped before taking pixels';
+
+function twoTabs(
+  onLifecycle: (tab: Tab, state: State) => void | Promise<void>,
+  deadline: <T>(work: Promise<T>) => Promise<T> = work => work,
+) {
+  const commands: [Tab, State][] = [];
+  const lifecycle = new Map<Tab, State>();
+  const sessions = new Map<Page, CDPSession>();
+  const context = { pages: () => [...sessions.keys()], on: () => undefined } as unknown as BrowserContext;
+
+  const addTab = (name: Tab) => {
+    const page = {
+      context: () => context,
+      frames: () => [],
+      isClosed: () => false,
+      on: () => undefined,
+    } as unknown as Page;
+    lifecycle.set(name, 'active');
+    const session = {
+      async send(method: string, { state }: { state: State } = { state: 'active' }) {
+        if (method === 'Animation.enable') throw new Error(INSPECTION_FAILURE);
+        expect(method).toBe('Page.setWebLifecycleState');
+        commands.push([name, state]);
+        await onLifecycle(name, state);
+        lifecycle.set(name, state);
+        return {};
+      },
+    } as unknown as CDPSession;
+    sessions.set(page, session);
+    return page;
+  };
+  addTab('first');
+  const survivor = addTab('survivor');
+  const capture = new BrowserCapture(
+    async page => {
+      const session = sessions.get(page);
+      if (!session) throw new Error('fixture tab has no session');
+      return session;
+    },
+    async () => {
+      throw new Error('the fixture should prevent composition');
+    },
+    deadline,
+    () => Date.now(),
+  );
+  return {
+    commands,
+    lifecycle,
+    capture: () =>
+      capture.fieldShot(survivor, async () => {
+        throw new Error('the fixture should prevent taking pixels');
+      }),
+  };
+}
+
+it('capture cleanup restores the surviving tab when an earlier lifecycle session rejects', async () => {
+  const tabs = twoTabs((tab, state) => {
+    if (tab === 'first' && state === 'active') throw new Error('the first lifecycle session closed while restoring');
+  });
+
+  await expect(tabs.capture()).rejects.toThrow(INSPECTION_FAILURE);
+  expect(tabs.commands).toEqual([
+    ['first', 'frozen'],
+    ['survivor', 'frozen'],
+    ['first', 'active'],
+    ['survivor', 'active'],
+  ]);
+  expect(tabs.lifecycle.get('survivor')).toBe('active');
+});
+
+it('capture cleanup restores a late freeze acknowledgement without freezing the next tab after the deadline', async () => {
+  const freezeSent = Promise.withResolvers<void>();
+  const freezeAcknowledged = Promise.withResolvers<void>();
+  const deadline = Promise.withResolvers<never>();
+  let freezeWork: Promise<unknown> | undefined;
+  const tabs = twoTabs(
+    async (tab, state) => {
+      if (tab === 'first' && state === 'frozen') {
+        freezeSent.resolve();
+        await freezeAcknowledged.promise;
+      }
+    },
+    work => {
+      if (freezeWork) return work;
+      freezeWork = work;
+      return Promise.race([work, deadline.promise]);
+    },
+  );
+  const outcome = tabs.capture().then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  await freezeSent.promise;
+  expect(tabs.commands).toEqual([['first', 'frozen']]);
+
+  deadline.reject(new Error('fixture capture deadline'));
+  expect(await outcome).toEqual(new Error('fixture capture deadline'));
+  expect(tabs.commands).toEqual([
+    ['first', 'frozen'],
+    ['first', 'active'],
+    ['survivor', 'active'],
+  ]);
+
+  // Chrome can acknowledge an in-flight freeze after the deadline and the first restoration.
+  freezeAcknowledged.resolve();
+  await freezeWork;
+  expect(tabs.commands).toEqual([
+    ['first', 'frozen'],
+    ['first', 'active'],
+    ['survivor', 'active'],
+    ['first', 'active'],
+  ]);
+  expect([...tabs.lifecycle]).toEqual([
+    ['first', 'active'],
+    ['survivor', 'active'],
+  ]);
+});
+
+for (const failure of ['timeout', 'crash', 'navigation'] as const) {
+  it(`context discovery withholds a capture when another tab has an incomplete ${failure} inspection`, async () => {
+    const handlers = new Map<Page, Map<string, () => void>>();
+    const context = { pages: () => [...handlers.keys()], on: () => undefined } as unknown as BrowserContext;
+    const makePage = () => {
+      const events = new Map<string, () => void>();
+      const page = {
+        context: () => context,
+        on: (event: string, callback: () => void) => events.set(event, callback),
+      } as unknown as Page;
+      handlers.set(page, events);
+      return page;
+    };
+    const target = makePage();
+    const related = makePage();
+    const capture = new BrowserCapture(
+      async () => {
+        throw new Error('no pixels may be acquired');
+      },
+      async () => {
+        throw new Error('no pixels may be composed');
+      },
+      work => work,
+      () => Date.now(),
+    );
+    const visited: Page[] = [];
+    capture.of(target).scan = async () => {
+      visited.push(target);
+      return { rects: [], filled: false };
+    };
+    capture.of(related).scan = async () => {
+      visited.push(related);
+      if (failure === 'navigation') {
+        handlers.get(related)?.get('framenavigated')?.();
+        return { rects: [], filled: false };
+      }
+      throw new Error(`synthetic related ${failure}`);
+    };
+    await expect(capture.inspect([target])).rejects.toThrow(
+      failure === 'navigation' ? /changed/u : new RegExp(failure),
+    );
+    expect(visited).toEqual([target, related]);
+    await expect(capture.binary(target)).rejects.toThrow();
+    capture.of(target).sensitiveNode = async () => false;
+    capture.of(related).sensitiveNode = async () => {
+      if (failure === 'navigation') {
+        handlers.get(related)?.get('framenavigated')?.();
+        return false;
+      }
+      throw new Error(`synthetic related ${failure}`);
+    };
+    await expect(capture.frame(target, 'unsafe-native-frame')).rejects.toThrow();
+  });
+}
