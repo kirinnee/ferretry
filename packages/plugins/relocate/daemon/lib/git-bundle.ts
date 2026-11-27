@@ -6,6 +6,8 @@ import type { KernelPorts } from '@ferretry/kernel/contract';
 
 /** What the snapshot asks of one working tree. Git runs only to list, diff and bundle; it never writes the tree. */
 export interface WorkingTree {
+  /** Decompressed history objects, inspected inside the daemon before their pack may be exported. */
+  inspect(check: (path: string, bytes: Uint8Array) => void): Promise<void>;
   /** `HEAD`'s commit and the branch it is on (absent on a detached `HEAD`), or `undefined` for a folder that is no work tree. */
   head(): Promise<{ readonly head: string; readonly branch?: string } | undefined>;
   /** `origin`'s address in the one spelling two machines compare (`normalizeRemote`), or `undefined` when it has none or it is no network address. */
@@ -160,6 +162,25 @@ export function kernelWorkingTree(kernel: Pick<KernelPorts, 'roots' | 'spawn' | 
     return head;
   };
   return {
+    inspect: async check => {
+      const head = await verifiedHead();
+      const deadline = kernel.clock.nowMs() + 10_000;
+      const objects = decoder
+        .decode(await ok(['rev-list', '--objects', head], 8 * 1024 * 1024, deadline))
+        .trim()
+        .split('\n');
+      if (objects.length > 20_000)
+        throw new WorkingTreeError('the history has too many objects to inspect for secrets');
+      let inspected = 0;
+      for (const object of objects) {
+        const split = object.indexOf(' ');
+        const oid = split < 0 ? object : object.slice(0, split);
+        const bytes = await ok(['cat-file', '-p', oid], 64 * 1024 * 1024, deadline);
+        inspected += bytes.length;
+        if (inspected > 500 * 1024 * 1024) throw new WorkingTreeError('the expanded history is too large to inspect');
+        check(split < 0 ? 'git history' : object.slice(split + 1), bytes);
+      }
+    },
     head: async () => {
       const done = await git(['rev-parse', '--verify', '-q', 'HEAD'], 4096);
       if (done.exitCode !== 0) {

@@ -1,6 +1,6 @@
 import { posix } from 'node:path';
 import type { AsksApi } from '@ferretry/core-asks/contract';
-import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
+import { secretReferencesIn, type ChildEnvironment, type VaultApi } from '@ferretry/core-vault/contract';
 import type { FencedPath, HookDecision, InstructionEntry, SharedCredential } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
@@ -301,6 +301,7 @@ export interface FerretsPorts {
   realPath?(ferret: FerretId, folder: string): Promise<string | undefined>;
   /** Where a launch records the switches it handed the pane (`instructions` reads them back). Unbound: none is kept. */
   launchEnvironment?: Pick<LaunchEnvironmentRecord, 'write'>;
+  recordLaunchSecrets?(ferret: FerretId, names: readonly string[]): Promise<void>;
   /**
    * Where a launch records the instruction sections it told the pane, by id and fingerprint, so a ferret whose words
    * changed since can be told apart (`outdated`). Unbound, or a write that fails: none is kept and the ferret is never
@@ -2887,7 +2888,6 @@ export class FerretsService implements FerretsApi {
     signedIn: Readonly<Record<string, string>>,
     harness: HarnessKey,
   ): Promise<Result<ChildEnvironment, string | { readonly kind: 'subscription_login' }>> {
-    // Login, mode defaults, then owner parts; FY_* switches keep final precedence.
     const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     // What a plugin gives THIS pane (the Git account's ssh-agent and git settings): judged by name, refused naming the plugin.
@@ -2919,6 +2919,7 @@ export class FerretsService implements FerretsApi {
     const steps = this.ports.launchSteps;
     if (steps !== undefined && !steps.sealed()) return err(LAUNCH_STEPS_UNSEALED);
     Object.assign(env, await paneVariables(steps?.stores() ?? [], ferret));
+    await this.ports.recordLaunchSecrets?.(ferret, secretReferencesIn(JSON.stringify([parts, env])));
     const resolved = await this.ports.vault.childEnvironment(ferret, env, harness);
     if (!resolved.ok)
       return err(
@@ -2926,7 +2927,6 @@ export class FerretsService implements FerretsApi {
           ? { kind: 'subscription_login' as const }
           : `unknown secrets: ${resolved.error.unknown.join(', ')}`,
       );
-    // Persist only switches for `instructions`, after refusal is impossible. A record failure never fails the launch.
     await this.ports.launchEnvironment?.write(ferret, recordedSwitches(env)).catch(() => undefined);
     return ok(resolved.value);
   }

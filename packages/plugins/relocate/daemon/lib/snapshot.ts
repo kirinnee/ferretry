@@ -36,6 +36,7 @@ export interface GatheredEntry {
 
 /** The facts a preflight has proved, and the refusals it found. Reading is all it does: nothing is stopped or written. */
 export interface Plan {
+  readonly secrets: readonly string[];
   readonly refusals: readonly string[];
   readonly files: readonly RelocationFile[];
   /** New files git does not ignore and whose names do not say secret. */
@@ -62,7 +63,9 @@ const topLevel = (path: string): string => (path.split('/')[0] ?? path).replace(
  */
 export async function plan(inputs: SnapshotInputs): Promise<Plan> {
   const refusals: string[] = [...(await inputs.source.busy())];
+  const secrets = [...new Set(await inputs.source.secretNames())].sort();
   const refusedPlan = (): Plan => ({
+    secrets,
     refusals,
     files: [],
     untracked: [],
@@ -105,6 +108,7 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
   let head: Plan['head'];
   let remote: string | undefined;
   const finish = (): Plan => ({
+    secrets,
     refusals,
     files,
     untracked,
@@ -169,15 +173,14 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
 
 /**
  * What the other machine must have to run this ferret: names and facts only. `secrets` is the `${secret:NAME}` names the
- * ferret's launch refers to; nothing on this machine yet lists a ferret's own (the MCP entries reach a launch through
- * `launch.parts`), so it is empty until a source of them exists (a declared gap), and the target checks whatever it is told.
+ * ferret's composed launch refers to, recorded by Ferrets before the Vault resolves profile, MCP and environment parts.
  */
-function needsOf(summary: Pick<FerretSummary, 'harness' | 'runtime'>, found: Pick<Plan, 'remote'>): Needs {
+function needsOf(summary: Pick<FerretSummary, 'harness' | 'runtime'>, found: Pick<Plan, 'remote' | 'secrets'>): Needs {
   return {
     harness: summary.harness,
     ...(summary.runtime === undefined ? {} : { runtime: summary.runtime }),
     ...(found.remote === undefined ? {} : { remote: found.remote }),
-    secrets: [],
+    secrets: [...found.secrets],
   };
 }
 

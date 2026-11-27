@@ -25,6 +25,47 @@ const nonceText = (): string => toBase64Url(relayCrypto.randomBytes(NONCE_BYTES)
 const be32 = (value: number): Uint8Array =>
   new Uint8Array([value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255]);
 
+it('Relocate alone may sign source bundle headers, with a distinct label and every field bound', async () => {
+  const identity = await newDaemonIdentity();
+  const signer = createIdentitySigner(identity);
+  const request = {
+    v: 1,
+    offerId: 'offer',
+    targetDaemonId: 'target',
+    expiresAt: '2026-11-27T12:05:00Z',
+    ephemeralKey: 'ephemeral',
+    chunks: 2,
+    bytes: 100,
+  };
+  const signed = await signerFor('relocate', signer).signRelocateBundle(request);
+  const expected = concatBytes(
+    [
+      'ferretry-relocate-bundle-v1',
+      '1',
+      request.offerId,
+      identity.daemonId,
+      signed.identityKey,
+      request.targetDaemonId,
+      request.expiresAt,
+      request.ephemeralKey,
+      '2',
+      '100',
+    ].map(field => lengthPrefixed(utf8Bytes(field))),
+  );
+  const signature = fromBase64UrlFixed(signed.signature, 64) as Uint8Array;
+  expect(await relayCrypto.verifyEd25519(identity.publicKeySpki, signature, expected)).toBe(true);
+  for (const plugin of ['vault', 'connections', 'catalogs', 'board'])
+    await expect(signerFor(plugin, signer).signRelocateBundle(request)).rejects.toThrow(TypeError);
+  await expect(signer.signRelocateBundle({ ...request, chunks: 0 })).rejects.toThrow(TypeError);
+  expect(
+    await relayCrypto.verifyEd25519(
+      identity.publicKeySpki,
+      signature,
+      utf8Bytes(new TextDecoder().decode(expected).replace('bundle-v1', 'offer-v1')),
+    ),
+  ).toBe(false);
+});
+
 describe('identity signer: the rendezvous claim', () => {
   it('signs the claim layout: label (not length-prefixed), then LP(protocol), LP(daemonId), LP(host), LP(nonce)', async () => {
     const identity = await newDaemonIdentity();
@@ -85,6 +126,7 @@ describe('identity signer: the rendezvous claim', () => {
       'sign',
       'signCatalog',
       'signLinkStoreRequest',
+      'signRelocateBundle',
       'signRelocateOffer',
       'signSecretOffer',
       'signTunnel',
@@ -229,6 +271,7 @@ describe('kernel.signer: each signature is offered only to the plugin that needs
       'sign',
       'signCatalog',
       'signLinkStoreRequest',
+      'signRelocateBundle',
       'signRelocateOffer',
       'signSecretOffer',
       'signTunnel',

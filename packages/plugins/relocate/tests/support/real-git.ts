@@ -31,11 +31,20 @@ export function git(cwd: string, ...args: string[]): string {
   return done.stdout.toString();
 }
 
+/** Synthetic raw tree objects cannot be made through porcelain: this input path deliberately constructs hostile packs. */
+export function gitInput(cwd: string, input: Uint8Array, ...args: string[]): string {
+  const done = Bun.spawnSync(['git', ...args], { cwd, env: GIT_ENV, stdin: input });
+  if (done.exitCode !== 0) throw new Error('the synthetic git object could not be made');
+  return done.stdout.toString().trim();
+}
+
 /**
  * The kernel's spawn and roots as far as the working tree uses them, over the real disk: real git, real files. The
  * folder handle refuses what the kernel's `imports` root refuses for this use (a `..`, a link, a second hard link).
  */
-export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
+export function realKernel(
+  remotes: ReadonlyMap<string, string> = new Map(),
+): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
   return {
     clock: { nowMs: () => performance.now() } as KernelPorts['clock'],
     spawn: {
@@ -46,7 +55,21 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
         throw new Error('not used');
       },
       runBytes: async (program, args, options) => {
-        const child = Bun.spawn([program, ...args], {
+        let invocation = [...args];
+        if (program === 'git' && args.includes('clone')) {
+          const remote = args[args.length - 2] ?? '';
+          const fixture = remotes.get(remote);
+          if (fixture === undefined || fixture === '') throw new Error('test network fence: no external git transport');
+          invocation = [
+            ...args.slice(0, args.indexOf('clone')),
+            '-c',
+            'protocol.file.allow=always',
+            ...args.slice(args.indexOf('clone'), -2),
+            fixture,
+            args.at(-1) as string,
+          ];
+        }
+        const child = Bun.spawn([program, ...invocation], {
           env: { ...GIT_ENV, ...(options?.env as Readonly<Record<string, string>> | undefined) },
           cwd: typeof options?.cwd === 'string' ? options.cwd : options?.cwd?.describe,
           stdout: 'pipe',
@@ -86,6 +109,10 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
             close: async () => {},
           }),
           realPath: async (path: string) => realpathSync(path),
+          fileIdentity: async (path: string) => {
+            const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+            return stat === undefined ? undefined : { device: stat.dev, inode: stat.ino };
+          },
           lstat: async (path: string) => {
             try {
               const s = lstatSync(path);
@@ -110,7 +137,13 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
               throw new Error('exists');
             writeFileSync(path, bytes);
           },
-          remove: async (path: string) => {
+          remove: async (path: string, options?: { expectedIdentity?: { device: bigint; inode: bigint } }) => {
+            if (options?.expectedIdentity !== undefined) {
+              const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+              if (stat === undefined) return;
+              if (stat.dev !== options.expectedIdentity.device || stat.ino !== options.expectedIdentity.inode)
+                throw new Error('changed');
+            }
             rmSync(path, { recursive: true, force: true });
           },
         };

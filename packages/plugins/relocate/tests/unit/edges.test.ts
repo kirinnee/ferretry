@@ -111,6 +111,7 @@ describe('failures are sentences, and the ferret is never left stopped by a fail
 describe('a working tree that cannot be read is a refusal, not a crash', () => {
   const tree = (head: () => Promise<{ head: string }>, rest: Partial<WorkingTree>): WorkingTree => ({
     head,
+    inspect: async () => {},
     remote: async () => undefined,
     commits: async () => undefined,
     changes: async () => new Uint8Array(),

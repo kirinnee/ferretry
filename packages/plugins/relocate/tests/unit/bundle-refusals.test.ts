@@ -14,7 +14,7 @@ import { RelocateRefused } from '../../daemon/lib/relocation.ts';
 import { normalizeRemote } from '../../daemon/lib/remote.ts';
 import { sealBundle } from '../../daemon/lib/seal.ts';
 import { CONVERSATION } from '../support/fake-ferrets.ts';
-import { crypto, newIdentity } from '../support/identity.ts';
+import { bundleSigner, crypto, newIdentity } from '../support/identity.ts';
 import { git, makeRepository, REMOTE_URL } from '../support/real-git.ts';
 import { type TargetOptions, targetWorld } from '../support/target.ts';
 
@@ -103,10 +103,12 @@ async function craft(target: Awaited<ReturnType<typeof targetWorld>>, spec: Spec
   const framed = new Uint8Array(4 + manifestBytes.length);
   new DataView(framed.buffer).setUint32(0, manifestBytes.length, false);
   framed.set(manifestBytes, 4);
-  const sourceDaemonId = spec.sourceDaemonId ?? (await newIdentity()).daemonId;
+  const identity = await newIdentity();
+  const sourceDaemonId = spec.sourceDaemonId ?? identity.daemonId;
   const sealed = await sealBundle(crypto, {
     offer,
     offerKey,
+    signer: bundleSigner({ ...identity, daemonId: sourceDaemonId }),
     sourceDaemonId,
     parts: spec.parts ?? [framed, ...entries.map(entry => entry.bytes)],
     chunkBytes: spec.chunkBytes ?? 1024 * 1024,
@@ -128,7 +130,12 @@ async function refused(
   const { target } = await fixtureWorld(options);
   const before = target.shape();
   const made = await craft(target, spec, upload);
-  const error = await refusal(target.importer.import(made.offerId, { header: tweak?.(made.header) ?? made.header }));
+  const error = await refusal(
+    target.importer.import(made.offerId, {
+      header: tweak?.(made.header) ?? made.header,
+      sourceDaemonId: made.header.sourceDaemonId,
+    }),
+  );
   expect(target.started).toEqual([]);
   expect(target.shape()).toEqual(before);
   return error;
@@ -145,7 +152,9 @@ describe('a bundle that cannot be trusted is refused, and nothing is written', (
     const { target } = await fixtureWorld();
     const before = target.shape();
     const made = await craft(target, { sourceDaemonId: target.daemonId });
-    const error = await refusal(target.importer.import(made.offerId, { header: made.header }));
+    const error = await refusal(
+      target.importer.import(made.offerId, { header: made.header, sourceDaemonId: made.header.sourceDaemonId }),
+    );
     expect(error.message).toContain('from itself');
     expect(target.shape()).toEqual(before);
   });
@@ -237,7 +246,9 @@ describe('a bundle that opens but cannot be received is refused before the first
     });
     const before = target.shape();
     const made = await craft(target, { worktree: { head: pushed, branch: 'feature' } });
-    const error = await refusal(target.importer.import(made.offerId, { header: made.header }));
+    const error = await refusal(
+      target.importer.import(made.offerId, { header: made.header, sourceDaemonId: made.header.sourceDaemonId }),
+    );
     expect(error).toMatchObject({ status: 409, code: 'folder_taken' });
     expect(target.shape()).toEqual(before);
   });
@@ -249,30 +260,42 @@ describe('a bundle that opens but cannot be received is refused before the first
     mkdirSync(cloneInto);
     const before = target.shape();
     const made = await craft(target, { worktree: { head: NO_HEAD, branch: 'main' } });
-    const error = await refusal(target.importer.import(made.offerId, { header: made.header, cloneInto }));
+    const error = await refusal(
+      target.importer.import(made.offerId, {
+        header: made.header,
+        sourceDaemonId: made.header.sourceDaemonId,
+        cloneInto,
+      }),
+    );
     expect(error).toMatchObject({ status: 409, code: 'commit_missing' });
-    expect(target.registered).toHaveLength(1);
-    expect(target.removedProjects).toEqual(['p-cloned']);
+    expect(target.registered).toHaveLength(0);
+    expect(target.removedProjects).toEqual([]);
     expect(target.shape()).toEqual(before);
   });
 
-  test('Projects going off between the look and the write', async () => {
+  test('Projects is only consulted during the read-only preflight', async () => {
     const fixture = makeRepository();
     const target = await targetWorld({ project: false, accounts: 1, projectsGoneAfterLook: true }, fixture.remote);
     const cloneInto = join(target.root, 'clones');
     mkdirSync(cloneInto);
-    const before = target.shape();
-    const made = await craft(target, { worktree: { head: NO_HEAD, branch: 'main' } });
-    const error = await refusal(target.importer.import(made.offerId, { header: made.header, cloneInto }));
-    expect(error.message).toContain('Projects is off here');
-    expect(target.shape()).toEqual(before);
+    const pushed = git(fixture.folder, 'rev-parse', 'HEAD~1').trim();
+    const made = await craft(target, { worktree: { head: pushed, branch: 'main' } });
+    const done = await target.importer.import(made.offerId, {
+      header: made.header,
+      sourceDaemonId: made.header.sourceDaemonId,
+      cloneInto,
+    });
+    expect(done.ferretId).toBeDefined();
+    expect(target.started.length).toBe(1);
   });
 
   test('a harness that falls over while it starts leaves nothing this import made', async () => {
     const { target, pushed } = await fixtureWorld({ start: 'throw' });
     const before = target.shape();
     const made = await craft(target, { worktree: { head: pushed, branch: 'feature' } });
-    const error = await refusal(target.importer.import(made.offerId, { header: made.header }));
+    const error = await refusal(
+      target.importer.import(made.offerId, { header: made.header, sourceDaemonId: made.header.sourceDaemonId }),
+    );
     expect(error).toMatchObject({ status: 409, code: 'move_failed' });
     expect(error.message).toContain('fell over');
     expect(target.shape()).toEqual(before);
@@ -283,7 +306,10 @@ describe('where a working tree stands', () => {
   test('a branch the project does not have is made under its own name, on the commit the ferret was on', async () => {
     const { target, pushed } = await fixtureWorld();
     const made = await craft(target, { worktree: { head: pushed, branch: 'feature' }, runtime: 'claude-default' });
-    const done = await target.importer.import(made.offerId, { header: made.header });
+    const done = await target.importer.import(made.offerId, {
+      header: made.header,
+      sourceDaemonId: made.header.sourceDaemonId,
+    });
     expect(git(done.folder, 'branch', '--show-current').trim()).toBe('feature');
     expect(git(done.folder, 'rev-parse', 'HEAD').trim()).toBe(pushed);
     expect(target.started[0]?.runtime).toBe('claude-default');
@@ -292,7 +318,10 @@ describe('where a working tree stands', () => {
   test('a ferret on a detached head gets a detached working tree', async () => {
     const { target, pushed } = await fixtureWorld();
     const made = await craft(target, { worktree: { head: pushed } });
-    const done = await target.importer.import(made.offerId, { header: made.header });
+    const done = await target.importer.import(made.offerId, {
+      header: made.header,
+      sourceDaemonId: made.header.sourceDaemonId,
+    });
     expect(git(done.folder, 'branch', '--show-current').trim()).toBe('');
     expect(git(done.folder, 'rev-parse', 'HEAD').trim()).toBe(pushed);
   });

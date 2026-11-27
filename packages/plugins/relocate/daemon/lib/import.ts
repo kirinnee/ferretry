@@ -7,15 +7,16 @@ import type { VaultApi } from '@ferretry/core-vault/contract';
 import { cloneFolderName, type ProjectsApi } from '@ferretry/plugin-projects/contract';
 import type { GitAccountsApi } from '@ferretry/plugin-git-accounts/contract';
 import type { RuntimesApi } from '@ferretry/plugin-runtimes/contract';
-import {
-  type ImportRequest,
-  type ImportResponse,
-  type Needs,
-  type RelocateOffer,
-  type TargetPreflightRequest,
-  type TargetPreflightResponse,
+import type {
+  ImportRequest,
+  ImportResponse,
+  Needs,
+  RelocateOffer,
+  TargetPreflightRequest,
+  TargetPreflightResponse,
 } from '../../contract/index.ts';
 import type { Checkout } from './checkout.ts';
+import { approvedRemote } from './remote.ts';
 import { toHex } from './hex.ts';
 import type { OfferBook } from './offer.ts';
 import { BundleRefused, type OpenedBundle, openBundle } from './open-bundle.ts';
@@ -48,9 +49,9 @@ export interface ImporterDeps {
   readonly ownDaemonId: string;
   readonly clock: Pick<Clock, 'now'>;
   readonly offers: OfferBook;
-  readonly ferrets: Pick<FerretsApi, 'start' | 'stop' | 'harnesses'>;
+  readonly ferrets: Pick<FerretsApi, 'start' | 'get' | 'harnesses'>;
   /** The optional neighbours: absent means that plugin is off, and a move needing it is refused with a sentence. */
-  readonly projects: () => Pick<ProjectsApi, 'list' | 'register' | 'remove'> | undefined;
+  readonly projects: () => Pick<ProjectsApi, 'list'> | undefined;
   readonly gitAccounts: () => Pick<GitAccountsApi, 'list'> | undefined;
   readonly runtimes: () => Pick<RuntimesApi, 'resolve' | 'default'> | undefined;
   readonly vault: () => Pick<VaultApi, 'has'> | undefined;
@@ -144,6 +145,7 @@ export class Importer {
         header: request.header,
         chunks: spent.chunks,
         ownDaemonId: this.deps.ownDaemonId,
+        sourceDaemonId: request.sourceDaemonId,
       });
     } catch (error) {
       throw error instanceof BundleRefused ? new RelocateRefused(400, error.message, 'bundle_refused') : error;
@@ -198,67 +200,40 @@ export class Importer {
         'folder_taken',
       );
 
-    const undo: (() => Promise<void>)[] = [];
-    // Once a start has made the ferret nothing under it is taken back: it exists and runs on these files.
+    let cleanup: (() => Promise<void>) | undefined;
     let ferretExists = false;
-    const rollback = async (): Promise<void> => {
-      for (const step of undo.reverse())
-        await step().catch(() => this.deps.log.warn('a moved import could not take a step back'));
-    };
     try {
-      let repo: string;
-      if (resolved.kind === 'found') repo = resolved.repo;
-      else {
-        const projects = this.deps.projects();
-        if (projects === undefined)
-          throw new RelocateRefused(409, 'Projects is off here, so the project cannot be cloned', 'move_refused');
-        // A clone makes a folder before it can fail, and the folder was free: whatever is there afterwards is ours.
-        undo.push(async () => await this.deps.checkout.removeFolder(resolved.destination));
-        const registered = await projects.register({ kind: 'clone', url: resolved.url, path: resolved.destination });
-        if (!registered.ok) throw new RelocateRefused(409, registered.error.message, 'clone_failed');
-        undo.push(async () => void (await projects.remove(registered.value.id)));
-        repo = registered.value.path;
-      }
-      const ref = `refs/fy-relocate/${tag}`;
-      if (commits === undefined) {
-        if (!(await this.deps.checkout.hasCommit(repo, manifest.worktree.head)))
-          throw new RelocateRefused(
-            409,
-            'the cloned project does not have the commit the ferret was on',
-            'commit_missing',
-          );
-      } else {
-        undo.push(async () => await this.deps.checkout.deleteRef(repo, ref));
-        await this.#step(() =>
-          this.deps.checkout.importCommits(repo, commits.bytes, manifest.worktree?.head ?? '', ref),
-        );
-      }
+      const stage = await this.deps.checkout.prepare(
+        resolved.kind === 'found' ? { repo: resolved.repo } : { remote: resolved.url },
+        folder,
+      );
+      cleanup = stage.cleanup;
+      const repo = stage.repo;
+      const ref = 'refs/fy-relocate/import';
+      if (commits !== undefined)
+        await this.deps.checkout.importCommits(repo, commits.bytes, manifest.worktree.head, ref);
+      else if (!(await this.deps.checkout.hasCommit(repo, manifest.worktree.head)))
+        throw new RelocateRefused(409, 'the project does not have the moved commit', 'commit_missing');
+      const changes = entry('worktree-changes');
+      await this.deps.checkout.audit(repo, manifest.worktree.head, changes?.bytes);
       const wanted = manifest.worktree.branch;
       const branch =
         wanted === undefined
           ? undefined
-          : (await this.deps.checkout.branchExists(repo, wanted))
-            ? `${wanted}-moved-${tag}`
+          : (await this.deps.checkout.branchExists(resolved.kind === 'found' ? resolved.repo : repo, wanted))
+            ? wanted + '-moved-' + tag
             : wanted;
-      undo.push(async () => {
-        await this.deps.checkout.removeWorktree(repo, folder);
-        if (branch !== undefined) await this.deps.checkout.deleteBranch(repo, branch);
+      const tree = folder + '/worktree';
+      await this.deps.checkout.addWorktree(repo, tree, {
+        head: manifest.worktree.head,
+        ...(branch === undefined ? {} : { branch }),
       });
-      await this.#step(() =>
-        this.deps.checkout.addWorktree(repo, folder, {
-          head: manifest.worktree?.head ?? '',
-          ...(branch === undefined ? {} : { branch }),
-        }),
-      );
-      await this.deps.checkout.deleteRef(repo, ref).catch(() => undefined);
-      const changes = entry('worktree-changes');
-      if (changes !== undefined) await this.#step(() => this.deps.checkout.applyDiff(folder, changes.bytes));
+      if (changes !== undefined) await this.deps.checkout.applyDiff(tree, changes.bytes);
       for (const file of bundle.entries)
-        if (file.kind === 'worktree-file')
-          await this.#step(() => this.deps.checkout.writeNewFile(folder, file.path, file.bytes));
-
+        if (file.kind === 'worktree-file') await this.deps.checkout.writeNewFile(tree, file.path, file.bytes);
+      await this.deps.checkout.finish(repo);
       const started = await this.deps.ferrets.start(
-        this.#startRequest(record, found.runtime, folder, { bytes: conversation.bytes, relPath: conversation.path }),
+        this.#startRequest(record, found.runtime, tree, { bytes: conversation.bytes, relPath: conversation.path }),
         { kind: 'person' },
       );
       if (!started.ok) throw new RelocateRefused(409, started.error.reason, 'start_refused');
@@ -267,19 +242,34 @@ export class Importer {
       try {
         await this.deps.received.record(started.value, { ...movedFrom, at: this.deps.clock.now() });
       } catch {
-        // The ferret exists and runs: take nothing from under it. Stop it and say the provenance was not kept.
-        await this.deps.ferrets
-          .stop(started.value, 'polite', 'the move could not record where it came from')
-          .catch(() => undefined);
-        throw new RelocateRefused(
-          409,
-          'the ferret was received but where it came from could not be recorded; it was stopped and kept',
-          'provenance_unrecorded',
-        );
+        const actual = await this.deps.ferrets.get(started.value).catch(() => undefined);
+        const state = actual === undefined ? 'unknown' : actual.state === 'stopped' ? 'stopped' : 'running';
+        return {
+          ferretId: started.value,
+          folder: tree,
+          movedFrom,
+          recovery: {
+            code: 'provenance_unrecorded',
+            state,
+            message:
+              'the ferret started in this folder; its origin could not be saved; keep this receipt to recover it',
+          },
+        };
       }
-      return { ferretId: started.value, folder, movedFrom };
+      return { ferretId: started.value, folder: tree, movedFrom };
     } catch (error) {
-      if (!ferretExists) await rollback();
+      if (!ferretExists && cleanup !== undefined) {
+        try {
+          await cleanup();
+        } catch {
+          this.deps.log.warn('a moved quarantine could not be removed');
+          throw new RelocateRefused(
+            409,
+            'the move failed and its quarantine could not be removed: ' + folder,
+            'cleanup_failed',
+          );
+        }
+      }
       if (error instanceof RelocateRefused) throw error;
       throw new RelocateRefused(409, sentence(error, 'the move could not be received'), 'move_failed');
     }
@@ -309,15 +299,6 @@ export class Importer {
     };
   }
 
-  /** A git or file step: whatever it throws is one plain sentence of ours, never git's own text. */
-  async #step(work: () => Promise<void>): Promise<void> {
-    try {
-      await work();
-    } catch (error) {
-      throw new RelocateRefused(409, sentence(error, 'the moved working tree could not be made'), 'move_failed');
-    }
-  }
-
   #guarded<T>(work: () => T): T {
     try {
       return work();
@@ -336,6 +317,7 @@ export class Importer {
 
     if (needs.remote === undefined)
       refusals.push('this ferret’s folder has no remote the other machine could match, so it cannot be moved');
+    else if (!approvedRemote(needs.remote)) refusals.push('only an approved https or ssh project address may be moved');
     else {
       const projects = this.deps.projects();
       if (projects === undefined)

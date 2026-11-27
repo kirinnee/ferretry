@@ -1,6 +1,8 @@
 import { gitEnvironment, HARDENED_GIT_ARGUMENTS } from '@ferretry/core-ferrets/contract';
-import type { KernelPorts } from '@ferretry/kernel/contract';
+import type { KernelPorts, RootIdentity } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
+import { approvedRemote } from './remote.ts';
+import { auditTree } from './tree-audit.ts';
 
 /** A git or filesystem step that failed on this machine: one plain sentence, never git's own text or a path of the other machine. */
 export class CheckoutError extends Error {
@@ -15,6 +17,14 @@ export class CheckoutError extends Error {
  * `CheckoutError`; nothing is ever left half-made by one call except where it says so.
  */
 export interface Checkout {
+  /** An exclusively created, private checkout. Existing repository objects/config/refs are READ ONLY. */
+  prepare(
+    source: { readonly repo: string } | { readonly remote: string },
+    folder: string,
+  ): Promise<{ readonly repo: string; cleanup(): Promise<void> }>;
+  /** Prove the full history and the patched index before any checkout or launch; detach from borrowed objects. */
+  audit(repo: string, head: string, diff?: Uint8Array): Promise<void>;
+  finish(repo: string): Promise<void>;
   /** Whether `repo` holds this commit. */
   hasCommit(repo: string, sha: string): Promise<boolean>;
   /** Whether `repo` has a local branch of this name. */
@@ -23,18 +33,12 @@ export interface Checkout {
   importCommits(repo: string, bundle: Uint8Array, head: string, ref: string): Promise<void>;
   /** A new working tree at `path` (which must not exist), on a NEW branch at `head`, or detached at it when no branch is named. */
   addWorktree(repo: string, path: string, at: { readonly head: string; readonly branch?: string }): Promise<void>;
-  /** Takes back a working tree this machine made, however it was left. */
-  removeWorktree(repo: string, path: string): Promise<void>;
-  deleteRef(repo: string, ref: string): Promise<void>;
-  deleteBranch(repo: string, branch: string): Promise<void>;
   /** Applies a binary diff to the working files of `tree` (the index is left alone). */
   applyDiff(tree: string, diff: Uint8Array): Promise<void>;
   /** Makes a NEW file below `tree`, and its folders; refuses a name that is already there. */
   writeNewFile(tree: string, relative: string, bytes: Uint8Array): Promise<void>;
   /** Whether nothing is at `path`, a link included. `false` for a path whose folder is missing. */
   isFree(path: string): Promise<boolean>;
-  /** Removes a folder this import made (a clone, or a working tree's leftovers). */
-  removeFolder(path: string): Promise<void>;
 }
 
 const GIT_TIMEOUT_MS = 60_000;
@@ -42,6 +46,7 @@ const READ_BYTES = 64 * 1024;
 
 /** The checkout over the kernel: git through `kernel.spawn` inside a held directory, files through the `imports` root. */
 export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Checkout {
+  const alternates = new Map<string, string>();
   const parentOf = (path: string): { readonly parent: string; readonly name: string } => {
     const cut = path.lastIndexOf('/');
     return { parent: cut <= 0 ? '/' : path.slice(0, cut), name: path.slice(cut + 1) };
@@ -57,16 +62,49 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
     if (!self.ok) throw new CheckoutError('this folder cannot be fenced for git');
     const held = await handle.pin(self.value, { fence: 'none' });
     try {
-      const done = await kernel.spawn.runBytes('git', [...HARDENED_GIT_ARGUMENTS, ...args], {
-        cwd: held.policyCwd,
-        env: gitEnvironment({}, true),
-        timeout: milliseconds(GIT_TIMEOUT_MS),
-        maxStdoutBytes: options.maxStdoutBytes ?? READ_BYTES,
-        maxStderrBytes: READ_BYTES,
-        killOnOutputLimit: true,
-        sealed: true,
-        ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
-      });
+      const done = await kernel.spawn.runBytes(
+        'git',
+        [
+          ...HARDENED_GIT_ARGUMENTS,
+          '-c',
+          'protocol.allow=never',
+          '-c',
+          'protocol.https.allow=always',
+          '-c',
+          'protocol.ssh.allow=always',
+          '-c',
+          'core.sshCommand=ssh -F /dev/null',
+          '-c',
+          'core.attributesFile=/dev/null',
+          '-c',
+          'init.templateDir=',
+          '-c',
+          'submodule.recurse=false',
+          '-c',
+          'gc.auto=0',
+          '-c',
+          'maintenance.auto=false',
+          ...args,
+        ],
+        {
+          cwd: held.policyCwd,
+          env: {
+            ...gitEnvironment({}, true),
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_CONFIG_GLOBAL: '/dev/null',
+            GIT_CONFIG_SYSTEM: '/dev/null',
+            GIT_NO_REPLACE_OBJECTS: '1',
+            GIT_LFS_SKIP_SMUDGE: '1',
+            ...(alternates.has(folder) ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternates.get(folder) as string } : {}),
+          },
+          timeout: milliseconds(GIT_TIMEOUT_MS),
+          maxStdoutBytes: options.maxStdoutBytes ?? READ_BYTES,
+          maxStderrBytes: READ_BYTES,
+          killOnOutputLimit: true,
+          sealed: true,
+          ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
+        },
+      );
       if (done.timedOut) throw new CheckoutError('git did not answer in time');
       return done;
     } finally {
@@ -77,7 +115,7 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
     folder: string,
     args: readonly string[],
     failure: string,
-    options?: { readonly stdin?: Uint8Array },
+    options?: { readonly stdin?: Uint8Array; readonly maxStdoutBytes?: number },
   ): Promise<Uint8Array> => {
     const done = await git(folder, args, options);
     if (done.exitCode !== 0 || done.stdoutTruncated) throw new CheckoutError(failure);
@@ -85,6 +123,88 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
   };
 
   return {
+    prepare: async (source, folder) => {
+      const { parent, name } = parentOf(folder);
+      const handle = kernel.roots.root('imports', { subfolder: parent });
+      const path = handle.resolve(name);
+      const cwd = handle.resolve('');
+      if (!path.ok || !cwd.ok) throw new CheckoutError('the quarantine folder cannot be fenced');
+      const held = await handle.pin(cwd.value, { fence: 'none' });
+      try {
+        const created = await kernel.spawn.runBytes('mkdir', ['-m', '700', '--', name], {
+          cwd: held.policyCwd,
+          env: {},
+          sealed: true,
+          timeout: milliseconds(GIT_TIMEOUT_MS),
+          maxStdoutBytes: READ_BYTES,
+          maxStderrBytes: READ_BYTES,
+          killOnOutputLimit: true,
+        });
+        if (created.exitCode !== 0 || created.timedOut)
+          throw new CheckoutError('the quarantine folder is already taken or could not be created');
+      } finally {
+        await held.close();
+      }
+      const identity: RootIdentity | undefined = await handle.fileIdentity(path.value);
+      if (identity === undefined) throw new CheckoutError('the quarantine folder identity could not be proved');
+      const repo = `${folder}/repository`;
+      const cleanup = async () => {
+        alternates.delete(repo);
+        await handle.remove(path.value, { expectedIdentity: identity });
+      };
+      try {
+        if ('remote' in source) {
+          if (!approvedRemote(source.remote))
+            throw new CheckoutError('only an approved https or ssh project address may be cloned');
+          await must(
+            folder,
+            ['clone', '--no-checkout', '--template=', '--', source.remote, repo],
+            'the network project could not be cloned',
+          );
+        } else {
+          // The ONLY commands in an existing project are read-only probes. Its config is never copied or used for checkout.
+          const objects = new TextDecoder()
+            .decode(
+              await must(
+                source.repo,
+                ['rev-parse', '--path-format=absolute', '--git-path', 'objects'],
+                'the project objects could not be located',
+              ),
+            )
+            .trim();
+          if (!objects.startsWith('/') || /[\n\r:\0]/u.test(objects))
+            throw new CheckoutError('the project objects cannot be borrowed safely');
+          await must(folder, ['init', '--template=', '--', repo], 'the quarantine repository could not be made');
+          alternates.set(repo, objects);
+        }
+        return { repo, cleanup };
+      } catch (error) {
+        try {
+          await cleanup();
+        } catch {
+          throw new CheckoutError('preparing the quarantine failed and its cleanup failed; the quarantine was kept');
+        }
+        throw error;
+      }
+    },
+
+    audit: async (repo, head, diff) => {
+      await auditTree(
+        async (args, stdin) =>
+          await must(repo, args, 'the moved git tree or patch is unsafe', {
+            ...(stdin === undefined ? {} : { stdin }),
+            maxStdoutBytes: 8 * 1024 * 1024,
+          }),
+        head,
+        diff,
+      );
+    },
+
+    finish: async repo => {
+      await must(repo, ['repack', '-a', '-d'], 'the quarantined objects could not be made independent');
+      alternates.delete(repo);
+      await must(repo, ['fsck', '--no-reflogs', '--connectivity-only'], 'the quarantined objects are incomplete');
+    },
     hasCommit: async (repo, sha) => (await git(repo, ['cat-file', '-e', `${sha}^{commit}`])).exitCode === 0,
 
     branchExists: async (repo, branch) =>
@@ -109,20 +229,6 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
           : ['worktree', 'add', '-b', at.branch, '--', path, at.head],
         'a working tree could not be made for the moved ferret',
       );
-    },
-
-    removeWorktree: async (repo, path) => {
-      // `--force` because the working tree may hold the files this import wrote; it is ours, and being removed.
-      await git(repo, ['worktree', 'remove', '--force', '--', path]);
-      await git(repo, ['worktree', 'prune']);
-    },
-
-    deleteRef: async (repo, ref) => {
-      await git(repo, ['update-ref', '-d', ref]);
-    },
-
-    deleteBranch: async (repo, branch) => {
-      await git(repo, ['branch', '-D', '--', branch]);
     },
 
     applyDiff: async (tree, diff) => {
@@ -153,14 +259,6 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
       } catch {
         return false;
       }
-    },
-
-    removeFolder: async path => {
-      const { parent, name } = parentOf(path);
-      const handle = kernel.roots.root('imports', { subfolder: parent });
-      const fenced = handle.resolve(name);
-      if (!fenced.ok) throw new CheckoutError('a folder this import made could not be fenced for removal');
-      await handle.remove(fenced.value);
     },
   };
 }

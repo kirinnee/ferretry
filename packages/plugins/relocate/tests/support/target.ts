@@ -32,6 +32,8 @@ export interface TargetOptions {
   readonly projectsGoneAfterLook?: boolean;
   /** The ledger that says where a ferret came from cannot be written. */
   readonly recordFails?: boolean;
+  readonly stopFails?: boolean;
+  readonly actualState?: 'idle' | 'stopped' | 'unavailable';
   /** Wraps the real checkout, so a test can make one step fail. */
   readonly wrapCheckout?: (real: Checkout) => Checkout;
   /** Mutates the clock the target and its offers share. */
@@ -116,13 +118,17 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
       },
     },
   });
-  const realCheckout = kernelCheckout(realKernel());
+  const realCheckout = kernelCheckout(realKernel(new Map([[REMOTE_URL.replace(/\.git$/u, ''), bare]])));
   const deps: ImporterDeps = {
     crypto,
     ownDaemonId: identity.daemonId,
     clock,
     offers,
     ferrets: {
+      get: async () => {
+        if (options.actualState === 'unavailable') throw new Error('state unavailable');
+        return { state: options.actualState ?? 'idle' } as never;
+      },
       harnesses: () => (options.harnesses ?? ['claude-code']) as readonly HarnessKey[],
       start: async request => {
         started.push(request);
@@ -131,10 +137,11 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
           ? err({ code: 'refused', reason: 'the moved conversation was refused by the harness' })
           : ok(NEW_FERRET);
       },
-      stop: async ferret => {
+      stop: async (ferret: string) => {
         stopped.push(ferret);
+        if (options.stopFails) throw new Error('stop failed');
       },
-    },
+    } as ImporterDeps['ferrets'],
     projects: () =>
       options.projectsOff === true || (options.projectsGoneAfterLook === true && looks.count++ > 0)
         ? undefined

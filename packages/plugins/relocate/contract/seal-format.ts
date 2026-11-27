@@ -14,6 +14,24 @@ export const BUNDLE_KEY_LABEL = 'ferretry-relocate-key-v1';
 /** The label of the header every chunk's tag authenticates. */
 export const CHUNK_HEADER_LABEL = 'ferretry-relocate-chunk-v1';
 
+/** The SOURCE's signature binds its identity to this offer, recipient and ephemeral sealing key. */
+export function bundleSignedBytes(header: Omit<BundleHeader, 'signature'>): Uint8Array {
+  return concatBytes(
+    [
+      'ferretry-relocate-bundle-v1',
+      String(header.v),
+      header.offerId,
+      header.sourceDaemonId,
+      header.identityKey,
+      header.targetDaemonId,
+      header.expiresAt,
+      header.ephemeralKey,
+      String(header.chunks),
+      String(header.bytes),
+    ].map(field => lengthPrefixed(utf8Bytes(field))),
+  );
+}
+
 /** The bytes an offer's signature covers, length-prefixed so no field's end can become the next one's start. */
 export function offerSignedBytes(offer: Omit<RelocateOffer, 'signature'>): Uint8Array {
   return concatBytes(

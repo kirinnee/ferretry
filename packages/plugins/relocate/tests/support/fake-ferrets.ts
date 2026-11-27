@@ -30,6 +30,8 @@ export const HISTORY = '{"sequence":1,"type":"session.started"}\n{"sequence":2,"
 export const CONVERSATION = { relPath: 'projects/-work/abc-123.jsonl', text: '{"type":"user","text":"hello"}\n' };
 
 export interface FakeSourceOptions {
+  readonly history?: string;
+  readonly secretNames?: readonly string[];
   readonly busy?: readonly string[];
   readonly conversation?: Result<PackedConversation, { readonly reason: string }>;
   /** Extra listed files beyond the fixture's, by path (with their text). */
@@ -45,15 +47,16 @@ export function fakeSource(options: FakeSourceOptions = {}): RelocationSource & 
   const reads: string[] = [];
   return {
     reads,
+    secretNames: async () => options.secretNames ?? [],
     files: async () => [
       ...Object.entries(session).map(
         ([path, text]): RelocationFile => ({ area: 'session', path, size: options.size?.(path) ?? text.length }),
       ),
-      { area: 'history', path: 'history.jsonl', size: HISTORY.length },
+      { area: 'history', path: 'history.jsonl', size: (options.history ?? HISTORY).length },
     ],
     read: async (file, limit) => {
       reads.push(`${file.area}:${file.path}`);
-      const text = file.area === 'history' ? HISTORY : session[file.path];
+      const text = file.area === 'history' ? (options.history ?? HISTORY) : session[file.path];
       if (text === undefined) throw new Error('not listed');
       if (text.length > limit) throw new Error('too large');
       return bytes(text);
@@ -86,6 +89,7 @@ export function summaryOf(state: FerretSummary['state']): FerretSummary {
 
 /** The Ferrets port as the move uses it, recording `stop` and `resume` so a test can say "nothing was stopped". */
 export function fakeFerrets(options: {
+  readonly runtime?: string;
   readonly state?: FerretSummary['state'];
   readonly source?: RelocationSource | undefined;
   readonly folder?: string | undefined;
@@ -95,7 +99,10 @@ export function fakeFerrets(options: {
     calls,
     state: options.state ?? 'idle',
     port: {
-      get: async id => (id === FERRET ? summaryOf(self.state) : undefined),
+      get: async id =>
+        id === FERRET
+          ? { ...summaryOf(self.state), ...(options.runtime === undefined ? {} : { runtime: options.runtime }) }
+          : undefined,
       workFolder: async () => (options.folder === undefined ? undefined : { folder: options.folder }),
       relocationSource: async () => options.source,
       stop: async (_ferret, how) => {

@@ -76,6 +76,8 @@ function build(options: {
   readonly packConversation?: () => Promise<unknown>;
   readonly known?: boolean;
   readonly listingError?: { readonly path: string; readonly code: string };
+  readonly names?: readonly string[];
+  readonly namesUnreadable?: boolean;
 }) {
   const harness = { packConversation: options.packConversation };
   const folder = sessionFolder(options.files ?? SESSION);
@@ -86,6 +88,14 @@ function build(options: {
     return await entries(path);
   };
   const context = {
+    kernel: {
+      state: {
+        read: async () =>
+          options.namesUnreadable
+            ? { ok: false }
+            : { ok: true, value: options.names === undefined ? undefined : { names: options.names } },
+      },
+    },
     hooks: {
       contributions: (token: unknown) =>
         token === JobKeeper && options.jobs !== undefined ? [{ item: { jobs: async () => options.jobs } }] : [],
@@ -118,6 +128,14 @@ function build(options: {
 }
 
 describe('relocationSource lists a closed set', () => {
+  test('launch references are names only, and missing/unreadable metadata refuses rather than claiming none', async () => {
+    expect(await (await build({ names: ['MCP_TOKEN', 'ENV_TOKEN'] })(ID))?.secretNames()).toEqual([
+      'MCP_TOKEN',
+      'ENV_TOKEN',
+    ]);
+    await expect((await build({})(ID))?.secretNames()).rejects.toThrow('launch secret names');
+    await expect((await build({ namesUnreadable: true })(ID))?.secretNames()).rejects.toThrow('launch secret names');
+  });
   test('only turns/, channel/ and attachments/ and the journal; never environment.json, the ledger, media or markers', async () => {
     const source = await build({})(ID);
     const files = await source?.files();

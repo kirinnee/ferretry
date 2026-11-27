@@ -8,7 +8,7 @@ import { VaultPort } from '@ferretry/core-vault/contract';
 import { MOVED_STATE, RECEIVED_STATE, RELOCATE_AUDIT } from './contract/index.ts';
 
 /**
- * Relocate (C-45, source side): moves a ferret to another machine the person's app is already paired to. The TARGET
+ * Relocate (C-45, source and target): moves a ferret to another machine the person's app is already paired to. The TARGET
  * opens a one-time X25519 offer signed by its daemon identity; the SOURCE seals a snapshot of the ferret to it; the app
  * carries only ciphertext between the two. No daemon talks to another daemon, nothing is paired, no credential is made,
  * and no secret value, credential file or ignored file is in what is sealed (`contract/wire.ts` is the whole table).
@@ -104,5 +104,5 @@ export default definePlugin({
 
   // The working tree is read through the `imports` root, scoped to the one folder the ferret works in, and git is run
   // only to list, diff and bundle it.
-  permissions: { roots: ['imports'], spawn: ['git'] },
+  permissions: { roots: ['imports'], spawn: ['git', 'mkdir'] },
 });

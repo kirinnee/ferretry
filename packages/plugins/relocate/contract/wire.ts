@@ -147,6 +147,8 @@ export const BundleHeaderSchema = z.strictObject({
   v: z.literal(RELOCATE_FORMAT),
   offerId: OfferIdSchema,
   sourceDaemonId: DaemonIdSchema,
+  identityKey: Base64UrlSchema,
+  signature: Base64UrlSchema,
   targetDaemonId: DaemonIdSchema,
   expiresAt: InstantSchema,
   /** The source's one-time X25519 public key. */
@@ -289,6 +291,8 @@ export const ChunkReceivedSchema = z.strictObject({ index: z.number().int().nonn
 /** `POST /v1/relocate/offers/:offerId/import`: the header the source sealed with, and where a clone may go. */
 export const ImportRequestSchema = z.strictObject({
   header: BundleHeaderSchema,
+  /** The SOURCE chosen through the owner's paired-machine list, independently of the uploaded header. */
+  sourceDaemonId: DaemonIdSchema,
   cloneInto: AbsoluteFolderSchema.optional(),
 });
 export type ImportRequest = z.infer<typeof ImportRequestSchema>;
@@ -297,6 +301,14 @@ export const ImportResponseSchema = z.strictObject({
   ferretId: z.string(),
   folder: z.string(),
   movedFrom: z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1) }),
+  /** A launch succeeded but provenance could not be saved. The ferret and its files are kept. */
+  recovery: z
+    .strictObject({
+      code: z.literal('provenance_unrecorded'),
+      state: z.enum(['running', 'stopped', 'unknown']),
+      message: z.string(),
+    })
+    .optional(),
 });
 export type ImportResponse = z.infer<typeof ImportResponseSchema>;
 

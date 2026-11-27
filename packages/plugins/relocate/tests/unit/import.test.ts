@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { RelocateRefused } from '../../daemon/lib/relocation.ts';
 import { CheckoutError, type Checkout } from '../../daemon/lib/checkout.ts';
@@ -8,6 +9,7 @@ import { crypto } from '../support/identity.ts';
 import { git, snapshotOf } from '../support/real-git.ts';
 import { NEW_FERRET, targetWorld } from '../support/target.ts';
 import { world } from '../support/world.ts';
+import { openBundle } from '../support/open-bundle.ts';
 
 const refusal = async (work: Promise<unknown>): Promise<RelocateRefused> => {
   try {
@@ -32,7 +34,7 @@ describe('importing a bundle on the target', () => {
     const w = await world();
     const t = await targetWorld({}, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
-    const done = await t.importer.import(offerId, { header });
+    const done = await t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId });
 
     expect(done.ferretId).toBe(NEW_FERRET);
     expect(git(done.folder, 'rev-parse', 'HEAD')).toBe(git(w.fixture.folder, 'rev-parse', 'HEAD'));
@@ -54,10 +56,28 @@ describe('importing a bundle on the target', () => {
   });
 
   test('no secret value and no ignored file reaches the target', async () => {
-    const w = await world();
+    const known = new Map<string, string>();
+    const w = await world({ knownSecrets: known });
+    Object.values(w.fixture.secrets).forEach((value, i) => {
+      known.set(`FIXTURE_${String(i)}`, value);
+    });
+    // Check the actual transferred session/transcript entries as well as the materialized working files (U16 restores them).
+    const audit = await world({ knownSecrets: known });
+    const offer = await audit.offer();
+    const exported = await audit.relocation.export(FERRET, offer.offer);
+    const packed = await openBundle(
+      offer.privateKey,
+      offer.offer.offerId,
+      exported.header,
+      Array.from({ length: exported.header.chunks }, (_, i) => audit.relocation.chunk(exported.exportId, i)),
+    );
+    expect(packed?.files.has('session:turns/turn-001.md')).toBe(true);
+    expect(packed?.files.has(`conversation:${CONVERSATION.relPath}`)).toBe(true);
+    for (const value of Object.values(w.fixture.secrets))
+      expect(Buffer.from(packed?.plaintext ?? []).includes(Buffer.from(value))).toBe(false);
     const t = await targetWorld({}, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
-    const done = await t.importer.import(offerId, { header });
+    const done = await t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId });
     const landed = [...snapshotOf(done.folder).values()].join('\n');
     for (const value of Object.values(w.fixture.secrets)) expect(landed).not.toContain(value);
     expect(snapshotOf(done.folder).has('.env')).toBe(false);
@@ -78,7 +98,12 @@ describe('what is refused before anything is written', () => {
     const before = t.shape();
     const second = await targetWorld({ project: false, accounts: 0 }, w.fixture.remote);
     const carriedOver = await second.carry(w);
-    const refused = await refusal(second.importer.import(carriedOver.offerId, { header: carriedOver.header }));
+    const refused = await refusal(
+      second.importer.import(carriedOver.offerId, {
+        header: carriedOver.header,
+        sourceDaemonId: carriedOver.header.sourceDaemonId,
+      }),
+    );
     expect(refused.status).toBe(409);
     expect(refused.code).toBe('move_refused');
     expect(second.started).toEqual([]);
@@ -153,7 +178,7 @@ describe('a failure at any step leaves the target with nothing new', () => {
       );
       const before = t.shape();
       const { offerId, header } = await t.carry(w);
-      const refused = await refusal(t.importer.import(offerId, { header }));
+      const refused = await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId }));
       expect(refused.status).toBe(409);
       expect(t.shape()).toEqual(before);
       expect(t.started).toEqual([]);
@@ -165,7 +190,7 @@ describe('a failure at any step leaves the target with nothing new', () => {
     const t = await targetWorld({ start: 'refuse' }, w.fixture.remote);
     const before = t.shape();
     const { offerId, header } = await t.carry(w);
-    const refused = await refusal(t.importer.import(offerId, { header }));
+    const refused = await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId }));
     expect(refused).toMatchObject({ status: 409, code: 'start_refused' });
     expect(refused.message).toContain('refused by the harness');
     expect(t.started.length).toBe(1);
@@ -177,10 +202,11 @@ describe('a failure at any step leaves the target with nothing new', () => {
     const w = await world();
     const t = await targetWorld({ project: false, accounts: 1, start: 'refuse' }, w.fixture.remote);
     const cloneInto = join(t.root, 'clones');
+    mkdirSync(cloneInto);
     const { offerId, header } = await t.carry(w);
-    await refusal(t.importer.import(offerId, { header, cloneInto }));
-    expect(t.registered).toEqual([join(cloneInto, 'project')]);
-    expect(t.removedProjects).toEqual(['p-cloned']);
+    await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId, cloneInto }));
+    expect(t.registered).toEqual([]);
+    expect(t.removedProjects).toEqual([]);
     expect(await Bun.file(join(cloneInto, 'project', 'README.md')).exists()).toBe(false);
   });
 
@@ -188,21 +214,21 @@ describe('a failure at any step leaves the target with nothing new', () => {
     const w = await world();
     const t = await targetWorld({ project: false, accounts: 1 }, w.fixture.remote);
     const cloneInto = join(t.root, 'clones');
+    mkdirSync(cloneInto);
     const { offerId, header } = await t.carry(w);
-    const done = await t.importer.import(offerId, { header, cloneInto });
+    const done = await t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId, cloneInto });
     expect(done.folder.startsWith(`${join(cloneInto, 'project')}-main-`)).toBe(true);
     expect(git(done.folder, 'rev-parse', 'HEAD')).toBe(git(w.fixture.folder, 'rev-parse', 'HEAD'));
   });
 
-  test('a ferret that was received but whose origin cannot be recorded is stopped and kept, not torn down', async () => {
+  test('a received ferret with an unwritable provenance ledger returns a recovery receipt', async () => {
     const w = await world();
     const t = await targetWorld({ recordFails: true }, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
-    const refused = await refusal(t.importer.import(offerId, { header }));
-    expect(refused.code).toBe('provenance_unrecorded');
-    expect(t.stopped).toEqual([NEW_FERRET]);
-    expect(t.started[0]?.folder).toBeDefined();
-    expect(await Bun.file(join(t.started[0]?.folder ?? '', 'new.txt')).exists()).toBe(true);
+    const done = await t.importer.import(offerId, { header, sourceDaemonId: w.sourceIdentity.daemonId });
+    expect(done.recovery).toMatchObject({ code: 'provenance_unrecorded', state: 'running' });
+    expect(t.stopped).toEqual([]);
+    expect(await Bun.file(join(done.folder, 'new.txt')).exists()).toBe(true);
   });
 });
 
@@ -211,9 +237,9 @@ describe('an offer opens one bundle, once', () => {
     const w = await world();
     const t = await targetWorld({}, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
-    await t.importer.import(offerId, { header });
+    await t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId });
     const shape = t.shape();
-    const again = await refusal(t.importer.import(offerId, { header }));
+    const again = await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId }));
     expect(again).toMatchObject({ status: 409, code: 'offer_spent' });
     expect(t.started.length).toBe(1);
     expect(t.shape()).toEqual(shape);
@@ -223,8 +249,10 @@ describe('an offer opens one bundle, once', () => {
     const w = await world();
     const t = await targetWorld({ start: 'refuse' }, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
-    await refusal(t.importer.import(offerId, { header }));
-    expect(await refusal(t.importer.import(offerId, { header }))).toMatchObject({ code: 'offer_spent' });
+    await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId }));
+    expect(await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId }))).toMatchObject({
+      code: 'offer_spent',
+    });
   });
 
   test('an offer that timed out is gone, and so are its key and chunks', async () => {
@@ -232,7 +260,10 @@ describe('an offer opens one bundle, once', () => {
     const t = await targetWorld({}, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
     t.now += 6 * 60_000;
-    expect(await refusal(t.importer.import(offerId, { header }))).toMatchObject({ status: 404, code: 'offer_unknown' });
+    expect(await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId }))).toMatchObject({
+      status: 404,
+      code: 'offer_unknown',
+    });
     expect(t.started).toEqual([]);
   });
 
@@ -259,7 +290,7 @@ describe('a bundle that cannot be trusted writes nothing', () => {
       if (index === 0) copy[copy.length - 1] = (copy[copy.length - 1] ?? 0) ^ 1;
       t.importer.receive(offerId, index, copy);
     }
-    expect(await refusal(t.importer.import(offerId, { header }))).toMatchObject({
+    expect(await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId }))).toMatchObject({
       status: 400,
       code: 'bundle_refused',
     });
@@ -274,7 +305,9 @@ describe('a bundle that cannot be trusted writes nothing', () => {
     expect(header.chunks).toBeGreaterThan(0);
     for (const [index, chunk] of chunks.entries()) if (index > 0) t.importer.receive(offerId, index, chunk);
     if (header.chunks === 1) t.importer.receive(offerId, 5, chunks[0] ?? new Uint8Array(1));
-    expect(await refusal(t.importer.import(offerId, { header }))).toMatchObject({ code: 'bundle_refused' });
+    expect(await refusal(t.importer.import(offerId, { header, sourceDaemonId: header.sourceDaemonId }))).toMatchObject({
+      code: 'bundle_refused',
+    });
     expect(t.started).toEqual([]);
   });
 
@@ -283,7 +316,9 @@ describe('a bundle that cannot be trusted writes nothing', () => {
     const t = await targetWorld({}, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
     const other = { ...header, bytes: header.bytes + 1 };
-    expect(await refusal(t.importer.import(offerId, { header: other }))).toMatchObject({ code: 'bundle_refused' });
+    expect(
+      await refusal(t.importer.import(offerId, { header: other, sourceDaemonId: header.sourceDaemonId })),
+    ).toMatchObject({ code: 'bundle_refused' });
   });
 
   test('a bundle sealed for another machine is refused', async () => {
@@ -291,6 +326,8 @@ describe('a bundle that cannot be trusted writes nothing', () => {
     const t = await targetWorld({}, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
     const other = { ...header, targetDaemonId: w.sourceIdentity.daemonId };
-    expect(await refusal(t.importer.import(offerId, { header: other }))).toMatchObject({ code: 'bundle_refused' });
+    expect(
+      await refusal(t.importer.import(offerId, { header: other, sourceDaemonId: header.sourceDaemonId })),
+    ).toMatchObject({ code: 'bundle_refused' });
   });
 });

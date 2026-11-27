@@ -7,9 +7,13 @@ import {
   type PrivateKeyHandle,
   utf8Bytes,
   X25519_PUBLIC_KEY_BYTES,
+  fromBase64Url,
+  ED25519_SIGNATURE_BYTES,
+  publicKeyMatchesDaemonId,
 } from '@ferretry/std/sealing';
 import {
   BUNDLE_KEY_LABEL,
+  bundleSignedBytes,
   type BundleHeader,
   type BundleEntryKind,
   type BundleManifest,
@@ -107,6 +111,7 @@ export async function openBundle(input: {
   readonly header: BundleHeader;
   readonly chunks: ReadonlyMap<number, Uint8Array>;
   readonly ownDaemonId: string;
+  readonly sourceDaemonId: string;
 }): Promise<OpenedBundle> {
   const { crypto, offer, header, chunks } = input;
   if (header.offerId !== offer.offerId || header.expiresAt !== offer.expiresAt)
@@ -119,6 +124,16 @@ export async function openBundle(input: {
     throw new BundleRefused('this bundle is larger than a move can be');
   if (chunks.size !== header.chunks)
     throw new BundleRefused(`${String(chunks.size)} of ${String(header.chunks)} chunks arrived; upload them all`);
+  const identity = fromBase64Url(header.identityKey);
+  const signature = fromBase64UrlFixed(header.signature, ED25519_SIGNATURE_BYTES);
+  if (
+    header.sourceDaemonId !== input.sourceDaemonId ||
+    identity === null ||
+    signature === null ||
+    !(await publicKeyMatchesDaemonId(crypto, identity, input.sourceDaemonId)) ||
+    !(await crypto.verifyEd25519(identity, signature, bundleSignedBytes(header)))
+  )
+    throw new BundleRefused('the bundle was not signed by the source machine you chose');
   const ephemeral = fromBase64UrlFixed(header.ephemeralKey, X25519_PUBLIC_KEY_BYTES);
   const shared = ephemeral === null ? null : await crypto.deriveSharedSecret(input.privateKey, ephemeral);
   if (shared === null) throw new BundleRefused('this bundle carries a key no machine could hold');

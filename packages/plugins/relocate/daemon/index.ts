@@ -8,6 +8,7 @@ import {
   type RouteHandler,
 } from '@ferretry/kernel/contract';
 import { CAPABILITIES } from '@ferretry/core-gate/contract';
+import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { fromBase64Url, WebCryptoCloneCrypto } from '@ferretry/std/sealing';
 import {
@@ -38,7 +39,7 @@ async function readJson(call: CallContext): Promise<unknown> {
 }
 
 /**
- * Relocate (C-45), daemon half, the SOURCE end: four person's routes. It holds no secret and no credential: what it
+ * Relocate (C-45), daemon half, SOURCE and TARGET routes. It holds no secret and no credential: what it
  * seals is the closed set `contract/wire.ts` lists, to a key the other machine's offer carries, and the app that carries
  * the ciphertext between the two machines can open none of it.
  */
@@ -59,6 +60,25 @@ export default implementDaemon(manifest, {
     };
     const crypto = new WebCryptoCloneCrypto();
     const relocation = new Relocation({
+      profileSecrets: async runtime => {
+        const runtimes = uses.runtimes.current();
+        if (runtimes === undefined)
+          throw new RelocateRefused(
+            409,
+            'Runtimes is off, so the launch secret names cannot be checked',
+            'move_refused',
+          );
+        const home = (await runtimes.homes()).find(home => home.runtimes.includes(runtime as never));
+        if (home === undefined)
+          throw new RelocateRefused(
+            409,
+            'the runtime profile is unavailable, so its secret names cannot be checked',
+            'move_refused',
+          );
+        return [...new Set(Object.values(home.secretEnv ?? {}).flatMap(value => secretReferencesIn(value)))];
+      },
+      signer: kernel.signer,
+      redaction: kernel.redaction,
       crypto,
       ferrets: needs.ferrets,
       treeOf: folder => kernelWorkingTree(kernel, folder),

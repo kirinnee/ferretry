@@ -12,7 +12,7 @@ import {
 } from '../../contract/index.ts';
 import { verifiedOfferKey } from '../../daemon/lib/seal.ts';
 import { normalizeRemote } from '../../daemon/lib/remote.ts';
-import { crypto } from '../support/identity.ts';
+import { crypto, newIdentity, openOffer } from '../support/identity.ts';
 import { git, makeRepository, REMOTE_URL } from '../support/real-git.ts';
 
 /**
@@ -75,6 +75,7 @@ async function machine(name: string): Promise<Machine> {
     JSON.stringify({ format: 1, createdBy: 'relocate-sit', createdAt: STAMP }),
   );
   await writeFile(path.join(home, 'config/limits.yaml'), 'enabled: false\n');
+  await writeFile(path.join(home, 'config/connections.yaml'), 'relay: []\ntunnel:\n  enabled: false\n');
   const port = await claimTestPort();
   const url = `http://127.0.0.1:${port}`;
   return {
@@ -100,12 +101,20 @@ async function machine(name: string): Promise<Machine> {
 }
 
 async function boot(m: Machine): Promise<void> {
-  m.child = Bun.spawn([process.execPath, path.join(ROOT, 'packages/core/kernel/host/fyd.ts')], {
-    cwd: ROOT,
-    env: m.environment,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  m.child = Bun.spawn(
+    [
+      process.execPath,
+      '--preload',
+      path.join(ROOT, 'packages/plugins/relocate/tests/support/loopback-only.ts'),
+      path.join(ROOT, 'packages/core/kernel/host/fyd.ts'),
+    ],
+    {
+      cwd: ROOT,
+      env: m.environment,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
   let logs = '';
   let ready = false;
   const pump = async (stream: ReadableStream<Uint8Array>) => {
@@ -191,6 +200,10 @@ beforeAll(async () => {
   await writeFile(path.join(home, 'conversation.json'), JSON.stringify({ format: 1, id: CONVERSATION, cwd: folder }));
   await mkdir(path.join(a.home, 'state/ferrets/f1'), { recursive: true });
   await writeFile(
+    path.join(a.home, 'state/ferrets/f1/launch-references.json'),
+    JSON.stringify({ format: 1, names: [] }),
+  );
+  await writeFile(
     path.join(a.home, 'state/ferrets/f1/ferret.json'),
     JSON.stringify({
       format: 1,
@@ -252,6 +265,23 @@ afterAll(async () => {
 }, 60_000);
 
 describe('a move between two real daemons (SIT)', () => {
+  it('a daemon-held value in a transferred turn refuses export, naming only the secret and file', async () => {
+    const value = 'SYNTHETIC-SIT-ONLY-2649';
+    const stored = await call(a, 'POST', '/v1/secrets', { name: 'MOVE_TEST_TOKEN', value });
+    expect(stored.status).toBe(200);
+    const turn = path.join(a.home, 'state/ferrets/sessions/f1/turns/turn-002.md');
+    await writeFile(turn, `a transcript line ${value}\n`);
+    const opened = await openOffer(await newIdentity(), { expiresAtMs: Date.now() + 120_000 });
+    const refused = await call(a, 'POST', '/v1/relocate/f1/export', { offer: opened.offer });
+    expect(refused.status).toBe(409);
+    const shown = JSON.stringify(refused.json);
+    expect(shown.includes(value)).toBe(false);
+    expect(shown).toContain('MOVE_TEST_TOKEN');
+    expect(shown).toContain('turns/turn-002.md');
+    await rm(turn);
+    await call(a, 'DELETE', '/v1/secrets/MOVE_TEST_TOKEN');
+  });
+
   it('B opens an offer signed by its own identity, and A accepts it', async () => {
     const opened = await call(b, 'POST', '/v1/relocate/offers');
     expect(opened.status, JSON.stringify(opened.json)).toBe(200);
@@ -304,7 +334,10 @@ describe('a move between two real daemons (SIT)', () => {
       machine: await readdir(path.join(base, 'b/machine')),
       refs: git(targetRepo, 'for-each-ref'),
     };
-    const refused = await call(b, 'POST', `/v1/relocate/offers/${offer.offerId}/import`, { header: exported.header });
+    const refused = await call(b, 'POST', `/v1/relocate/offers/${offer.offerId}/import`, {
+      header: exported.header,
+      sourceDaemonId: exported.header.sourceDaemonId,
+    });
     expect(refused.status, JSON.stringify(refused.json)).toBe(409);
     expect(refused.json).toMatchObject({ code: 'move_refused' });
     expect({
@@ -312,7 +345,10 @@ describe('a move between two real daemons (SIT)', () => {
       machine: await readdir(path.join(base, 'b/machine')),
       refs: git(targetRepo, 'for-each-ref'),
     }).toEqual(before);
-    const replay = await call(b, 'POST', `/v1/relocate/offers/${offer.offerId}/import`, { header: exported.header });
+    const replay = await call(b, 'POST', `/v1/relocate/offers/${offer.offerId}/import`, {
+      header: exported.header,
+      sourceDaemonId: exported.header.sourceDaemonId,
+    });
     expect(replay.json).toMatchObject({ code: 'offer_spent' });
     // A stopped nothing it had not been asked to, and is still the owner of every file
     expect(await readFile(path.join(fixture.folder, 'new.txt'), 'utf8')).toBe('a new file\n');

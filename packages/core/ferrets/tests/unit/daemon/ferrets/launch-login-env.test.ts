@@ -77,6 +77,26 @@ const env =
     ok(values);
 
 describe('a ferret launch carries its login’s environment', () => {
+  test('records only secret NAMES from profile env, MCP config and launch env before resolution', async () => {
+    const f = fixture({
+      loginEnv: env({ PROFILE: '${secret:PROFILE_TOKEN}' }),
+      parts: [
+        { kind: 'env', env: { LOCAL: '${secret:ENV_TOKEN}' } },
+        { kind: 'mcp', name: 'fixture', config: { env: { TOKEN: '${secret:MCP_TOKEN}' } } },
+      ],
+    });
+    const recorded: (readonly string[])[] = [];
+    f.ports.recordLaunchSecrets = async (_ferret, names) => {
+      recorded.push(names);
+    };
+    const launched = await f.service.start(
+      { folder: '/work', harness: 'claude-code', login: 'login', by: 'owner' },
+      PERSON_ORIGIN,
+    );
+    expect(launched.ok).toBe(true);
+    expect([...new Set(recorded[0])].sort()).toEqual(['ENV_TOKEN', 'MCP_TOKEN', 'PROFILE_TOKEN']);
+    expect(JSON.stringify(recorded)).not.toContain('${secret:');
+  });
   test('an owner cutoff after sealed replacement preflight still prevents the replacement from launching', async () => {
     const f = fixture({ harness: 'opencode' });
     let cutOff = false;

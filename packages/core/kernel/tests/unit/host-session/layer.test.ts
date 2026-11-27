@@ -1264,6 +1264,7 @@ describe('the session layer: the identity signer it offers carriers', () => {
       'sign',
       'signCatalog',
       'signLinkStoreRequest',
+      'signRelocateBundle',
       'signRelocateOffer',
       'signSecretOffer',
       'signTunnel',
