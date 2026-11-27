@@ -1,7 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { deliveredFilename } from '../../../contract/index.ts';
-import { messageWithAttachments } from '../../../daemon/lib/attachments-delivery.ts';
+import { deliveredFilename, messageWithAttachments } from '../../../daemon/lib/attachments-delivery.ts';
 
 describe('attachment delivery', () => {
   it('names a delivered copy after the uploaded file, without characters a prompt would have to quote', () => {

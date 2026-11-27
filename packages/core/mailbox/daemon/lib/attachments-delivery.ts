@@ -14,10 +14,11 @@
 
 import {
   type DeliveredAttachment,
+  deliveredFilename,
   messageWithAttachments as handoffMessageWithAttachments,
 } from '../../contract/index.ts';
 
-export type { DeliveredAttachment };
+export { type DeliveredAttachment, deliveredFilename };
 
 /**
  * The person's message, followed by the files the agent should open. The wording is the hand-off's

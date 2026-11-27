@@ -13,7 +13,6 @@ import {
   parseMessageAttachments,
   PEER_MESSAGE_LABELS,
   combinedDelivery,
-  deliveredFilename,
   peerSender,
   type PeerMessageLabel,
   type QueuedMessage,
@@ -27,7 +26,7 @@ import type { ClaudeChannel, MailboxRefusal, SendChannel, SendEvidenceSource, Se
 import { ClockSendScheduler } from './adapters/index.ts';
 import { type QueuedSend, SendPathDeliveryView, SendPathQueueTransport } from './adapters/send-path-delivery.ts';
 import { defaultQueueDeliverySettings, QueueDeliverer, Senders } from './lib/queue/index.ts';
-import type { LedgerPath as SendPath } from '../contract/index.ts';
+import { type LedgerPath as SendPath } from '../contract/index.ts';
 import {
   defaultSendTrackerSettings,
   defaultSessionSendSettings,
@@ -76,7 +75,7 @@ import {
   UnreadableComposer,
 } from '../contract/lib/send/harness-seam.ts';
 import { startupParkedPending } from './lib/delivery/service.ts';
-import type { DeliveredAttachment } from './lib/attachments-delivery.ts';
+import { type DeliveredAttachment, deliveredFilename } from './lib/attachments-delivery.ts';
 import { harnessSendTerminal } from './send-terminal.ts';
 import { harnessFamily, hasClaudeChannel } from '../contract/index.ts';
 import { KeyedSerialExecutor } from '../contract/index.ts';
