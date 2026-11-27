@@ -3,6 +3,7 @@ import {
   HARNESS_HISTORY_READ_MAX_BYTES,
   type HarnessHistoryFiles,
   type HarnessHistoryKind,
+  type ConversationSource,
   recordedHarnessOf,
 } from '@ferretry/core-ferrets/contract';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
@@ -1284,17 +1285,47 @@ export class ConversationIndex {
   }
 
   /** One conversation, as listed (the newest copy), or `undefined`. */
-  get(harness: string | undefined, id: string, kinds?: readonly HarnessHistoryKind[]): IndexedConversation | undefined {
+  get(
+    harness: string | undefined,
+    id: string,
+    kinds?: readonly HarnessHistoryKind[],
+    selected?: ConversationSource,
+  ): IndexedConversation | undefined {
     const db = this.#open();
     const kindSql =
       kinds === undefined || kinds.length === 0 ? '' : ` AND c.kind IN (${kinds.map(() => '?').join(', ')})`;
-    const row = db.query<Row & { also: number }>(
+    const rows = db.query<Row & { also: number }>(
       `SELECT c.*, EXISTS (SELECT 1 FROM conv e WHERE e.harness = c.harness AND e.id = c.id AND e.kind = 'computer' AND e.ok = 1
          AND e.rowid <> c.rowid) AS also FROM conv c WHERE c.id = ? AND c.ok = 1${harness === undefined ? '' : ' AND c.harness = ?'}${kindSql}
-         ORDER BY c.last_at DESC, c.rowid LIMIT 1`,
+         ORDER BY c.last_at DESC, c.rowid${selected === undefined ? ' LIMIT 1' : ''}`,
       [id, ...(harness === undefined ? [] : [harness]), ...(kinds ?? [])],
-    )[0];
+    );
+    const row =
+      selected === undefined
+        ? rows[0]
+        : rows.find(row => row.kind === selected.kind && this.#source(row).row === selected.row);
     return row === undefined ? undefined : this.#wire(row);
+  }
+
+  #source(row: Row): ConversationSource {
+    return {
+      kind: row.kind,
+      row: createHash('sha256')
+        .update(
+          JSON.stringify([
+            row.harness,
+            row.kind,
+            row.label,
+            row.path,
+            row.id,
+            row.size,
+            row.mtime_ms,
+            row.head_sha,
+            row.last_at,
+          ]),
+        )
+        .digest('hex'),
+    };
   }
 
   /** The tree a listed conversation's file is in, for the one fresh read of a preview. */
@@ -1333,6 +1364,7 @@ export class ConversationIndex {
         ...(row.turns_at_least === 1 ? { turnsAtLeast: true as const } : {}),
         ...(row.model === null ? {} : { model: row.model }),
         keptIn: row.kind === 'computer' ? 'computer' : 'ferretry',
+        source: this.#source(row),
         ...(row.also === 1 && row.kind !== 'computer' ? { alsoOnComputer: true as const } : {}),
       },
     };

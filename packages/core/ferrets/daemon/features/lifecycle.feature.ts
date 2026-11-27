@@ -17,6 +17,7 @@ import {
 } from '../../contract/index.ts';
 import { agentAddressName, ambiguousAgentAddressMessage } from '../../contract/agent-address.ts';
 import { confirmRestore } from '../lib/route-security/restore.ts';
+import { conversationCopyRefusal } from '../lib/route-security/conversation-copy.ts';
 import { terminalLaunchRefusal } from '../lib/route-security/launch.ts';
 import { stateHomeLaunchRefusal } from '../lib/route-security/state-home.ts';
 import { callerIsAgent, launchOriginOf } from '../lib/ferrets/launch-origin.ts';
@@ -112,6 +113,8 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         // What counts as a known project: Projects' registered folders plus the managed worktree root. Read at each start;
         // a throw from Projects answers 503 `launch_roots_unavailable` (it cannot classify), never "outside".
         await terminalLaunchRefusal(call, parsed, knownLaunchRoots);
+        // Copying the owner's computer history in is its own act: a device is stepped up for it, not only for the start.
+        conversationCopyRefusal(call, parsed);
         let startedFerret: FerretId | undefined;
         const start = async (): Promise<ApiResponse> => {
           const started = await service.start(

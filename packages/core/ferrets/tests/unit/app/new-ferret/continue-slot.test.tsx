@@ -17,6 +17,7 @@ const PICK: ContinuePick = {
   key: 'conversation:codex:c-77',
   harness: 'codex',
   conversation: 'c-77',
+  source: { kind: 'pool', row: 'a'.repeat(64) },
   folder: '/work/api',
   title: 'Fix the api',
 };
@@ -154,6 +155,7 @@ describe('the New ferret page and the continue slot', () => {
       folder: '/work/api',
       mode: 'interactive',
       harnessConversation: 'c-77',
+      conversationSource: PICK.source,
       // The pick's harness travels with the request, so the daemon refuses a runtime of the OTHER harness
       // (`runtime rt runs the claude-code harness, not codex`) even when the runtime field was typed by hand.
       harness: 'codex',
@@ -193,6 +195,7 @@ describe('the New ferret page and the continue slot', () => {
     const body = calls.find(call => call.route === 'POST /v1/ferrets')?.body as Record<string, unknown>;
     expect(body).toMatchObject({ folder: '/work/web', runtime: 'claude-auto' });
     expect(body).not.toHaveProperty('harnessConversation');
+    expect(body).not.toHaveProperty('conversationSource');
     expect(body).not.toHaveProperty('harness');
   });
 

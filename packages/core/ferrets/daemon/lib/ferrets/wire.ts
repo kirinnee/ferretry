@@ -2,6 +2,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import {
   FerretIdSchema,
+  ConversationSourceSchema,
   FerretNameSchema,
   FerretRoleSchema,
   FerretTitleSchema,
@@ -30,6 +31,7 @@ const StartIdentitySchema = z.strictObject({
   role: FerretRoleSchema.optional(),
   harness: HarnessKeySchema.optional(),
   harnessConversation: z.string().min(1).max(256).optional(),
+  conversationSource: ConversationSourceSchema.optional(),
   runtime: RuntimeNameSchema.optional(),
   login: LoginNameSchema.optional(),
   /** Optional on the wire so a start without one is refused with today's sentence, not a schema issue list. */
