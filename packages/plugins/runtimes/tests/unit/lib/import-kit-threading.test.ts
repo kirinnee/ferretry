@@ -3,6 +3,7 @@ import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
 import type { RuntimesHarnessKit } from '../../../contract/index.ts';
 import type { HarnessKind } from '../../../daemon/lib/manifest.ts';
 import * as importModule from '../../../daemon/lib/account/import.ts';
+import { UnsupportedHarnessError } from '../../../daemon/lib/harness-kind.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
 import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
@@ -26,7 +27,7 @@ beforeEach(() => {
 });
 
 const { HostHarnessScanner } = await import('../../../daemon/adapters/host-harness-scan.ts');
-const { planImport } = await import('../../../daemon/lib/account/import-plan.ts');
+const { planImport, planImportRefusing, scansRefusing } = await import('../../../daemon/lib/account/import-plan.ts');
 const { fileFleetSetupDeps } = await import('../../../daemon/adapters/setup-files.ts');
 const { FleetSetupService } = await import('../../../daemon/lib/service/setup-service.ts');
 const kits = new Map<HarnessKind, RuntimesHarnessKit>([
@@ -136,6 +137,45 @@ describe('host import kit threading', () => {
     await service.scan();
     expectKits(kits);
     expect(requested).toEqual(['claude', 'codex', 'claude', 'codex']);
+  });
+});
+
+describe('the refusals a route names', () => {
+  const refuse = (sentence: string) => new Error(`refused: ${sentence}`);
+
+  it('words a missing kit in the refusal of the route that asked, before any harvest', () => {
+    expect(() => planImportRefusing(refuse, scans, { kits: undefined, digest: text => text })).toThrow(
+      'refused: claude is not supported here',
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it('lets any other planning failure through as it is', () => {
+    const boom = new Error('boom');
+    const throwing = new Map(kits).set('codex', {
+      ...codexRuntimesKit,
+      harvest: () => {
+        throw boom;
+      },
+    });
+    expect(() => planImportRefusing(refuse, scans, { digest: text => text, kits: throwing })).toThrow(boom);
+  });
+
+  it('words an unsupported scan in the route refusal and any other scan failure as unreadable', async () => {
+    const unreadable = (error: unknown) => new Error(`unreadable: ${(error as Error).message}`);
+    expect(await scansRefusing(async () => scans, refuse, unreadable)).toBe(scans);
+    await expect(
+      scansRefusing(
+        async () => {
+          throw new UnsupportedHarnessError('codex');
+        },
+        refuse,
+        unreadable,
+      ),
+    ).rejects.toThrow('refused: codex is not supported here');
+    await expect(scansRefusing(() => Promise.reject(new Error('disk')), refuse, unreadable)).rejects.toThrow(
+      'unreadable: disk',
+    );
   });
 });
 
