@@ -7,7 +7,11 @@ import {
   useStickToBottom,
 } from '../../../../app/chat/use-stick-to-bottom.ts';
 import type { ChatScroll, ChatScrollSlot } from '@ferretry/app';
-import { interact, type Mounted, mount } from '@ferretry/app/testing';
+import { ensureDom, interact, type Mounted, mount } from '@ferretry/app/testing';
+
+// The DOM replaces requestAnimationFrame and the timers when it registers: have it in place BEFORE the seams below
+// capture and stub them, or a lone run's first mount wipes the stubs and the frame never runs.
+ensureDom();
 
 /** A scroller's box: happy-dom lays nothing out, so the test states it and may change it later. */
 interface Box {
