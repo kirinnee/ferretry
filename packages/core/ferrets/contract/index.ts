@@ -63,5 +63,6 @@ export * from './view/session-search.ts';
 export * from './pins.ts';
 export * from './session-restart.ts';
 export * from './worktrees.ts';
+export * from './worktree-move.ts';
 export * from './view/event-stream.ts';
 export * from './view/runtime-control.ts';

@@ -140,6 +140,8 @@ export interface KitHostSetup {
   readonly instructions: KitHostDocumentRead;
   readonly settings: KitHostDocumentRead;
   readonly mcp?: KitHostDocumentRead;
+  /** A separate hooks document, for a harness that keeps its hooks outside its settings. Only counted, never imported. */
+  readonly hooks?: KitHostDocumentRead;
   readonly projectInstructions?: readonly KitProjectInstructionHint[];
   readonly skills: readonly KitHostSkill[];
   readonly problems: readonly string[];

@@ -34,9 +34,9 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         registered: { folders, root: folder => kernel.roots.root('imports', { subfolder: folder }) },
       }),
     // The project registry is Projects'; Ferrets asks it by id through `launch.roots` and never reads a path from the caller.
-    projectRepository: async project => {
+    projectRepository: async (project, commonDirectory) => {
       const found = hooks.provider(LaunchRoots, LAUNCH_ROOTS_KEY);
-      return found === 'unavailable' ? undefined : await found.repository?.(project);
+      return found === 'unavailable' ? undefined : await found.repository?.(project, commonDirectory);
     },
     state: kernel.state,
     clock: kernel.clock,
@@ -52,6 +52,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       }));
     },
     terminalRoots: async () => await liveTerminalRoots(hooks.contributions(TerminalRoots).map(entry => entry.item)),
+    withFerretMove: async (path, move) => await f.service.withWorktreeMove(path, move),
     withTerminalRemoval: async (path, remove) =>
       await withTerminalRemoval(
         hooks.contributions(TerminalRoots).map(entry => entry.item),

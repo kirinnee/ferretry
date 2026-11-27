@@ -238,6 +238,23 @@ describe('the skills a catalog installed into this machine, as the installer rea
     expect(await readFile(join(w.installed, 'pdf', 'SKILL.md'), 'utf8')).toBe(SKILL_DOC);
   });
 
+  test('a file the update already removed counts as removed, not as a folder that changed', async () => {
+    const w = await world();
+    const assets = new InstalledSkillAssets(w.store);
+    await w.store.install('pdf', FILES);
+    const reviewed = await assets.inspect('pdf');
+    // The store's own replace drops what the new version lacks, so the file is gone before the installer prunes it.
+    await w.store.install('pdf', [{ path: 'SKILL.md', content: SKILL_DOC }]);
+    await expect(
+      assets.remove('pdf', new Map([['scripts/run.sh', reviewed.files.get('scripts/run.sh') as string]])),
+    ).resolves.toBeUndefined();
+    expect([...(await assets.inspect('pdf')).files.keys()]).toEqual(['SKILL.md']);
+    // A file that is still there with different bytes is still refused.
+    await expect(assets.remove('pdf', new Map([['SKILL.md', 'f'.repeat(64)]]))).rejects.toBeInstanceOf(
+      SkillFolderChanged,
+    );
+  });
+
   test('a folder somebody put there by hand lists every file in it, so the installer sees it and never claims it', async () => {
     const w = await world();
     await mkdir(join(w.installed, 'by-hand'), { recursive: true });

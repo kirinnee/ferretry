@@ -26,7 +26,7 @@
  * A home the person moved with `CLAUDE_CONFIG_DIR` or `CODEX_HOME` is reachable only if the caller names it (GAP(kernel): the person's shell variables are not readable by a plugin).
  */
 import { basename, isAbsolute, join, relative, sep } from 'node:path';
-import { hostCodexHome, isSignInName } from '../lib/account/credentials.ts';
+import { isSignInName } from '../lib/account/credentials.ts';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import type { RuntimesHarnessKit } from '../../contract/index.ts';
 import {
@@ -39,7 +39,7 @@ import {
   scannedMcpServers,
 } from '../lib/account/import.ts';
 import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
-import { harnessKeyOfKind, UnsupportedHarnessError } from '../lib/harness-kind.ts';
+import { harnessKeyOfKind, supportedKinds, UnsupportedHarnessError } from '../lib/harness-kind.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import type { HostEntry, HostFiles } from './ports.ts';
 
@@ -91,59 +91,35 @@ export class HostHarnessScanner {
     this.#maxSkillFiles = deps.maxSkillFiles ?? DEFAULT_MAX_SKILL_FILES;
   }
 
-  /** Both harnesses, installed or not, in a stable order. */
+  /** Both harnesses, installed or not, in a stable order. A harness without its kit refuses before anything is read. */
   async scan(): Promise<readonly HostHarnessScan[]> {
     const kits = this.deps.kits();
-    return await Promise.all([this.#claude(kits?.get('claude')), this.#codex(kits?.get('codex'))]);
-  }
-
-  async #claude(kit?: RuntimesHarnessKit): Promise<HostHarnessScan> {
-    if (kit?.scanHost === undefined) throw new UnsupportedHarnessError('claude');
-    return await this.#complete({
-      harness: 'claude',
-      ...(await kit.scanHost({
-        userHome: this.deps.userHome,
-        configuredHome: this.deps.claudeConfigDir,
-        read: (home, path) => this.#read(home, path),
-        readUserMcp: () => this.#readUserClaudeJson(),
-        skills: (home, directory) => this.#skills('claude', home, directory),
-        login: () => this.#login('claude'),
-        projectInstructions: mcp => this.#projectInstructions({ harness: 'claude', mcp } as HostHarnessScan),
-      })),
+    const homes: Readonly<Record<HarnessKind, string | undefined>> = {
+      claude: this.deps.claudeConfigDir,
+      codex: this.deps.codexHome,
+    };
+    const ready = supportedKinds().map(harness => {
+      const kit = kits?.get(harness);
+      if (kit?.scanHost === undefined) throw new UnsupportedHarnessError(harness);
+      return { harness, scanHost: kit.scanHost.bind(kit) };
     });
-  }
-
-  async #codex(_kit?: RuntimesHarnessKit): Promise<HostHarnessScan> {
-    const home = hostCodexHome(this.deps.codexHome, this.deps.userHome);
-    if (home === undefined) {
-      const reason = 'CODEX_HOME is set to a relative path, so your Codex setup could not be found';
-      const source = this.deps.codexHome ?? '';
-      return await this.#complete({
-        harness: 'codex',
-        login: { state: 'not-shareable', reason },
-        instructions: { kind: 'unreadable', source, reason },
-        settings: { kind: 'unreadable', source, reason },
-        hooks: { kind: 'absent', source },
-        skills: [],
-        problems: [],
-      });
-    }
-    const [instructions, settings, hooks, skills] = await Promise.all([
-      this.#read(home, join(home, 'AGENTS.md')),
-      this.#read(home, join(home, 'config.toml')),
-      this.#read(home, join(home, 'hooks.json')),
-      this.#skills('codex', home, join(home, 'skills')),
-    ]);
-    const login = await this.#login('codex');
-    return await this.#complete({
-      harness: 'codex',
-      login,
-      instructions,
-      settings,
-      hooks,
-      skills: skills.found,
-      problems: skills.problems,
-    });
+    return await Promise.all(
+      ready.map(
+        async ({ harness, scanHost }) =>
+          await this.#complete({
+            harness,
+            ...(await scanHost({
+              userHome: this.deps.userHome,
+              configuredHome: homes[harness],
+              read: (home, path) => this.#read(home, path),
+              readUserMcp: () => this.#readUserClaudeJson(),
+              skills: (home, directory) => this.#skills(harness, home, directory),
+              login: () => this.#login(harness),
+              projectInstructions: mcp => this.#projectInstructions({ harness, mcp } as HostHarnessScan),
+            })),
+          }),
+      ),
+    );
   }
 
   /**
