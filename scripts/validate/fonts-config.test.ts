@@ -120,11 +120,28 @@ describe('the fonts-config gate (static)', () => {
       `${STORE_DIR}\n<dir>/nix/storex/fonts</dir>`,
       'not a plain /nix/store path',
     ],
+    // R2-1: the gate must read the resolved target of each directory, not its spelling.
+    [
+      'a /tmp dir with a spaced closing tag',
+      `${STORE_DIR}\n<dir>/tmp/fy-empty-font-dir</dir >`,
+      'not under /nix/store',
+    ],
+    [
+      'a dir with an XML comment inside',
+      `${STORE_DIR}\n<dir>/nix/store<!-- x -->/../../tmp/fy-empty-font-dir</dir>`,
+      'not under /nix/store',
+    ],
+    [
+      'a /nix/store/../../tmp path',
+      `${STORE_DIR}\n<dir>/nix/store/../../tmp/fy-empty-font-dir</dir>`,
+      'not under /nix/store',
+    ],
     ['no DejaVu root', '<dir>/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-other-fonts-1</dir>', 'no DejaVu'],
     ['no font dir at all', '', 'no <dir>'],
   ] as const)
     test(`FAILS on ${name}`, () => {
-      const result = gate(config(temp('fy-fonts-'), body));
+      // fc-list is stubbed to store-only paths, so only the static reading of the file can catch these.
+      const result = gate(config(temp('fy-fonts-'), body), stubFcList(['/nix/store/aaaa-dejavu/a.ttf']));
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(says);
     });
