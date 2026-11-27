@@ -63,18 +63,18 @@ rule exists so a model cannot fabricate a destination by writing one.
 
 ## 2. The direct authored forms
 
-| Form                 | Means                   | Example                       | Notes                                                           |
-| -------------------- | ----------------------- | ----------------------------- | --------------------------------------------------------------- |
-| `:name`              | An agent's session      | `:zelda`                      | Case-insensitive, 1–32 chars, letters/digits/`-`                |
-| `@path`              | A file                  | `@src/api.ts`, `@./README.md` | Session-relative, `./`-relative, or absolute inside the cwd     |
-| `@path:line`         | A file at one line      | `@src/api.ts:120`             | 1-based                                                         |
-| `@path:line-end`     | A file line range       | `@src/api.ts:120-140`         | Inclusive; `end` must be ≥ `line`                               |
-| `&ID`                | A task                  | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits; machine-wide           |
-| `^AN`                | An agenda item          | `^A3`                         | Always `A` + a positive number; session-scoped                  |
-| `/name` or `$name`   | A skill                 | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill             |
-| `%terminal:<key>`    | A live terminal         | `%terminal:dev`               | The terminal's name, or the daemon's id; session-scoped         |
-| `%browser:<key>`     | A live browser page     | `%browser:app`                | The page's name, or the worker's page id; session-scoped        |
-| `%attachment:<name>` | A file sent in the chat | `%attachment:spec.pdf`        | The name it was delivered under; session-scoped; not proved yet |
+| Form                      | Means                   | Example                        | Notes                                                                      |
+| ------------------------- | ----------------------- | ------------------------------ | -------------------------------------------------------------------------- |
+| `:name`                   | An agent's session      | `:zelda`                       | Case-insensitive, 1–32 chars, letters/digits/`-`                           |
+| `@path`                   | A file                  | `@src/api.ts`, `@./README.md`  | Session-relative, `./`-relative, or absolute inside the cwd                |
+| `@path:line`              | A file at one line      | `@src/api.ts:120`              | 1-based                                                                    |
+| `@path:line-end`          | A file line range       | `@src/api.ts:120-140`          | Inclusive; `end` must be ≥ `line`                                          |
+| `&ID`                     | A task                  | `&F12`, `&B7`, `&I3`, `&C1`    | Case-insensitive prefix, up to 9 digits; machine-wide                      |
+| `^AN`                     | An agenda item          | `^A3`                          | Always `A` + a positive number; session-scoped                             |
+| `/name` or `$name`        | A skill                 | `/summary`, `$summary`         | **Lowercase only**; both sigils mean the same skill                        |
+| `%terminal:<key>`         | A live terminal         | `%terminal:dev`                | The terminal's name, or the daemon's id; session-scoped                    |
+| `%browser:<key>`          | A live browser page     | `%browser:app`                 | The page's name, or the worker's page id; session-scoped                   |
+| `%attachment:<id>/<name>` | A file sent in the chat | `%attachment:att_1f…/spec.pdf` | The folder and name it was delivered under; session-scoped; not proved yet |
 
 Both skill sigils are accepted because the harnesses differ: Claude invokes a skill as `/name` and
 Codex as `$name`. Whichever you type is what the reader keeps seeing — a reference is never rewritten
@@ -96,15 +96,18 @@ dashes, unique within its session, and it may never be twelve hex characters: th
 written before names existed, and a name that could also be an id would make one key mean two shells.
 The key grammar below is unchanged — a name is already a valid key.
 
-**An attachment is named by the file name the agent was handed it under.** A file sent with a message is
-copied into the ferret's own `attachments/<attachment id>/<name>` folder, and the message lists that path,
-so `%attachment:spec.pdf` points at the file whose path ends in `/spec.pdf`. The name is `deliveredFilename`
-(`@ferretry/core-mailbox/contract`, one owner for the daemon that writes the copy and the app that writes the token):
-the base name with every character outside letters, digits, `_`, `.` and `-` turned into `-`. Unlike a terminal
-key it may contain dots, because file names do; it starts and ends on a letter, digit or `_` (a closing full stop
-or dash is the sentence's), is at most 128 characters and is case-sensitive. A file whose delivered name cannot be
-written that way cannot be pointed at, and the plus on its tile says so instead of inserting it. Two files of one
-name in one session are one token — a declared GAP.
+**An attachment is named by the folder and file name the agent was handed it under.** A file sent with a
+message is copied into the ferret's own `attachments/<attachment id>/<name>` folder, and the message lists that
+path, so `%attachment:<attachment id>/<name>` is the last two parts of that path and points at exactly that copy:
+two delivered files both called `report.pdf` are two tokens (`%attachment:att_aa…/report.pdf`,
+`%attachment:att_bb…/report.pdf`), the composer never calls the second "already there", and the agent resolves
+the token by joining it onto the attachments folder. The id is the attachment's own (`att_` and 64 hex digits; the
+grammar takes any run of up to 80 letters, digits, `_` and `-` that starts on a letter or digit). The name is
+`deliveredFilename` (`@ferretry/core-mailbox/contract`, one owner for the daemon that writes the copy and the app that
+writes the token): the base name with every character outside letters, digits, `_`, `.` and `-` turned into `-`.
+Unlike a terminal key it may contain dots, because file names do; it starts and ends on a letter, digit or `_` (a
+closing full stop or dash is the sentence's), is at most 128 characters and is case-sensitive. A file whose delivered
+name cannot be written that way cannot be pointed at, and the plus on its tile says so instead of inserting it.
 
 The plus on a stored attachment's tile in the chat inserts this token through the shared
 `conversation.add-to-chat` action (`app/composer/attachment-plus.tsx`). **GAP: nothing proves an attachment yet.**

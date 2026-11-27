@@ -1,6 +1,6 @@
 /**
  * The browser entry for "the plus on an attachment tile": Conversation's REAL `TranscriptAttachmentGallery` over fake
- * files (a PDF, a long-named document, a stored picture), above a stand-in message box registered as the ferret's real
+ * files (a PDF, a long-named document, a stored picture, a 16px one), above a stand-in message box registered as the ferret's real
  * composer target, so the plus reaches it through the real Add to chat. Everything is fake data.
  *
  *   ?theme=<palette>-<mode>   (the test sets `data-style` itself)
@@ -23,17 +23,17 @@ const daemon = daemonConnection('scene-daemon');
 const FERRET = 'scene-ferret';
 const INITIAL_DRAFT = params.get('draft') ?? '';
 
-const picture = (): Promise<Blob> =>
+const picture = (width = 480, height = 300): Promise<Blob> =>
   new Promise((resolve, reject) => {
     const canvas = document.createElement('canvas');
-    canvas.width = 480;
-    canvas.height = 300;
+    canvas.width = width;
+    canvas.height = height;
     const draw = canvas.getContext('2d');
     if (draw === null) return reject(new Error('no canvas'));
     draw.fillStyle = '#26364f';
-    draw.fillRect(0, 0, 480, 300);
+    draw.fillRect(0, 0, width, height);
     draw.fillStyle = '#5eead4';
-    draw.fillRect(60, 80, 360, 140);
+    draw.fillRect(width / 8, height * 0.27, width * 0.75, height * 0.46);
     canvas.toBlob(blob => (blob === null ? reject(new Error('no blob')) : resolve(blob)), 'image/png');
   });
 
@@ -54,9 +54,10 @@ const FILES = [
     3_100,
   ),
   file('att-png', 'screenshot.png', 'image/png', 90_000),
+  file('att-tiny', 'tiny.png', 'image/png', 120),
 ];
 
-const Scene = ({ image }: { image: Blob }) => {
+const Scene = ({ image, tiny }: { image: Blob; tiny: Blob }) => {
   const [draft, setDraft] = useState(INITIAL_DRAFT);
   useEffect(() => {
     let current = INITIAL_DRAFT;
@@ -76,7 +77,11 @@ const Scene = ({ image }: { image: Blob }) => {
       <AttachmentGalleryProvider
         urls={{ create: blob => URL.createObjectURL(blob), revoke: url => URL.revokeObjectURL(url) }}
         load={async (_daemon, scope) =>
-          scope.attachmentId === 'att-png' ? image : new Blob(['%PDF-1.4'], { type: 'application/pdf' })
+          scope.attachmentId === 'att-png'
+            ? image
+            : scope.attachmentId === 'att-tiny'
+              ? tiny
+              : new Blob(['%PDF-1.4'], { type: 'application/pdf' })
         }
       >
         <TranscriptAttachmentGallery daemon={daemon} images={FILES} />
@@ -96,4 +101,6 @@ const Scene = ({ image }: { image: Blob }) => {
 
 const mount = document.getElementById('root');
 if (mount === null) throw new Error('no root');
-void picture().then(image => createRoot(mount).render(<Scene image={image} />));
+void Promise.all([picture(), picture(16, 16)]).then(([image, tiny]) =>
+  createRoot(mount).render(<Scene image={image} tiny={tiny} />),
+);

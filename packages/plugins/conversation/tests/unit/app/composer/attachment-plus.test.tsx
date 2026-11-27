@@ -53,12 +53,49 @@ const byLabel = (container: HTMLElement, label: string): HTMLElement =>
 
 describe('the attachment token', () => {
   it('names the file by the name the agent was delivered it under', () => {
-    expect(attachmentToken({ filename: 'My Notes (1).md' })).toBe('%attachment:My-Notes-1-.md');
-    expect(attachmentToken({ filename: 'C:\\x\\report.final.pdf' })).toBe('%attachment:report.final.pdf');
+    expect(attachmentToken({ attachmentId: 'att-1', filename: 'My Notes (1).md' })).toBe(
+      '%attachment:att-1/My-Notes-1-.md',
+    );
+    expect(attachmentToken({ attachmentId: 'att-1', filename: 'C:\\x\\report.final.pdf' })).toBe(
+      '%attachment:att-1/report.final.pdf',
+    );
   });
 
   it('writes nothing for a name the grammar cannot point at', () => {
-    expect(attachmentToken({ filename: 'notes-' })).toBeNull();
+    expect(attachmentToken({ attachmentId: 'att-1', filename: 'notes-' })).toBeNull();
+  });
+});
+
+describe('two delivered files of one name', () => {
+  it('get two distinct tokens, each naming its own delivered copy, and both can be added', async () => {
+    const mine = composer('plus-daemon', 'plus-ferret');
+    expect(attachmentToken({ attachmentId: 'att_aa', filename: 'report.pdf' })).toBe('%attachment:att_aa/report.pdf');
+    expect(attachmentToken({ attachmentId: 'att_bb', filename: 'report.pdf' })).toBe('%attachment:att_bb/report.pdf');
+    const view = await mount(
+      <AttachmentGalleryProvider urls={urls} load={bytes}>
+        <TranscriptAttachmentGallery
+          daemon={daemon}
+          images={[
+            stored({ attachmentId: 'att_aa', filename: 'report.pdf', mime: 'application/pdf' }),
+            stored({ attachmentId: 'att_bb', filename: 'report.pdf', mime: 'application/pdf' }),
+          ]}
+        />
+      </AttachmentGalleryProvider>,
+    );
+    try {
+      const pluses = view.container.querySelectorAll<HTMLElement>('[aria-label="Add report.pdf to the message"]');
+      expect(pluses.length).toBe(2);
+      await interact(() => {
+        pluses[0]?.click();
+      });
+      await interact(() => {
+        pluses[1]?.click();
+      });
+      expect(mine.draft).toBe('%attachment:att_aa/report.pdf %attachment:att_bb/report.pdf ');
+      expect(view.container.textContent).not.toContain('already in this message');
+    } finally {
+      await view.unmount();
+    }
   });
 });
 
@@ -76,14 +113,14 @@ describe('the plus on a document card', () => {
       await interact(() => {
         byLabel(view.container, 'Add My Notes (1).md to the message').click();
       });
-      expect(mine.draft).toBe('read %attachment:My-Notes-1-.md ');
+      expect(mine.draft).toBe('read %attachment:att-1/My-Notes-1-.md ');
       expect(otherFerret.draft).toBe('');
       expect(otherDaemon.draft).toBe('');
-      expect(view.container.textContent).toContain("Added %attachment:My-Notes-1-.md to this ferret's message.");
+      expect(view.container.textContent).toContain("Added %attachment:att-1/My-Notes-1-.md to this ferret's message.");
       await interact(() => {
         byLabel(view.container, 'Add My Notes (1).md to the message').click();
       });
-      expect(mine.draft).toBe('read %attachment:My-Notes-1-.md ');
+      expect(mine.draft).toBe('read %attachment:att-1/My-Notes-1-.md ');
       expect(view.container.textContent).toContain('is already in this message.');
     } finally {
       await view.unmount();
@@ -146,7 +183,7 @@ describe('the plus on a stored picture', () => {
       await interact(() => {
         byLabel(view.container, 'Add shot.png to the message').click();
       });
-      expect(mine.draft).toBe('%attachment:shot.png ');
+      expect(mine.draft).toBe('%attachment:att-1/shot.png ');
     } finally {
       globalThis.IntersectionObserver = original;
       await view.unmount();

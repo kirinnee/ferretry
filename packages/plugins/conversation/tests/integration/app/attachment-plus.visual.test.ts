@@ -90,21 +90,50 @@ for (const style of STYLES)
 
           // Every tile has a plus, and each is a 44px target inside the screen.
           const pluses = page.locator('[aria-label^="Add "][aria-label$=" to the message"]');
-          expect(await pluses.count()).toBe(3);
-          for (let at = 0; at < 3; at += 1) {
+          expect(await pluses.count()).toBe(4);
+          for (let at = 0; at < 4; at += 1) {
             const box = await pluses.nth(at).boundingBox();
             expect(box?.width ?? 0).toBeGreaterThanOrEqual(43.5);
             expect(box?.height ?? 0).toBeGreaterThanOrEqual(43.5);
             expect((box?.x ?? -1) >= 0 && (box?.x ?? 0) + (box?.width ?? 0) <= viewport.width).toBe(true);
           }
 
+          // On a 16px picture the Expand and the Add buttons are two separate targets: neither covers the other, each is
+          // at least 44px, and the centre of each is hit by that very button (not its neighbour).
+          const expand = page.locator('[aria-label="Expand tiny.png"]');
+          const addTiny = page.locator('[aria-label="Add tiny.png to the message"]');
+          const [expandBox, addBox] = [await expand.boundingBox(), await addTiny.boundingBox()];
+          if (expandBox === null || addBox === null) throw new Error('the tiny picture has no buttons');
+          expect(expandBox.width).toBeGreaterThanOrEqual(43.5);
+          expect(expandBox.height).toBeGreaterThanOrEqual(43.5);
+          const overlaps =
+            expandBox.x < addBox.x + addBox.width &&
+            addBox.x < expandBox.x + expandBox.width &&
+            expandBox.y < addBox.y + addBox.height &&
+            addBox.y < expandBox.y + expandBox.height;
+          expect(overlaps, 'Expand and Add on a tiny picture do not overlap').toBe(false);
+          for (const [label, box] of [
+            ['Expand tiny.png', expandBox],
+            ['Add tiny.png to the message', addBox],
+          ] as const) {
+            const hit = await page.evaluate(
+              ([x, y]) =>
+                document
+                  .elementFromPoint(x as number, y as number)
+                  ?.closest('button')
+                  ?.getAttribute('aria-label'),
+              [box.x + box.width / 2, box.y + box.height / 2],
+            );
+            expect(hit, `the centre of the ${label} button hits that button`).toBe(label);
+          }
+
           await page.click('[aria-label="Add quarterly report.pdf to the message"]');
           await page.click('[aria-label="Add screenshot.png to the message"]');
           await page.waitForTimeout(300);
-          const draft = await page.locator('[data-scene-draft]').innerText();
-          expect(draft).toBe('Please read %attachment:quarterly-report.pdf %attachment:screenshot.png');
-          expect(await page.locator('[role="status"]').allInnerTexts()).toEqual(
-            expect.arrayContaining([expect.stringContaining('Added %attachment:quarterly-report.pdf')]),
+          const draft = ((await page.locator('[data-scene-draft]').textContent()) ?? '').trim();
+          expect(draft).toBe('Please read %attachment:att-pdf/quarterly-report.pdf %attachment:att-png/screenshot.png');
+          expect(await page.locator('[role="status"]').allTextContents()).toEqual(
+            expect.arrayContaining([expect.stringContaining('Added %attachment:att-pdf/quarterly-report.pdf')]),
           );
 
           if (shotsDir !== '')

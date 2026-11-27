@@ -200,11 +200,16 @@ const AGENDA_TOKEN = new RegExp(`^${ATTENTION_SIGIL_CLASS}(${AGENDA_ID_BODY})$`,
 const SURFACE_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const SURFACE_TOKEN = /^%(terminal|browser):([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/iu;
 /**
- * An attachment is named by the file name the agent was delivered it under (`deliveredFilename`), so its key keeps
- * the dots a file name has. It starts and ends on a word character: a closing full stop or dash would be the
- * sentence's, never the name's, and a name that cannot end that way is a file this grammar cannot point at.
+ * An attachment is named by the folder and the file name the agent was delivered it under
+ * (`…/attachments/<attachment id>/<delivered name>`, `deliveredFilename`), so the key is `<attachment id>/<name>` and
+ * two delivered files of one name are two keys. The id is a word-character run (a real one is `att_` and 64 hex
+ * digits); the name keeps the dots a file name has, and starts and ends on a word character: a closing full stop or
+ * dash would be the sentence's, never the name's, and a name that cannot end that way is a file this grammar cannot
+ * point at.
  */
-const ATTACHMENT_KEY_BODY = '[A-Za-z0-9_](?:[A-Za-z0-9_.-]{0,126}[A-Za-z0-9_])?';
+const ATTACHMENT_ID_BODY = '[A-Za-z0-9][A-Za-z0-9_-]{0,79}';
+const ATTACHMENT_NAME_BODY = '[A-Za-z0-9_](?:[A-Za-z0-9_.-]{0,126}[A-Za-z0-9_])?';
+const ATTACHMENT_KEY_BODY = `${ATTACHMENT_ID_BODY}/${ATTACHMENT_NAME_BODY}`;
 const ATTACHMENT_KEY = new RegExp(`^${ATTACHMENT_KEY_BODY}$`, 'u');
 const ATTACHMENT_TOKEN = new RegExp(`^%(attachment):(${ATTACHMENT_KEY_BODY})$`, 'iu');
 // LOWERCASE ONLY, unlike an agent callsign. A skill name is a directory name,

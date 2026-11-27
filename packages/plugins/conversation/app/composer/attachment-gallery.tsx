@@ -35,12 +35,7 @@ import {
   type DaemonAttachmentScope,
   daemonAttachmentScope,
 } from './attachment-blob-cache.ts';
-import {
-  AttachmentPlusButton,
-  AttachmentPlusNote,
-  AttachmentThumbnailPlus,
-  useAttachmentPlus,
-} from './attachment-plus.tsx';
+import { AttachmentPlusButton, AttachmentPlusNote, AttachmentWithPlus, useAttachmentPlus } from './attachment-plus.tsx';
 import { loadAttachmentBlob } from './attachment-source.ts';
 import {
   attachmentTypeLabel,
@@ -405,10 +400,10 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
           </span>
         </div>
       ) : src ? (
-        <div className="relative w-fit max-w-full">
+        <AttachmentWithPlus daemon={daemon} attachment={image.kind === 'attachment' ? image : undefined}>
           <button
             type="button"
-            className="block min-h-[44px] min-w-[44px] max-w-full overflow-hidden rounded-control border border-border-soft bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center max-w-full overflow-hidden rounded-control border border-border-soft bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             onClick={onOpen}
             aria-label={`Expand ${alt}`}
             data-transcript-image-state={transcript ? 'loaded' : undefined}
@@ -421,8 +416,7 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
               onError={() => setFailed(transcript ? transcriptImageErrorMessage(undefined) : '')}
             />
           </button>
-          {image.kind === 'attachment' && <AttachmentThumbnailPlus daemon={daemon} attachment={image} />}
-        </div>
+        </AttachmentWithPlus>
       ) : (
         <div
           className={cn(

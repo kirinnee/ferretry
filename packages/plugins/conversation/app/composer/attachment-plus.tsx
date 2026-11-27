@@ -3,8 +3,9 @@
  *
  * The delivery is Conversation's shared Add to chat (`addToChatFor`, the same action `conversation.add-to-chat` hands
  * every other surface), so the token reaches only the composer of THIS daemon and THIS ferret, and says its outcome in
- * the one set of words every caller uses. The token is `%attachment:<delivered name>` (docs/reference-standard.md): the
- * name the agent was handed the file under, so the path it already has ends in what the token names.
+ * the one set of words every caller uses. The token is `%attachment:<attachment id>/<delivered name>`
+ * (docs/reference-standard.md): the last two parts of the path the agent was handed the file at, so two files of one
+ * name are two tokens and each names its own copy.
  *
  * A file whose delivered name the grammar cannot write down (one that ends in a dot or a dash) says so in those words
  * instead of inserting something the reader could never prove.
@@ -13,15 +14,21 @@
 import { deliveredFilename } from '@ferretry/core-mailbox/contract';
 import { cn } from '@ferretry/app/ui';
 import { Plus } from 'lucide-react';
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { referenceToken } from './composer-references.ts';
 import { addToChatFor } from './add-to-chat.ts';
 import type { StoredTranscriptAttachment } from './attachments.ts';
 import type { DaemonConnection } from './seam.ts';
 
-/** The canonical `%attachment:` token of a stored file, or `null` when its delivered name cannot be written. */
-export const attachmentToken = (attachment: Pick<StoredTranscriptAttachment, 'filename'>): string | null =>
-  referenceToken({ kind: 'surface', surface: 'attachment', key: deliveredFilename(attachment.filename) });
+/** The canonical `%attachment:` token of a stored file, or `null` when its id or delivered name cannot be written. */
+export const attachmentToken = (
+  attachment: Pick<StoredTranscriptAttachment, 'attachmentId' | 'filename'>,
+): string | null =>
+  referenceToken({
+    kind: 'surface',
+    surface: 'attachment',
+    key: `${attachment.attachmentId}/${deliveredFilename(attachment.filename)}`,
+  });
 
 interface AttachmentPlusProps {
   readonly daemon: DaemonConnection;
@@ -73,17 +80,49 @@ export const AttachmentPlusNote = ({ note }: { readonly note: string }) =>
     </span>
   );
 
-/** The plus laid over a picture's top-right corner, with its sentence under the picture. */
-export const AttachmentThumbnailPlus = ({ daemon, attachment }: Omit<AttachmentPlusProps, 'className'>) => {
+/**
+ * A picture's Expand control with the plus BESIDE it, never over it: on a 16px picture the Expand target is 44px, and
+ * a plus laid on the picture would sit on top of it. Both stay 44px targets, 8px apart, and the plus's sentence goes
+ * under the pair. Without an attachment (an inline picture) the picture is returned as it is.
+ */
+export const AttachmentWithPlus = ({
+  daemon,
+  attachment,
+  children,
+}: {
+  readonly daemon: DaemonConnection;
+  readonly attachment: StoredTranscriptAttachment | undefined;
+  readonly children: ReactNode;
+}) =>
+  attachment === undefined ? (
+    children
+  ) : (
+    <PictureWithPlus daemon={daemon} attachment={attachment}>
+      {children}
+    </PictureWithPlus>
+  );
+
+const PictureWithPlus = ({
+  daemon,
+  attachment,
+  children,
+}: {
+  readonly daemon: DaemonConnection;
+  readonly attachment: StoredTranscriptAttachment;
+  readonly children: ReactNode;
+}) => {
   const plus = useAttachmentPlus({ daemon, attachment });
   return (
-    <>
-      <AttachmentPlusButton
-        add={plus.add}
-        filename={attachment.filename}
-        className="absolute top-2 right-2 border border-border-soft bg-surface-2"
-      />
+    <div className="w-fit max-w-full">
+      <div className="flex max-w-full items-start gap-2">
+        {children}
+        <AttachmentPlusButton
+          add={plus.add}
+          filename={attachment.filename}
+          className="shrink-0 border border-border-soft bg-surface-2"
+        />
+      </div>
       <AttachmentPlusNote note={plus.note} />
-    </>
+    </div>
   );
 };
