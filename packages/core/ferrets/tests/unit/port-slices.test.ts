@@ -11,6 +11,7 @@ import type { HarnessHistorySource } from '../../contract/history.ts';
 import type { FerretState, FerretSummary, HarnessKey, PackId } from '../../contract/ids.ts';
 import type { ConversationImport, HarnessFacts, RunnerHandle, TurnUsage } from '../../contract/kinds.ts';
 import type { LaunchOrigin } from '../../contract/launch-origin.ts';
+import type { RelocationSource } from '../../contract/ports/reads.port.ts';
 import type {
   RepoWorktreeListResponse,
   RemovedWorktree,
@@ -105,6 +106,7 @@ interface FerretsApiAtBase {
   markStalled?(ferret: FerretId, stalled: boolean): Promise<boolean>;
   exclusive?<T>(ferret: FerretId, work: () => Promise<T>): Promise<T>;
   runtimeControl?: RuntimeControlApi['runtimeControl'];
+  relocationSource?(ferret: FerretId): Promise<RelocationSource | undefined>;
 }
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;

@@ -73,6 +73,7 @@ describe('the Claude harness parts', () => {
       dialogs: true,
       discover: true,
       exportConversation: true,
+      packConversation: true,
       facts: true,
       fork: true,
       hasConversation: true,

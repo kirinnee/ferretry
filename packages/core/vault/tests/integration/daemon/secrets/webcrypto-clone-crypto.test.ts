@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { WebCryptoCloneCrypto } from '../../../../daemon/adapters/secrets/webcrypto-clone-crypto.ts';
-import { AEAD_NONCE_BYTES, SHARED_SECRET_BYTES } from '../../../../daemon/lib/secrets/clone-crypto.ts';
+import { WebCryptoCloneCrypto } from '@ferretry/std/sealing';
+import { AEAD_NONCE_BYTES, SHARED_SECRET_BYTES } from '@ferretry/std/sealing';
 
 /** The adapter over the platform's REAL WebCrypto: X25519, Ed25519, HKDF and AES-GCM, nothing faked. */
 const adapter = new WebCryptoCloneCrypto();

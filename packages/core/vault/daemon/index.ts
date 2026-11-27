@@ -33,7 +33,7 @@ import { KernelSealedDocuments } from './adapters/secrets/kernel-sealed-document
 import { kernelSealedFiles } from './adapters/secrets/kernel-sealed-files.ts';
 import { KernelSecretChildRunner } from './adapters/secrets/kernel-secret-child-runner.ts';
 import { FileSecretDocumentStore } from './adapters/secrets/file-secret-document-store.ts';
-import { WebCryptoCloneCrypto } from './adapters/secrets/webcrypto-clone-crypto.ts';
+import { WebCryptoCloneCrypto } from '@ferretry/std/sealing';
 import { FileSecretKey, WebCryptoSecretCipher } from './adapters/secrets/webcrypto-secret-cipher.ts';
 import { quarantineOverOutputGuard } from './adapters/inputs/output-guard.ts';
 import { buildInputs } from './inputs.ts';
