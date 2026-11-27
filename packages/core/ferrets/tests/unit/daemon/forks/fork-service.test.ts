@@ -189,6 +189,41 @@ describe('the fork service', () => {
     expect(calls.cuts).toEqual([]);
   });
 
+  test('should remove the checkout a refused cut made, and say it was left only when that removal fails', async () => {
+    // Arrange
+    const removed: string[] = [];
+    const refusing = { fork: async () => Promise.reject(new Error('a rollout format Ferretry has not tested')) };
+    const checkout = (discard: ForkWorktrees['discard']): ForkWorktrees => ({
+      inspect: async () => ({ head: 'abc123' }),
+      create: async request => ({
+        cwd: '/managed/repo-1/fork-quick-otter/pkg',
+        worktree: { path: '/managed/repo-1/fork-quick-otter', branch: request.branch },
+      }),
+      discard,
+    });
+    const clean = world({
+      harness: refusing,
+      worktrees: checkout(async made => void removed.push(made.branch)),
+    });
+    const stuck = world({
+      harness: refusing,
+      worktrees: checkout(async () => {
+        throw new Error('the checkout is in use');
+      }),
+    });
+
+    // Act
+    const first = await clean.service.fork(SOURCE, AT, { worktree: 'new' }, PERSON);
+    const second = await stuck.service.fork(SOURCE, AT, { worktree: 'new' }, PERSON);
+
+    // Assert
+    expect(first.ok).toBe(false);
+    if (!first.ok) expect(first.error.reason).not.toContain('left in place');
+    expect(removed).toEqual(['fork/quick-otter-abcdef12']);
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.error.reason).toContain('was left in place');
+  });
+
   test('should refuse a ferret that is working or starting before the harness or any checkout is touched', async () => {
     // Arrange
     const working = world({ source: source({ running: true }) });
