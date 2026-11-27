@@ -256,12 +256,12 @@ describe('a relay session reading frames from its carrier', () => {
     should(twice.socket.closed?.reason).match(/second ready/u);
   });
 
-  it('should keep the reason when the rendezvous ends a session or refuses the browser', async () => {
+  it('should keep pre-handshake admission reasons from the rendezvous', async () => {
     const ended = await opened();
     await ended.session.receiveBinary(
-      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.authRejected, reason: 'unknown device' }),
+      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'daemon absent' }),
     );
-    should((await failure(ended.session.ready())).code).equal(RELAY_CLOSE_CODES.authRejected);
+    should((await failure(ended.session.ready())).code).equal(RELAY_CLOSE_CODES.daemonAbsent);
 
     const refused = await opened();
     await refused.session.receiveBinary(
