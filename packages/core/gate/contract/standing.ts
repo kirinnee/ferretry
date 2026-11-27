@@ -219,6 +219,8 @@ declare module '@ferretry/kernel/contract' {
     readonly governance?: CallerGovernance;
     readonly presentation?: CapabilityPresentation;
     readonly spendStepUp?: () => void;
+    /** Atomically checks and spends this call's step-up; configured reusable windows remain reusable. */
+    readonly claimStepUp?: () => boolean;
     readonly spendFreshStepUp?: () => void;
     readonly claimFreshStepUp?: ClaimFreshStepUp;
     readonly claimStoredProof?: ClaimStoredProof;
