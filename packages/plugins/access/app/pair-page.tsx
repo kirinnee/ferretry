@@ -142,7 +142,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
     // The query names a non-secret machine and WHY it needs pairing; a code never rides it.
     const [recovery] = useState(() => new URL(location()).searchParams);
     const [refusedBy, setRefusedBy] = useState<string | null>(
-      () => recovery.get('replaced') ?? recovery.get('refused'),
+      () => recovery.get('replaced') ?? recovery.get('refused') ?? recovery.get('unreachable'),
     );
     const scanHost = useMemo(() => (environment.scanHost ?? (() => browserQrScan(environment.loadDecoder)))(), []);
     const snapshot = useSyncExternalStore(ports.daemons.subscribe, ports.daemons.snapshot);
@@ -171,7 +171,7 @@ export function pairPage(ports: DaemonlessPorts, environment: PairPageEnvironmen
       <>
         {refused === undefined ? null : (
           <DeviceRefusedNotice
-            reason={recovery.has('replaced') ? 'replaced' : 'refused'}
+            reason={recovery.has('replaced') ? 'replaced' : recovery.has('unreachable') ? 'unreachable' : 'refused'}
             machineName={distinctDaemonName(refused, snapshot.daemons)}
             onPairAgain={() => setRefusedBy(null)}
           />

@@ -277,6 +277,7 @@ export {
   daemonSettingsHref,
   deviceSettingsHref,
   HOME_HREF,
+  pairAgainHref,
   type Route,
   type RouteTable,
   routeTable,
