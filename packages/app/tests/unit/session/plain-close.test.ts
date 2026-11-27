@@ -238,22 +238,14 @@ for (const code of [4403, 4426]) {
       kind: 'read',
       entries: new Map(CORE.map(entry => [entry.id, { on: true, contract: entry.contract }])),
     });
-    shape.saveGrants(
-      identity.daemonId,
-      device.deviceId,
-      new Map([
-        [
-          'fleet',
-          {
-            capability: 'fleet',
-            use: true,
-            configure: false,
-            useRefusal: 'granted',
-            configureRefusal: 'not-granted',
-          },
-        ],
-      ]),
-    );
+    const fleetGrant = {
+      capability: 'fleet',
+      use: true,
+      configure: false,
+      useRefusal: 'granted',
+      configureRefusal: 'not-granted',
+    } as const;
+    shape.saveGrants(identity.daemonId, device.deviceId, new Map([['fleet', fleetGrant]]));
     const snapshot = () => JSON.stringify([...values]);
     const before = snapshot();
     let attack = true;
@@ -263,7 +255,13 @@ for (const code of [4403, 4426]) {
       accepts: () => [publicKey],
       respond: async request => ({
         status: 200,
-        body: request.path === '/v1/plugins' ? inventoryOf(CORE) : {},
+        // The authenticated daemon answers with exactly the state the device already holds.
+        body:
+          request.path === '/v1/plugins'
+            ? inventoryOf(CORE)
+            : request.path === '/v1/grants'
+              ? { capabilities: [fleetGrant] }
+              : {},
       }),
     });
     const transport = new SessionTransport({
@@ -302,6 +300,8 @@ for (const code of [4403, 4426]) {
       await until(() => stopOf(runtime, identity.daemonId) === undefined);
       expect(genuine.credentials.some(credential => credential.accepted)).toBe(true);
       expect(runtime.isRefused(identity.daemonId)).toBe(false);
+      // Genuine recovery leaves the persisted pairing, inventory and grants exactly the authenticated state.
+      expect(snapshot() === before).toBe(true);
       expect((await keySnapshot()) === keysBefore).toBe(true);
     } finally {
       const connection = runtime.connection(identity.daemonId);
