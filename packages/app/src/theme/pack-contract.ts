@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RENDER_PALETTE_TOKENS, RENDER_STYLE_TOKENS } from './render-contract.ts';
+import { RENDER_OPTIONAL_STYLE_TOKENS, RENDER_PALETTE_TOKENS, RENDER_STYLE_TOKENS } from './render-contract.ts';
 
 /**
  * WHAT A THEME PACK IS. A style, a palette and a font are each ONE folder under `theme/packs/{style,palette,font}/<id>/`,
@@ -289,7 +289,11 @@ const STYLE_ONLY_TOKENS = [
 ] as const;
 
 export const PALETTE_TOKENS: readonly string[] = [...RENDER_PALETTE_TOKENS, ...PALETTE_ONLY_TOKENS];
-export const STYLE_TOKENS: readonly string[] = [...RENDER_STYLE_TOKENS, ...STYLE_ONLY_TOKENS];
+export const STYLE_TOKENS: readonly string[] = [
+  ...RENDER_STYLE_TOKENS,
+  ...RENDER_OPTIONAL_STYLE_TOKENS,
+  ...STYLE_ONLY_TOKENS,
+];
 
 const paletteTokens: ReadonlySet<string> = new Set(PALETTE_TOKENS);
 const styleTokens: ReadonlySet<string> = new Set(STYLE_TOKENS);

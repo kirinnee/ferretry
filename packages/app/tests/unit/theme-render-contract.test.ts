@@ -95,8 +95,9 @@ function contrastMisses(sources: ThemeSources, palette: string, mode: ThemeMode)
 /**
  * Misses that exist and are pinned, `identity -> why`. A pin is an identity, not a tolerance: it goes stale the day the miss is
  * fixed and then fails (`pins nothing that no longer misses`). The ledger is empty: the one pin it held (`--md-link-weight:
- * inherit`, a CSS-wide keyword that computes to nothing) was fixed in the styles that carried it (Studio, Retro, Raw), each of
- * which now names the weight (G2 U5), so a new miss is a failure to fix, not a line to add here without a reason.
+ * inherit`, a CSS-wide keyword that computes to nothing) is now an OPTIONAL render token (`RENDER_OPTIONAL_STYLE_TOKENS`): a link
+ * keeps the weight of the text around it, so a style that names none says nothing (G2 U5). A new miss is a failure to fix, not a
+ * line to add here without a reason.
  */
 const KNOWN: Readonly<Record<string, string>> = {};
 /** What a fixture found that nobody pinned. */

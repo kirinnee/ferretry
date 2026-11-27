@@ -5,8 +5,6 @@
   --bubble-stroke: 1px;
   --bubble-radius: 14px 14px 8px 14px;
   --bubble-shadow: var(--shadow-sm);
-  /* A link keeps the body weight. A CSS-wide keyword here would compute to nothing, which a renderer cannot read. */
-  --md-link-weight: var(--weight-normal);
 }
 
 :root[data-style='studio'][data-mode='dark'],
