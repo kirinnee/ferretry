@@ -12,7 +12,7 @@ import { type BrowserWorkerProgram, selectBrowserWorker } from '../worker/progra
  * here and visible.
  */
 export interface BrowserHost {
-  /** `state/browsers/` in the home: Chrome's profile (`data/agent`), the display cookies (`x11/`), the lease. */
+  /** `state/browsers/` in the home: Chrome's profile (`data/<identity>`, `agent` by default), the display cookies (`x11/`), the lease. */
   readonly stateDirectory: string;
   /** Where the worker stages a page's downloads until the agent saves them (or fifteen minutes pass). */
   readonly stageDirectory: string;
