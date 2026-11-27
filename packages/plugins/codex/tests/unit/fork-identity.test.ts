@@ -52,10 +52,12 @@ describe('round-two native setup and identities', () => {
         content: [{ type: 'input_text', text: xml }],
       }) +
       forkRow('world_state', {
+        full: true,
         state: {
           environments: {
             environments: { local: { cwd: '/work/source' } },
-            filesystem: '<filesystem><workspace_roots><root>/work/source</root></workspace_roots></filesystem>',
+            filesystem:
+              '<filesystem><workspace_roots><root>/work/source</root><root>/independent</root></workspace_roots></filesystem>',
           },
         },
       }) +
@@ -74,6 +76,8 @@ describe('round-two native setup and identities', () => {
     expect(result.text).not.toContain(SOURCE_ID);
     expect(result.text).not.toContain('/work/source');
     expect(result.text).toContain('<root>/work/fork/sub</root>');
+    expect(result.text).toContain('<root>/independent</root>');
+    expect(result.text).toContain('"full":true');
   });
 
   test('R2: unrecognized record types, events, fields and XML carrying identities or worktrees refuse', () => {
