@@ -47,6 +47,7 @@
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames } from '../foreign.ts';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import { byHarness, isKind } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
@@ -804,6 +805,7 @@ export const describePartialSupport = (entry: PartialSupport): string =>
 export function plumbingOf(
   harness: string,
   facts: { readonly claudeStatusline: ClaudeStatuslineCommand; readonly codexSqliteHome: string },
+  _kit?: RuntimesHarnessKit,
 ): AdaptPlumbing {
   return byHarness<AdaptPlumbing>(harness, {
     claude: () => ({ harness: 'claude', statusLine: facts.claudeStatusline }),
@@ -817,10 +819,11 @@ export function plumbingOf(
  */
 export function priorServersOf(
   harness: string,
-  servers: Readonly<Record<string, McpComponent>>,
+  servers: () => Readonly<Record<string, McpComponent>>,
+  _kit?: RuntimesHarnessKit,
 ): Readonly<Record<string, SettingsObject>> {
   return byHarness<Readonly<Record<string, SettingsObject>>>(harness, {
-    claude: () => renderMcpComponents('claude', servers),
+    claude: () => renderMcpComponents('claude', servers()),
     codex: () => ({}),
   });
 }

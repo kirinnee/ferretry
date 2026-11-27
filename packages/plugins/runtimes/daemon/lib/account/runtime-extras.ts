@@ -5,6 +5,7 @@
  * Codex keeps its history in a SQLite home shared by every runtime on it, and lists the models of a login whose provider it
  * does not know from a catalog file Ferretry writes (docs/model-catalog.md). Claude adds nothing here.
  */
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import { byHarness, isKind } from '../harness-kind.ts';
 import {
   CODEX_MODEL_CATALOG_FILE,
@@ -52,6 +53,7 @@ export function runtimeExtras(
     readonly derived: RuntimeModels;
     readonly settings: SettingsObject;
   },
+  _kit?: RuntimesHarnessKit,
 ): RuntimeExtras {
   return byHarness<RuntimeExtras>(harness, {
     claude: () => ({ env: {} }),

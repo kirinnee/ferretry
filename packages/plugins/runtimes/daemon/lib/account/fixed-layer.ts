@@ -78,6 +78,7 @@ import {
   sameSettingsValue,
   settingsKey,
 } from './layering.ts';
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
 import { byHarness, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { AgentPermissions } from './schema.ts';
@@ -915,8 +916,11 @@ export interface FixedLayerRequest {
   readonly acceptsAutoPermissionMode: boolean;
 }
 
-/** The fixed layer for the harness `harness` (a stored word or a plugin key), or the reason it cannot launch. */
-export function fixedLayerOf(harness: string, request: FixedLayerRequest): FixedLayerResult {
+/**
+ * The fixed layer for the harness `harness` (a stored word or a plugin key), or the reason it cannot launch. `kit` is the
+ * harness's own plugin's hand to Runtimes; no member is read yet (the move PRs fill them in), so the harness still decides.
+ */
+export function fixedLayerOf(harness: string, request: FixedLayerRequest, _kit?: RuntimesHarnessKit): FixedLayerResult {
   const { agentPermissions, cwd, fyCommand } = request;
   return byHarness<FixedLayerResult>(harness, {
     claude: () =>

@@ -368,12 +368,18 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     // The fixed layer: computed for a placeholder folder, which never reaches a file.
     let fixed: FixedLayer | undefined;
-    const result = fixedLayerOf(harness, {
-      agentPermissions: model.machine.agentPermissions,
-      cwd: LAUNCH_FOLDER_PLACEHOLDER,
-      acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
-      fyCommand: input.fyCommand,
-    });
+    // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
+    const kit = input.kits?.get(harness);
+    const result = fixedLayerOf(
+      harness,
+      {
+        agentPermissions: model.machine.agentPermissions,
+        cwd: LAUNCH_FOLDER_PLACEHOLDER,
+        acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
+        fyCommand: input.fyCommand,
+      },
+      kit,
+    );
     if (result.ok) fixed = withoutLaunchFolder(result.layer);
     // An auto launch the harness cannot honour refuses THAT launch only: the person's own run and an interactive ferret
     // never get the fixed layer, so they are not stopped by it.
@@ -382,7 +388,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     const adapted = adaptProfile({
       resolved,
-      plumbing: plumbingOf(harness, { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome }),
+      plumbing: plumbingOf(harness, { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome }, kit),
       bodies: {
         ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
         ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
@@ -427,12 +433,16 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     env[RUNTIME_NAME_ENV] = name;
     env[STATE_HOME_ENV] = layout.stateHome;
     // What only this harness's runtime has (Codex's shared history database, and a catalog of the login's own models).
-    const extras = runtimeExtras(harness, {
-      sqliteHome,
-      statePath: joinPath(home, RUNTIME_STATE_DIRECTORY),
-      derived,
-      settings: adapted.settings.value,
-    });
+    const extras = runtimeExtras(
+      harness,
+      {
+        sqliteHome,
+        statePath: joinPath(home, RUNTIME_STATE_DIRECTORY),
+        derived,
+        settings: adapted.settings.value,
+      },
+      kit,
+    );
     Object.assign(env, extras.env);
     const codexCatalog = extras.catalog?.text;
 
@@ -445,13 +455,16 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         absent: adapted.absent,
         settings: adapted.settings,
         claudeJson: adapted.claudeJson,
+        // A callback: a harness whose document keeps no prior servers never filters them.
         priorServers: priorServersOf(
           harness,
-          Object.fromEntries(
-            Object.entries(model.components.mcp).filter(
-              ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+          () =>
+            Object.fromEntries(
+              Object.entries(model.components.mcp).filter(
+                ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+              ),
             ),
-          ),
+          kit,
         ),
         overlay: fixed?.claudeSettingsOverlay,
         codexRules: fixed?.codexRules,
@@ -490,7 +503,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
             ? { refusal: result.ok ? '' : result.refusal.message }
             : {
                 args: [...launchPrefix, ...launch.args, ...fixedSettingsArgs],
-                ...autonomousPreparation(harness),
+                ...autonomousPreparation(harness, kit),
               },
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
