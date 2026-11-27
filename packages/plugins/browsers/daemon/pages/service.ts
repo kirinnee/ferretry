@@ -419,6 +419,7 @@ export const MAX_VIEWERS_PER_SESSION = 64;
 export class BrowserSessionService implements BrowserSubsystem {
   private run: Running | undefined;
   private starting: Promise<Running> | undefined;
+  private stopping: Promise<void> | undefined;
   /** Page opens (and starts) that have been asked for and have not answered yet, whoever asked. */
   private opening = 0;
   private readonly serial = new Map<string, Promise<void>>();
@@ -442,6 +443,10 @@ export class BrowserSessionService implements BrowserSubsystem {
   /** Whether this session has a page with this name or id in this identity's running browser. */
   owns(sessionId: string, key: string): boolean {
     return this.run !== undefined && this.page(this.run, sessionId, key) !== undefined;
+  }
+
+  ownsId(sessionId: string, key: string): boolean {
+    return this.run !== undefined && this.owned(this.run, sessionId).some(page => page.id === key);
   }
 
   /** How many pages this session has open in this identity's browser, as last reported. */
@@ -829,6 +834,7 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   /** The machine browser as a whole: whether it runs, since when, and the proxy it started with. */
   overview(): BrowserStateView {
+    if (this.stopping !== undefined) return { state: 'stopping' };
     const run = this.run;
     if (run === undefined) return { state: this.starting === undefined ? 'stopped' : 'starting' };
     return {
@@ -851,6 +857,7 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   /** The machine's browser, started on first need; concurrent first needs share one launch. */
   private async ensure(): Promise<Running> {
+    if (this.stopping !== undefined) await this.stopping;
     if (this.run !== undefined) return this.run;
     this.starting ??= this.launch().finally(() => {
       this.starting = undefined;
@@ -1105,14 +1112,22 @@ export class BrowserSessionService implements BrowserSubsystem {
   }
 
   private async stop(): Promise<void> {
+    this.stopping ??= this.teardown().finally(() => {
+      this.stopping = undefined;
+    });
+    await this.stopping;
+  }
+
+  private async teardown(): Promise<void> {
+    await this.starting?.catch(() => undefined);
     const run = this.run;
     if (run === undefined) return;
-    this.run = undefined;
     run.closed = true;
     run.idle?.cancel();
     for (const viewer of run.viewers) viewer.terminal({ code: 1000, reason: 'browser stopped' });
     run.viewers.clear();
     await run.driver.close().catch(() => undefined);
+    if (this.run === run) this.run = undefined;
     this.toldAll(run);
   }
 
@@ -1146,7 +1161,8 @@ export class BrowserSessionService implements BrowserSubsystem {
 
   /** This session's page with this name or id — never another session's. */
   private page(run: Running, sessionId: string, key: string): BrowserPageSummary | undefined {
-    return this.owned(run, sessionId).find(page => page.id === key || run.names.get(page.id) === key);
+    const pages = this.owned(run, sessionId);
+    return pages.find(page => page.id === key) ?? pages.find(page => run.names.get(page.id) === key);
   }
 
   private requirePage(run: Running, sessionId: string, key: string): BrowserPageSummary {

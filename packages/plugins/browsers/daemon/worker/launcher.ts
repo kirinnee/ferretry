@@ -38,9 +38,9 @@ import { BrowserWorkerClient, type StartWorker, type WorkerClientOptions } from 
  * host has an address to drive the owner's signed-in profile through) is REFUSED here, saying why: the kernel's spawn
  * gives a child no extra pipes and cannot hand one child's ends to another (GAP, kernel spawn). Over a PORT — the
  * default — Chrome listens on loopback and the worker connects to it once it answers — and only
- * once the kernel shows the listener is THIS Chrome's own socket (`lib/browser/control/listener-proof.ts`):
- * the port is picked free and released before Chrome binds it, and a squatter who took it in between would
- * otherwise be the endpoint the worker drives. Either
+ * once the kernel proves its ownership, or Chrome's own stderr names its unique browser WebSocket and
+ * `/json/version` agrees. A known foreign listener always refuses. A free port is only a suggestion: two launches
+ * may choose it, but only the Chrome that bound it can announce that endpoint on its own stderr. Either
  * way the daemon spawns Chrome itself, so it holds the real child: the pid on the lease, the exit it waits
  * on and the process it reaps are Chrome's own. A worker that dies is a browser restart: the daemon reaps Chrome
  * ITSELF (`LeasedBrowser`), never trusting the worker to have closed it, and starts a fresh pair on the next need. */
@@ -233,8 +233,14 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       const diagnostics = collectTail(chrome.stderr);
       // Recorded BEFORE anything else can fail: from here on, the Chrome holding the profile is this pid.
       await lease.updateChromePid(chrome.pid, version);
-      const endpoint = `http://127.0.0.1:${cdp.port}`;
-      await waitForCdp(this.ports, endpoint, cdp.port, chrome, diagnostics, prover);
+      const endpoint = await waitForCdp(
+        this.ports,
+        `http://127.0.0.1:${cdp.port}`,
+        cdp.port,
+        chrome,
+        diagnostics,
+        prover,
+      );
       let worker: BrowserWorkerClient;
       try {
         worker = await this.connectWorker({
@@ -541,8 +547,8 @@ async function freePort(): Promise<number> {
 /**
  * Waits for Chrome's debugging endpoint — asking it for `/json/version` only once the kernel shows the listener
  * on its port is this Chrome's own socket, so nothing is ever sent to a program that took the port first. A
- * listener that is not Chrome's refuses at once: Chrome cannot bind a port somebody holds, so waiting longer
- * would only report a timeout instead of the squatter. A host that cannot prove (macOS) asks as it always did.
+ * listener that is not Chrome's refuses at once. Even without kernel evidence (macOS), only the browser WebSocket
+ * announced on this child's stderr is accepted, and the worker pins that URL rather than resolving the port again.
  */
 // read-scoped: none — it waits for Chrome's DevTools port and shows no page text
 async function waitForCdp(
@@ -552,20 +558,32 @@ async function waitForCdp(
   chrome: ChromeChild,
   diagnostics: () => string,
   prover: ListenerProverPort,
-): Promise<void> {
+): Promise<string> {
   const deadline = ports.clock.nowMs() + 20_000;
   let exited = false;
   while (ports.clock.nowMs() < deadline) {
     const proof = await prover.prove(port, chrome.pid);
     if (proof.kind === 'foreign') throw new BrowserControlError('launch_failed', listenerHeldRefusal(port, proof.uid));
     if (
-      proof.kind !== 'absent' &&
+      proof.kind === 'proven' &&
       (await ports.fetch
         .request(`${endpoint}/json/version`)
         .then(response => response.ok)
         .catch(() => false))
     )
-      return;
+      return endpoint;
+    const own = /DevTools listening on (ws:\/\/127\.0\.0\.1:(\d+)\/devtools\/browser\/[A-Za-z0-9-]+)/u.exec(
+      diagnostics(),
+    );
+    if (proof.kind !== 'absent' && own?.[1] !== undefined && Number(own[2]) === port) {
+      const version = await ports.fetch
+        .request(`${endpoint}/json/version`)
+        .then(async response =>
+          response.ok ? ((await response.json()) as { webSocketDebuggerUrl?: unknown }) : undefined,
+        )
+        .catch(() => undefined);
+      if (version?.webSocketDebuggerUrl === own[1]) return own[1];
+    }
     exited = await exitedWithin(ports.clock, chrome, 100);
     if (exited) break;
   }
@@ -610,15 +628,19 @@ const CHROME_STDERR_TAIL_BYTES = 2_048;
  *  keeps only the last bytes, so a launch failure can say WHY Chrome did not start. */
 function collectTail(stream: ReadableStream<Uint8Array>): () => string {
   let tail = '';
+  let listening: string | undefined;
   void (async () => {
     const decoder = new TextDecoder();
     try {
       for await (const chunk of stream) {
         tail = (tail + decoder.decode(chunk, { stream: true })).slice(-CHROME_STDERR_TAIL_BYTES);
+        listening ??= /DevTools listening on ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[A-Za-z0-9-]+[\r\n]/u
+          .exec(tail)?.[0]
+          .trim();
       }
     } catch {
       // The pipe closing with the child is the normal end of this drain.
     }
   })();
-  return () => tail.trim().replace(/\s+/g, ' ');
+  return () => `${listening ?? ''} ${tail}`.trim().replace(/\s+/g, ' ');
 }

@@ -52,6 +52,9 @@ export interface IdentityBrowsersOptions {
  */
 export class IdentityBrowsers implements BrowserSubsystem {
   private readonly services = new Map<string, BrowserSessionService>();
+  private readonly naming = new Map<string, Set<string>>();
+  private readonly admissions = new Set<Promise<unknown>>();
+  private closing: Promise<void> | undefined;
   /** Identities a start has been asked for and has not answered yet: they count as running from the moment of the ask. */
   private readonly starting = new Map<string, number>();
   private readonly screens = new Map<string, string>();
@@ -136,14 +139,13 @@ export class IdentityBrowsers implements BrowserSubsystem {
   }
 
   async openPage(sessionId: string, name: string, options: BrowserOpenOptions = {}): Promise<BrowserPageSummary> {
-    // A name is the session's, whichever identity's browser holds the page it names.
-    if (this.holder(sessionId, name) !== undefined)
-      throw new BrowserSessionError('conflict', `this session already has a browser page named ${name}`);
-    const identity = this.named(options.identity) ?? this.homeOf(sessionId);
-    return await this.admit(identity, async () => {
-      const opened = await this.serviceOf(identity).openPage(sessionId, name, options);
-      this.last.set(sessionId, identity);
-      return opened;
+    return await this.withName(sessionId, name, async () => {
+      const identity = this.named(options.identity) ?? this.homeOf(sessionId);
+      return await this.admit(identity, async () => {
+        const opened = await this.serviceOf(identity).openPage(sessionId, name, options);
+        this.last.set(sessionId, identity);
+        return opened;
+      });
     });
   }
 
@@ -166,7 +168,11 @@ export class IdentityBrowsers implements BrowserSubsystem {
   }
 
   async adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary> {
-    return await this.pageService(sessionId, key).adoptPage(sessionId, key, name, openedBy);
+    return await this.withName(
+      sessionId,
+      name,
+      async () => await this.pageService(sessionId, key).adoptPage(sessionId, key, name, openedBy),
+    );
   }
 
   async scriptOnPage(
@@ -221,7 +227,13 @@ export class IdentityBrowsers implements BrowserSubsystem {
   }
 
   async closeAll(): Promise<void> {
-    await Promise.all([...this.services.values()].map(async service => await service.closeAll()));
+    this.closing ??= (async () => {
+      await Promise.allSettled([...this.admissions]);
+      await Promise.all([...this.services.values()].map(async service => await service.closeAll()));
+    })().finally(() => {
+      this.closing = undefined;
+    });
+    await this.closing;
   }
 
   /** Whether any identity's browser runs, since when (the earliest), and the proxy the first of them started with. */
@@ -250,6 +262,7 @@ export class IdentityBrowsers implements BrowserSubsystem {
 
   /** Counts a start against `maxRunning` from the moment it is asked, so two at once cannot both slip under it. */
   private async admit<T>(identity: string, work: () => Promise<T>): Promise<T> {
+    if (this.closing !== undefined) throw new BrowserSessionError('not_running', 'the browsers are stopping');
     const live = this.runningIdentities();
     const limit = this.options.maxRunning();
     if (!live.includes(identity) && live.length >= limit)
@@ -258,9 +271,12 @@ export class IdentityBrowsers implements BrowserSubsystem {
         `${live.length === 1 ? 'The browser identity' : 'The browser identities'} ${live.join(', ')} ${live.length === 1 ? 'is' : 'are'} already running, and at most ${String(limit)} may run at once; close the pages of one of them (or raise maxRunning in the Browsers settings) before opening ${identity}`,
       );
     this.starting.set(identity, (this.starting.get(identity) ?? 0) + 1);
+    const admitted = work();
+    this.admissions.add(admitted);
     try {
-      return await work();
+      return await admitted;
     } finally {
+      this.admissions.delete(admitted);
       const left = (this.starting.get(identity) ?? 1) - 1;
       if (left <= 0) this.starting.delete(identity);
       else this.starting.set(identity, left);
@@ -285,7 +301,35 @@ export class IdentityBrowsers implements BrowserSubsystem {
   /** The identity whose browser holds this session's page with this name or id. */
   private holder(sessionId: string, key: string | undefined): string | undefined {
     if (key === undefined) return undefined;
-    return [...this.services].find(([, service]) => service.owns(sessionId, key))?.[0];
+    return (
+      [...this.services].find(([, service]) => service.ownsId(sessionId, key))?.[0] ??
+      [...this.services].find(([, service]) => service.owns(sessionId, key))?.[0]
+    );
+  }
+
+  /** Reserve synchronously before either operation yields, across all identities and both naming paths. */
+  private async withName<T>(sessionId: string, name: string, work: () => Promise<T>): Promise<T> {
+    let pending = this.naming.get(sessionId);
+    if (
+      /^(?:[a-z][a-z0-9-]*-)?pg-\d+$/u.test(name) ||
+      pending?.has(name) === true ||
+      this.holder(sessionId, name) !== undefined
+    )
+      throw new BrowserSessionError(
+        'conflict',
+        `this session already has a browser page named ${name}, or that name is reserved for page ids`,
+      );
+    if (pending === undefined) {
+      pending = new Set();
+      this.naming.set(sessionId, pending);
+    }
+    pending.add(name);
+    try {
+      return await work();
+    } finally {
+      pending.delete(name);
+      if (pending.size === 0) this.naming.delete(sessionId);
+    }
   }
 
   /** Where a call that names no page and no identity goes: the identity the session last used while it still holds pages there, else any that holds one, else its last (or the default). */
@@ -311,7 +355,7 @@ export class IdentityBrowsers implements BrowserSubsystem {
   }
 
   private running(service: BrowserSessionService): boolean {
-    return service.overview().state === 'running';
+    return ['running', 'starting', 'stopping'].includes(service.overview().state);
   }
 
   private sum(count: (service: BrowserSessionService) => number): number {

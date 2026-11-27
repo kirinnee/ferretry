@@ -31,12 +31,12 @@ const xvfb = Bun.which('Xvfb');
 const WORKERS = REAL_WORKER();
 const sessions = new Set(['s1', 's2', 's3']);
 
-/** Binds the first free loopback port of this repo's test range (7480-7499), starting somewhere random so parallel runs rarely meet. */
+let nextTestPort = Math.floor(Math.random() * 20);
+/** Probe different ports for concurrent launches in this file; retry occupied ports within the test range. */
 async function inRange<T>(bind: (port: number) => Promise<T> | T): Promise<T> {
-  const first = 7480 + Math.floor(Math.random() * 20);
   for (let step = 0; step < 20; step += 1) {
     try {
-      return await bind(7480 + ((first - 7480 + step) % 20));
+      return await bind(7480 + (nextTestPort++ % 20));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' && !String(error).includes('EADDRINUSE')) throw error;
     }
@@ -84,10 +84,17 @@ async function fakeProxy(name: string) {
 const SITE = (request: Request): Response => {
   const url = new URL(request.url);
   const headers: Record<string, string> = { 'content-type': 'text/html' };
+  if (url.pathname === '/mask') {
+    const value = url.searchParams.get('v') === 'one' ? 'synthetic-native-one-3198' : 'synthetic-native-two-7526';
+    return new Response(
+      `<html><body><input type="password" value="${value}"><p id="c">${value} ordinary-readable</p></body></html>`,
+      { headers },
+    );
+  }
   if (url.pathname === '/set') headers['set-cookie'] = `who=${url.searchParams.get('v') ?? ''}; Path=/`;
   if (url.pathname === '/count')
     return new Response(
-      '<html><body><button id="b" onclick="window.n=(window.n||0)+1;document.getElementById(\'c\').textContent=\'n:\'+window.n">tap</button><p id="c">n:0</p></body></html>',
+      '<html><head><style>@keyframes pulse{to{background-color:#f0f0ff}}body{animation:pulse .2s infinite alternate}</style></head><body><button id="b" onclick="window.n=(window.n||0)+1;document.getElementById(\'c\').textContent=\'n:\'+window.n">tap</button><p id="c">n:0</p></body></html>',
       { headers },
     );
   return new Response(`<html><body><p id="c">cookie:${request.headers.get('cookie') ?? ''}</p></body></html>`, {
@@ -103,6 +110,7 @@ let mode: 'headless' | 'window' = 'headless';
 const proxies = new Map<string, ResolvedBrowserProxy>();
 const windowDisplays: { readonly identity: string; readonly display: XvfbDisplay }[] = [];
 let pages: IdentityBrowsers;
+let launcher: NodeSessionBrowserLauncher;
 
 const textOf = async (sessionId: string, page: string): Promise<string> => {
   const read = await pages.actOnPage(sessionId, page, { action: 'read', selector: '#c' });
@@ -154,12 +162,12 @@ function memoryLine(
 }
 
 /** The pid of one identity's Chrome: the process that holds its profile folder and is no child process of Chrome's own. */
-async function chromePid(identity: string): Promise<number> {
+async function chromePid(identity: string, profileRoot = root): Promise<number> {
   for (const entry of await readdir('/proc')) {
     if (!/^\d+$/u.test(entry)) continue;
     const command = (await readFile(`/proc/${entry}/cmdline`, 'utf8').catch(() => '')).split('\0');
     if (
-      command.some(arg => arg.startsWith('--user-data-dir=') && arg.endsWith(`/data/${identity}`)) &&
+      command.includes(`--user-data-dir=${join(profileRoot, 'data', identity)}`) &&
       !command.some(arg => arg.startsWith('--type='))
     )
       return Number(entry);
@@ -173,11 +181,16 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
     root = await mkdtemp(join(tmpdir(), 'ferretry-identities-'));
     site = await inRange(port => Bun.serve({ port, hostname: '127.0.0.1', fetch: SITE }));
     base = `http://127.0.0.1:${String(site.port)}`;
-    const launcher = new NodeSessionBrowserLauncher(
+    launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
       WORKERS.start,
       launcherPorts(),
-      { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
+      {
+        FY_CHROME_BIN: chrome,
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        FONTCONFIG_FILE: process.env.FONTCONFIG_FILE,
+      },
       undefined,
       {
         stageDirectory: join(root, 'stage'),
@@ -288,6 +301,61 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
     );
     console.info(memoryLine('headless', ['one', 'two'], sizes));
   }, 120_000);
+
+  it('should resolve a Chrome only inside the requested test profile root, even when another Chrome has the same identity', async () => {
+    await pages.openPage('s1', 'pidcheck', { identity: 'one', url: `${base}/read` });
+    const decoyRoot = await mkdtemp(join(tmpdir(), 'ferretry-identities-decoy-'));
+    const decoy = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(decoyRoot),
+      WORKERS.start,
+      launcherPorts(),
+      {
+        FY_CHROME_BIN: chrome ?? undefined,
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        FONTCONFIG_FILE: process.env.FONTCONFIG_FILE,
+      },
+      undefined,
+      { listenerProver: unprovenListenerProver(), cdpPort: freeRangePort },
+    );
+    const browser = await decoy.launch({ width: 800, height: 600 }, 'one');
+    try {
+      const record = JSON.parse(await readFile(join(decoyRoot, 'profile.one.lock'), 'utf8')) as { chromePid: number };
+      should(await chromePid('one', decoyRoot)).equal(record.chromePid);
+      should(await chromePid('one')).not.equal(record.chromePid);
+    } finally {
+      await browser.close();
+      await rm(decoyRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('should attach only the Chrome that bound the port when two real launches are forced onto the same port', async () => {
+    const collisionRoot = await mkdtemp(join(tmpdir(), 'ferretry-identities-collision-'));
+    const port = await freeRangePort();
+    const collision = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(collisionRoot),
+      WORKERS.start,
+      launcherPorts(),
+      {
+        FY_CHROME_BIN: chrome ?? undefined,
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        FONTCONFIG_FILE: process.env.FONTCONFIG_FILE,
+      },
+      undefined,
+      { listenerProver: unprovenListenerProver(), cdpPort: async () => port },
+    );
+    const results = await Promise.allSettled([
+      collision.launch({ width: 800, height: 600 }, 'one'),
+      collision.launch({ width: 800, height: 600 }, 'two'),
+    ]);
+    try {
+      should(results.filter(result => result.status === 'fulfilled')).have.length(1);
+    } finally {
+      for (const result of results) if (result.status === 'fulfilled') await result.value.close();
+      await rm(collisionRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('should leave one identity’s pages live when the other identity’s Chrome is killed', async () => {
     // Act — identity one's Chrome is killed outright.
@@ -408,6 +476,83 @@ describe.if(process.platform === 'linux')('one Chrome per identity, in parallel,
     },
     120_000,
   );
+
+  it.if(xvfb !== null)(
+    'should finish shutdown during a real window launch with no Chrome or Xvfb left behind',
+    async () => {
+      await pages.closeAll();
+      mode = 'window';
+      const started = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const local = new IdentityBrowsers({
+        maxRunning: () => 1,
+        make: (identity, quota) =>
+          new BrowserSessionService(
+            { get: async () => ({}) },
+            {
+              launch: async viewport => {
+                const browser = await launcher.launch(viewport, identity);
+                started.resolve();
+                await release.promise;
+                return browser;
+              },
+            },
+            Date.now,
+            undefined,
+            undefined,
+            undefined,
+            identity,
+            quota,
+          ),
+      });
+      const opening = local.openPage('s1', 'late', { identity: 'shutdown', url: `${base}/read` });
+      await started.promise;
+      const pid = await chromePid('shutdown');
+      const displays = await xvfbPids();
+      let settled = false;
+      const closing = local.closeAll().then(() => {
+        settled = true;
+      });
+      await Bun.sleep(50);
+      const early = settled;
+      release.resolve();
+      await Promise.allSettled([opening, closing]);
+      try {
+        should(early).be.false();
+        should(await readFile(`/proc/${String(pid)}/cmdline`, 'utf8').catch(() => '')).equal('');
+        should((await xvfbPids()).filter(pid => displays.includes(pid))).deepEqual([]);
+      } finally {
+        await local.closeAll();
+        mode = 'headless';
+      }
+    },
+    90_000,
+  );
+
+  it('should preserve worker-local native secret masking in two identities and keep their page ids distinct', async () => {
+    await pages.closeAll();
+    const opened = await Promise.all([
+      pages.openPage('s1', 'maskone', { identity: 'maskone', url: `${base}/mask?v=one` }),
+      pages.openPage('s1', 'masktwo', { identity: 'masktwo', url: `${base}/mask?v=two` }),
+    ]);
+    try {
+      should(opened[0]?.id).startWith('maskone-pg-');
+      should(opened[1]?.id).startWith('masktwo-pg-');
+      for (const name of ['maskone', 'masktwo']) {
+        const read = await textOf('s1', name);
+        should(read).containEql('[redacted]');
+        should(read).containEql('ordinary-readable');
+        should(read).not.match(/synthetic-native-(one|two)-/u);
+        const evaluated = await pages.scriptOnPage('s1', name, {
+          source: '() => document.querySelector("input").value',
+        });
+        should(evaluated.text).containEql('[redacted]');
+        should(JSON.stringify(evaluated)).not.match(/synthetic-native-(one|two)-/u);
+      }
+    } finally {
+      await pages.closeAll();
+    }
+  }, 90_000);
 });
 
 /** The Xvfb processes of this host whose Xauthority lives in this test's own directory. */

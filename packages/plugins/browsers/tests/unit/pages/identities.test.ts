@@ -2,13 +2,13 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { BROWSER_MAX_PAGES } from '../../../contract/index.ts';
 import { IdentityBrowsers } from '../../../daemon/pages/identities.ts';
-import { BrowserSessionError, BrowserSessionService } from '../../../daemon/pages/service.ts';
+import { type BrowserSessionError, BrowserSessionService } from '../../../daemon/pages/service.ts';
 import { Tabs } from '../../support/tabs.ts';
 
 const known = new Set(['s1', 's2']);
 
 /** One fake browser per identity, and a record of which identity each launch was asked for. */
-function world(maxRunning = 4) {
+function world(maxRunning = 4, gates: { launch?: Promise<void>; close?: Promise<void> } = {}) {
   const browsers = new Map<string, Tabs>();
   const launched: string[] = [];
   const tabsOf = (identity: string): Tabs => {
@@ -29,7 +29,15 @@ function world(maxRunning = 4) {
         {
           launch: async (_viewport, named) => {
             launched.push(named ?? 'agent');
-            return tabsOf(named ?? 'agent').automation;
+            await gates.launch;
+            const tabs = tabsOf(named ?? 'agent');
+            return {
+              ...tabs.automation,
+              close: async () => {
+                await gates.close;
+                await tabs.automation.close();
+              },
+            };
           },
         },
         () => Date.parse('2026-11-27T10:00:00.000Z'),
@@ -50,6 +58,75 @@ const failure = async (work: Promise<unknown>): Promise<BrowserSessionError> =>
   )) as BrowserSessionError;
 
 describe('identity browsers — one Chrome per identity behind the one surface', () => {
+  it('should prefer an exact page id over another identity’s page name', async () => {
+    const { pages, tabsOf } = world();
+    await pages.openPage('s1', 'p1-work');
+    const target = await pages.openPage('s1', 'work', { identity: 'work' });
+    await pages.actOnPage('s1', target.id, { action: 'click', selector: 'a' });
+    should(tabsOf('work').calls).containEql(`click:${target.id}`);
+    should(tabsOf('agent').calls.filter(call => call.startsWith('click'))).deepEqual([]);
+  });
+
+  it('should reserve every generated id spelling before a future page exists', async () => {
+    const { pages } = world();
+    for (const name of ['pg-1', 'work-pg-2'])
+      should(await failure(pages.openPage('s1', name))).match({ code: 'conflict' });
+  });
+
+  it('should reserve a name atomically across concurrent identity opens', async () => {
+    const { pages } = world();
+    const results = await Promise.allSettled([
+      pages.openPage('s1', 'same', { identity: 'one' }),
+      pages.openPage('s1', 'same', { identity: 'two' }),
+    ]);
+    should(results.filter(result => result.status === 'fulfilled')).have.length(1);
+  });
+
+  it('should reserve names across adopt and open in different identities', async () => {
+    const { pages } = world();
+    await pages.openPage('s1', 'home');
+    const unnamed = await pages.act('s1', { action: 'new-page' }, { identity: 'work' });
+    const key = unnamed.status.pages.at(-1)?.id ?? '';
+    const results = await Promise.allSettled([
+      pages.adoptPage('s1', key, 'same'),
+      pages.openPage('s1', 'same', { identity: 'agent' }),
+    ]);
+    should(results.filter(result => result.status === 'fulfilled')).have.length(1);
+  });
+
+  it('should wait for a pending launch and close its browser before shutdown returns', async () => {
+    const gate = Promise.withResolvers<void>();
+    const { pages, tabsOf, launched } = world(1, { launch: gate.promise });
+    const opening = pages.openPage('s1', 'home');
+    while (launched.length === 0) await Bun.sleep(1);
+    let closed = false;
+    const closing = pages.closeAll().then(() => {
+      closed = true;
+    });
+    await Bun.sleep(10);
+    const returnedEarly = closed;
+    gate.resolve();
+    await Promise.allSettled([opening, closing]);
+    should(returnedEarly).be.false();
+    should(tabsOf('agent').calls).containEql('close');
+    should(pages.runningIdentities()).deepEqual([]);
+  });
+
+  it('should keep an identity’s slot until its browser teardown has finished', async () => {
+    const gate = Promise.withResolvers<void>();
+    const { pages, launched } = world(1, { close: gate.promise });
+    await pages.openPage('s1', 'home');
+    const closing = pages.act('s1', { action: 'stop' });
+    await Bun.sleep(10);
+    const opening = pages.openPage('s2', 'work', { identity: 'work' });
+    const result = await failure(opening);
+    gate.resolve();
+    await closing;
+    should(result).match({ code: 'capacity' });
+    should(launched).deepEqual(['agent']);
+    await pages.openPage('s2', 'work', { identity: 'work' });
+  });
+
   it('should start one browser per identity and route every act to the identity that opened the page', async () => {
     // Arrange
     const { pages, tabsOf, launched } = world();

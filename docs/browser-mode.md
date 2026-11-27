@@ -144,8 +144,9 @@ identities:
 A page belongs to (identity, session): one ferret can hold pages in two identities, and two ferrets can drive two identities at
 the same time. The caps stay per session (20 pages) and per machine (60), counted across identities. A page name is unique
 within a session whichever identity holds it, and another identity's page ids carry its key (`work-pg-1`), so two Chromes never
-mint the same id. A real headful Chrome costs real memory (measured with two identities: about 0.6 GB of RAM in all, by
-proportional share, and about 1.3 GB each counting shared pages in every process), which is why `maxRunning` exists.
+mint the same id. The two headful Chrome process trees measured about 0.6 GB of RAM in all by proportional share,
+and about 1.3 GB each counting shared pages in every process. These numbers exclude Xvfb and the workers; the full
+window session costs more, which is why `maxRunning` exists.
 
 - **GAP: nothing chooses an identity yet.** Every tool and the app still open pages in `agent`; the router accepts an
   identity on `openPage` and on a start, and choosing one belongs to the next step (agent tools and the owner's login window).
