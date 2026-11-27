@@ -129,3 +129,27 @@ describe('an answer in its undo window, in the item conversation', () => {
     expect(pendingAnswerEvents(deferred.getSnapshot(), card(item({ id: 'A2' })).key, item({ id: 'A2' }))).toEqual([]);
   });
 });
+
+describe('what the line says of the answer', () => {
+  test('carries the owner’s note, and a Done is drawn as done', () => {
+    const { timers } = fakeTimers();
+    const deferred = new DeferredAgendaActions(async () => undefined, timers);
+    deferred.schedule(card(), { ...SHIP, note: 'after lunch' });
+    deferred.schedule(card(item({ id: 'A3' })), { kind: 'resolve', label: 'Done' });
+    deferred.schedule(card(item({ id: 'A4' })), { kind: 'dismiss', label: 'Skip', note: '  ' });
+    const events = (id: string) => pendingAnswerEvents(deferred.getSnapshot(), card(item({ id })).key, item({ id }));
+    expect(events('A1')).toMatchObject([{ text: 'Ship', form: 'answer', note: 'after lunch' }]);
+    expect(events('A3')).toMatchObject([{ text: 'Done', form: 'done' }]);
+    const dismissed = events('A4')[0];
+    expect(dismissed).toMatchObject({ text: 'Skip' });
+    expect(dismissed).not.toHaveProperty('form');
+    expect(dismissed).not.toHaveProperty('note');
+  });
+
+  test('a snooze is no answer', () => {
+    const { timers } = fakeTimers();
+    const deferred = new DeferredAgendaActions(async () => undefined, timers);
+    deferred.schedule(card(), { kind: 'snooze', label: 'Snooze', until: '2026-10-24T09:00:00.000Z' });
+    expect(pendingAnswerEvents(deferred.getSnapshot(), card().key, item())).toEqual([]);
+  });
+});
