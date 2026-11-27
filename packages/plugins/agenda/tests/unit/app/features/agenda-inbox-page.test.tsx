@@ -1187,11 +1187,18 @@ describe('a lane-proposal card', () => {
 describe('AgendaInboxPage a second refusal on the open deck', () => {
   const deckFailures = (mounted: Mounted): string =>
     mounted.container.querySelector('[data-agenda-failures]')?.textContent ?? '';
+  const openView = (mounted: Mounted): string | null | undefined =>
+    mounted.container.querySelector('.fy-attn-deck__top [data-agenda-view]')?.getAttribute('data-agenda-view');
+  const answer = { kind: 'dismiss', label: 'Dismiss' } as never;
+  /** The card the board shows when the machine's last try at the owner's answer failed, with its reason and instant. */
+  const refusedCard = (reason: string, at: string): InboxCard => ({
+    ...twoWay,
+    item: { ...twoWay.item, undelivered: { at, reply: { action: 'dismiss' }, reason } } as InboxCard['item'],
+  });
 
   it('says the second refusal of a retried answer on the deck the reader is on, not only on its own card', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [threeWay, twoWay], { phone: true, initialOpen: twoWay.key }));
-    const answer = { kind: 'dismiss', label: 'Dismiss' } as never;
     // The first answer is refused; the reader retries it, and that is refused too, while they are reading ANOTHER item.
     fake.failNext = 'first refusal';
     await interact(() => fake.deferred.schedule(threeWay, answer));
@@ -1199,8 +1206,68 @@ describe('AgendaInboxPage a second refusal on the open deck', () => {
     fake.failNext = 'second refusal';
     await interact(() => fake.deferred.schedule(threeWay, answer));
     await advance(fake, 10_000);
-    expect(mounted.container.querySelector('.fy-attn-deck__top')?.getAttribute('data-agenda-view') ?? 'A2').toBe('A2');
+    expect(openView(mounted)).toBe('A2');
     expect(deckFailures(mounted)).toContain('second refusal');
+    await mounted.unmount();
+  });
+
+  it('says a retry the machine took and refused later: the real Retry, then a board that reopens the item', async () => {
+    const fake = fakeInbox();
+    const was = refusedCard('The machine is offline.', '2026-08-01T11:30:00.000Z');
+    const mounted = await mount(page(fake, [threeWay, was], { initialOpen: was.key }));
+    expect(mounted.container.querySelector('[data-agenda-delivery="undelivered"]')?.textContent).toContain('offline');
+    const retry = must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-retry]'), 'the Retry control');
+    await interact(() => retry.click());
+    await advance(fake, 10_000);
+    // The retry went through: the board has not been read since, so it still shows the refusal it had. Nothing is new.
+    expect(fake.commits.map(commit => commit.action.label)).toEqual(['Retry']);
+    await mounted.render(page(fake, [threeWay, was], { initialOpen: was.key }));
+    expect(deckFailures(mounted)).toBe('');
+    // The board is read again: the item is open again with a NEW reason, while the reader is on the other item.
+    const again = refusedCard('The machine said no again.', '2026-08-01T11:45:00.000Z');
+    await mounted.render(page(fake, [threeWay, again], { initialOpen: threeWay.key }));
+    expect(openView(mounted)).toBe('A3');
+    expect(deckFailures(mounted)).toContain('The machine said no again.');
+    const dismiss = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-agenda-failures] button'),
+      'the dismiss button',
+    );
+    await interact(() => dismiss.click());
+    expect(deckFailures(mounted)).toBe('');
+    await mounted.unmount();
+  });
+
+  it('keeps the refusal an Undo took the retry back from, since that retry never ran', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [threeWay, twoWay], { initialOpen: twoWay.key }));
+    fake.failNext = 'first refusal';
+    await interact(() => fake.deferred.schedule(threeWay, answer));
+    await advance(fake, 10_000);
+    expect(deckFailures(mounted)).toContain('first refusal');
+    await interact(() => fake.deferred.schedule(threeWay, answer));
+    await interact(() => undoButton(mounted).click());
+    expect(fake.commits).toHaveLength(1);
+    expect(fake.deferred.getSnapshot().failed.map(failure => failure.message)).toEqual(['first refusal']);
+    expect(deckFailures(mounted)).toContain('first refusal');
+    await mounted.unmount();
+  });
+
+  it('says one refusal once when two sends of the same item are refused for the same reason', async () => {
+    const fake = fakeInbox();
+    fake.holdCommits = true;
+    const mounted = await mount(page(fake, [threeWay, twoWay], { initialOpen: twoWay.key }));
+    await interact(() => fake.deferred.schedule(threeWay, answer));
+    await advance(fake, 10_000);
+    await interact(() => fake.deferred.schedule(threeWay, answer));
+    await advance(fake, 10_000);
+    expect(fake.gates).toHaveLength(2);
+    await interact(() => {
+      for (const gate of fake.gates) gate.reject(new Error('The machine said no.'));
+    });
+    await flush();
+    expect(fake.deferred.getSnapshot().failed).toHaveLength(2);
+    const lines = [...mounted.container.querySelectorAll('[data-agenda-failures] li')];
+    expect(lines.map(line => line.textContent)).toEqual([expect.stringContaining('The machine said no.')]);
     await mounted.unmount();
   });
 });

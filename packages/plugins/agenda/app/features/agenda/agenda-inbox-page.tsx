@@ -81,7 +81,6 @@ import { itemHistory, withDeviceEvents } from '../../lib/agenda-history.ts';
 import { pendingAnswerEvents } from '../../lib/pending-answer-history.ts';
 import { inboxOpenCard } from '../../lib/inbox-open-card.ts';
 import {
-  actionSentence,
   agendaConversationPath,
   DISMISS_ACTION,
   type FailedAgendaAction,
@@ -145,6 +144,7 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { ownsKeys } from './agenda-swipe-gesture.ts';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
+import { OrphanedFailures } from './orphaned-failures.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
 import { CardMetaLine, hasWords, joinMeta } from './card-meta-line.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
@@ -770,37 +770,6 @@ function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonl
         </button>
       </div>
     </div>
-  );
-}
-
-/**
- * Refusals whose task the reader is not looking at: said once, until they dismiss them. `shown` names the tasks whose
- * own view already says their refusal; absent, that is every task still on the list. An opened deck shows ONE task, so a
- * retried answer refused again while the reader is on another one is said here, not only on a card they may never reopen.
- */
-function OrphanedFailures({ inbox, shown }: { readonly inbox: AgendaInbox; readonly shown?: readonly string[] }) {
-  const onDeck = new Set(shown ?? inbox.cards.map(card => card.key));
-  const orphans = inbox.deferredState.failed.filter(failure => !onDeck.has(failure.key));
-  if (orphans.length === 0) return null;
-  return (
-    <ul className="fy-attn-inbox__failures" data-agenda-failures="">
-      {orphans.map(failure => (
-        <li className="fy-attn-inbox__failure" key={failure.key} role="alert">
-          <span className="min-w-0 flex-1">
-            Not sent — {actionSentence(failure.action, failure.card.item.id)}: {failure.message}
-          </span>
-          <button
-            aria-label={`Dismiss: ${actionSentence(failure.action, failure.card.item.id)} was not sent`}
-            className="kt-btn kt-btn--sm"
-            data-variant="ghost"
-            onClick={() => inbox.deferred.clearFailure(failure.key)}
-            type="button"
-          >
-            <X aria-hidden="true" size={14} />
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }
 
