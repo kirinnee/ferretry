@@ -537,7 +537,17 @@ describe('G27: real worker capture paths never expose filled fields', () => {
       history.replaceState({}, '', `/encoded?${new URLSearchParams({ value: (node as HTMLInputElement).value })}`);
     });
     expect(raw.url()).toContain('encoded?');
-    expect((await client.location(pageId)).url).not.toContain(new URLSearchParams({ value }).toString().slice(6));
+    const output = await client.location(pageId).then(
+      result => JSON.stringify(result),
+      (error: unknown) => {
+        const message = String(error);
+        expect(message).toContain('related pages changed during sensitive field inspection');
+        return message;
+      },
+    );
+    expect(output).not.toContain(value);
+    expect(output).not.toContain(JSON.stringify(value).slice(1, -1));
+    expect(output).not.toContain(new URLSearchParams({ value }).toString().slice(6));
   });
 
   it('page read and eval: mask a whole value before the output limit can cut it', async () => {

@@ -143,8 +143,12 @@ it('clean native frames take one selector scan per page, no snapshots and no ren
       throw new Error('clean frames need no compositor');
     },
     work => work,
+    () => Date.now(),
   );
-  expect(await capture.frame(target, 'synthetic-native-pixels')).toBe('synthetic-native-pixels');
+  await expect(capture.frame(target, 'unprimed-native-pixels', Date.now() / 1000)).rejects.toThrow();
+  await Bun.sleep(5);
+  commands.length = 0;
+  expect(await capture.frame(target, 'synthetic-native-pixels', Date.now() / 1000)).toBe('synthetic-native-pixels');
   expect(commands.filter(method => method === 'DOM.performSearch')).toHaveLength(context.pages().length);
   expect(commands).not.toContain('Page.setWebLifecycleState');
   expect(commands).not.toContain('DOMSnapshot.captureSnapshot');

@@ -48,6 +48,7 @@ function twoTabs(
       throw new Error('the fixture should prevent composition');
     },
     deadline,
+    () => Date.now(),
   );
   return {
     commands,
@@ -145,6 +146,7 @@ for (const failure of ['timeout', 'crash', 'navigation'] as const) {
         throw new Error('no pixels may be composed');
       },
       work => work,
+      () => Date.now(),
     );
     const visited: Page[] = [];
     capture.of(target).scan = async () => {

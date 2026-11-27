@@ -199,6 +199,7 @@ const capture = new BrowserCapture(
     return await own.newPage();
   },
   work => within(2000, work),
+  () => Date.now(),
 );
 
 /**
@@ -975,6 +976,8 @@ async function startScreencast(page: Page, viewport: Viewport): Promise<void> {
   session.on('Page.screencastFrame', listener);
   await session.send('Page.enable');
   await applyViewport(page, viewport);
+  // A discovery failure primes nothing; the first frame still inspects and fails closed.
+  await capture.prepareFrames(page).catch(() => undefined);
   await session.send('Page.startScreencast', {
     format: 'jpeg',
     quality: 50,
@@ -999,7 +1002,7 @@ async function stopScreencast(id: string): Promise<void> {
 async function frame(event: CaptureFrameEvent, session: CDPSession, page: Page, epoch: number): Promise<void> {
   const id = pageId(page);
   if (screencasts.get(id) !== session || typeof event.data !== 'string' || typeof event.sessionId !== 'number') return;
-  const pixels = await capture.frame(page, event.data);
+  const pixels = await capture.frame(page, event.data, event.metadata?.timestamp);
   if (screencasts.get(id) !== session || castEpochs.get(id) !== epoch) return;
   frameSerial += 1;
   heldFrames.set(frameSerial, { session, cdpSessionId: event.sessionId });

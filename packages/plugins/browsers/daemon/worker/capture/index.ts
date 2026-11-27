@@ -6,11 +6,12 @@ import type { BrowserInputFacts } from '../../target/lib/contracts.ts';
 import { CaptureFields, type CaptureRect, type CaptureScan } from './fields.ts';
 import { CapturePixels } from './pixels.ts';
 import { CaptureValues } from './values.ts';
+import { CaptureFrameWindow } from './frame-window.ts';
 
 export interface CaptureFrameEvent {
   readonly data?: unknown;
   readonly sessionId?: unknown;
-  readonly metadata?: { readonly deviceWidth?: unknown; readonly deviceHeight?: unknown };
+  readonly metadata?: { readonly deviceWidth?: unknown; readonly deviceHeight?: unknown; readonly timestamp?: unknown };
 }
 
 /** Keep action controls available when observations from a changing context must be withheld. */
@@ -38,11 +39,24 @@ export class BrowserCapture {
   private readonly protectedContexts = new WeakSet<BrowserContext>();
   private readonly contextEpochs = new WeakMap<BrowserContext, number>();
   private readonly sensitiveContexts = new WeakSet<BrowserContext>();
+  private readonly frameWindows = new WeakMap<BrowserContext, CaptureFrameWindow>();
+
+  private frameWindow(context: BrowserContext): CaptureFrameWindow {
+    let window = this.frameWindows.get(context);
+    if (!window) {
+      window = new CaptureFrameWindow(this.now);
+      this.frameWindows.set(context, window);
+    }
+    return window;
+  }
 
   private watchContext(context: BrowserContext): void {
     if (this.contextEpochs.has(context)) return;
     this.contextEpochs.set(context, 0);
-    const changed = () => this.contextEpochs.set(context, (this.contextEpochs.get(context) ?? 0) + 1);
+    const changed = () => {
+      this.contextEpochs.set(context, (this.contextEpochs.get(context) ?? 0) + 1);
+      this.frameWindow(context).invalidate();
+    };
     const watch = (page: Page) => {
       page.on('close', changed);
       page.on('crash', changed);
@@ -61,6 +75,7 @@ export class BrowserCapture {
     private readonly session: (page: Page) => Promise<CDPSession>,
     makeCompositor: () => Promise<Page>,
     private readonly deadline: <T>(work: Promise<T>) => Promise<T>,
+    private readonly now: () => number,
   ) {
     this.pixels = new CapturePixels(makeCompositor);
   }
@@ -158,10 +173,12 @@ export class BrowserCapture {
 
   async writeContext<T>(context: BrowserContext, work: () => Promise<T>): Promise<T> {
     while (this.pixelTurns.has(context)) await this.pixelTurns.get(context);
+    this.frameWindow(context).invalidate();
     this.writers.set(context, (this.writers.get(context) ?? 0) + 1);
     try {
       return await work();
     } finally {
+      this.frameWindow(context).invalidate();
       this.writers.set(context, (this.writers.get(context) ?? 1) - 1);
     }
   }
@@ -331,28 +348,44 @@ export class BrowserCapture {
     });
   }
 
-  async frame(page: Page, nativePixels: string): Promise<string> {
+  /** Prime before Chrome renders its first frame, including on an otherwise static page. */
+  async prepareFrames(page: Page): Promise<void> {
+    if (this.sensitiveContexts.has(page.context()) || this.protectedContexts.has(page.context())) return;
+    await this.cleanFrame(page);
+  }
+
+  private async cleanFrame(page: Page, event?: { renderedAt: unknown }): Promise<void> {
     const context = page.context();
-    if (!this.sensitiveContexts.has(context) && !this.protectedContexts.has(context)) {
-      return await this.pixelTurn(context, async () => {
-        if (this.failedContexts.has(context)) throw new Error('browser capture state unavailable');
-        this.watchContext(context);
-        const epoch = this.contextEpochs.get(context);
-        const sensitive = await this.bounded(async () => {
+    await this.pixelTurn(context, async () => {
+      if (this.failedContexts.has(context)) throw new Error('browser capture state unavailable');
+      this.watchContext(context);
+      const epoch = this.contextEpochs.get(context);
+      const window = this.frameWindow(context);
+      const scan = async () => {
+        await this.bounded(async () => {
           for (const related of context.pages()) {
-            if (await this.of(related).sensitiveNode()) return true;
+            const fields = this.of(related);
+            for (const session of await fields.captureSessions()) await window.watch(session);
+            if (await fields.sensitiveNode()) {
+              this.sensitiveContexts.add(context);
+              // Drop this trigger; the next frame takes one frozen context scan.
+              throw new Error('sensitive node discovered; native pixels withheld');
+            }
           }
-          return false;
         });
-        if (sensitive) {
-          this.sensitiveContexts.add(context);
-          // Drop this trigger. The next frame takes one frozen context scan, with no second scan here.
-          throw new Error('sensitive node discovered; native pixels withheld');
-        }
         if (epoch !== this.contextEpochs.get(context) || this.protectedContexts.has(context))
           throw new Error('browser context changed during capture');
-        return nativePixels;
-      });
+      };
+      if (event === undefined) await window.prime(scan);
+      else await window.check(event.renderedAt, scan);
+    });
+  }
+
+  async frame(page: Page, nativePixels: string, renderedAt?: unknown): Promise<string> {
+    const context = page.context();
+    if (!this.sensitiveContexts.has(context) && !this.protectedContexts.has(context)) {
+      await this.cleanFrame(page, { renderedAt });
+      return nativePixels;
     }
     // Native pixels have old geometry. A protected frame owns one frozen context scan and a fresh image.
     return await this.frozen(page, async (session, scan) => {
