@@ -99,16 +99,13 @@ export const isSpeechWorkerScriptUrl = (url: string): boolean =>
 const DURIAN_WORKER_SCRIPT = /^\/assets\/durian-worker-[A-Za-z0-9_-]+\.js$/u;
 
 /**
- * The address Vite's DEV server serves the Durian worker at: the same `/@fs` shape as the speech workers' (the plugin's folder
- * is outside the app's root), with plain path segments only and exactly that one file. Read behind `import.meta.env.DEV`
- * like {@link DEV_SPEECH_WORKER_SCRIPT}, so a release carries neither the pattern nor accepts such a URL.
+ * Vite's exact worker URL for THIS checkout. Conversation's build plugin substitutes its own `?worker&url` import in
+ * development only. A different checkout's URL is refused, even if it names the same file. Vite removes this DEV branch
+ * in production, so the release policy still accepts only the content-hashed chunk above.
+ * Whether a URL is the Durian worker's script: the chunk the build emits, or (in development only) the dev server's address.
  */
-const DEV_DURIAN_WORKER_SCRIPT =
-  /^\/@fs(?:\/(?!\.{1,2}(?:\/|$))(?:[A-Za-z0-9._ -]|%20)+)+\/packages\/plugins\/conversation\/app\/hypermedia\/durian-worker\.ts\?worker_file&type=module$/u;
-
-/** Whether a URL is the Durian worker's script: the chunk the build emits, or (in development only) the dev server's address. */
 export const isDurianWorkerScriptUrl = (url: string): boolean =>
-  DURIAN_WORKER_SCRIPT.test(url) || (!!import.meta.env.DEV && DEV_DURIAN_WORKER_SCRIPT.test(url));
+  DURIAN_WORKER_SCRIPT.test(url) || (!!import.meta.env.DEV && url === import.meta.env.FY_DURIAN_DEV_WORKER_URL);
 
 /** Whether a URL is one of the app's own worker scripts: the service worker, a speech worker or the Durian worker. */
 export const isWorkerScriptUrl = (url: string): boolean =>

@@ -84,9 +84,11 @@ describe('isWorkerScriptUrl', () => {
   // Bun reads `import.meta.env` from the process environment; Vite's dev server sets DEV the same way for the page.
   beforeEach(() => {
     process.env.DEV = 'true';
+    process.env.FY_DURIAN_DEV_WORKER_URL = DEV_DURIAN();
   });
   afterEach(() => {
     delete process.env.DEV;
+    delete process.env.FY_DURIAN_DEV_WORKER_URL;
   });
 
   it('accepts the speech worker the build emits, and its dev-server address', () => {
@@ -166,7 +168,8 @@ describe('isWorkerScriptUrl', () => {
   it("accepts the Durian worker's dev-server address under the dev flag, and nothing near it", () => {
     expect(isWorkerScriptUrl(DEV_DURIAN())).toBe(true);
     expect(isDurianWorkerScriptUrl(DEV_DURIAN())).toBe(true);
-    expect(isWorkerScriptUrl(DEV_DURIAN('/home/dev/Workspace/ferretry/.worktrees/vb16'))).toBe(true);
+    expect(isWorkerScriptUrl(DEV_DURIAN('/home/dev/Workspace/ferretry/.worktrees/vb16'))).toBe(false);
+    expect(() => trustedWorkerUrl(DEV_DURIAN('/home/dev/Workspace/ferretry/.worktrees/vb16'))).toThrow(TypeError);
     expect(trustedWorkerUrl(DEV_DURIAN())).toBe(DEV_DURIAN());
     for (const url of [
       DEV_DURIAN('/home/dev/../../etc'),

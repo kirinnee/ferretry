@@ -72,7 +72,7 @@ import {
   svgCanvasRefusal,
   validateHtml,
   validateSvg,
-} from '../../contract/index.ts';
+} from '../../contract/fy-render.ts';
 // The two pure subpaths, not the shell's barrel: the Durian worker reads `fy-render` blocks and must not carry the shell.
 import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS, PALETTE_KEY } from '@ferretry/app/fy-render';
 import { parseReferenceToken } from '@ferretry/app/references/grammar';
@@ -86,8 +86,8 @@ export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };
  * re-exported from `@ferretry/protocol/fy-render`, where the daemon can run the
  * same reader on a save. The names its readers use are re-exported from here.
  */
-export { FY_RENDER_IMAGE_MIMES, FY_RENDER_MEDIA_TYPES } from '../../contract/index.ts';
-export type { FyRenderImageMime, FyRenderMediaType } from '../../contract/index.ts';
+export { FY_RENDER_IMAGE_MIMES, FY_RENDER_MEDIA_TYPES } from '../../contract/fy-render.ts';
+export type { FyRenderImageMime, FyRenderMediaType } from '../../contract/fy-render.ts';
 
 /**
  * The attribute on the `<code>` of the fence node the hypermedia reader hands the fence door (`fences.tsx`): the only

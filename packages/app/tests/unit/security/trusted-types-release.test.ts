@@ -28,6 +28,8 @@ const built = async (mode: 'production' | 'development'): Promise<string> => {
     configFile: false,
     logLevel: 'silent',
     mode,
+    // Unit builds supply a synthetic exact Vite URL; the enforcing dev-server test measures the real query import.
+    define: { 'import.meta.env.FY_DURIAN_DEV_WORKER_URL': JSON.stringify(DEV_DURIAN_URL) },
     root: out,
     build: {
       outDir: dir,
@@ -60,5 +62,6 @@ describe('a Vite production build of the trusted-types policy', () => {
     const mod = (await import(pathToFileURL(file).href)) as typeof import('../../../src/security/trusted-types.ts');
     expect(mod.isWorkerScriptUrl(DEV_URL)).toBe(true);
     expect(mod.isWorkerScriptUrl(DEV_DURIAN_URL)).toBe(true);
+    expect(mod.isWorkerScriptUrl(DEV_DURIAN_URL.replace('/home/dev/', '/other/checkout/'))).toBe(false);
   }, 60_000);
 });
