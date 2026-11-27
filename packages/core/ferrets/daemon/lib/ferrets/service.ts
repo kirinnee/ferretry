@@ -31,6 +31,7 @@ import { beforePane, type LaunchGuard, type LaunchSteps, paneOpened, paneVariabl
 import { paneEnvironment } from './pane-env.ts';
 import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../../../contract/agent-address.ts';
+import { relocatedRefusal, stageConversation, unpackRelocated } from './start-conversation.ts';
 import {
   type FerretBirth,
   DAEMON_ORIGIN,
@@ -72,7 +73,6 @@ import type {
   LaunchPart,
   LaunchPartSource,
   OpeningAttachmentsSource,
-  PackedConversation,
   ConversationStageSource,
   LaunchSpec,
   LoginCredentialAnswer,
@@ -526,7 +526,7 @@ interface LaunchExtras {
   readonly carried?: ResumeOptions['onCarried'] | undefined;
   readonly notInWardenTree?: true | undefined;
   readonly fast?: DecidedFast | undefined;
-  readonly relocated?: PackedConversation | undefined;
+  readonly relocated?: StartRequest['relocated'];
 }
 
 /**
@@ -756,6 +756,8 @@ interface LaunchSaid {
   conversationUnknown?: true;
   /** The harness's own sentence for a first turn that failed to start ({@link Harness.startFailure}), when it fits the cause. */
   explained?: string;
+  /** A conversation that came from another machine, unpacked into this ferret's own home before the pane opens. */
+  relocated?: StartRequest['relocated'];
 }
 
 class ResumeRefusal extends Error {
@@ -1107,32 +1109,6 @@ export class FerretsService implements FerretsApi {
     return ok({ prompt: `${prompt}\n${planned.value.section}`, files });
   }
 
-  /**
-   * "Continue a past conversation": the transcript a start names is put where the harness finds it (the one
-   * `conversation.stage` provider: the existing indexed copy-on-link); a refusal refuses the start with its reason. With NO
-   * provider nothing is copied: a pooled transcript is resumed, and the launch refuses one the harness proves absent (E17).
-   * ONLY THE OWNER'S start stages: the transcript comes from the owner's own computer, and a ferret (or a pack, board or
-   * warden) must never be able to pull a host conversation into the pool by naming it. Any other asker resumes a
-   * conversation the pool already holds, and the launch refuses one it does not.
-   */
-  private async stageConversation(
-    harness: HarnessKey,
-    conversation: string | undefined,
-    by: StartRequest['by'],
-  ): Promise<Result<void, StartFailure>> {
-    const source = conversation === undefined || by !== 'owner' ? undefined : this.ports.conversationStage?.();
-    if (conversation === undefined || source === undefined) return ok(undefined);
-    const staged = await source
-      .stage({ harness, conversation })
-      .catch(
-        (): Awaited<ReturnType<ConversationStageSource['stage']>> =>
-          err({ code: 'failed', reason: 'the conversation could not be staged' }),
-      );
-    return staged.ok
-      ? ok(undefined)
-      : failed('refused', `${staged.error.reason} The ferret was not started, so nothing was resumed.`);
-  }
-
   /** An agent may start nothing in the state home; a fence that cannot be built refuses too (never a lexical guess). */
   private async stateHomeRefusal(folder: string): Promise<Result<never, StartFailure> | undefined> {
     if (this.ports.stateHomeHolding === undefined) return failed('state_home_unresolved', STATE_HOME_UNRESOLVED);
@@ -1181,19 +1157,8 @@ export class FerretsService implements FerretsApi {
     if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');
     if (this.ports.harness(harnessKey) === undefined)
       return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);
-    // A moved conversation is the owner's alone and needs a harness that can unpack it: refused here, before any write.
-    if (request.relocated !== undefined) {
-      if (request.by !== 'owner' || request.harnessConversation !== undefined)
-        return failed(
-          'refused',
-          'a moved conversation is started by the owner alone, and never beside another conversation',
-        );
-      if (this.ports.harness(harnessKey)?.unpackConversation === undefined)
-        return failed(
-          'refused',
-          `the ${harnessKey} harness cannot take a conversation moved from another machine, so nothing was started`,
-        );
-    }
+    const unfit = relocatedRefusal(request, this.ports.harness(harnessKey), harnessKey);
+    if (unfit !== undefined) return unfit;
     // The folder's identity is captured HERE, before any taker is asked, and re-verified as the last step before the
     // harness starts: a swap in between (a link into the state home put where the project was) cannot be launched in.
     const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
@@ -1228,7 +1193,7 @@ export class FerretsService implements FerretsApi {
     request = decided.request;
     // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
     const named = admission.conversationInPool === true ? undefined : request.harnessConversation;
-    const staged = await this.stageConversation(harnessKey, named, request.by);
+    const staged = await stageConversation(this.ports.conversationStage?.(), harnessKey, named, request.by);
     if (!staged.ok) return staged;
     // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
     const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);
@@ -1292,8 +1257,8 @@ export class FerretsService implements FerretsApi {
       recordedOk();
       return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
         attached: opening.value.files,
-        ...(request.relocated === undefined ? {} : { relocated: request.relocated }),
         bound: bound.value,
+        ...(request.relocated === undefined ? {} : { relocated: request.relocated }),
         ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
       });
     });
@@ -2192,6 +2157,7 @@ export class FerretsService implements FerretsApi {
     let turn: PendingTurn | undefined;
     // A START that names a conversation is an explicit continue: it never falls back to a fresh conversation.
     const said: LaunchSaid = kind === 'start' ? { requireConversation: true } : {};
+    if (relocated !== undefined) said.relocated = relocated;
     try {
       const session = await this.sessionStep(record, kind, prompt, revive, attached, notInWardenTree);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
@@ -2210,17 +2176,7 @@ export class FerretsService implements FerretsApi {
           return typeof value === 'function' ? value.bind(target) : value;
         },
       });
-      const result = await this.launchAttempt(
-        record,
-        prompt,
-        conversation,
-        tracked,
-        bound,
-        said,
-        fast,
-        prepared,
-        relocated,
-      );
+      const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said, fast, prepared);
       // A RESUME with no conversation to resume starts a new one just as a missing one does, and is said the same way: a
       // ferret that silently forgot everything (proof run 8, a converted Codex ferret) is the defect this names.
       if (kind === 'resume' && conversation === undefined) said.conversationUnknown = true;
@@ -2405,7 +2361,6 @@ export class FerretsService implements FerretsApi {
     said: LaunchSaid = {},
     decidedFast?: DecidedFast,
     prepared?: PreparedLaunch,
-    relocated?: PackedConversation,
   ): Promise<Result<FerretId, StartFailure>> {
     const ready =
       prepared === undefined ? await this.prepareLaunch(record, prompt, conversation, decidedFast) : ok(prepared);
@@ -2420,17 +2375,11 @@ export class FerretsService implements FerretsApi {
       const home = await prepareLaunchHome(harness, spec);
       if (!home.ok) return home;
     }
-    // A conversation that came from another machine is written into THIS ferret's own home now that the home exists, and the
-    // launch resumes it. The harness refuses with one sentence and writes nothing when it cannot (an untested version, a pack
-    // that is not a whole conversation); the launch then fails as any other does.
     let named = conversation;
-    if (relocated !== undefined) {
-      const unpacked = await harness.unpackConversation?.(spec, relocated).catch((): undefined => undefined);
-      if (unpacked === undefined)
-        return failed('refused', "the moved conversation could not be written into this ferret's home");
-      if (!unpacked.ok) return failed('refused', unpacked.error.reason);
-      named = unpacked.value.conversation;
-      spec = { ...spec, harnessConversation: named };
+    if (said.relocated !== undefined) {
+      const unpacked = await unpackRelocated(harness, spec, said.relocated);
+      if (!unpacked.ok) return unpacked;
+      ({ spec, conversation: named } = unpacked.value);
     }
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
@@ -2439,7 +2388,7 @@ export class FerretsService implements FerretsApi {
     // starts a new conversation instead, and the caller says so; any doubt resumes as asked.
     const resumable =
       named === undefined || harness.hasConversation === undefined
-        ? named
+        ? conversation
         : (await harness.hasConversation(spec, named).catch(() => undefined)) === false
           ? undefined
           : named;
