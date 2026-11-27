@@ -13,7 +13,7 @@ that into consideration when writing — now its just looks buggy"), so it is a 
 per-component fix.
 
 The token layer is [`packages/app/src/styles/`](../../../packages/app/src/styles/themes.css): `tokens/base-style.css` holds
-every style-owned token's default, `style/<id>.css` one style's values, `tokens/floors.css` the touch-target floors.
+every style-owned token's default, `theme/packs/style/<id>/style.css` one style's values (a style is a pack: its `style.ts` names it, its `style.css` draws it), `tokens/floors.css` the touch-target floors.
 
 ## The rule
 

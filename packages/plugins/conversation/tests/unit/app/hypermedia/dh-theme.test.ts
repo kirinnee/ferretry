@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { RENDER_PALETTE_TOKENS, RENDER_STYLE_TOKENS } from '@ferretry/app';
+import { RENDER_OPTIONAL_STYLE_TOKENS, RENDER_PALETTE_TOKENS, RENDER_STYLE_TOKENS } from '@ferretry/app';
 import { ensureDom } from '@ferretry/app/testing';
 
 ensureDom();
@@ -144,7 +144,11 @@ describe('look.ts', () => {
 });
 
 describe('the hypermedia stylesheets read the app only through the renderer contract', () => {
-  const contract: ReadonlySet<string> = new Set([...RENDER_PALETTE_TOKENS, ...RENDER_STYLE_TOKENS]);
+  const contract: ReadonlySet<string> = new Set([
+    ...RENDER_PALETTE_TOKENS,
+    ...RENDER_STYLE_TOKENS,
+    ...RENDER_OPTIONAL_STYLE_TOKENS,
+  ]);
   const sheets = ['dh-theme.css', 'hypermedia.css'].map(name =>
     withoutComments(readFileSync(join(folder, name), 'utf8')),
   );

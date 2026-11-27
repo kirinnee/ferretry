@@ -1,6 +1,6 @@
 /**
- * THE THEME STYLESHEET AS ONE TEXT. `src/styles/themes.css` is an index of `@import`s over `tokens/`, `style/` and
- * `palette/`; a test that wants "the theme CSS" (to read a token's value, walk every block, or paint a page with it)
+ * THE THEME STYLESHEET AS ONE TEXT. `src/styles/themes.css` is an index of `@import`s over `tokens/` and the generated
+ * `theme-packs.css` (each style pack's `style.css` imported, each palette written from its data); a test that wants "the theme CSS" (to read a token's value, walk every block, or paint a page with it)
  * reads it through here, so it sees the files in the order the browser applies them.
  */
 import { readFileSync } from 'node:fs';
@@ -20,16 +20,17 @@ export function readCssWithImports(file: string): string {
 }
 
 /**
- * Every theme token declaration: `themes.css` with all its imports inlined, then the generated theme packs (palettes as data).
- * The real page imports the packs once from `index.css`, before `themes.css`; here they come after so the bases stay first in the
- * text (a reader asking for "the first `--muted`" gets the default). Palette selectors out-rank the bases, so the order never
- * decides a colour, and a before/after dump of every token of every style x palette x mode is the same either way.
+ * Every theme token declaration, in the order the browser applies them: `themes.css` with all its imports inlined, i.e. the
+ * bases, then the generated theme packs (every style's `style.css`, the fonts, the palettes as data), then the floors.
  */
-export const readThemeCss = (): string =>
-  `${readCssWithImports(join(stylesRoot, 'themes.css'))}\n${readFileSync(join(stylesRoot, '../generated/theme-packs.css'), 'utf8')}`;
+export const readThemeCss = (): string => readCssWithImports(join(stylesRoot, 'themes.css'));
 
-/** One file under `src/styles` (`style/neo.css`, `tokens/base-palette.css`, …). */
+/** One file under `src/styles` (`tokens/base-palette.css`, `index.css`, …). */
 export const readStyleFile = (relative: string): string => readFileSync(join(stylesRoot, relative), 'utf8');
+
+/** One style pack's stylesheet (`theme/packs/style/<id>/style.css`): its tokens and its own rules. */
+export const readStylePackCss = (id: string): string =>
+  readFileSync(join(stylesRoot, '../theme/packs/style', id, 'style.css'), 'utf8');
 
 /**
  * One palette's blocks of the generated stylesheet (`generated/theme-packs.css`, written from `theme/packs/palette/<id>/palette.ts`):

@@ -116,7 +116,6 @@ export const RENDER_STYLE_TOKENS = [
   'md-link-decoration',
   'md-link-pad',
   'md-link-radius',
-  'md-link-weight',
   'md-list-marker-color',
   'md-ul-marker',
   'md-ol-marker',
@@ -131,6 +130,14 @@ export const RENDER_STYLE_TOKENS = [
   'md-cell-border-y',
 ] as const;
 export type RenderStyleToken = (typeof RENDER_STYLE_TOKENS)[number];
+
+/**
+ * Style tokens a renderer reads that a style MAY leave unset, without their leading `--`. `--md-link-weight` is the base's `inherit`:
+ * a CSS-wide keyword, so it resolves to nothing and a link takes the weight of the text around it (a link in a heading or in bold
+ * stays that weight). A style that wants a fixed link weight names a number; one that does not, says nothing. The resolver therefore
+ * does not require it, and a renderer may read it.
+ */
+export const RENDER_OPTIONAL_STYLE_TOKENS = ['md-link-weight'] as const;
 
 /**
  * The values a stylesheet cannot branch on, which `look.ts` reads once per theme change. A style must set each to

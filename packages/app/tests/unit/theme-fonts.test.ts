@@ -1,7 +1,7 @@
 /**
  * WHICH FONT FILES EACH STYLE DRAWS WITH, now that a font is a pack (`theme/packs/font/<id>/font.ts` + its woff2 files + its
  * licence text). The faces are generated from the packs (`generated/theme-packs.css`), `theme/fonts.ts` names font ids per
- * style and resolves them to files, and `styles/style/<id>.css` holds the stacks that name them. Type is a style decision,
+ * style and resolves them to files, and `theme/packs/style/<id>/style.css` holds the stacks that name them. Type is a style decision,
  * so the table is keyed by style; this suite fails when those stop agreeing, and pins what each style fetched before the move.
  */
 import { describe, expect, it } from 'bun:test';
@@ -10,7 +10,7 @@ import { basename, join } from 'node:path';
 import { FONT_PACKS } from '../../src/generated/theme-packs.ts';
 import { STYLE_IDS } from '../../src/theme/catalog.ts';
 import { preloadThemeFonts, STYLE_FONT_FILES, type PreloadHost } from '../../src/theme/fonts.ts';
-import { readStyleFile } from '../../src/testing/theme-css.ts';
+import { readStylePackCss } from '../../src/testing/theme-css.ts';
 
 const srcDir = join(import.meta.dir, '../../src');
 const fontsDir = join(srcDir, 'theme/packs/font');
@@ -179,9 +179,7 @@ describe('the preload table', () => {
       const row = STYLE_FONT_FILES[style];
       if (row === undefined) continue; // Contrast and Lucid draw with the device (a bundled name late in a stack is only a fallback)
       const files = [...row.text, ...row.code].map(url => basename(url));
-      const stacks = [
-        ...readStyleFile(`style/${style}.css`).matchAll(/--font-(?:body|display|ui|mono|code):\s*([^;]+);/gu),
-      ];
+      const stacks = [...readStylePackCss(style).matchAll(/--font-(?:body|display|ui|mono|code):\s*([^;]+);/gu)];
       for (const [, stack] of stacks) {
         const named = [...(stack as string).matchAll(/['"]([^'"]+)['"]/gu)].map(match => match[1]);
         const lead = FONT_PACKS.find(
@@ -223,7 +221,7 @@ describe('preloadThemeFonts', () => {
 
 describe('the Look picker preview stays cheap', () => {
   it('a Gen Z swatch draws its body in the device face, so Bricolage loads only when Gen Z is the active style', () => {
-    const css = readStyleFile('style/genz.css');
+    const css = readStylePackCss('genz');
     const rule = css.match(/\[data-swatch\]\[data-style='genz'\]:not\(:root\)\s*\{([^}]*)\}/u)?.[1] ?? '';
     expect(rule).toContain('--font-body: system-ui');
     expect(rule).not.toContain('Bricolage');
