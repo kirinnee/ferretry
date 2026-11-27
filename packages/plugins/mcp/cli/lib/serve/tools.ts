@@ -309,7 +309,7 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   {
     name: 'browser_open',
     description:
-      'Open a named browser page, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins; "incognito": true gives a throwaway one.',
+      'Open a named browser page, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins; "incognito": true gives a throwaway one; "identity" opens it in another browser identity’s own Chrome (its own sign-ins and cookies), the built-in "agent" when omitted.',
     inputSchema: object(
       {
         name: NEW_NAME,
@@ -317,6 +317,12 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
         incognito: {
           type: 'boolean',
           description: 'A private page: its own cookies and storage, discarded when it closes.',
+        },
+        identity: {
+          type: 'string',
+          pattern: '^[a-z][a-z0-9-]{0,31}$',
+          description:
+            'The browser identity to open it in: its own profile, sign-ins and proxy. browser_list shows each page’s identity.',
         },
         askOwner: ASK_OWNER,
       },

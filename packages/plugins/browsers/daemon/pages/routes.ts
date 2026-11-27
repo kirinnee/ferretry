@@ -4,6 +4,7 @@ import {
   type CallContext,
   type KernelPorts,
   jsonResponse,
+  queryValue,
   type Redaction,
   type RouteHandler,
   type SocketAccept,
@@ -12,7 +13,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { ferretOf, isFerretCall, isHumanAdminActor } from '@ferretry/core-gate/contract';
 import { PAIRING_SCREEN_REFUSAL } from '@ferretry/std/pairing-screen';
-import { BrowserLoginActionSchema } from '../../contract/index.ts';
+import { BrowserIdentityKeySchema, BrowserLoginActionSchema, DEFAULT_BROWSER_IDENTITY } from '../../contract/index.ts';
 import { mapStrings } from '../address-rule.ts';
 import { hostOfOrigin } from '../sealed/page-guards.ts';
 import { isWebUrl, WEB_URL_ONLY } from '../../contract/wire/limits.ts';
@@ -229,14 +230,24 @@ async function answer(work: () => Promise<BrowserLoginStatus>): Promise<ApiRespo
 
 /** Carries out the one intent the body names. */
 async function loginAct(window: BrowserLoginLifecycle, call: CallContext): Promise<ApiResponse> {
+  const identity = loginIdentity(call);
   const action = await parseBody(call.request, BrowserLoginActionSchema);
   return await answer(async () => {
     if (action.action === 'start')
-      return await window.start(action.minutes === undefined ? {} : { minutes: action.minutes });
+      return await window.start({ identity, ...(action.minutes === undefined ? {} : { minutes: action.minutes }) });
     if (action.action === 'stop')
-      return await window.stop(action.primed === undefined ? {} : { primed: action.primed });
-    return await window.confirm();
+      return await window.stop({ identity, ...(action.primed === undefined ? {} : { primed: action.primed }) });
+    return await window.confirm(identity);
   });
+}
+
+/** Which identity's sign-in window a call is about: `?identity=`, the built-in one when absent, a 400 for anything that is no identity key. */
+function loginIdentity(call: CallContext): string {
+  const named = queryValue(call.request, 'identity');
+  if (named === undefined) return DEFAULT_BROWSER_IDENTITY;
+  if (!BrowserIdentityKeySchema.safeParse(named).success)
+    throw new ApiError(400, `there is no browser identity named ${named}`, 'invalid_browser_login_request');
+  return named;
 }
 
 /** What a refusal says when its own message could not be masked: the status and code stay, the words do not. */
@@ -536,7 +547,7 @@ export function pageRoutes(
 ) {
   const guard = (handler: RouteHandler): RouteHandler => guarded(kernel.redaction, handler);
   return {
-    'GET /v1/browser/login': guard(async () => await answer(async () => await window.status())),
+    'GET /v1/browser/login': guard(async call => await answer(async () => await window.status(loginIdentity(call)))),
     'POST /v1/browser/login': guard(async call => await loginAct(window, call)),
     'GET /v1/ferrets/:ferretId/browser': guard(
       async call => await browserStatus(kernel, browser, ferretGuard, gate, call),

@@ -33,7 +33,7 @@ import {
 } from '../../contract/wire/target.ts';
 import { BrowserTransportError } from '../worker/protocol.ts';
 import type { SurfaceControl } from './control.ts';
-import type { SurfaceControlRequest } from '../../contract/index.ts';
+import { DEFAULT_BROWSER_IDENTITY, type SurfaceControlRequest } from '../../contract/index.ts';
 import type { AgentSurface, SurfaceControlView, SurfaceController } from '../../contract/wire/control.ts';
 import type { BrowserFiles } from './files.ts';
 import { sizeWords } from './files-policy.ts';
@@ -755,6 +755,8 @@ export class BrowserTools {
             ...(call.url === undefined ? {} : { url: call.url }),
             ...(opener === undefined ? {} : { openedBy: opener }),
             ...(call.incognito === true ? { incognito: true } : {}),
+            // No identity named is the built-in `agent`: never whichever one this session happened to use last.
+            identity: call.identity ?? DEFAULT_BROWSER_IDENTITY,
           });
         });
         if (page === undefined) throw new BrowserToolError('upstream_failed', 'The browser opened no page.');
@@ -769,9 +771,13 @@ export class BrowserTools {
         await this.drove(caller, call, surface);
         await this.announce(caller, surface, call.askOwner);
         const kind = call.incognito === true ? 'an incognito page, ' : '';
+        const where =
+          call.identity === undefined || call.identity === DEFAULT_BROWSER_IDENTITY
+            ? ''
+            : ` in identity ${call.identity}`;
         const read = await this.readBack(surface, { url: page.url });
         return {
-          summary: `Opened ${kind}${surfaceReference(call.name)}${read?.url === undefined ? '' : ` at ${read.url}`}${handedNote(call.askOwner)}.${page.challenge === undefined ? '' : HUMAN_CHECK_NOTE}`,
+          summary: `Opened ${kind}${surfaceReference(call.name)}${where}${read?.url === undefined ? '' : ` at ${read.url}`}${handedNote(call.askOwner)}.${page.challenge === undefined ? '' : HUMAN_CHECK_NOTE}`,
         };
       }
       default: {
@@ -1385,6 +1391,7 @@ export class BrowserTools {
             ...(page.openedBy === undefined ? {} : { openedBy: page.openedBy }),
             ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
             ...(page.incognito === true ? { incognito: true } : {}),
+            ...(page.identity === undefined ? {} : { identity: page.identity }),
           },
           status.pages,
         ),
@@ -1439,6 +1446,7 @@ export class BrowserTools {
       ...(row.name === undefined ? {} : { name: row.name }),
       title: row.title,
       ...(row.incognito === true ? { incognito: true } : {}),
+      ...(row.identity === undefined ? {} : { identity: row.identity }),
       ...(row.url === undefined ? {} : { url: row.url }),
       ...(row.openerId === undefined ? {} : { openerId: row.openerId }),
     };
@@ -1798,7 +1806,14 @@ function surfaceOf(found: PageRows[number]): ResolvedSurface {
 
 function shown(surfaces: readonly AgentSurface[]): BrowserToolAnswer {
   if (surfaces.length === 0) return { summary: 'No browser pages are open for you in this session.', surfaces };
-  const names = surfaces.map(entry => surfaceReference(entry.name ?? entry.id)).join(', ');
+  // A page in an identity other than the built-in one says which, so two identities' pages are never mistaken for each other.
+  const names = surfaces
+    .map(
+      entry =>
+        surfaceReference(entry.name ?? entry.id) +
+        (entry.identity === undefined || entry.identity === DEFAULT_BROWSER_IDENTITY ? '' : ` (${entry.identity})`),
+    )
+    .join(', ');
   return { summary: `${plural(surfaces.length, 'browser page')}: ${names}.`, surfaces };
 }
 

@@ -348,3 +348,124 @@ describe('BrowserLoginWindowService', () => {
     should(status).deepEqual({ state: 'closed', profilePrimed: false });
   });
 });
+
+/** A profile store with one lease per identity, as the real one keeps: acquiring one identity twice is refused, two identities never clash. */
+class IdentityProfiles implements BrowserProfilePort {
+  readonly calls: string[] = [];
+  readonly held = new Set<string>();
+  readonly primed = new Set<string>();
+
+  async acquire(identity: string): Promise<BrowserProfileLease> {
+    if (this.held.has(identity)) throw new Error(`the ${identity} profile is already in use`);
+    this.held.add(identity);
+    this.calls.push(`acquire:${identity}`);
+    return {
+      identity,
+      profile: `/private/data/${identity}`,
+      sessionId: 'human-login',
+      daemonPid: 101,
+      acquiredAt: new Date(0).toISOString(),
+      recoveredDeadOwner: false,
+      updateChromePid: async () => undefined,
+      cleanupStaleChromeLocks: async () => [],
+      markPrimed: async () => {
+        this.primed.add(identity);
+      },
+      release: async () => {
+        this.held.delete(identity);
+        this.calls.push(`release:${identity}`);
+        return true;
+      },
+    };
+  }
+
+  async isPrimed(identity: string): Promise<boolean> {
+    return this.primed.has(identity);
+  }
+
+  async assertChromeVersionCompatible(): Promise<void> {
+    return undefined;
+  }
+}
+
+/** The runtime of one machine with a screen per identity, recording which identity each step was for. */
+function identityRuntime(events: string[]): BrowserLoginRuntime {
+  let ports = 5900;
+  let pids = 400;
+  return {
+    ...runtime([]),
+    display: async identity => `:${identity ?? 'machine'}`,
+    authority: identity => `/state/x11/${identity ?? 'machine'}`,
+    releaseDisplay: async identity => {
+      events.push(`screen-released:${identity}`);
+    },
+    spawn: argv => {
+      events.push(`spawn:${argv.find(part => part.startsWith('--user-data-dir=')) ?? 'vnc'}`);
+      pids += 1;
+      return child(pids);
+    },
+    freePort: async () => {
+      ports += 1;
+      return ports;
+    },
+  };
+}
+
+describe('BrowserLoginWindowService, one window per identity', () => {
+  it('should open the window for one identity and leave every other identity’s agent browser and window alone', async () => {
+    // Arrange
+    const events: string[] = [];
+    const profiles = new IdentityProfiles();
+    const subject = new BrowserLoginWindowService({
+      profile: profiles,
+      runtime: identityRuntime(events),
+      closeAgentBrowsers: async identity => {
+        events.push(`agents-closed:${identity}`);
+      },
+      password: () => 'abcdefgh',
+    });
+
+    // Act
+    const a = openWindow(onTheWire(await subject.start({ identity: 'a' })));
+    const bBefore = onTheWire(await subject.status('b'));
+    const b = openWindow(onTheWire(await subject.start({ identity: 'b' })));
+    await subject.stop({ identity: 'a', primed: true });
+
+    // Assert — only the named identity's browser was closed, each window has its own profile, screen and port
+    should(events.filter(event => event.startsWith('agents-closed'))).deepEqual(['agents-closed:a', 'agents-closed:b']);
+    should(events.filter(event => event.startsWith('spawn:--user-data-dir'))).deepEqual([
+      'spawn:--user-data-dir=/private/data/a',
+      'spawn:--user-data-dir=/private/data/b',
+    ]);
+    should(bBefore.state).equal('closed');
+    should(a.connection.port).not.equal(b.connection.port);
+    // Closing a released a's profile and screen and nothing of b's: b's window is still open and its lease still held.
+    should(onTheWire(await subject.status('b')).state).equal('open');
+    should(profiles.held.has('b')).equal(true);
+    should(profiles.held.has('a')).equal(false);
+    should(events).containEql('screen-released:a');
+    should(events).not.containEql('screen-released:b');
+    should(profiles.primed.has('a')).equal(true);
+    should(profiles.primed.has('b')).equal(false);
+  });
+
+  it('should open the built-in agent identity’s window when none is named', async () => {
+    // Arrange
+    const events: string[] = [];
+    const profiles = new IdentityProfiles();
+    const subject = new BrowserLoginWindowService({
+      profile: profiles,
+      runtime: identityRuntime(events),
+      closeAgentBrowsers: async identity => {
+        events.push(`agents-closed:${identity}`);
+      },
+    });
+
+    // Act
+    await subject.start();
+
+    // Assert
+    should(events).containEql('agents-closed:agent');
+    should(profiles.held.has('agent')).equal(true);
+  });
+});

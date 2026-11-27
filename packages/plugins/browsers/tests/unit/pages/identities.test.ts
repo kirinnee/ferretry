@@ -308,4 +308,74 @@ describe('identity browsers — one Chrome per identity behind the one surface',
     should(delivered).have.length(1);
     attachment.detach();
   });
+
+  it('should tell every page which identity’s Chrome holds it', async () => {
+    // Arrange
+    const { pages } = world();
+    await pages.openPage('s1', 'home');
+    await pages.openPage('s1', 'work', { identity: 'work' });
+
+    // Act
+    const status = await pages.status('s1');
+
+    // Assert
+    should(Object.fromEntries(status.pages.map(page => [page.name, page.identity]))).deepEqual({
+      home: 'agent',
+      work: 'work',
+    });
+  });
+
+  it('should close one identity’s Chrome and leave every other identity’s pages live', async () => {
+    // Arrange
+    const { pages, tabsOf } = world();
+    await pages.openPage('s1', 'home');
+    await pages.openPage('s1', 'work', { identity: 'work' });
+    let closed = 0;
+    const work = tabsOf('work').automation;
+    const close = work.close;
+    work.close = async () => {
+      closed += 1;
+      await close();
+    };
+
+    // Act
+    await pages.closeIdentity('agent');
+    const status = await pages.status('s1');
+
+    // Assert
+    should(status.pages.map(page => page.name)).deepEqual(['work']);
+    should(closed).equal(0);
+  });
+
+  it('should move a screen to the identity that holds the page it is asked to show, and stream that page there', async () => {
+    // Arrange — two pages in two identities, the screen starts on the agent's
+    const { pages, tabsOf } = world();
+    const work = await pages.openPage('s1', 'work', { identity: 'work' });
+    const home = await pages.openPage('s1', 'home', { identity: 'agent' });
+    const frames: string[] = [];
+    const attachment = await pages.attachViewer(
+      's1',
+      frame => frames.push(frame.pageId ?? ''),
+      () => undefined,
+      'admin',
+    );
+    const viewer = { id: attachment.viewerId, caller: 'admin' };
+    tabsOf('agent').emit(home.id);
+
+    // Act
+    await pages.act('s1', { action: 'activate-page', pageId: work.id }, { viewer });
+    const shown = { status: await pages.status('s1', viewer) };
+    tabsOf('work').emit(work.id);
+    tabsOf('agent').emit(home.id);
+
+    // Assert — the screen is on the other identity's Chrome: its frames come from there, the old one's no longer reach it
+    should(frames).deepEqual([home.id, work.id]);
+    should('activePageId' in shown.status ? shown.status.activePageId : undefined).equal(work.id);
+    should(shown.status.pages.map(page => page.identity).sort()).deepEqual(['agent', 'work']);
+    await pages.dispatchHumanInput('s1', { kind: 'key', type: 'keyDown', key: 'a' } as never, viewer);
+    should(tabsOf('work').inputs).have.length(1);
+    should(tabsOf('agent').inputs).have.length(0);
+    attachment.detach();
+    should(tabsOf('work').casts.get(work.id)?.size ?? 0).equal(0);
+  });
 });

@@ -293,6 +293,9 @@ export function buildBrowsers(
   // ── the human sign-in window ─────────────────────────────────────────────────────────────────────────────────
   const loginRuntime = new NodeBrowserLoginRuntime({
     display,
+    // Any other identity's sign-in window draws on an X server of its own, taken with the window and closed with it.
+    identityDisplay: () =>
+      new XvfbDisplay({ executable: which('Xvfb'), authorityDirectory: profile.displayDirectory, processes }),
     processes,
     secretsDirectory: profile.browserDirectory,
     x11vncExecutable: which('x11vnc'),
@@ -304,7 +307,8 @@ export function buildBrowsers(
   const login = new BrowserLoginWindowService({
     profile,
     runtime: loginRuntime,
-    closeAgentBrowsers: async () => await pages.closeAll(),
+    // Only the identity being signed in has its agent browser closed: every other identity's pages stay live.
+    closeAgentBrowsers: async identity => await pages.closeIdentity(identity),
   });
 
   // ── the proxy test and state ─────────────────────────────────────────────────────────────────────────────────

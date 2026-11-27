@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
 import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '../../../../contract/wire/browser.ts';
+import { DEFAULT_BROWSER_IDENTITY } from '../../../../contract/wire.ts';
 import { type ResolvedBrowserPorts } from '../../../proxy/wire/ports.ts';
 import {
   BrowserControlError,
@@ -423,6 +424,8 @@ export class XvfbDisplay implements BrowserDisplayPort {
 
 export interface BrowserLoginRuntimeOptions extends BrowserLoginTiming {
   readonly display: BrowserDisplayPort;
+  /** The screen of any OTHER identity's window: its own X server, taken when the window opens and closed with it. Absent, every identity shares `display`. */
+  readonly identityDisplay?: (identity: string) => BrowserDisplayPort;
   /** Where the one-shot VNC password file is written. The daemon's own browser directory, so the
    *  secret never lands in a world-readable temp path. */
   readonly secretsDirectory: string;
@@ -474,6 +477,8 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
   private readonly probePort: (port: number) => Promise<boolean>;
   private readonly freePortOf: () => Promise<number>;
   private readonly prover: ListenerProverPort;
+  /** The private screens other identities' windows hold right now. */
+  private readonly identityDisplays = new Map<string, BrowserDisplayPort>();
 
   constructor(private readonly options: BrowserLoginRuntimeOptions) {
     this.platform = options.platform ?? options.processes.platform;
@@ -506,18 +511,38 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
     this.prover = options.listenerProver;
   }
 
-  async display(): Promise<string> {
-    return await this.options.display.display();
+  async display(identity?: string): Promise<string> {
+    return await this.screenOf(identity).display();
   }
 
-  authority(): string | undefined {
-    return this.options.display.authority();
+  authority(identity?: string): string | undefined {
+    return this.screenOf(identity).authority();
   }
 
-  /** Releases the display this runtime took. Registered by the composition root, not by the window:
-   *  the display outlives any one window by design (see `XvfbDisplay`). */
+  /** An identity's own screen goes with its window; the machine's own outlives any window (see `XvfbDisplay`). */
+  async releaseDisplay(identity: string): Promise<void> {
+    const own = this.identityDisplays.get(identity);
+    this.identityDisplays.delete(identity);
+    await own?.close();
+  }
+
+  /** Releases every display this runtime took. Registered by the composition root, not by a window. */
   async close(): Promise<void> {
+    const own = [...this.identityDisplays.values()];
+    this.identityDisplays.clear();
+    await Promise.all(own.map(async display => await display.close().catch(() => undefined)));
     await this.options.display.close();
+  }
+
+  private screenOf(identity: string | undefined): BrowserDisplayPort {
+    if (identity === undefined || identity === DEFAULT_BROWSER_IDENTITY || this.options.identityDisplay === undefined)
+      return this.options.display;
+    let own = this.identityDisplays.get(identity);
+    if (own === undefined) {
+      own = this.options.identityDisplay(identity);
+      this.identityDisplays.set(identity, own);
+    }
+    return own;
   }
 
   chromeExecutable(): string {
