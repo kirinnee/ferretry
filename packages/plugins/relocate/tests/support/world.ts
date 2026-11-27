@@ -1,5 +1,6 @@
 import type { DaemonIdentity } from '@ferretry/std/sealing';
 import type { Instant } from '@ferretry/std';
+import type { Redaction } from '@ferretry/kernel/contract';
 import { kernelWorkingTree } from '../../daemon/lib/git-bundle.ts';
 import { type MovedLedger, Relocation } from '../../daemon/lib/relocation.ts';
 import { type FakeFerrets, fakeFerrets, fakeSource, type FakeSourceOptions } from './fake-ferrets.ts';
@@ -34,6 +35,7 @@ export async function world(
     readonly knownSecrets?: ReadonlyMap<string, string>;
     readonly profileSecrets?: readonly string[];
     readonly runtime?: string;
+    readonly redaction?: Redaction;
   } = {},
 ): Promise<World> {
   const fixture = makeRepository();
@@ -65,7 +67,7 @@ export async function world(
     relocation: new Relocation({
       profileSecrets: async () => options.profileSecrets ?? [],
       signer: bundleSigner(sourceIdentity),
-      redaction: {
+      redaction: options.redaction ?? {
         read: async work =>
           await work({
             text: text => text,
