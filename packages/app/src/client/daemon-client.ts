@@ -26,9 +26,12 @@ import {
   CARRIER_OUTAGE_CODE,
   DaemonCallError,
   type DaemonTransport,
+  DAEMON_REPLACED_CODE,
+  DAEMON_REPLACED_SENTENCE,
   DEVICE_REFUSED_CODE,
   carrierFateOf,
   isCarrierGone,
+  isDaemonReplaced,
   isDeviceRefusal,
   type SocketListeners,
   type TransportAnswer,
@@ -65,6 +68,11 @@ const GATE_PACKAGE = 'gate';
 
 /** Said when a call died on the carrier, before any answer. */
 const CARRIER_OUTAGE_SENTENCE = 'The connection to this machine was lost before it answered.';
+
+/** Why this client stopped dialling the machine: it ended a session with `4403`, or the walk proved the daemon is another one. */
+export type RefusedWhy = 'refused' | 'replaced';
+const REFUSED: RefusedWhy = 'refused';
+const REPLACED: RefusedWhy = 'replaced';
 
 /**
  * What this client tells the shell's grants cache (shell contract S1) about the answers it sees, so a stale control
@@ -247,7 +255,7 @@ export class DaemonClient {
   /** Bumped by every passkey confirm the shell hears of (S1, R3 m2). */
   #generation = 0;
   readonly #authorityListeners = new Set<(signal: AuthoritySignal) => void>();
-  readonly #refusedListeners = new Set<() => void>();
+  readonly #refusedListeners = new Set<(why: RefusedWhy) => void>();
   #refused = false;
   readonly #rereadAfterMs: readonly number[];
   readonly #bootstrapDeadlineMs: number;
@@ -437,7 +445,7 @@ export class DaemonClient {
    * cleartext word a relay can forge (`docs/relay-protocol.md`), so it is NOT proof the pairing is gone: the shell
    * stops dialling this machine for this page and says so, and deletes nothing. Only the person's own removal unpairs.
    */
-  onRefused(listener: () => void): () => void {
+  onRefused(listener: (why: RefusedWhy) => void): () => void {
     this.#refusedListeners.add(listener);
     return () => this.#refusedListeners.delete(listener);
   }
@@ -495,6 +503,7 @@ export class DaemonClient {
       inventory = inventoryFromAnswer(answer);
     } catch (error) {
       if (isDeviceRefusal(error)) this.#refuse();
+      else if (isDaemonReplaced(error)) this.#refuse(REPLACED);
       inventory = unreadableBecause(error);
     }
     try {
@@ -745,6 +754,10 @@ export class DaemonClient {
       this.#refuse();
       return new DaemonCallError(0, DEVICE_REFUSED_CODE, DEVICE_NOT_ACCEPTED_SENTENCE, undefined, undefined, error);
     }
+    if (isDaemonReplaced(error)) {
+      this.#refuse(REPLACED);
+      return new DaemonCallError(0, DAEMON_REPLACED_CODE, DAEMON_REPLACED_SENTENCE, undefined, undefined, error);
+    }
     if (isCarrierGone(error))
       return new DaemonCallError(
         0,
@@ -758,10 +771,10 @@ export class DaemonClient {
     return error;
   }
 
-  #refuse(): void {
+  #refuse(why: RefusedWhy = REFUSED): void {
     if (this.#refused || this.#stopped) return;
     this.#refused = true;
-    for (const listener of [...this.#refusedListeners]) listener();
+    for (const listener of [...this.#refusedListeners]) listener(why);
   }
 
   #signal(signal: AuthoritySignal): void {

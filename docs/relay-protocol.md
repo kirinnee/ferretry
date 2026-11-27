@@ -183,7 +183,10 @@ WebSocket upgrade on its own listener. **One socket is one session**: on upgrade
 16-byte `sessionId` and sends the client the same `ready` a rendezvous sends (`limits` included), and
 that is the only control frame on the socket — the daemon never sends `challenge`, accepts no
 `claim`, and refuses with `4400` a client that sends any control frame at all. The session's end is
-the socket's close, with the code the session ended with. A wrong `daemonId` is `404`. An upgrade is
+the socket's close, with the code the session ended with. A wrong `daemonId` is answered over the socket, not with an HTTP status a browser
+cannot read: the upgrade is accepted and the socket closed `4404` ("this daemon does not answer for that
+fingerprint"), holding no slot and naming nothing of this daemon's own identity — the words the `404` carried.
+The client reads that as proof of a replaced daemon (§13, "A replaced daemon"). An upgrade is
 ADMITTED before any public-key work is done for it. At most 30 admitted upgrades a minute from one
 peer address (a refused upgrade spends none of them) and at most 2 unproven sockets per remote
 address — the host's own loopback address is exempt, because every tab on it shares one — each answer
@@ -1366,6 +1369,26 @@ chosen by trying it, not by a health check.**
    worked is not remembered** — it served no request, so there is no answer to keep, and a later
    request re-probes. When a remembered winner's transport later fails, that choice is forgotten and
    the next request starts the walk again from the top.
+
+#### A replaced daemon
+
+A machine reinstalled or replaced AT the address a device paired over answers that address with a different
+identity, and the old fingerprint then reaches nobody. A walk that cannot tell this from a machine that is
+asleep retries it forever, so one case is proved and every other stays an outage:
+
+- **The proof** is a `direct` or `tunnel` leg that OPENED and was closed `4404` by the daemon behind it (above).
+  A relay's `4404` ("no daemon holds this rendezvous"), a socket that never opened, a timeout and every other
+  close prove nothing: an asleep or restarting machine says the same, so they keep the backoff and never offer
+  to pair again.
+- **What follows** is the walk ending the session with an INTERNAL replacement verdict (reported locally as
+  `4405`, outside the wire close-code table), and the reconnect loop stopping after that one failure. The
+  shell reads the internal verdict as its own end state, not as a carrier outage and not as `4403` (this browser was removed): one
+  page says the machine was reinstalled or replaced and offers to pair again. Nothing is deleted.
+  A peer's close or control message carrying `4405` cannot populate that verdict and keeps the backoff.
+- **What it cannot prove:** a pairing that only ever reaches the machine through the hosted relay has no direct or
+  tunnel answer to read, so it stays on the backoff. The `4404` is sent to any unauthenticated caller, exactly as
+  the `404` was, and a host on the path can forge it — the cost is a stopped retry and an offer to pair again, never
+  access.
 
 Direct before relay is the protocol's rule. **Within a kind, the daemon's order is the operator's
 preference**, which is the right authority, and a client that re-sorted it would be substituting its
