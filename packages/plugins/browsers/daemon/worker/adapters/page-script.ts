@@ -84,7 +84,7 @@ export function pageScriptExpression(source: string, mark: string | undefined): 
 }
 
 /** The first line of what a script threw, or of why DevTools refused it. */
-function thrown(details: unknown): string {
+async function thrown(details: unknown, mask: (text: string) => string | Promise<string>): Promise<string> {
   const record = details as { exception?: { description?: unknown }; text?: unknown } | undefined;
   const text =
     typeof record?.exception?.description === 'string'
@@ -92,7 +92,7 @@ function thrown(details: unknown): string {
       : typeof record?.text === 'string'
         ? record.text
         : 'the script failed';
-  return `the script threw: ${text.replace(/[\r\n][\s\S]*$/u, '')}`;
+  return `the script threw: ${(await mask(text)).replace(/[\r\n][\s\S]*$/u, '')}`;
 }
 
 /**
@@ -129,6 +129,7 @@ export async function runPageScript(
   cdp: ActableCdp,
   script: PageScript,
   mint: MarkMint,
+  mask: (text: string) => string | Promise<string> = text => text,
 ): Promise<PageScriptResult> {
   const timeout = Math.min(Math.max(script.timeoutMs ?? AGENT_TOOL_DEFAULT_SCRIPT_MS, 1), AGENT_TOOL_MAX_SCRIPT_MS);
   const element = script.target === undefined ? undefined : await browserElementOf(page, script.target);
@@ -157,12 +158,12 @@ export async function runPageScript(
       }),
       timeout,
     )) as { result?: { value?: unknown }; exceptionDetails?: unknown };
-    if (answer.exceptionDetails !== undefined) throw new Error(thrown(answer.exceptionDetails));
+    if (answer.exceptionDetails !== undefined) throw new Error(await thrown(answer.exceptionDetails, mask));
     const value = answer.result?.value;
     const after = await worldOrigin(cdp, world.executionContextId);
     const origin = before !== undefined && before === after ? before : undefined;
     return {
-      text: (typeof value === 'string' ? value : String(value)).slice(0, PAGE_SCRIPT_MAX_RESULT_CHARS),
+      text: (await mask(typeof value === 'string' ? value : String(value))).slice(0, PAGE_SCRIPT_MAX_RESULT_CHARS),
       ...(origin === undefined ? {} : { origin }),
     };
   } finally {

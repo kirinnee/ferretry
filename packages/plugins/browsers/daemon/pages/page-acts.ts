@@ -287,7 +287,11 @@ export async function typeInto(
  * a ref beside every element and the contents of frames. A `find` keeps only the lines that contain the
  * text, case-insensitively — each line carries its own ref, so the agent can act on what it found.
  */
-export async function readPage(page: ActablePage, options: BrowserReadOptions = {}): Promise<string> {
+export async function readPage(
+  page: ActablePage,
+  options: BrowserReadOptions = {},
+  mask: (text: string) => string | Promise<string> = text => text,
+): Promise<string> {
   const mode = options.mode ?? 'text';
   const scope = options.target === undefined ? undefined : await browserElementOf(page, options.target);
   let text: string;
@@ -303,8 +307,9 @@ export async function readPage(page: ActablePage, options: BrowserReadOptions = 
       ...(options.boxes === true ? { boxes: true } : {}),
     };
     text = await (scope ?? page).ariaSnapshot(snapshot);
-    if (options.find !== undefined) text = findSnapshotLines(text, options.find);
   }
+  text = await mask(text);
+  if (mode === 'snapshot' && options.find !== undefined) text = findSnapshotLines(text, options.find);
   return text.slice(0, BROWSER_MAX_READ_CHARS);
 }
 

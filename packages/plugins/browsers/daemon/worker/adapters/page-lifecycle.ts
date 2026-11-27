@@ -28,10 +28,8 @@ import { browserSelectorOf } from '../../pages/page-acts.ts';
  * Like `page-acts.ts`, written against structural ports so each piece is tested with a fake page and no
  * browser. The worker attaches the listeners and hands this module what they report.
  *
- * NOTHING HERE IS SCRUBBED. Text that came from a page (a dialog message, a console line, a URL, a
- * response body) leaves the worker as it is and is scrubbed by the daemon, whose vault knows the secrets.
- * What this module DOES do is drop what no agent may see at all: credential headers, and the user-info
- * of a URL.
+ * The worker supplies capture masks for page text, applied before matching or output limits.
+ * Credential headers and URL user-info are dropped independently of those masks.
  */
 
 /** A page's dialog, as Playwright hands it over. */
@@ -69,7 +67,11 @@ export class PageDialogs {
   private readonly timers: DialogTimers;
   private readonly holdMs: number;
 
-  constructor(timers: DialogTimers = SYSTEM_TIMERS, holdMs: number = BROWSER_DIALOG_HOLD_MS) {
+  constructor(
+    timers: DialogTimers = SYSTEM_TIMERS,
+    holdMs: number = BROWSER_DIALOG_HOLD_MS,
+    private readonly mask: (text: string) => string = text => text,
+  ) {
     this.timers = timers;
     this.holdMs = holdMs;
   }
@@ -81,9 +83,13 @@ export class PageDialogs {
       void older.dialog.dismiss().catch(() => undefined);
     }
     const type = BrowserDialogTypeSchema.safeParse(dialog.type());
+    const message = dialog.message();
     const info: BrowserDialogInfo = {
       type: type.success ? type.data : 'alert',
-      message: dialog.message().slice(0, BROWSER_DIALOG_MESSAGE_MAX_CHARS),
+      message:
+        message.length > BROWSER_DIALOG_MESSAGE_MAX_CHARS
+          ? '[dialog message withheld: exceeds the safe capture limit]'
+          : this.mask(message),
     };
     const timer = this.timers.set(() => {
       void this.answer(key, 'dismiss').catch(() => undefined);
@@ -168,6 +174,7 @@ export interface ConsoleQuery {
 export class ConsoleLog {
   private readonly entries: ConsoleEntry[] = [];
   private seq = 0;
+  constructor(private readonly mask: (text: string) => string = text => text) {}
 
   add(type: string, text: string, location?: { readonly url?: string; readonly lineNumber?: number }): void {
     this.seq += 1;
@@ -175,7 +182,10 @@ export class ConsoleLog {
     this.entries.push({
       seq: this.seq,
       level: consoleLevelOf(type),
-      text: text.slice(0, BROWSER_CONSOLE_MESSAGE_MAX_CHARS),
+      text:
+        text.length > BROWSER_CONSOLE_MESSAGE_MAX_CHARS
+          ? '[console message withheld: exceeds the safe capture limit]'
+          : this.mask(text),
       where: url === '' ? '' : ` (${url}${location?.lineNumber === undefined ? '' : `:${location.lineNumber + 1}`})`,
     });
     if (this.entries.length > BROWSER_CONSOLE_BUFFER) this.entries.shift();
@@ -262,7 +272,12 @@ export class NetworkLog {
   private seq = 0;
   private readonly now: () => number;
 
-  constructor(now: () => number = Date.now) {
+  constructor(
+    now: () => number = Date.now,
+    private readonly mask: (text: string) => string = text => text,
+    private readonly beforeLimit: () => Promise<void> = async () => undefined,
+    private readonly queryAllowed: (text: string) => boolean = text => this.mask(text) === text,
+  ) {
     this.now = now;
   }
 
@@ -303,12 +318,16 @@ export class NetworkLog {
     const entry = this.byRequest.get(request);
     if (entry === undefined) return;
     entry.ms = this.now() - entry.startedAt;
-    entry.failure = errorText.slice(0, 120) || 'failed';
+    entry.failure =
+      errorText.length > 120
+        ? 'failure text withheld: exceeds the safe capture limit'
+        : this.mask(errorText) || 'failed';
   }
 
   list(query: NetworkQuery = {}): string {
+    if (query.filter !== undefined && !this.queryAllowed(query.filter)) return 'no requests recorded';
     const wanted = [...this.entries.values()]
-      .filter(entry => query.filter === undefined || entry.url.includes(query.filter))
+      .filter(entry => query.filter === undefined || this.mask(entry.url).includes(query.filter))
       .filter(entry => query.types === undefined || query.types.includes(entry.type))
       .slice(-BROWSER_NETWORK_LIST_LIMIT);
     if (wanted.length === 0) return 'no requests recorded';
@@ -338,12 +357,17 @@ export class NetworkLog {
       return lines.join('\n');
     }
     const body = await response.body().catch(() => undefined);
+    await this.beforeLimit();
     if (body === undefined) lines.push('(the response body is no longer available)');
     else {
       const clipped = body.byteLength > BROWSER_NETWORK_BODY_MAX_BYTES;
       lines.push(
         '',
-        new TextDecoder().decode(body.subarray(0, BROWSER_NETWORK_BODY_MAX_BYTES)),
+        new TextDecoder().decode(
+          new TextEncoder()
+            .encode(this.mask(new TextDecoder().decode(body)))
+            .subarray(0, BROWSER_NETWORK_BODY_MAX_BYTES),
+        ),
         ...(clipped ? [`(body clipped to ${BROWSER_NETWORK_BODY_MAX_BYTES} bytes of ${body.byteLength})`] : []),
       );
     }
@@ -424,7 +448,14 @@ export async function waitForCondition(
   condition: BrowserWaitCondition,
   timeoutMs: number,
   sleep: Pause = pause,
+  mask: (text: string) => string = text => text,
+  queryAllowed: (text: string) => boolean = text => mask(text) === text,
 ): Promise<boolean> {
+  if (
+    (condition.kind === 'url' && !queryAllowed(condition.url)) ||
+    ((condition.kind === 'text' || condition.kind === 'textGone') && !queryAllowed(condition.text))
+  )
+    return false;
   try {
     if (condition.kind === 'element') {
       await page
@@ -441,7 +472,7 @@ export async function waitForCondition(
       await sleep(Math.min(condition.ms, timeoutMs));
       return true;
     }
-    return await pollFor(page, condition, timeoutMs, sleep);
+    return await pollFor(page, condition, timeoutMs, sleep, mask);
   } catch (error) {
     if (isTimeout(error)) return false;
     throw error;
@@ -453,11 +484,12 @@ async function pollFor(
   condition: Extract<BrowserWaitCondition, { kind: 'text' | 'textGone' | 'url' }>,
   timeoutMs: number,
   sleep: Pause,
+  mask: (text: string) => string,
 ): Promise<boolean> {
   let waited = 0;
   for (;;) {
     if (condition.kind === 'url') {
-      if (page.url().includes(condition.url)) return true;
+      if (mask(page.url()).includes(condition.url)) return true;
     } else {
       const shown = await page
         .locator('body')
@@ -467,7 +499,7 @@ async function pollFor(
           if (isTimeout(error)) return undefined;
           throw error;
         });
-      if (shown !== undefined && shown.includes(condition.text) === (condition.kind === 'text')) return true;
+      if (shown !== undefined && mask(shown).includes(condition.text) === (condition.kind === 'text')) return true;
     }
     if (waited >= timeoutMs) return false;
     const step = Math.min(POLL_MS, timeoutMs - waited);
@@ -608,6 +640,8 @@ export interface LifecycleScope {
   readonly emulation: PageEmulation;
   readonly targets: EmulationTargets;
   readonly sleep?: Pause;
+  readonly mask?: (text: string) => string;
+  readonly queryAllowed?: (text: string) => boolean;
 }
 
 /** Runs one lifecycle request against one page. */
@@ -624,7 +658,14 @@ export async function runLifecycleRequest(
       };
     }
     case 'wait': {
-      const matched = await waitForCondition(scope.page, request.condition, request.timeoutMs, scope.sleep);
+      const matched = await waitForCondition(
+        scope.page,
+        request.condition,
+        request.timeoutMs,
+        scope.sleep,
+        scope.mask,
+        scope.queryAllowed,
+      );
       return { text: matched ? 'condition met' : 'condition not met yet', matched };
     }
     case 'console':
