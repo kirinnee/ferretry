@@ -355,3 +355,80 @@ describe('a native path that points outside the worktree and the home', () => {
     expect(result.text).toContain(`<root>${TARGET_FOLDER}/src</root>`);
   });
 });
+
+describe('the records a move reads field by field', () => {
+  const NEW_ID = '019fab95-ffff-7000-8000-000000000002';
+
+  test('the settings a turn applied move their folder and take the new id in every self field', () => {
+    const applied = {
+      type: 'event_msg',
+      session_id: SOURCE_ID,
+      payload: {
+        type: 'thread_settings_applied',
+        session_id: SOURCE_ID,
+        thread_id: SOURCE_ID,
+        thread_settings: { cwd: `${SOURCE_FOLDER}/src`, workspace_roots: [SOURCE_FOLDER] },
+      },
+    };
+    const result = moved(
+      relocateRollout(source([JSON.stringify(applied)]), { folder: TARGET_FOLDER, home: TARGET_HOME, id: NEW_ID }),
+    );
+    const found = records(result.text).find(record => record.payload.type === 'thread_settings_applied');
+    expect(found?.payload).toMatchObject({
+      session_id: NEW_ID,
+      thread_id: NEW_ID,
+      thread_settings: { cwd: TARGET_FOLDER, workspace_roots: [TARGET_FOLDER] },
+    });
+    expect(result.text).not.toContain(SOURCE_ID);
+  });
+
+  test('a token usage record takes the new id too', () => {
+    const usage = {
+      type: 'token_usage_record',
+      session_id: SOURCE_ID,
+      payload: { session_id: SOURCE_ID, thread_id: SOURCE_ID, total: 7 },
+    };
+    const result = moved(
+      relocateRollout(source([JSON.stringify(usage)]), { folder: TARGET_FOLDER, home: TARGET_HOME, id: NEW_ID }),
+    );
+    expect(records(result.text).find(record => record.type === 'token_usage_record')?.payload).toEqual({
+      session_id: NEW_ID,
+      thread_id: NEW_ID,
+      total: 7,
+    });
+  });
+
+  test('a folder the world state lists outside the work folder is not the work folder and stays as it is', () => {
+    const world = {
+      type: 'world_state',
+      payload: { state: { environments: { filesystem: '<environment><root>/usr/share/dict</root></environment>' } } },
+    };
+    const result = moved(
+      relocateRollout(source([JSON.stringify(world)]), { folder: TARGET_FOLDER, home: TARGET_HOME }),
+    );
+    expect(result.text).toContain('<root>/usr/share/dict</root>');
+  });
+
+  test.each([
+    ['arguments that are not JSON', 'run it now'],
+    ['arguments with no working folder', JSON.stringify({ cmd: 'pwd' })],
+  ])('a command with %s is left exactly as it was said', (_label, said) => {
+    const call = {
+      type: 'response_item',
+      payload: { type: 'function_call', name: 'exec_command', call_id: 'call_plain', arguments: said },
+    };
+    const result = moved(relocateRollout(source([JSON.stringify(call)]), { folder: TARGET_FOLDER, home: TARGET_HOME }));
+    expect(records(result.text).find(record => record.payload.type === 'function_call')?.payload.arguments).toBe(said);
+  });
+
+  test('a rollout with no header is refused', () => {
+    const text = source()
+      .split('\n')
+      .filter(row => !row.includes('"session_meta"'))
+      .join('\n');
+    expect(relocateRollout(text, { folder: TARGET_FOLDER, home: TARGET_HOME })).toMatchObject({
+      kind: 'refused',
+      reason: expect.stringContaining('no header'),
+    });
+  });
+});
