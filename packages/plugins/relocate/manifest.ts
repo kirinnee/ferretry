@@ -1,6 +1,7 @@
 import { ACTIONS_ROW_SLOT, FERRET_LIST_ROW_MARK_SLOT, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { cap } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, route } from '@ferretry/kernel/manifest';
+import { MOVE_SOURCE_GIT_READS } from '@ferretry/kernel/contract';
 import { GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
@@ -145,5 +146,10 @@ export default definePlugin({
 
   // The working tree is read through the `imports` root, scoped to the one folder the ferret works in, and git is run
   // only to list, diff and bundle it.
-  permissions: { roots: ['imports', 'worktrees'], spawn: ['git'] },
+  permissions: {
+    roots: ['imports', 'worktrees'],
+    spawn: ['git'],
+    readOnlySpawn: MOVE_SOURCE_GIT_READS,
+    writePins: [{ root: 'imports', capability: cap('fleet', 'configure').capability }],
+  },
 });

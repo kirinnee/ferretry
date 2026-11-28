@@ -68,7 +68,7 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
     const handle = kernel.roots.root('imports', { subfolder: folder });
     const self = handle.resolve('');
     if (!self.ok) throw new CheckoutError('this folder cannot be fenced for git');
-    const held = await handle.pin(self.value, { fence: 'none' });
+    const held = await handle.pin(self.value, { fence: 'none', write: true });
     try {
       await verify(folder);
       const done = await kernel.spawn.runBytes(

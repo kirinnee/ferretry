@@ -8,9 +8,11 @@ import { type ProjectRepository, WorktreesFile } from '../../../contract/index.t
 import { buildWorktrees } from '../../../daemon/modules/worktrees.ts';
 import type { WorktreeSessionFact } from '../../../daemon/lib/worktrees/service.ts';
 import type { WorktreeRouteKey } from '../../../daemon/lib/runtime/mounts/worktrees.ts';
-import type { FencedPath, FerretId, SpawnBytesOptions } from '@ferretry/kernel/contract';
+import type { FencedPath, FerretId } from '@ferretry/kernel/contract';
 import { bunSpawn } from '../../../../kernel/host/adapters/process.ts';
 import { PinRegistry } from '../../../../kernel/host/pins.ts';
+import { restrictSpawn } from '../../../../kernel/host/permissions.ts';
+import { WORKTREE_GIT_READS } from '@ferretry/kernel/contract';
 import { platformRootPinner } from '../../../../kernel/host/adapters/pinned/index.ts';
 import { nodeFs } from '../../../../kernel/host/adapters/node-fs.ts';
 import { ensureWorktreesBase, rootsPortFor } from '../../../../kernel/host/roots.ts';
@@ -29,16 +31,7 @@ const WORLD_FERRET = 'F1' as FerretId;
 const pins = new PinRegistry(() => platformRootPinner());
 const processes = bunSpawn({ PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' });
 
-const spawn = {
-  runBytes: async (program: string, args: readonly string[], options: SpawnBytesOptions) => {
-    const cwd = options.cwd;
-    const alias = typeof cwd === 'object' ? pins.lookup('ferrets', cwd as never)?.alias : undefined;
-    return await processes.runBytes(program, args, {
-      ...options,
-      cwd: alias === undefined ? cwd : (alias as FencedPath),
-    });
-  },
-};
+const spawn = restrictSpawn('ferrets', ['git'], processes, undefined, pins, undefined, WORKTREE_GIT_READS);
 
 /** `ferret: false` stands NO ferret in the repository: the daemon has nothing but its project registry to reach it by. */
 export interface WorktreeWorldOptions {
