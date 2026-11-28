@@ -331,7 +331,14 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // A derived runtime whose pinned model is gone, or whose pins nobody could read, is refused by name: never moved to the live default.
     if (runtime.refused !== undefined) reasons.push(runtime.refused);
 
-    const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness, loginStores);
+    const store = resolveCredentialStore(
+      runtime.credential,
+      credential,
+      credentialStorePaths,
+      input.kits,
+      harness,
+      loginStores,
+    );
     if ('unavailable' in store)
       reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
     if (store.store === 'environment' && store.problem !== undefined) {
@@ -412,7 +419,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       Object.entries(resolved.env).map(([variable, { value }]) => [variable, value]),
     );
     const env: Record<string, string> = {
-      ...credentialLaunchEnvironment(store),
+      ...credentialLaunchEnvironment(store, input.kits),
       ...derived.env,
       ...profileEnv,
       ...adapted.launchEnv,
