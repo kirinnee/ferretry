@@ -293,46 +293,50 @@ const countsOf = (tab: Page) =>
   );
 
 describe('recovery from real Actions', () => {
-  it('keeps recovery reachable with the target offline, at every size and rounding', async () => {
-    for (const width of WIDTHS)
-      for (const scheme of SCHEMES)
-        for (const style of STYLES) {
-          const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme });
-          try {
-            const tab = await context.newPage();
-            await tab.goto(`${server?.url.origin}/recover?offline=1&scheme=${scheme}&style=${style}`);
-            const entry = tab.getByRole('button', { name: 'Move to another machine…', exact: true });
-            await entry.waitFor({ timeout: 3000 });
-            expect(await countsOf(tab)).toEqual({ held: 0, releases: 0, ceremonies: 0 });
-            await entry.click();
-            await tab.waitForSelector('[data-move-step="pick"]');
-            expect(await tab.getByRole('button', { name: 'Check what would move' }).count()).toBe(0);
-            expect(await tab.locator('[data-move-release]').count()).toBe(0);
-            expect((await countsOf(tab)).held).toBe(0);
-            const shot = async (state: string) => {
-              expect(await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(
-                0,
+  // No other machine to move to (offline, or not paired at all): the entry only opens the recovery check, and says so.
+  for (const variant of ['offline', 'alone'] as const)
+    it(`keeps recovery reachable with no target (${variant}), at every size and rounding`, async () => {
+      for (const width of WIDTHS)
+        for (const scheme of SCHEMES)
+          for (const style of STYLES) {
+            const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme });
+            try {
+              const tab = await context.newPage();
+              await tab.goto(`${server?.url.origin}/recover?${variant}=1&scheme=${scheme}&style=${style}`);
+              const entry = tab.getByRole('button', { name: 'Check for an interrupted move…', exact: true });
+              await entry.waitFor({ timeout: 3000 });
+              expect(await tab.getByRole('button', { name: 'Move to another machine…', exact: true }).count()).toBe(0);
+              expect(await countsOf(tab)).toEqual({ held: 0, releases: 0, ceremonies: 0 });
+              const shot = async (state: string) => {
+                expect(await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(
+                  0,
+                );
+                const misses = await roundSafeMisses(tab);
+                expect(misses.length, describeRoundMisses(misses)).toBe(0);
+                if (shotsDir !== '')
+                  await tab.screenshot({ path: join(shotsDir, `${width}-${scheme}-${style}-${state}.png`) });
+              };
+              await shot(`${variant}-menu`);
+              await entry.click();
+              await tab.waitForSelector('[data-move-step="pick"]');
+              expect(await tab.getByRole('button', { name: 'Check what would move' }).count()).toBe(0);
+              expect(await tab.locator('[data-move-release]').count()).toBe(0);
+              expect((await countsOf(tab)).held).toBe(0);
+              await shot(`${variant}-check`);
+              await tab.getByRole('button', { name: 'Check for an interrupted move', exact: true }).click();
+              await tab.waitForSelector('[data-move-release]');
+              await shot(`${variant}-held`);
+              await tab.getByRole('button', { name: 'Release this move on Desk' }).click();
+              await tab.waitForFunction(() =>
+                document.querySelector('[data-move-release]')?.textContent?.includes('Its move slot is free'),
               );
-              const misses = await roundSafeMisses(tab);
-              expect(misses.length, describeRoundMisses(misses)).toBe(0);
-              if (shotsDir !== '')
-                await tab.screenshot({ path: join(shotsDir, `${width}-${scheme}-${style}-${state}.png`) });
-            };
-            await shot('offline-check');
-            await tab.getByRole('button', { name: 'Check for an interrupted move' }).click();
-            await tab.waitForSelector('[data-move-release]');
-            await shot('offline-held');
-            await tab.getByRole('button', { name: 'Release this move on Desk' }).click();
-            await tab.waitForFunction(() =>
-              document.querySelector('[data-move-release]')?.textContent?.includes('Its move slot is free'),
-            );
-            expect((await countsOf(tab)).releases).toBe(1);
-            await shot('offline-released');
-          } finally {
-            await context.close();
+              expect((await countsOf(tab)).releases).toBe(1);
+              await shot(`${variant}-released`);
+            } finally {
+              await context.close();
+            }
           }
-        }
-  });
+    });
 
   it('asks only on an explicit recovery check in a fresh session; Cancel says why, retry steps up then Releases', async () => {
     const context = await browser.newContext({ viewport: { width: 390, height: 900 } });
@@ -342,7 +346,7 @@ describe('recovery from real Actions', () => {
       await tab.getByRole('button', { name: 'Move to another machine…', exact: true }).click();
       await tab.waitForSelector('[data-move-step="pick"]');
       expect(await countsOf(tab)).toEqual({ held: 0, releases: 0, ceremonies: 0 });
-      const check = tab.getByRole('button', { name: 'Check for an interrupted move' });
+      const check = tab.getByRole('button', { name: 'Check for an interrupted move', exact: true });
       await check.click();
       const prompt = tab.getByRole('dialog', { name: 'Confirm it’s you' });
       await prompt.waitFor({ timeout: 3000 });
@@ -371,7 +375,7 @@ describe('recovery from real Actions', () => {
         const tab = await context.newPage();
         await tab.goto(`${server?.url.origin}/recover?${query}`);
         await tab.getByRole('button', { name: 'Move to another machine…', exact: true }).click();
-        await tab.getByRole('button', { name: 'Check for an interrupted move' }).click();
+        await tab.getByRole('button', { name: 'Check for an interrupted move', exact: true }).click();
         await tab
           .getByText(
             query === 'deny=1'

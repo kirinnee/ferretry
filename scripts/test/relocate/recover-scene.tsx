@@ -109,7 +109,11 @@ const from: DaemonReach = {
   press: async act => await act(),
   hook: () => undefined,
 };
-const rows = [from, { ...from, daemon: TARGET, machine: 'Laptop', online: params.get('offline') !== '1' }];
+// `?alone=1`: no other machine is paired at all. `?offline=1`: one is paired but unreachable.
+const rows =
+  params.get('alone') === '1'
+    ? [from]
+    : [from, { ...from, daemon: TARGET, machine: 'Laptop', online: params.get('offline') !== '1' }];
 const harness = deviceViewHarness({ plugin: 'relocate', fragments: [] });
 harness.setRows(rows);
 const Panel = createMoveMachineRowPanel(client, createMovedStore(client)) as unknown as FC<ActionsRowSlotProps>;
