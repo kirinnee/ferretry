@@ -233,10 +233,10 @@ const FIELD_READ = `function () {
     const buttons = query.call(root, 'button, input[type="submit" i], input[type="image" i]');
     const button = Array.from(buttons).find((button) => button.form === owner && (button instanceof HTMLButtonElement ? button.type === 'submit' : true));
     const own = button ? attr(button, "formaction") : null;
-    if (own !== null && own.trim() !== "") raw = own;
+    if (own !== null) raw = own;
     let action = "";
     try {
-      const url = raw === null || raw.trim() === "" ? new URL(get(Document.prototype, "URL").call(doc)) : new URL(raw, get(Node.prototype, "baseURI").call(doc));
+      const url = raw === null || raw === "" ? new URL(get(Document.prototype, "URL").call(doc)) : new URL(raw, get(Node.prototype, "baseURI").call(doc));
       action = url.href;
     } catch (error) { action = ""; }
     form = { id: clean(attr(owner, "id")), name: clean(attr(owner, "name")), action };
