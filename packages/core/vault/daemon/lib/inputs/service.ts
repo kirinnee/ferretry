@@ -2667,7 +2667,10 @@ export class InputRequestService {
         ? [ACTION_MOVED_FLAG]
         : []),
     ];
-    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
+    const classified = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
+    const fields = classified.map(field =>
+      flags.length === 0 ? field : { ...field, risk: worstRisk([...flags, field.risk]) as InputRisk },
+    );
     // The new picture is taken before the owner is asked again, exactly as at raise.
     const shot =
       seen.facts.kind === 'page'
@@ -2684,8 +2687,8 @@ export class InputRequestService {
       fields,
       sensitivity: strongestSensitivity(fields),
       observed: await this.project(request.sessionId, seen.facts, held.names),
-      risk: pasteRisk(worstRisk([...flags, ...fields.map(field => field.risk)]), copy),
-      risks: [...flags, ...fields.flatMap(field => (field.risk === undefined ? [] : [field.risk]))],
+      risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
+      risks: [...flags, ...classified.flatMap(field => (field.risk === undefined ? [] : [field.risk]))],
       observedDigest: digestFacts(seen.facts),
       ...(shot === undefined ? {} : { pictured: true as const }),
     };
