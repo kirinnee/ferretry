@@ -1,10 +1,12 @@
 import { join } from 'node:path';
 import type { SpawnPort } from '@ferretry/kernel/contract';
-import { agentScopeInPlacement } from '../../lib/cgroups/scope.ts';
-import { hostPid, hostPlatform, readFile, signalProcess } from '../host/fs.ts';
+import { isAgentScope, unifiedCgroupPath } from '../../lib/cgroups/scope.ts';
+import { hostPid, hostPlatform, open, readFile, signalProcess } from '../host/fs.ts';
+import { procStatStartTicks } from '../../lib/protocol/process-incarnation.ts';
 import { processIncarnationFor } from '../session/processes/process-incarnation.ts';
 import { parseProcStat, processTreeFor } from '../session/processes/process-tree.ts';
 import type { PaneProcessHost } from './tmux-runner.ts';
+import type { ProcessSnapshot } from './session-tree-end.ts';
 
 /** More parents than any real process chain has: a cycle or a hostile procfs cannot make the walk run for ever. */
 const MAX_ANCESTORS = 64;
@@ -34,26 +36,48 @@ export async function protectedPidsOf(
 }
 
 /**
- * Every pid in the product's agent scope that `pid` sits in, read from its own placement and that scope's `cgroup.procs`.
- * Only a scope this product named (`agentScopeInPlacement`: its prefix, one path segment) is ever read, so a pid in any other
- * cgroup answers nothing, and so does an unreadable one: a stop must never depend on a scope it cannot prove is its own.
+ * Pin the proc directory before reading anything: both stat and membership then refer to the SAME incarnation, even if
+ * its numeric PID is recycled between reads. An exited proc directory fails to read; it never resolves to the new PID.
  */
+async function processSnapshotOf(pid: number, procRoot = '/proc'): Promise<ProcessSnapshot | undefined> {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return undefined;
+  const directory = await open(join(procRoot, String(pid)), 'r').catch(() => undefined);
+  if (directory === undefined) return undefined;
+  try {
+    const pinned = `/proc/self/fd/${directory.fd}`;
+    const stat = await readFile(join(pinned, 'stat'), 'utf8');
+    const parsed = parseProcStat(stat);
+    const start = procStatStartTicks(stat);
+    const scope = unifiedCgroupPath(await readFile(join(pinned, 'cgroup'), 'utf8'));
+    if (start === undefined || parsed === undefined || scope === undefined || ['Z', 'X'].includes(parsed.state))
+      return undefined;
+    // A process that left during the read is not an enumerated member either.
+    if (procStatStartTicks(await readFile(join(pinned, 'stat'), 'utf8')) !== start) return undefined;
+    return { pid, start, ppid: parsed.ppid, scope };
+  } catch {
+    return undefined;
+  } finally {
+    await directory.close();
+  }
+}
+
+/** Enumerate identities, not bare PIDs, from an already resolved OWN scope. Every membership must match exactly. */
 export async function scopeMembersOf(
-  pid: number,
+  scope: string,
   procRoot = '/proc',
   cgroupRoot = '/sys/fs/cgroup',
-): Promise<readonly number[]> {
-  const placement = await readFile(join(procRoot, String(pid), 'cgroup'), 'utf8').catch(() => undefined);
-  const scope = placement === undefined ? undefined : agentScopeInPlacement(placement);
-  if (placement === undefined || scope === undefined) return [];
-  const line = placement.split('\n').find(row => row.includes(`/${scope}`));
-  const path = line?.slice(line.indexOf('/'), line.indexOf(`/${scope}`) + scope.length + 1);
-  if (path === undefined || path.split('/').includes('..')) return [];
-  const procs = await readFile(join(cgroupRoot, path, 'cgroup.procs'), 'utf8').catch(() => undefined);
-  return (procs ?? '')
-    .split('\n')
-    .map(row => Number(row.trim()))
-    .filter(member => Number.isSafeInteger(member) && member > 0);
+): Promise<readonly ProcessSnapshot[]> {
+  if (unifiedCgroupPath(`0::${scope}`) !== scope || !isAgentScope(scope.split('/').at(-1) ?? '')) return [];
+  const procs = await readFile(join(cgroupRoot, scope, 'cgroup.procs'), 'utf8').catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw error;
+  });
+  const members: ProcessSnapshot[] = [];
+  for (const word of procs.split('\n')) {
+    const member = await processSnapshotOf(Number(word.trim()), procRoot);
+    if (member !== undefined && member.scope === scope) members.push(member);
+  }
+  return members;
 }
 
 /** The machine reads and the one signal behind `TmuxRunner.identify` and `signalDescendant`. */
@@ -65,6 +89,20 @@ export function paneProcessHost(spawn: SpawnPort, platform: string = hostPlatfor
     tree: async root => await tree.tree(root),
     signal: signalProcess,
     protectedPids: async () => await protectedPidsOf(),
-    ...(platform === 'linux' ? { scopeMembers: async (pid: number) => await scopeMembersOf(pid) } : {}),
+    ...(platform === 'linux'
+      ? {
+          processOf: async (pid: number) => await processSnapshotOf(pid),
+          scopeMembers: async (unit: string) => {
+            if (!isAgentScope(unit)) return [];
+            const read = await spawn.run('systemctl', ['--user', 'show', unit, '--property=ControlGroup', '--value']);
+            if (read.exitCode !== 0) {
+              if (/could not be found|not loaded/iu.test(read.stderr)) return [];
+              throw new Error(`could not read the recorded scope ${unit}, so its processes were not proved stopped`);
+            }
+            const path = read.stdout.trim();
+            return path.split('/').at(-1) === unit ? await scopeMembersOf(path) : [];
+          },
+        }
+      : {}),
   };
 }

@@ -2,7 +2,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { protectedPidsOf, scopeMembersOf } from '../../../../daemon/adapters/tmux/pane-process-host.ts';
+import type { SpawnPort } from '@ferretry/kernel/contract';
+import {
+  paneProcessHost,
+  protectedPidsOf,
+  scopeMembersOf,
+} from '../../../../daemon/adapters/tmux/pane-process-host.ts';
+import { agentScopeCommand, agentScopeInCommand } from '../../../../daemon/lib/cgroups/scope.ts';
 
 /** A fake procfs: `/proc/<pid>/stat` with only the fields the parent walk reads (`pid (comm) S ppid …`). */
 const roots: string[] = [];
@@ -41,42 +47,80 @@ describe('protectedPidsOf', () => {
   });
 });
 
-describe('scopeMembersOf (E-309)', () => {
-  const SCOPE = 'ferretry-agent-s1-9f.scope';
-  const PLACEMENT = `0::/user.slice/user-1000.slice/user@1000.service/ferretry_fleet.slice/ferretry_fleet-s1.slice/${SCOPE}\n`;
-
-  /** A fake procfs and cgroup tree: pid 10 sits in `placement`, and `procs` is that cgroup's `cgroup.procs`. */
-  async function world(placement: string, procs: string | undefined, directory = PLACEMENT.slice(3, -1)) {
+describe.skipIf(process.platform !== 'linux')('scopeMembersOf (E-309)', () => {
+  const own = '/user.slice/fleet.slice/ferretry-agent-own-1.scope';
+  const other = '/user.slice/fleet.slice/ferretry-agent-other-1.scope';
+  const stat = (pid: number, start: number, state = 'S') =>
+    `${pid} (a b) ${state} 1 ${Array(17).fill('0').join(' ')} ${start}\n`;
+  async function world() {
     const proc = await mkdtemp(join(tmpdir(), 'fy-scope-proc-'));
     const cgroup = await mkdtemp(join(tmpdir(), 'fy-scope-cg-'));
     roots.push(proc, cgroup);
-    await mkdir(join(proc, '10'), { recursive: true });
-    await writeFile(join(proc, '10', 'cgroup'), placement);
-    if (procs !== undefined) {
-      await mkdir(join(cgroup, directory), { recursive: true });
-      await writeFile(join(cgroup, directory, 'cgroup.procs'), procs);
+    for (const path of [own, other]) {
+      await mkdir(join(cgroup, path), { recursive: true });
+      await writeFile(join(cgroup, path, 'cgroup.procs'), path === own ? '10\n11\n77\n' : '22\n');
+    }
+    for (const pid of [10, 11, 22, 77]) {
+      await mkdir(join(proc, String(pid)), { recursive: true });
+      await writeFile(join(proc, String(pid), 'stat'), stat(pid, pid * 10));
+      await writeFile(join(proc, String(pid), 'cgroup'), `0::${pid === 22 ? other : own}\n`);
     }
     return { proc, cgroup };
   }
 
-  test('is every pid of the agent scope the pid sits in, a reparented helper included', async () => {
-    const { proc, cgroup } = await world(PLACEMENT, '10\n11\n77\n');
-    expect(await scopeMembersOf(10, proc, cgroup)).toEqual([10, 11, 77]);
+  test('enumerates pid AND start with exact membership in the recorded scope, including reparented helpers', async () => {
+    const { proc, cgroup } = await world();
+    expect(await scopeMembersOf(own, proc, cgroup)).toEqual([
+      { pid: 10, ppid: 1, start: 100, scope: own },
+      { pid: 11, ppid: 1, start: 110, scope: own },
+      { pid: 77, ppid: 1, start: 770, scope: own },
+    ]);
   });
 
-  test('is nothing for a pid outside every product scope (a plain service or another unit)', async () => {
-    const { proc, cgroup } = await world('0::/user.slice/user@1000.service/app.slice/x.service\n', '10\n99\n');
-    expect(await scopeMembersOf(10, proc, cgroup)).toEqual([]);
+  test('a stale cgroup.procs PID cannot name a replacement in another scope or a nested cgroup', async () => {
+    const { proc, cgroup } = await world();
+    await writeFile(join(proc, '10', 'cgroup'), `0::${other}\n`);
+    await writeFile(join(proc, '11', 'cgroup'), `0::${own}/nested\n`);
+    expect((await scopeMembersOf(own, proc, cgroup)).map(row => row.pid)).toEqual([77]);
   });
 
-  test('is nothing when the placement or the scope cannot be read', async () => {
-    const { proc, cgroup } = await world(PLACEMENT, undefined);
-    expect(await scopeMembersOf(10, proc, cgroup)).toEqual([]);
-    expect(await scopeMembersOf(404, proc, cgroup)).toEqual([]);
+  test('exited and zombie members are absent, and missing cgroups are empty', async () => {
+    const { proc, cgroup } = await world();
+    await rm(join(proc, '10'), { recursive: true });
+    await writeFile(join(proc, '11', 'stat'), stat(11, 110, 'Z'));
+    expect((await scopeMembersOf(own, proc, cgroup)).map(row => row.pid)).toEqual([77]);
+    expect(await scopeMembersOf('/fleet/ferretry-agent-gone-1.scope', proc, cgroup)).toEqual([]);
   });
 
-  test('reads a scope of this product only, never a path that climbs out of the cgroup tree', async () => {
-    const { proc, cgroup } = await world(`0::/../../etc/${SCOPE}\n`, '10\n');
-    expect(await scopeMembersOf(10, proc, cgroup)).toEqual([]);
+  test('rejects traversal, non-product units and paths below a scope', async () => {
+    const { proc, cgroup } = await world();
+    for (const path of [
+      '/../../etc/ferretry-agent-x-1.scope',
+      '/fleet/x.service',
+      own + '/nested',
+      '/fleet//ferretry-agent-x-1.scope',
+    ])
+      expect(await scopeMembersOf(path, proc, cgroup)).toEqual([]);
   });
+});
+
+test('records only the outer launch wrapper unit, with or without its manager environment', () => {
+  const input = { scope: 'ferretry-agent-own-1.scope', slice: 'own.slice', properties: [], command: ['sh'] };
+  expect(agentScopeInCommand(agentScopeCommand(input))).toBe(input.scope);
+  expect(agentScopeInCommand(agentScopeCommand({ ...input, environment: { XDG_RUNTIME_DIR: '/fake/run' } }))).toBe(
+    input.scope,
+  );
+  expect(agentScopeInCommand(['echo', ...agentScopeCommand(input)])).toBeUndefined();
+  expect(
+    agentScopeInCommand(['systemd-run', '--user', '--scope', '--', 'echo', '--unit=ferretry-agent-other-1.scope']),
+  ).toBeUndefined();
+});
+
+test('a refused manager read cannot silently declare an owned scope empty', async () => {
+  const host = paneProcessHost(
+    { run: async () => ({ exitCode: 1, stdout: '', stderr: 'Failed to connect to bus' }) } as unknown as SpawnPort,
+    'linux',
+  );
+  const read = host.scopeMembers?.('ferretry-agent-own-1.scope');
+  await expect(read).rejects.toThrow('not proved stopped');
 });

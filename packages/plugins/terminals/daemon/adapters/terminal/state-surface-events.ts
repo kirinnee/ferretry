@@ -61,4 +61,21 @@ export class StateTerminalPanes {
     if (!read.ok) throw new Error(read.error.sentence);
     return (read.value ?? EMPTY).panes[ferret];
   }
+
+  async scopeOf(ferret: string): Promise<string | undefined> {
+    const read = await this.state.read(this.file);
+    if (!read.ok) throw new Error(read.error.sentence);
+    return read.value?.scopes?.[ferret];
+  }
+
+  async recordScope(ferret: string, scope: string | undefined): Promise<void> {
+    const updated = await this.state.update(this.file, current => {
+      const document = current ?? EMPTY;
+      const scopes = { ...document.scopes };
+      if (scope === undefined) delete scopes[ferret];
+      else scopes[ferret] = scope;
+      return { ...document, scopes };
+    });
+    if (!updated.ok) throw new Error(updated.error.sentence);
+  }
 }
