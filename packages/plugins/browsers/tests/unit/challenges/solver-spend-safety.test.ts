@@ -50,7 +50,7 @@ function pageWorld(
 ) {
   const vendor = vendorWorld(options);
   const clock = { now: 0 };
-  const widget = { value: { ...WIDGET, pageUrl: String(WIDGET.pageUrl) } };
+  const widget: { value: { kind: 'turnstile'; siteKey: string; pageUrl: string } | undefined } = { value: WIDGET };
   const solving = new CaptchaSolving({
     stealth: () => true,
     solver: {
@@ -142,6 +142,20 @@ describe('MUST 1–5: challenge purchases preserve spend and paid widgets', () =
     await flush();
     expect(world.tasks()).toBe(1);
     expect(await world.ledger.spent()).toBe(COST);
+  });
+
+  test('MUST 3: a missing probe between sightings does not authorize buying the same rejected widget again', async () => {
+    const world = pageWorld({ taken: false });
+    await world.solving.begin('session', 'p0');
+    await flush();
+    world.pageClock.now += 6 * 60_000;
+    world.widget.value = undefined;
+    await world.solving.begin('session', 'p0');
+    world.widget.value = WIDGET;
+    world.pageClock.now += 6 * 60_000;
+    expect(await world.solving.begin('session', 'p0')).toHaveProperty('kind', 'not-solving');
+    await flush();
+    expect(world.tasks()).toBe(1);
   });
 
   test('MUST 4: full paid memory refuses new purchases and keeps its oldest widget', async () => {

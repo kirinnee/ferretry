@@ -393,7 +393,7 @@ export class CaptchaSolving {
       .catch(() => cooling?.solved);
     // A paid answer (accepted or rejected) is never bought again for the unchanged widget, even if probing fails.
     if (cooling?.solved !== undefined) {
-      if (widget !== undefined && sameWidget(cooling.solved, widget)) return cooling.start;
+      if (widget === undefined || sameWidget(cooling.solved, widget)) return cooling.start;
       this.paid.delete(key);
     }
     if (widget === undefined)
