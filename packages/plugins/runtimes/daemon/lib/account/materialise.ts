@@ -53,6 +53,7 @@ import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, Materialise
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../foreign.ts';
+import { harnessKeyOfKind, isKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import {
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
@@ -377,6 +378,13 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     let fixed: FixedLayer | undefined;
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
+    // A Claude runtime is launched only with the launch line its own plugin hands over: without one the WHOLE runtime is
+    // refused by name (never a throw), and every other runtime still publishes.
+    const launchLineMissing = isKind(harness, 'claude') && kit?.wrapper === undefined;
+    if (launchLineMissing) {
+      const unsupported = unsupportedHarnessSentence(harnessKeyOfKind('claude'));
+      if (!reasons.includes(unsupported)) reasons.push(unsupported);
+    }
     const result = fixedLayerOf(
       harness,
       {
@@ -506,7 +514,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         defaultModel: defaultModel ?? undefined,
         // What a ferret started in auto mode gets instead (the wrapper runs it only for FY_SESSION_MODE=auto).
         autonomous:
-          launch === undefined
+          launch === undefined || launchLineMissing
             ? { refusal: result.ok ? '' : result.refusal.message }
             : {
                 args: [...launchPrefix, ...launch.args, ...fixedSettingsArgs],

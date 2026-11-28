@@ -15,6 +15,7 @@ import {
   type RuntimesHarnessKit,
 } from '../../../contract/index.ts';
 import { harnessKits } from '../../../daemon/adapters/profile-components.ts';
+import type { FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
 import { installGroupSpies } from '../../support/group-spies.ts';
 import { REAL_KITS } from '../../support/real-kits.ts';
 
@@ -25,6 +26,10 @@ const { twoHarnessWorld } = await import('../../support/two-harness-world.ts');
 
 const CLAUDE_KIT = REAL_KITS.get('claude') as RuntimesHarnessKit;
 const CODEX_KIT: RuntimesHarnessKit = { command: 'codex' };
+/** Why a runtime of the last published plan cannot start, or `undefined` when it can. */
+const blockedOf = (plan: FleetApplyPlan | undefined, runtime: string): string | undefined =>
+  plan?.manifest.accounts.find(account => account.displayName === runtime)?.unavailableReason ?? undefined;
+
 const GROUPS = ['fixedLayerOf', 'plumbingOf', 'priorServersOf', 'runtimeExtras', 'autonomousPreparation'] as const;
 
 const source = (kit: RuntimesHarnessKit): ProfileComponentSource => ({
@@ -53,16 +58,19 @@ describe('the kit threaded to the groups of a materialisation', () => {
 
   it('should hand a harness whose plugin gives no kit no kit, never another harness one, and refuse its runtime', async () => {
     spies.calls.length = 0;
-    const { service } = twoHarnessWorld({ kits: () => new Map([['codex', CODEX_KIT]] as const) });
-    await expect(service.publishFromFiles()).rejects.toThrow('claude is not supported here');
+    const { service, plans } = twoHarnessWorld({ kits: () => new Map([['codex', CODEX_KIT]] as const) });
+    await service.publishFromFiles();
+    expect(blockedOf(plans.at(-1), 'claude-default')).toContain('claude-code is not supported here');
+    expect(blockedOf(plans.at(-1), 'codex-default') ?? '').not.toContain('not supported here');
     expect(kitsOf('plumbingOf', 'claude')).toEqual([undefined]);
     expect(kitsOf('plumbingOf', 'codex').every(kit => kit === CODEX_KIT)).toBe(true);
   });
 
   it('should hand no group a kit when nothing supplies kits', async () => {
     spies.calls.length = 0;
-    const { service } = twoHarnessWorld({ kits: undefined });
-    await expect(service.publishFromFiles()).rejects.toThrow('is not supported here');
+    const { service, plans } = twoHarnessWorld({ kits: undefined });
+    await service.publishFromFiles();
+    expect(blockedOf(plans.at(-1), 'claude-default')).toContain('claude-code is not supported here');
     expect(spies.calls.length).toBeGreaterThan(0);
     expect(spies.calls.every(call => call.kit === undefined)).toBe(true);
   });
@@ -70,7 +78,7 @@ describe('the kit threaded to the groups of a materialisation', () => {
   it('should give the first plan after a settings source comes online the kit, and the plan before it none', async () => {
     spies.calls.length = 0;
     let online = false;
-    const { service } = twoHarnessWorld({
+    const { service, plans } = twoHarnessWorld({
       kits: () =>
         harnessKits(hook => {
           if (!online) return 'unavailable';
@@ -81,10 +89,12 @@ describe('the kit threaded to the groups of a materialisation', () => {
               : 'unavailable';
         }),
     });
-    await expect(service.publishFromFiles()).rejects.toThrow('claude is not supported here');
+    await service.publishFromFiles();
+    expect(blockedOf(plans.at(-1), 'claude-default')).toContain('claude-code is not supported here');
     expect(kitsOf('plumbingOf', 'claude')).toEqual([undefined]);
     online = true;
     await service.publishFromFiles();
+    expect(blockedOf(plans.at(-1), 'claude-default') ?? '').not.toContain('not supported here');
     for (const group of GROUPS) {
       expect(kitsOf(group, 'claude').at(-1)).toBe(CLAUDE_KIT);
       expect(kitsOf(group, 'codex').at(-1)).toBe(CODEX_KIT);

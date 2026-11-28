@@ -22,6 +22,7 @@
 import { type SecretName, secretReferencesIn } from '@ferretry/core-vault/contract';
 import {
   binaryName,
+  CLAUDE_NO_QUESTIONS_FLAG,
   CODEX_QUESTIONS_OFF_OVERRIDE,
   BROWSER_INSTRUCTION,
   BROWSER_STEALTH_ENV,
@@ -409,9 +410,10 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
   const { kit } = input;
   const defaults = defaultModelArgs(input.harness, input.defaultModel, kit);
   // What the wrapper supplies itself (the question tool's flag), so the exec line does not repeat the fixed layer's copy.
+  // Claude's plugin names its own; every other harness drops the same flag as before, since a Codex settings component may carry it.
   const supplied = byHarness<readonly string[]>(input.harness, {
     claude: () => wrapperOf(input.harness, kit).suppliedArguments ?? [],
-    codex: () => [],
+    codex: () => [CLAUDE_NO_QUESTIONS_FLAG],
   });
   const execLine = (launchArguments: readonly string[], withSections: boolean): string => {
     const args = [...defaults, ...launchArguments]
