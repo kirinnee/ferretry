@@ -862,7 +862,15 @@ export class CarrierRouter {
       },
       // A request was lost with the carrier under an accepted session: it stopped carrying, so the winner it was is
       // forgotten and the change announced (today's request path). An idle drop never reaches here.
-      lost: (method: ConnectionMethod) => forget(this.#holding(daemonId, walked.generation), method),
+      lost: (method: ConnectionMethod) => {
+        const entry = this.#holding(daemonId, walked.generation);
+        forget(entry, method);
+        if (entry !== undefined && decides)
+          this.deps.health?.outage(
+            daemonId,
+            carrierOutage([{ method, code: 1006, reason: 'the connection was lost', opened: true }]),
+          );
+      },
       dropped: (
         method: ConnectionMethod,
         end: Parameters<NonNullable<CarrierRouterDependencies['drops']>['dropped']>[3],

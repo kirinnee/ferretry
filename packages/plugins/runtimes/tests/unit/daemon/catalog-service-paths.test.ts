@@ -23,6 +23,7 @@ import {
 } from '../../../daemon/lib/service/catalog-service.ts';
 import { FleetApplyFailureError, type FleetApplyCommittedState } from '../../../daemon/lib/provisioning.ts';
 import type { RuntimeSessionRecord } from '../../../daemon/lib/service/runtime-sessions.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const NOW = 1_794_052_800_000;
 
@@ -140,6 +141,7 @@ function world(options: Options = {}) {
     layout: LAYOUT,
     claudeStatusline: () => "'fy' statusline",
     fyCommand: '/opt/ferretry/bin/fy',
+    kits: () => REAL_KITS,
     provisioner: {
       preview: options.preview ?? (async plan => ({ ...plan, sharedHistory: [] })),
       apply:

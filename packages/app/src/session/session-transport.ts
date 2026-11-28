@@ -46,8 +46,8 @@ import {
 export interface CarrierSocketEvents {
   readonly onBinary: (bytes: Uint8Array) => void;
   readonly onText: (text: string) => void;
-  /** `identityReplaced` is the walk's local proof, never a field read from a peer. */
-  readonly onClose: (code: number, reason: string, identityReplaced?: true) => void;
+  /** Replacement and pairing/preference fences are local verdicts, never fields read from a peer. */
+  readonly onClose: (code: number, reason: string, identityReplaced?: true, localFence?: true) => void;
   /** This socket carries one live stream (an event or terminal stream), not request sessions. */
   readonly stream?: boolean;
 }
@@ -213,7 +213,7 @@ function openSession(
   const socket = dial({
     onBinary: bytes => void session?.receiveBinary(bytes),
     onText: text => session?.receiveText(text),
-    onClose: (code, reason, replaced) => session?.carrierClosed(code, reason, replaced),
+    onClose: (code, reason, replaced, localFence) => session?.carrierClosed(code, reason, replaced, localFence),
     ...(mode.kind === 'stream' ? { stream: true } : {}),
   });
   session = new RelayClientSession({

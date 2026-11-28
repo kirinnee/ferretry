@@ -530,6 +530,8 @@ export class BrowserEnd {
   /** Every frame's bytes as the carrier (and so a relay) saw them. */
   readonly wire: Uint8Array[] = [];
   end: SessionEnd | undefined;
+  /** The carrier's public teardown, separate from the authenticated daemon verdict. */
+  carrierEnd: SessionEnd | undefined;
   #channel: session.ChannelState | undefined;
   #transcript: Uint8Array | undefined;
   #hello: session.SessionFrame | undefined;
@@ -669,20 +671,22 @@ export class BrowserEnd {
    * {@link WAIT_ROUNDS} quiet rounds (a count of rounds, not a clock), so a daemon that never answers still fails.
    */
   async pump(until?: () => boolean): Promise<void> {
-    const patience = until === undefined ? QUIET_ROUNDS : WAIT_ROUNDS;
+    let patience = until === undefined ? QUIET_ROUNDS : WAIT_ROUNDS;
     let idle = 0;
     while (idle < patience && this.end === undefined) {
       await settle(4);
       let pulled = false;
       for (let next = this.link.outbound.next(); next !== undefined; next = this.link.outbound.next()) {
         if (isSessionEnd(next)) {
-          this.end = next;
+          this.carrierEnd = next;
+          this.end ??= next;
           return;
         }
         pulled = true;
         await this.#receive(next.bytes);
       }
-      if (until?.() === true) return;
+      // A terminal seal may be queued behind the answer: drain it before returning the latched outcome.
+      if (until?.() === true) patience = QUIET_ROUNDS;
       if (pulled) idle = 0;
       else {
         idle += 1;
@@ -727,7 +731,15 @@ export class BrowserEnd {
     this.#window = session.recordConsumed(this.#window);
     this.#credit();
     const text = session.utf8Text(opened.plaintext) ?? '';
-    this.records.push({ message: JSON.parse(text) as Record<string, unknown>, bytes: opened.plaintext.length, text });
+    const message = JSON.parse(text) as Record<string, unknown>;
+    if (
+      message.t === 'session-end' &&
+      message.protocol === session.SESSION_PROTOCOL_ID &&
+      typeof message.code === 'number' &&
+      typeof message.reason === 'string'
+    ) {
+      this.end = { code: message.code, reason: message.reason };
+    } else this.records.push({ message, bytes: opened.plaintext.length, text });
   }
 
   last(t: string): Received | undefined {

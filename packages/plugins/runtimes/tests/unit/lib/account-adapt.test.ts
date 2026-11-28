@@ -21,6 +21,7 @@ import { type ResolvedProfile, resolveProfile } from '../../../daemon/lib/accoun
 import { type AccountModelDocument, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { HarnessKind } from '../../../daemon/lib/manifest.ts';
 import type { SettingsObject } from '../../../daemon/lib/settings.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 type Components = NonNullable<AccountModelDocument['components']>;
 
@@ -54,6 +55,7 @@ const adapt = (
   adaptProfile({
     resolved: resolve(harness, components, layers, options.settingsBodies),
     plumbing: options.plumbing ?? plumbingFor(harness),
+    kit: options.kit ?? REAL_KITS.get(harness),
     ...(options.bodies ? { bodies: options.bodies } : {}),
     ...(options.settings ? { settings: options.settings } : {}),
   });
