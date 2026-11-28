@@ -46,6 +46,8 @@ describe('whole-word encoded scanning before additional path masking', () => {
   it.each([
     ['png', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='],
     ['gif', 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'],
+    // small/webp.webp's VP8L image with a standard ignorable RIFF JUNK chunk.
+    ['webp', 'UklGRioAAABXRUJQVlA4TAYAAAAvQWxvAGtKVU5LEAAAAAAAAAAAAAAAAAAAAAAAAAA='],
     // Public 1x1 JPEG fixture: https://github.com/mathiasbynens/small/blob/master/jpeg.jpg
     [
       'jpeg',
