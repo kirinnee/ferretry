@@ -38,7 +38,10 @@ describe('autonomousPreparation', () => {
   });
 
   it('should have Claude seed its first run and trust no folder', () => {
-    expect(autonomousPreparation('claude')).toEqual({ seedFirstRun: true, trustLaunchFolder: false });
+    expect(autonomousPreparation('claude', REAL_KITS.get('claude'))).toEqual({
+      seedFirstRun: true,
+      trustLaunchFolder: false,
+    });
   });
 });
 
