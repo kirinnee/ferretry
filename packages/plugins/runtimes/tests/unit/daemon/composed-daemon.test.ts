@@ -1026,6 +1026,7 @@ describe('the default composition stands in for the services and keeps a broken 
     const world = await fleetWorld();
     const host = await testHost({
       plugins: [
+        ...settingsOwners(),
         runtimesDaemon(ctx =>
           hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
         ) as DaemonImplementation<any>,
@@ -1053,7 +1054,7 @@ describe('the default composition stands in for the services and keeps a broken 
     codexEnded(ferrets);
     const world = await fleetWorld();
     const host = await testHost({
-      plugins: [runtimesDaemon(brokenFleet(world.roots)) as DaemonImplementation<any>],
+      plugins: [...settingsOwners(), runtimesDaemon(brokenFleet(world.roots)) as DaemonImplementation<any>],
       fakes: {
         ferrets,
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),

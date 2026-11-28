@@ -4,6 +4,8 @@
  */
 import type { RuntimesHarnessKit } from '@ferretry/plugin-runtimes/contract';
 import { codexCredentialsKit } from './credentials.ts';
+import { codexEndKit } from './end.ts';
+import { codexExtrasKit } from './extras.ts';
 import { codexFixedLayerKit } from './fixed-layer.ts';
 import { codexImportKit } from './import.ts';
 import { codexMcpKit } from './mcp.ts';
@@ -16,5 +18,7 @@ export const codexRuntimesKit: RuntimesHarnessKit = {
   ...codexMcpKit,
   ...codexWrapperKit,
   ...codexImportKit,
+  ...codexExtrasKit,
+  ...codexEndKit,
   ...codexWordsKit,
 };

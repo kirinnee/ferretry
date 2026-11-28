@@ -46,7 +46,6 @@ import {
   type HarnessKind,
 } from '../manifest.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
-import { CODEX_CATALOG_FORMAT, CODEX_MODEL_CATALOG_FILE } from '../models/codex-catalog.ts';
 import { type RuntimeModels, runtimeModels } from '../models/runtime.ts';
 import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
@@ -381,8 +380,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     let fixed: FixedLayer | undefined;
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
-    // A Claude runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    // ...and so is a runtime of either harness whose kit gives no launch line (E-276 PR 8, PR 9), in the same words.
+    // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
+    // ...and so is one of either harness whose kit gives no launch line (E-276 PR 8, PR 9), in the same words.
     const kitMissing: KitRefusal | undefined =
       missingKitRefusal(harness, kit) ??
       (kit?.wrapper === undefined
@@ -472,7 +471,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       kit,
     );
     Object.assign(env, extras.env);
-    const codexCatalog = extras.catalog?.text;
+    const codexCatalog = extras.catalog;
 
     // An unavailable runtime for want of its kit writes nothing into its home.
     if (kitMissing === undefined)
@@ -555,7 +554,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       wrapper,
       models,
       ...(modelCatalog === undefined ? {} : { modelCatalog }),
-      ...(codexCatalog === undefined ? {} : { codexCatalog: CODEX_CATALOG_FORMAT }),
+      ...(codexCatalog === undefined ? {} : { codexCatalog: codexCatalog.format }),
       defaultModel,
       ...(compactAt === undefined ? {} : { compactAt }),
       secretEnv: sorted(
@@ -645,8 +644,8 @@ interface ConfigDirectoryInput {
   readonly overlay: SettingsObject | undefined;
   /** The text of the rules file a Codex agent runtime's home holds (`rules/ferretry.rules`: the commands it forbids). */
   readonly codexRules: string | undefined;
-  /** The text of the model catalog file a Codex runtime on a third-party provider reads. */
-  readonly codexCatalog: string | undefined;
+  /** The model catalog file a Codex runtime on a third-party provider reads: its name and text. */
+  readonly codexCatalog: { readonly file: string; readonly text: string } | undefined;
   readonly credentialLink: ReturnType<typeof codexCredentialLink>;
   readonly layout: FleetLayout;
 }
@@ -676,7 +675,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       keep: [
         MATERIALISED_RECORD_FILE,
         ...(input.overlay === undefined ? [] : [FIXED_SETTINGS_FILE]),
-        ...(input.codexCatalog === undefined ? [] : [CODEX_MODEL_CATALOG_FILE]),
+        ...(input.codexCatalog === undefined ? [] : [input.codexCatalog.file]),
       ],
       record,
       recordedAs: RUNTIME_STATE_DIRECTORY,
@@ -759,10 +758,10 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
   if (input.codexCatalog !== undefined) {
     operations.push({
       kind: 'file',
-      path: joinPath(state, CODEX_MODEL_CATALOG_FILE),
-      content: input.codexCatalog,
+      path: joinPath(state, input.codexCatalog.file),
+      content: input.codexCatalog.text,
       mode: PRIVATE_FILE_MODE,
-      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`, byName: true },
+      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${input.codexCatalog.file}`, byName: true },
     });
   }
   if (input.credentialLink !== undefined) {
@@ -785,7 +784,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       ...new Set([
         ...[...ownEntries, ...skillEntries].map(entry => entry.dest),
         ...(input.overlay === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`]),
-        ...(input.codexCatalog === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`]),
+        ...(input.codexCatalog === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${input.codexCatalog.file}`]),
         ...(input.codexRules === undefined ? [] : [CODEX_KILL_RULES_FILE]),
         ...(input.credentialLink === undefined ? [] : [CODEX_CREDENTIAL_FILE]),
       ]),

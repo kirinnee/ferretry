@@ -21,6 +21,7 @@ import { profileSecretNames } from './lib/service/profile-references.ts';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import {
   INSTRUCTION_ITEMS,
+  type KitEndHost,
   MODEL_SET_ITEMS,
   PROFILE_COMPONENTS_KEY,
   PROFILE_ITEMS,
@@ -42,7 +43,7 @@ import {
 import manifest from '../manifest.ts';
 import type { HarnessKind } from './lib/manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
-import { PROFILE_COMPONENT_SOURCE_HOOKS } from './adapters/profile-components.ts';
+import { harnessKits, PROFILE_COMPONENT_SOURCE_HOOKS } from './adapters/profile-components.ts';
 import {
   endedSeams,
   fileAssembly,
@@ -67,7 +68,7 @@ import { loginUsers } from './lib/service/login-users.ts';
 import { fleetFromFiles } from './lib/service/fleet-from-files.ts';
 import { createProfileLayers } from './lib/service/profile-layers.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
-import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
+import { RuntimeEnd } from './lib/service/runtime-end.ts';
 import type { FleetSetupService } from './lib/service/setup-service.ts';
 import { ferretRuntimeRoutes } from './routes/ferret-runtime.ts';
 import { fleetCatalogRoutes } from './routes/fleet-catalog.ts';
@@ -99,7 +100,7 @@ export interface RuntimesAssembly {
    * What an ended Codex ferret's follow-up stands on: the app-server supervisor, a runtime's published wrapper and the
    * dead pane's last screen. Absent until the host offers the process and pane seams; the subscriber then does nothing.
    */
-  readonly ended?: RuntimeEndSeams;
+  readonly ended?: KitEndHost;
   /** The harness homes the fleet published and a reader of one. Absent: no homes (the fail-closed fallback). */
   readonly homes?: RuntimeHomesApi;
   /**
@@ -534,9 +535,10 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       });
 
       // Ferrets never calls a plugin (§2.1): Runtimes hears that a ferret stopped and looks after its own runtime.
-      const ending = new RuntimeEndSupervision({
+      const ending = new RuntimeEnd({
         ferrets: ctx.needs.ferrets,
-        seams: assembly.ended,
+        host: assembly.ended,
+        kits: () => harnessKits(hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY)),
         warn: message => {
           ctx.kernel.log.warn(message);
         },
