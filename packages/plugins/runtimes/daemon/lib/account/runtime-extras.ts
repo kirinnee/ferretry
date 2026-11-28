@@ -3,16 +3,11 @@
  * `./materialise.ts`: the environment and the files only one harness's runtime has.
  *
  * Codex keeps its history in a SQLite home shared by every runtime on it, and lists the models of a login whose provider it
- * does not know from a catalog file Ferretry writes (docs/model-catalog.md). Claude adds nothing here.
+ * does not know from a catalog file Ferretry writes (docs/model-catalog.md); the Codex plugin's kit says both. Claude adds
+ * nothing here.
  */
-import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
+import type { KitExtras, RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import { byHarness, isKind } from '../harness-kind.ts';
-import {
-  CODEX_MODEL_CATALOG_FILE,
-  codexCatalogArguments,
-  codexCatalogModels,
-  renderCodexModelCatalog,
-} from '../models/codex-catalog.ts';
 import type { RuntimeModels } from '../models/runtime.ts';
 import { joinPath } from '../paths.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -25,19 +20,11 @@ export const sqliteHomeOf = (fleetDirectory: string): string =>
 /** Whether runtimes of `harness` keep their state in {@link sqliteHomeOf}, so the directory has to exist. */
 export const usesSqliteHome = (harness: string): boolean => isKind(harness, 'codex');
 
-/** The model catalog file one runtime is launched with. */
-interface RuntimeCatalogFile {
-  readonly text: string;
-  /** The path the launch flag names. */
-  readonly path: string;
-  readonly args: readonly string[];
-}
-
 export interface RuntimeExtras {
   /** Variables the runtime's launch environment adds. */
   readonly env: Readonly<Record<string, string>>;
   /** The catalog file the runtime reads, when the login's models need one. */
-  readonly catalog?: RuntimeCatalogFile;
+  readonly catalog?: KitExtras['catalog'];
 }
 
 /**
@@ -53,23 +40,24 @@ export function runtimeExtras(
     readonly derived: RuntimeModels;
     readonly settings: SettingsObject;
   },
-  _kit?: RuntimesHarnessKit,
+  kit?: RuntimesHarnessKit,
 ): RuntimeExtras {
   return byHarness<RuntimeExtras>(harness, {
     claude: () => ({ env: {} }),
     codex: () => {
-      const models = codexCatalogModels(input.derived);
-      if (models === undefined || 'model_catalog_json' in input.settings)
-        return { env: { CODEX_SQLITE_HOME: input.sqliteHome } };
-      const path = joinPath(input.statePath, CODEX_MODEL_CATALOG_FILE);
-      return {
-        env: { CODEX_SQLITE_HOME: input.sqliteHome },
-        catalog: {
-          text: renderCodexModelCatalog(models, input.derived.default),
-          path,
-          args: codexCatalogArguments(path),
+      // No kit (the plugin is off): Codex's variables and files are never guessed. The caller has already refused the runtime
+      // (`missingKitRefusal`) and plans nothing for it.
+      if (kit?.runtimeExtras === undefined) return { env: {} };
+      return kit.runtimeExtras({
+        sqliteHome: input.sqliteHome,
+        statePath: input.statePath,
+        models: {
+          ...(input.derived.catalog === undefined ? {} : { catalog: input.derived.catalog }),
+          entries: input.derived.models,
+          default: input.derived.default,
         },
-      };
+        settings: input.settings,
+      });
     },
   });
 }

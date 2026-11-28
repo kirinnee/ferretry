@@ -50,6 +50,47 @@ const f = fixture([
 ]);
 afterAll(() => f.dispose());
 
+const MOVED = [
+  ['tests/unit/golden/supervision.golden.test.ts', 'codex-runtime'],
+  ['tests/unit/golden/supervision.golden.test.ts', 'runtime-end-supervision'],
+  ['tests/unit/golden/mcp.golden.test.ts', 'model-catalog'],
+] as const;
+const movedImport = (module: string, path = 'tests/unit/golden/x.test.ts') =>
+  `import '${'../'.repeat(path.split('/').length)}codex/daemon/lib/runtimes-kit/${module}.ts';\n`;
+const moved = fixture([
+  {
+    id: 'runtimes',
+    files: {
+      ...Object.fromEntries(MOVED.map(([path, module]) => [path, movedImport(module, path)])),
+      // Right file, wrong module: not named.
+      'tests/unit/golden/mcp-extra.golden.test.ts': movedImport(
+        'model-catalog',
+        'tests/unit/golden/mcp-extra.golden.test.ts',
+      ),
+      'tests/unit/lib/other.test.ts': movedImport('codex-runtime', 'tests/unit/lib/other.test.ts'),
+    },
+  },
+  {
+    id: 'codex',
+    files: Object.fromEntries(
+      ['codex-runtime', 'runtime-end-supervision', 'model-catalog'].map(m => [
+        `daemon/lib/runtimes-kit/${m}.ts`,
+        'export {};\n',
+      ]),
+    ),
+  },
+]);
+afterAll(() => moved.dispose());
+
+test('only the two named goldens may import only the three moved Codex modules', async () => {
+  const findings = await check.run(contextFor(moved.root, { base: 'file:/nonexistent/ports-pending.json' }));
+  const found = findings.map(finding => `${finding.where}: ${finding.message}`).join('\n');
+  for (const [path] of MOVED) expect(found).not.toContain(`runtimes/${path}:`);
+  expect(found).toContain('runtimes/tests/unit/golden/mcp-extra.golden.test.ts:');
+  expect(found).toContain('runtimes/tests/unit/lib/other.test.ts:');
+  expect(findings).toHaveLength(2);
+});
+
 test('only the named Runtimes integration proofs may import the two real kit entry points', async () => {
   const findings = await check.run(contextFor(f.root, { base: 'file:/nonexistent/ports-pending.json' }));
   const found = findings.map(finding => `${finding.where}: ${finding.message}`).join('\n');

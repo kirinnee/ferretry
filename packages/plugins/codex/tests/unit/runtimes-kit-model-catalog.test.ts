@@ -5,8 +5,12 @@ import {
   codexCatalogArguments,
   codexCatalogModels,
   renderCodexModelCatalog,
-} from '../../../daemon/lib/models/codex-catalog.ts';
-import type { RuntimeModelEntry, RuntimeModels } from '../../../daemon/lib/models/runtime.ts';
+} from '../../daemon/lib/runtimes-kit/model-catalog.ts';
+import type { KitExtrasInput, KitRuntimeModel } from '@ferretry/plugin-runtimes/contract';
+import { codexRuntimesKit } from '../../daemon/lib/runtimes-kit/index.ts';
+
+type RuntimeModelEntry = KitRuntimeModel;
+type RuntimeModels = KitExtrasInput['models'];
 
 const entry = (id: string, extra: Partial<RuntimeModelEntry> = {}): RuntimeModelEntry => ({
   id,
@@ -78,23 +82,53 @@ describe('the model catalog file a Codex runtime on a third-party provider reads
   });
 
   it('keeps Codex’s own list for a login with no catalog, a catalog Codex knows, or no usable model', () => {
-    const source = (id: string) => ({ id, label: id, origin: 'file' as const, customIds: false, docs: '' });
+    const source = (id: string) => ({ id });
     const derived = (overrides: Partial<RuntimeModels>): RuntimeModels => ({
-      models: [],
+      entries: [],
       default: undefined,
-      env: {},
       ...overrides,
     });
     const usable = entry('ok');
-    expect(codexCatalogModels(derived({ models: [usable] }))).toBeUndefined();
+    expect(codexCatalogModels(derived({ entries: [usable] }))).toBeUndefined();
     for (const known of ['openai', 'azure-openai']) {
-      expect(codexCatalogModels(derived({ catalog: source(known), models: [usable] }))).toBeUndefined();
+      expect(codexCatalogModels(derived({ catalog: source(known), entries: [usable] }))).toBeUndefined();
     }
     expect(
-      codexCatalogModels(derived({ catalog: source('acme'), models: [entry('gone', { available: false })] })),
+      codexCatalogModels(derived({ catalog: source('acme'), entries: [entry('gone', { available: false })] })),
     ).toBeUndefined();
     expect(
-      codexCatalogModels(derived({ catalog: source('acme'), models: [usable, entry('gone', { available: false })] })),
+      codexCatalogModels(derived({ catalog: source('acme'), entries: [usable, entry('gone', { available: false })] })),
     ).toEqual([usable]);
+  });
+});
+
+describe('the Codex kit’s runtime extras', () => {
+  const input = (models: KitExtrasInput['models'], settings: Record<string, unknown> = {}): KitExtrasInput => ({
+    sqliteHome: '/fy/fleet/history/codex/sqlite',
+    statePath: '/fy/fleet/homes/a/.fy',
+    models,
+    settings,
+  });
+  const acme = { catalog: { id: 'acme' }, entries: [entry('a'), entry('b')], default: 'b' };
+
+  it('always points Codex at the shared history database', () => {
+    expect(codexRuntimesKit.runtimeExtras?.(input({ entries: [], default: undefined }))).toEqual({
+      env: { CODEX_SQLITE_HOME: '/fy/fleet/history/codex/sqlite' },
+    });
+  });
+
+  it('writes the login’s own model catalog, launching with the default model first', () => {
+    const extras = codexRuntimesKit.runtimeExtras?.(input(acme));
+    expect(extras?.catalog?.file).toBe(CODEX_MODEL_CATALOG_FILE);
+    expect(extras?.catalog?.format).toBe(CODEX_CATALOG_FORMAT);
+    expect(extras?.catalog?.path).toBe(`/fy/fleet/homes/a/.fy/${CODEX_MODEL_CATALOG_FILE}`);
+    expect(extras?.catalog?.args).toEqual(codexCatalogArguments(extras?.catalog?.path ?? ''));
+    expect(extras?.catalog?.text).toBe(renderCodexModelCatalog(acme.entries, 'b'));
+  });
+
+  it('leaves a person’s own model_catalog_json alone', () => {
+    expect(
+      codexRuntimesKit.runtimeExtras?.(input(acme, { model_catalog_json: '/mine.json' }))?.catalog,
+    ).toBeUndefined();
   });
 });
