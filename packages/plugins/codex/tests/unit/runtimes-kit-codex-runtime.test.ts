@@ -14,6 +14,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import { type TestProcess, testHost, testProcessTable } from '@ferretry/kernel/testing';
+import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import should from 'should';
 import {
   type CodexAppServerHost,
@@ -22,8 +23,7 @@ import {
   codexRuntimeHome,
   parseCodexPidFile,
   runtimeHomeId,
-} from '../../../daemon/lib/service/codex-runtime.ts';
-import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '../../../contract/codex-launch.ts';
+} from '../../daemon/lib/runtimes-kit/codex-runtime.ts';
 
 const HOMES = '/fleet/homes';
 const ID = 'codex-a';
