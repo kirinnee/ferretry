@@ -47,6 +47,16 @@ export function readOnlySpawnAllows(
 ): boolean {
   if (!Array.isArray(declared) || !Array.from(declared).every(valid)) return false;
   return declared.some((entry: ReadOnlySpawnEntry) => {
+    // Git can write traces or override configuration through otherwise unrelated environment keys.
+    const expectedEnv = typeof entry === 'string' ? undefined : entry.env;
+    if (
+      Object.entries(env ?? {}).some(
+        ([key, value]) =>
+          key.startsWith('GIT_') &&
+          (expectedEnv === undefined || !Object.hasOwn(expectedEnv, key) || expectedEnv[key] !== value),
+      )
+    )
+      return false;
     if (typeof entry === 'string') return programAmong([entry], program);
     if (!programAmong([entry.program], program)) return false;
     if (entry.rest === undefined ? args.length !== entry.args.length : args.length < entry.args.length) return false;

@@ -68,7 +68,8 @@ The route still performs its usual confirmation; this extra check rechecks curre
 spending a second confirmation. It is repeated when the write pin is used, so retaining an owner's pin cannot
 lend that authority to a later read-only caller.
 
-An authenticated ungoverned host caller is allowed. A use-only device, missing standing, an unbound or throwing
+An authenticated ungoverned host caller with request governance is allowed. Even loopback is refused when its
+standing has no governance. A use-only device, missing standing, an unbound or throwing
 judge, or undetermined live grants is refused. A job has no request standing and cannot acquire an explicit write
 pin. `HeldRoot.withWritePin` makes the same explicit request for a scoped token on the descriptor already held:
 it verifies the original folder's identity, retains that descriptor through the operation, and revokes the token

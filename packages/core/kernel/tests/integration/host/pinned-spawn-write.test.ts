@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err, ok } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -56,10 +56,11 @@ async function fixture(access: 'read' | 'write' | 'undetermined', readOnlySpawn?
     undefined,
     readOnlySpawn,
   );
-  return { folder, held, spawn };
+  return { parent, folder, held, spawn, pins };
 }
 
 const mutate = ['-c', 'printf changed > kept.txt; printf new > created.txt'];
+const gitEnv = { GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1' };
 async function invoke(
   spawn: SpawnPort,
   method: 'run' | 'runBytes' | 'start',
@@ -74,6 +75,107 @@ async function invoke(
 }
 
 describe('SEC-K1: a pinned program needs the root’s write authority', () => {
+  for (const method of ['run', 'runBytes', 'start'] as const) {
+    for (const extra of ['trace', 'config'] as const) {
+      test(`SEC-K1b: ${method} undeclared Git ${extra} environment refuses before a read writes`, async () => {
+        const f = await fixture('read', WORKTREE_GIT_READS);
+        try {
+          const env = {
+            ...gitEnv,
+            ...(extra === 'trace'
+              ? { GIT_TRACE: `${f.folder}/trace.log` }
+              : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'core.pager', GIT_CONFIG_VALUE_0: 'injected' }),
+          };
+          const call = async () => {
+            const result = f.spawn[method]('git', [...HARDENED_GIT_ARGUMENTS, 'rev-parse', '--is-inside-work-tree'], {
+              cwd: f.held.policyCwd,
+              env,
+            });
+            if ('exited' in result) await result.exited;
+            else await result;
+          };
+          const refused = await call().then(
+            () => undefined,
+            error => error,
+          );
+          expect(await readdir(f.folder)).toEqual(['kept.txt']);
+          expect(refused).toMatchObject({ code: 'pin_write_required' });
+        } finally {
+          await f.held.close();
+        }
+      });
+    }
+  }
+
+  test('SEC-K1b: Git global paths stay inside the pin, including after symlinks and chained -C', async () => {
+    const f = await fixture('read', WORKTREE_GIT_READS);
+    const setup = bunSpawn({ PATH: process.env.PATH ?? '', HOME: `${f.parent}/home` });
+    try {
+      const outside = `${f.parent}/folder-other`;
+      const inside = `${f.folder}/repo`;
+      for (const folder of [outside, inside]) {
+        await mkdir(folder);
+        expect((await setup.run('git', ['init', '-b', 'main', folder])).exitCode).toBe(0);
+      }
+      await mkdir(`${outside}/deep`);
+      expect((await setup.run('git', ['init', '-b', 'main', `${outside}/repo`])).exitCode).toBe(0);
+      await symlink(outside, `${f.folder}/escape`);
+      await symlink(`${outside}/deep`, `${f.folder}/deep-link`);
+      await symlink(inside, `${f.folder}/local`);
+      const attempts = [
+        { prefix: [`--git-dir=${outside}/.git`, '--work-tree=.'], allowed: false },
+        { prefix: ['--git-dir=../folder-other/.git', '--work-tree=.'], allowed: false },
+        { prefix: ['--git-dir=escape/.git', '--work-tree=.'], allowed: false },
+        { prefix: ['--git-dir=deep-link/../repo/.git', '--work-tree=.'], allowed: false },
+        { prefix: ['--git-dir=repo/.git', '--work-tree=.'], allowed: true },
+        { prefix: ['--git-dir=local/.git', '--work-tree=.'], allowed: true },
+        { prefix: ['--git-dir=missing/.git', '--work-tree=.'], allowed: false },
+        { prefix: ['--git-dir', `${outside}/.git`, '--work-tree', '.'], allowed: false },
+        { prefix: ['--git-dir=repo/.git', '--work-tree', outside], allowed: false },
+        { prefix: ['--git-dir=repo/.git', '--work-tree=escape'], allowed: false },
+        { prefix: ['-C', outside], allowed: false },
+        { prefix: ['-Cescape'], allowed: false },
+        { prefix: ['-C', 'repo', '-C', '../../folder-other'], allowed: false },
+        { prefix: ['-C', 'repo'], allowed: true },
+        { prefix: ['--git-dir=.git', '-C', 'repo'], allowed: true },
+      ];
+      for (const { prefix, allowed } of attempts) {
+        // Exact declarations ensure denial proves path confinement, rather than an argv mismatch.
+        const args = [...HARDENED_GIT_ARGUMENTS, ...prefix, 'rev-parse', '--absolute-git-dir'];
+        const port = restrictSpawn('ferrets', ['git'], setup, undefined, f.pins, undefined, [
+          { program: 'git', args, env: gitEnv },
+        ]);
+        const result = await port.run('git', args, { cwd: f.held.policyCwd, env: gitEnv }).then(
+          value => value,
+          error => error,
+        );
+        if (allowed) expect(result).toMatchObject({ exitCode: 0, stdout: `${inside}/.git\n` });
+        else expect(result).toMatchObject({ code: 'pin_write_required' });
+      }
+      // Exercise the shipped wildcard declaration too, so narrowing that declaration alone cannot hide the hole.
+      await expect(
+        f.spawn.run(
+          'git',
+          [...HARDENED_GIT_ARGUMENTS, `--git-dir=${outside}/.git`, '--work-tree=.', 'rev-parse', '--absolute-git-dir'],
+          { cwd: f.held.policyCwd, env: gitEnv },
+        ),
+      ).rejects.toMatchObject({ code: 'pin_write_required' });
+      const escaped = [
+        ...HARDENED_GIT_ARGUMENTS,
+        `--git-dir=${outside}/.git`,
+        '--work-tree=.',
+        'rev-parse',
+        '--absolute-git-dir',
+      ];
+      await expect(f.spawn.runBytes('git', escaped, { cwd: f.held.policyCwd, env: gitEnv })).rejects.toMatchObject({
+        code: 'pin_write_required',
+      });
+      expect(() => f.spawn.start('git', escaped, { cwd: f.held.policyCwd, env: gitEnv })).toThrow();
+    } finally {
+      await f.held.close();
+    }
+  });
+
   for (const method of ['run', 'runBytes', 'start'] as const) {
     test(`${method}: read-only-only capability cannot mutate through its pin; disk stays unchanged`, async () => {
       const f = await fixture('read');
@@ -187,11 +289,29 @@ describe('SEC-K1: a pinned program needs the root’s write authority', () => {
       const mtime = (await stat(`${f.folder}/.git/index`, { bigint: true })).mtimeNs;
       const config = await readFile(`${f.folder}/.git/config`, 'utf8');
       const env = { GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1' };
-      const run = (args: string[], givenEnv = env) =>
+      const run = (args: string[], givenEnv: Record<string, string> = env) =>
         f.spawn.run('git', [...HARDENED_GIT_ARGUMENTS, ...args], {
           cwd: f.held.policyCwd,
           env: givenEnv,
         });
+      for (const readsGlobal of [false, true]) {
+        for (const literal of [false, true]) {
+          const safe = {
+            ...env,
+            GIT_CONFIG_SYSTEM: '/dev/null',
+            ...(readsGlobal ? {} : { GIT_CONFIG_GLOBAL: '/dev/null' }),
+            GIT_CONFIG_NOSYSTEM: '1',
+            GIT_TERMINAL_PROMPT: '0',
+            GIT_PAGER: 'cat',
+            GIT_ASKPASS: '',
+            ...(literal ? { GIT_LITERAL_PATHSPECS: '1' } : {}),
+          };
+          expect((await run(['rev-parse', '--is-inside-work-tree'], safe)).exitCode).toBe(0);
+          await expect(
+            run(['rev-parse', '--is-inside-work-tree'], { ...safe, GIT_PAGER: 'injected' }),
+          ).rejects.toMatchObject({ code: 'pin_write_required' });
+        }
+      }
       for (const args of [
         ['rev-parse', '--is-inside-work-tree'],
         ['for-each-ref', '--format=%(refname)', 'refs/remotes'],
