@@ -48,7 +48,8 @@ import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contra
 import { mcpOAuthSecretNames } from '../foreign.ts';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
 import { isSseUrl, type KitServerEnvironment, type RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
-import { byHarness, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
+import { byHarness, harnessKeyOfKind, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
 import { deepMergeSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
@@ -569,15 +570,24 @@ const replacedLeaves = (
 
 // ── Adapting a runtime ───────────────────────────────────────────────────────────────────────────
 
+/** A typed refusal: a runtime that cannot be planned, said as data and never thrown. */
+export interface KitRefusal {
+  readonly kind: 'harness-unsupported';
+  readonly message: string;
+}
+
 /**
- * The reason a runtime of `harness` cannot be planned without its plugin's kit, or `undefined` when it can. Claude's MCP
+ * The typed refusal for a runtime of `harness` that cannot be planned without its plugin's kit, or `undefined` when it can. Claude's MCP
  * servers and config documents are the Claude kit's (E-276 PR 6), so a Claude runtime whose plugin is off is published
- * unavailable with this sentence; Codex still branches in Runtimes and needs none. Only that runtime is affected: the
+ * unavailable with this refusal (`claude-code is not supported here`); Codex still branches in Runtimes and needs none. Only that runtime is affected: the
  * rest of the plan is made as usual.
  */
-export const missingKitReason = (harness: string, kit: RuntimesHarnessKit | undefined): string | undefined =>
-  byHarness<string | undefined>(harness, {
-    claude: () => (kit === undefined ? new UnsupportedHarnessError(harness).message : undefined),
+export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
+  byHarness<KitRefusal | undefined>(harness, {
+    claude: () =>
+      kit === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
+        : undefined,
     codex: () => undefined,
   });
 

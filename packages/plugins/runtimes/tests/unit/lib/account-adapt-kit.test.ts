@@ -8,6 +8,7 @@ import type { RuntimesHarnessKit } from '../../../contract/index.ts';
 import {
   type AdaptPlumbing,
   adaptProfile,
+  missingKitRefusal,
   priorServersOf,
   renderMcpComponents,
 } from '../../../daemon/lib/account/adapt.ts';
@@ -91,5 +92,16 @@ describe('Claude documents and plumbing through the kit', () => {
     expect(() => adapt({ renderMcpServer: MARKED.renderMcpServer, configDocuments: MARKED.configDocuments })).toThrow(
       REFUSAL,
     );
+  });
+});
+
+describe('a Claude runtime without its plugin kit, as data', () => {
+  it('should be a typed refusal, never a throw, and only for Claude', () => {
+    expect(missingKitRefusal('claude', undefined)).toEqual({
+      kind: 'harness-unsupported',
+      message: 'claude-code is not supported here',
+    });
+    expect(missingKitRefusal('claude', {} as RuntimesHarnessKit)).toBeUndefined();
+    expect(missingKitRefusal('codex', undefined)).toBeUndefined();
   });
 });

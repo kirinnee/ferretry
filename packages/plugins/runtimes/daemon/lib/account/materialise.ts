@@ -68,7 +68,7 @@ import {
   type ClaudeStatuslineCommand,
   componentPartialSupport,
   kitlessAdaptation,
-  missingKitReason,
+  missingKitRefusal,
   plumbingOf,
   priorServersOf,
   SKILLS_STORE_DIRECTORY,
@@ -380,9 +380,9 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
     // A Claude runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    const kitMissing = missingKitReason(harness, kit);
+    const kitMissing = missingKitRefusal(harness, kit);
     // (A login whose own store already says so is not said twice.)
-    if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing);
+    if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing.message);
     const result = fixedLayerOf(
       harness,
       {

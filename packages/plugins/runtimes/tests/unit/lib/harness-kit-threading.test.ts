@@ -72,7 +72,7 @@ describe('the kit threaded to the groups of a materialisation', () => {
     const accounts = plans[0]?.manifest.accounts ?? [];
     expect(accountOf(accounts, 'claude-default')).toMatchObject({
       available: false,
-      unavailableReason: expect.stringContaining('is not supported here'),
+      unavailableReason: expect.stringContaining('claude-code is not supported here'),
     });
     expect(accountOf(accounts, 'codex-default').unavailableReason ?? '').not.toContain('is not supported here');
     expect(wrapperText(plans[0] as FleetApplyPlan, 'codex-default')).not.toContain('is not supported here');
