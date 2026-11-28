@@ -257,7 +257,11 @@ const envEntries = (env: Readonly<Record<string, string>> | undefined): FleetEnv
     .toSorted(([left], [right]) => byName(left, right))
     .map(([name, value]) => (looksSecret(name, value) ? { name, hidden: true as const } : { name, value }));
 
-function componentDetail(kind: ComponentKind, component: Record<string, unknown>): FleetComponentDetail {
+function componentDetail(
+  kind: ComponentKind,
+  component: Record<string, unknown>,
+  remote: boolean,
+): FleetComponentDetail {
   const env = component.env as Readonly<Record<string, string>> | undefined;
   const text = (key: string) => (typeof component[key] === 'string' ? { [key]: component[key] as string } : {});
   switch (kind) {
@@ -278,7 +282,9 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
       return {
         kind,
         ...text('file'),
-        ...(Array.isArray(component.flags) ? { flags: [...(component.flags as string[])] } : {}),
+        ...(Array.isArray(component.flags)
+          ? { flags: (component.flags as string[]).map(flag => (remote ? redactText(flag).text : flag)) }
+          : {}),
         env: envEntries(env),
       };
     case 'hooks':
@@ -719,7 +725,7 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
             name,
             ...(harness === undefined ? {} : { harness }),
             scope: componentScope(group.kind, component),
-            detail: componentDetail(group.kind, component),
+            detail: componentDetail(group.kind, component, facts.remote !== false),
             partial: partial
               .filter(entry => entry.reference === reference)
               .map(entry => ({ harness: entry.harness, reason: describePartialSupport(entry) })),
@@ -959,6 +965,9 @@ function fixedLayerView(
         });
   if (!result.ok) return { refusal: result.refusal.message };
   const fixed = result.layer;
+  // Resolve the original parsed settings first; redacting inputs would erase real value conflicts.
+  const overriddenValue = (name: string, text: string): string =>
+    facts.remote !== false && secretValue(name, text) ? HIDDEN_TEXT : text;
   const overridden =
     resolved === undefined
       ? []
@@ -966,13 +975,13 @@ function fixedLayerView(
           entry.kind === 'setting'
             ? {
                 key: entry.key,
-                value: shown(entry.value),
+                value: overriddenValue(entry.key, shown(entry.value)),
                 from: entry.layer.name,
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               }
             : {
                 key: entry.tokens[0] as string,
-                value: entry.tokens.join(' '),
+                value: overriddenValue(entry.tokens[0] as string, entry.tokens.join(' ')),
                 from: entry.layer.name,
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               },

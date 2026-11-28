@@ -1360,6 +1360,28 @@ describe('runtimeCatalog', () => {
     ]);
   });
 
+  it.each([false, true])('should redact overridden settings and flags only for remote readers: %s', remote => {
+    const fake = '2tsNcUhfv26rC9AIL6wycpLvgsoQGsRqXVQ1OFbhK8A=';
+    const model = parseAccountModel({
+      version: 2,
+      credentials: { login: { harness: 'claude', store: 'host' } },
+      components: {
+        settings: { opaque: { harness: 'claude', file: 'opaque.json', flags: ['--permission-mode', fake] } },
+      },
+      profiles: { default: { layers: ['settings/opaque'] } },
+      runtimes: { agent: { credential: 'login', profile: 'default', agent: true } },
+    });
+    const facts = factsOf({ remote, settingsBodies: { opaque: { permissions: { defaultMode: fake } } } });
+    const overrides = runtimeNamed(runtimeCatalog(model, facts), 'agent').fixedLayer?.overridden;
+    should(overrides?.map(row => [row.key, row.value])).deepEqual([
+      ['permissions.defaultMode', remote ? '‹hidden›' : fake],
+      ['--permission-mode', remote ? '‹hidden›' : `--permission-mode ${fake}`],
+    ]);
+    const components = JSON.stringify(componentCatalog(model, facts));
+    if (remote) should(components).not.containEql(fake);
+    else should(components).containEql(fake);
+  });
+
   it('should show a setting that is not text as the JSON it is when it is overridden', () => {
     // Arrange
     const model = modelOf({ machine: { agentPermissions: 'skip' } });

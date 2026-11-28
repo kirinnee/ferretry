@@ -717,6 +717,7 @@ export class FleetCatalogService {
     for (const [name, component] of Object.entries(model.components.settings)) {
       if (component.file === undefined) continue;
       const body = parsed(await text(component.file, `settings/${name}`), SETTINGS_FORMAT[component.harness]);
+      // Keep original values for conflict detection; remote views redact them, including fixed-layer overrides.
       if (body !== undefined) settings[name] = body;
     }
     const hooks: Record<string, SettingsObject> = {};

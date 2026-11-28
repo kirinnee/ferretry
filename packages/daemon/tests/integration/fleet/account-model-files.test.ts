@@ -793,12 +793,12 @@ describe('remote component credential boundary', () => {
         instructions: { notes: { file: 'components/notes.md' } },
         settings: {
           moved: { harness: 'claude', file: 'components/moved.json' },
-          copied: { harness: 'claude', file: 'components/copied.json' },
+          copied: { harness: 'claude', file: 'components/copied.json', flags: ['--permission-mode', fake] },
           other: { harness: 'claude', file: 'components/other.json' },
         },
       },
       profiles: { conflict: { layers: ['settings/moved', 'settings/copied', 'settings/other'] } },
-      runtimes: { worker: { credential: 'login', profile: 'conflict' } },
+      runtimes: { worker: { credential: 'login', profile: 'conflict', agent: true } },
     });
     const host = await machine(model, undefined, async home => {
       await writeFile(path.join(home.paths.state, 'secrets.key'), `${fake}\n`);
@@ -811,7 +811,15 @@ describe('remote component credential boundary', () => {
     await mkdir(directory, { recursive: true });
     await copyFile(path.join(host.paths.state, 'secrets.key'), path.join(directory, 'notes.md'));
     await rename(path.join(host.paths.state, 'login-secrets.json'), path.join(directory, 'moved.json'));
-    await writeFile(path.join(directory, 'copied.json'), JSON.stringify({ theme: fake, opaqueValue: fake, projectId }));
+    await writeFile(
+      path.join(directory, 'copied.json'),
+      JSON.stringify({
+        theme: fake,
+        opaqueValue: fake,
+        projectId,
+        permissions: { defaultMode: fake },
+      }),
+    );
     await writeFile(path.join(directory, 'other.json'), JSON.stringify({ theme: 'light', projectId: otherProjectId }));
     const grants = new CapabilityGrantService({
       document: { read: async () => DEFAULT_CAPABILITY_GRANTS, written: async () => [], write: async () => undefined },
@@ -870,11 +878,19 @@ describe('remote component credential boundary', () => {
       if (preview) should(JSON.stringify(jsonBody(response).resolved)).containEql(otherProjectId);
       if (preview) should(JSON.stringify(jsonBody(response).resolved)).not.containEql(fake);
       if (preview || endpoint === 'profiles') should(body).containEql('overrides');
+      if (endpoint === 'runtimes') {
+        const runtimes = await catalog.runtimes(true);
+        should(runtimes.runtimes[0]?.fixedLayer?.overridden.map(row => row.value)).deepEqual(['‹hidden›', '‹hidden›']);
+      }
     }
     should(localReads).equal(0);
     should(remoteReads).be.above(0);
     // The copy is readable locally; remote masking, rather than an inode refusal, protects its bytes.
     should(await host.deps.readAsset(path.join(directory, 'notes.md'))).equal(`${fake}\n`);
+    const localOverrides = (await host.catalog.runtimes(false)).runtimes[0]?.fixedLayer?.overridden;
+    should(localOverrides?.map(row => row.value)).deepEqual([fake, `--permission-mode ${fake}`]);
+    const localPreview = await host.catalog.previewProfile({ layers: ['settings/copied'] }, false);
+    should(JSON.stringify(localPreview.resolved)).containEql(fake);
     const forbidden = await api.dispatch(
       request({
         path: '/v1/fleet/proposals',
