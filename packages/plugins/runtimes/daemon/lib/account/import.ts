@@ -44,7 +44,7 @@ import {
 import { harnessNamed } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
-import { byHarness, harnessKeyOfKind, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import { harnessKeyOfKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { StarterModels } from '../models/catalog.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
@@ -139,12 +139,6 @@ export interface HostHarnessScan {
   /** Sentences for anything the scan could not read that is not one of the documents above. */
   readonly problems: readonly string[];
 }
-
-/** What the import preview calls each harness's instructions document. */
-export const HOST_INSTRUCTIONS_NAME: Readonly<Record<HarnessKind, string>> = {
-  claude: 'CLAUDE.md',
-  codex: 'AGENTS.md',
-};
 
 // ── What comes out ───────────────────────────────────────────────────────────────────────────────
 
@@ -589,19 +583,14 @@ export interface ScannedMcpServer {
   readonly ignored: readonly string[];
 }
 
-const CLAUDE_MCP_KEYS: ReadonlySet<string> = new Set(['type', 'command', 'args', 'env', 'url']);
-const CODEX_MCP_KEYS: ReadonlySet<string> = new Set(['command', 'args', 'env', 'url', 'enabled']);
-
-/** Where each harness's MCP servers sit: Claude's `mcpServers` in `.claude.json`, Codex's `mcp_servers`. */
-const mcpTableOf = (harness: HarnessKind, document: SettingsObject | undefined): SettingsObject => {
-  const table = document?.[byHarness(harness, { claude: () => 'mcpServers', codex: () => 'mcp_servers' })];
-  return isRecord(table) ? table : {};
-};
-
-function scannedServer(harness: HarnessKind, name: string, entry: unknown): ScannedMcpServer | undefined {
+function scannedServer(
+  mcpImport: NonNullable<RuntimesHarnessKit['mcpImport']>,
+  name: string,
+  entry: unknown,
+): ScannedMcpServer | undefined {
   if (!isRecord(entry)) return undefined;
-  if (isKind(harness, 'codex') && entry.enabled === false) return undefined;
-  const known = byHarness(harness, { claude: () => CLAUDE_MCP_KEYS, codex: () => CODEX_MCP_KEYS });
+  if (mcpImport.skipDisabled && entry.enabled === false) return undefined;
+  const known = new Set(mcpImport.knownKeys);
   const command = typeof entry.command === 'string' && entry.command.trim() !== '' ? entry.command : undefined;
   const url = typeof entry.url === 'string' && entry.url.trim() !== '' ? entry.url : undefined;
   const args = Array.isArray(entry.args) ? entry.args.filter((arg): arg is string => typeof arg === 'string') : [];
@@ -619,33 +608,24 @@ function scannedServer(harness: HarnessKind, name: string, entry: unknown): Scan
  * The MCP servers one harness's scan declares. Exported so the scan adapter can look up each
  * server's command on this machine before the plan is made (E8).
  */
-export function scannedMcpServers(scan: HostHarnessScan): readonly ScannedMcpServer[] {
+export function scannedMcpServers(
+  scan: HostHarnessScan,
+  kit: RuntimesHarnessKit | undefined,
+): readonly ScannedMcpServer[] {
+  const mcpImport = kit?.mcpImport;
+  if (mcpImport === undefined) throw new UnsupportedHarnessError(scan.harness);
   const problems: string[] = [];
-  const document = byHarness(scan.harness, {
-    claude: () => parsedDocument(scan.mcp, 'json', '.claude.json', problems),
-    codex: () => parsedDocument(scan.settings, 'toml', 'config.toml', problems),
-  });
-  return Object.entries(mcpTableOf(scan.harness, document)).flatMap(([name, entry]) => {
-    const server = scannedServer(scan.harness, name, entry);
+  const document = parsedDocument(
+    mcpImport.document === 'mcp' ? scan.mcp : scan.settings,
+    mcpImport.format,
+    mcpImport.file,
+    problems,
+  );
+  const table = document?.[mcpImport.table];
+  return Object.entries(isRecord(table) ? table : {}).flatMap(([name, entry]) => {
+    const server = scannedServer(mcpImport, name, entry);
     return server === undefined ? [] : [server];
   });
-}
-
-/** The most project folders the scan lists; a person with more sees the first of them. */
-const PROJECT_FOLDERS_LIMIT = 200;
-
-/**
- * The project folders Claude keeps state for: the keys of `projects` in `~/.claude.json`. Names only — the values
- * under each key are never looked at. Absolute paths with no control character, in the host's order, bounded.
- */
-export function claudeProjectFolders(scan: HostHarnessScan): readonly string[] {
-  if (!isKind(scan.harness, 'claude')) return [];
-  const document = parsedDocument(scan.mcp, 'json', '.claude.json', []);
-  const projects = document?.projects;
-  if (!isRecord(projects)) return [];
-  return Object.keys(projects)
-    .filter(path => path.startsWith('/') && [...path].every(character => (character.codePointAt(0) ?? 0) >= 0x20))
-    .slice(0, PROJECT_FOLDERS_LIMIT);
 }
 
 // ── One harness, read into components ────────────────────────────────────────────────────────────
@@ -697,21 +677,6 @@ const countHooks = (block: Readonly<Record<string, unknown>>): number =>
         : 0),
     0,
   );
-
-/** The profiles a `config.toml` declares: names, and the two keys an import would keep. Never anything else. */
-function codexProfilesOf(settings: Readonly<Record<string, unknown>> | undefined): CodexProfileHint[] {
-  const table = settings?.profiles;
-  if (!isRecord(table)) return [];
-  return Object.entries(table).flatMap(([name, value]) => {
-    if (name === '' || !isRecord(value)) return [];
-    const model = typeof value.model === 'string' && value.model !== '' ? value.model : undefined;
-    const effort =
-      typeof value.model_reasoning_effort === 'string' && value.model_reasoning_effort !== ''
-        ? value.model_reasoning_effort
-        : undefined;
-    return [{ name, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }];
-  });
-}
 
 export function harvest(
   scan: HostHarnessScan,
@@ -803,7 +768,7 @@ export function harvest(
   // MCP servers.
   const missing = new Set(scan.missingCommands);
   const { mcpSource } = taken;
-  const mcp = scannedMcpServers(scan).flatMap(server => {
+  const mcp = scannedMcpServers(scan, kit).flatMap(server => {
     if (skip.has(importNamedItemId(key, 'mcp', server.name))) return [];
     const warnings: string[] = [];
     if (server.ignored.length > 0) {
@@ -860,7 +825,7 @@ export function harvest(
     ...(instructions === undefined ? {} : { instructions }),
     ...(settings === undefined ? {} : { settings }),
     ...(hooks === undefined ? {} : { hooks }),
-    codexProfiles: isKind(harness, 'codex') ? codexProfilesOf(parsed) : [],
+    codexProfiles: taken.profileHints ?? [],
     mcp,
     skills,
     skillsLeft,
@@ -904,6 +869,8 @@ export const LAYER_ORDER: readonly ComponentKind[] = ['instructions', 'mcp', 'sk
 export function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
   candidates: Candidate[];
   identical?: boolean;
+  /** Which two harnesses' instructions were compared, when two were found. */
+  compared?: { readonly first: HarnessKind; readonly second: HarnessKind };
 } {
   const found = harvests.flatMap(entry =>
     entry.instructions === undefined ? [] : [{ harness: entry.harness, ...entry.instructions }],
@@ -935,6 +902,7 @@ export function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
     return {
       candidates: [make(IMPORT_NAMES.sharedInstructions, first.text, [first.source, second.source])],
       identical: true,
+      compared: { first: first.harness, second: second.harness },
     };
   }
   return {
@@ -942,6 +910,7 @@ export function instructionsCandidates(harvests: readonly HarnessHarvest[]): {
       make(harnessNamed(entry.harness, 'instructions'), entry.text, [entry.source], entry.harness),
     ),
     identical: false,
+    compared: { first: first.harness, second: second.harness },
   };
 }
 

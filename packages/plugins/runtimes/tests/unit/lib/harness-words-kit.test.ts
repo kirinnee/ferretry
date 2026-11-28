@@ -102,8 +102,7 @@ describe('fast mode through the kit', () => {
     expect(fastSupportOf('claude', 'claude-opus-5-5', without(CLAUDE_KIT, 'fastSupport'))).toEqual({});
   });
 
-  it('should never ask the Claude rule for another harness, whatever kit it is handed', () => {
-    expect(fastSupportOf('codex', 'claude-opus-5-5', CLAUDE_KIT)).toEqual({});
+  it('should give Codex no fast-mode claim, because its own kit makes none', () => {
     expect(fastSupportOf('codex', 'gpt-6', CODEX_KIT)).toEqual({});
   });
 });

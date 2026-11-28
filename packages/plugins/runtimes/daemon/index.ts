@@ -588,6 +588,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ctx.needs.logins,
           async () => organizationTypeOfAccountDocument(await assembly.hostClaudeAccount?.()),
           login,
+          harnessKits(hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY)),
         );
       const launchGate = new LaunchGate({ source: launchFacts, organizationType });
 

@@ -8,5 +8,6 @@ import type { RuntimesHarnessKit } from '@ferretry/plugin-runtimes/contract';
 export const codexWordsKit: RuntimesHarnessKit = {
   command: 'codex',
   homeEnv: 'CODEX_HOME',
+  keepsSharedState: true,
   ownedSkillEntries: ['.system'],
 };

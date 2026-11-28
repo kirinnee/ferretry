@@ -8,11 +8,10 @@ import { applyFixedLayer, fixedLayerFor } from '../../../daemon/lib/account/fixe
 import { loginNote, scannedMcpServers } from '../../../daemon/lib/account/import.ts';
 import { AccountModelSchema, parseForeignComponent } from '../../../daemon/lib/account/schema.ts';
 import {
-  byHarness,
   harnessKeyOfKind,
   harnessKindOfKey,
-  isKind,
   isSupportedKind,
+  kindOrUndefined,
   supportedKinds,
   supportedKindOfKey,
   UnsupportedHarnessError,
@@ -47,9 +46,9 @@ describe('the stored words of the two shipped harnesses stay what they were on d
   });
 
   test('a word and its key name the same harness', () => {
-    expect(isKind('claude', 'claude')).toBe(true);
-    expect(isKind('claude-code', 'claude')).toBe(true);
-    expect(isKind('codex', 'claude')).toBe(false);
+    expect(kindOrUndefined('claude')).toBe('claude');
+    expect(kindOrUndefined('claude-code')).toBe('claude');
+    expect(kindOrUndefined('codex')).toBe('codex');
     expect(supportedKindOfKey('claude-code')).toBe('claude');
   });
 });
@@ -58,22 +57,11 @@ describe.each(UNKNOWN)('a harness Runtimes has no behaviour for (%s)', unknown =
   test('is no supported word or key', () => {
     expect(isSupportedKind(unknown)).toBe(false);
     expect(supportedKindOfKey(unknown)).toBeUndefined();
-    expect(isKind(unknown, 'claude')).toBe(false);
-    expect(isKind(unknown, 'codex')).toBe(false);
+    expect(kindOrUndefined(unknown)).toBeUndefined();
   });
 
   test('is refused by the key door with the one sentence', () => {
     expect(refused(() => harnessKindOfKey(unknown))).toBe(refusal(unknown));
-  });
-
-  test('is refused by byHarness, which runs neither case', () => {
-    let ran = false;
-    const cases = {
-      claude: () => (ran = true),
-      codex: () => (ran = true),
-    };
-    expect(refused(() => byHarness(unknown, cases))).toBe(refusal(unknown));
-    expect(ran).toBe(false);
   });
 
   test('is refused where the fixed launch layer was Claude unless it was Codex', () => {
@@ -102,7 +90,7 @@ describe.each(UNKNOWN)('a harness Runtimes has no behaviour for (%s)', unknown =
 
   test('is refused where a host scan read Claude’s MCP document unless Codex’s', () => {
     const scan = { harness: unknown, settings: { kind: 'absent' }, problems: [] } as never;
-    expect(refused(() => scannedMcpServers(scan))).toBe(refusal(unknown));
+    expect(refused(() => scannedMcpServers(scan, undefined))).toBe(refusal(unknown));
   });
 
   test('is refused where a launch layer folded appended instructions in Claude’s way unless Codex’s', () => {

@@ -5,12 +5,7 @@ import should from 'should';
 import { TEST_STARTERS } from '../../support/starters.ts';
 import { type ImportItemId, ImportItemIdSchema, importItemId, importNamedItemId } from '../../../contract/index.ts';
 import { SetupScanSchema } from '../../../contract/wire/setup.ts';
-import {
-  claudeProjectFolders,
-  type HostDocumentRead,
-  type HostHarnessScan,
-  type ImportPlan,
-} from '../../../daemon/lib/account/import.ts';
+import { type HostDocumentRead, type HostHarnessScan, type ImportPlan } from '../../../daemon/lib/account/import.ts';
 import { mergeImport, mergeImportRecord, planImport } from '../../../daemon/lib/account/import-plan.ts';
 
 const IMPORT_KITS = new Map([
@@ -278,10 +273,11 @@ describe('planImport — hints that are listed, not imported', () => {
   });
 
   it('should name the project folders Claude keeps, absolute and printable only, and read nothing in them', () => {
-    should(claudeProjectFolders(claude())).deepEqual(['/work/app', '/work/lib']);
-    should(claudeProjectFolders(codex())).deepEqual([]);
-    should(claudeProjectFolders(claude({ mcp: absent('/h/.claude.json') }))).deepEqual([]);
-    should(claudeProjectFolders(claude({ mcp: text('/h/.claude.json', 'not json') }))).deepEqual([]);
+    const folders = (scan: HostHarnessScan) => IMPORT_KITS.get(scan.harness)?.projectFolders?.(scan.mcp) ?? [];
+    should(folders(claude())).deepEqual(['/work/app', '/work/lib']);
+    should(folders(codex())).deepEqual([]);
+    should(folders(claude({ mcp: absent('/h/.claude.json') }))).deepEqual([]);
+    should(folders(claude({ mcp: text('/h/.claude.json', 'not json') }))).deepEqual([]);
   });
 
   it('should carry the hints a scan was given into the preview, and make nothing of them', () => {

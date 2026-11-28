@@ -18,7 +18,6 @@ import {
   type HarnessImportPreview,
   harnessCandidates,
   harvest,
-  HOST_INSTRUCTIONS_NAME,
   type HostHarnessScan,
   IMPORT_NAMES,
   type ImportDuplicate,
@@ -69,6 +68,9 @@ function localInstructionsDigest(
   return digest(`${JSON.stringify(local.harness === undefined ? {} : { harness: local.harness })}\n${local.text}`);
 }
 
+/** The harness Runtimes lists first: the one a note about shared text is attributed to when the text belongs to none. */
+const FIRST_HARNESS = supportedKinds()[0] as HarnessKind;
+
 /** The installed harnesses a scan list should import, in a stable order. */
 const importedHarnesses = (scans: readonly HostHarnessScan[], include?: readonly HarnessKind[]): HarnessKind[] =>
   supportedKinds().filter(
@@ -77,7 +79,11 @@ const importedHarnesses = (scans: readonly HostHarnessScan[], include?: readonly
       (include === undefined || include.includes(harness)),
   );
 
-function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): HarnessImportPreview {
+function previewOf(
+  scan: HostHarnessScan,
+  entry: HarnessHarvest | undefined,
+  kit: RuntimesHarnessKit | undefined,
+): HarnessImportPreview {
   const base = {
     harness: scan.harness,
     installed: scan.command !== undefined,
@@ -100,7 +106,7 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
     ...(scan.instructions.kind === 'text' && entry.instructions !== undefined
       ? {
           instructions: {
-            name: HOST_INSTRUCTIONS_NAME[scan.harness],
+            name: kit?.importSetup?.instructionsName ?? '',
             source: scan.instructions.source,
             bytes: scan.instructions.bytes,
           },
@@ -236,12 +242,14 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
       });
     }
   }
-  if (instructions.identical !== undefined) {
+  if (instructions.identical !== undefined && instructions.compared !== undefined) {
+    // The second harness's instructions, said against the first's own file.
+    const first = kits.get(instructions.compared.first)?.importSetup?.instructionsName ?? '';
     notes.push({
-      harness: 'codex',
+      harness: instructions.compared.second,
       text: instructions.identical
-        ? 'Instructions: same as your CLAUDE.md · one shared copy.'
-        : 'Instructions: different from your CLAUDE.md · kept separately.',
+        ? `Instructions: same as your ${first} · one shared copy.`
+        : `Instructions: different from your ${first} · kept separately.`,
     });
   }
   notes.push(...mcp.notes, ...skills.notes);
@@ -277,7 +285,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
         // import wrote (its digest is the recorded one). Text the person changed here is theirs and is left as it is.
         if (kind === 'instructions' && localInstructionsDigest(existing, name, options.digest) !== previous.digest) {
           notes.push({
-            harness: existing.components.instructions[name]?.harness ?? 'claude',
+            harness: existing.components.instructions[name]?.harness ?? FIRST_HARNESS,
             text: `Instructions "${name}": the host's file changed, but you changed them here, so they were left as they are.`,
           });
           continue;
@@ -448,7 +456,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const recordedProfiles: Partial<Record<HarnessKind, string>> = { ...record.profiles, ...profileOf };
 
   const preview: ImportPreview = {
-    harnesses: scans.map(scan => previewOf(scan, harvestOf(scan.harness))),
+    harnesses: scans.map(scan => previewOf(scan, harvestOf(scan.harness), kits.get(scan.harness))),
     ...(instructions.identical === undefined ? {} : { instructionsIdentical: instructions.identical }),
   };
 

@@ -1,0 +1,3742 @@
+{
+  "both real kits": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "d17e03c6251de772c948e6e43190b2a913544eef909a23aabc6768456775f7bb"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "keep": [],
+        "only": ["AGENTS.md", "hooks", "hooks.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "keep": [".system"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/config.toml",
+        "format": "toml",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "cli_auth_credentials_store": "file",
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules/ferretry.rules",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+          "key": "rules/ferretry.rules",
+          "byName": true
+        },
+        "bytes": 308,
+        "sha256": "a2a2bf76e94c634eb1f6601f9b8be7162378d547c7502f35b16296c68365df37"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 49,
+        "sha256": "89f3a9c4b10fab0f8522d5edfc91118d81ff54ecfd29b5e1e9695cf51f39261e"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 12575,
+        "sha256": "1bc0ce7788b224d25b3772b68aa8c8e9fa53bd152fd13123a834fcd0e32f4311"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "claude without runtimeExtras": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "d17e03c6251de772c948e6e43190b2a913544eef909a23aabc6768456775f7bb"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "keep": [],
+        "only": ["AGENTS.md", "hooks", "hooks.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "keep": [".system"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/config.toml",
+        "format": "toml",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "cli_auth_credentials_store": "file",
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules/ferretry.rules",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+          "key": "rules/ferretry.rules",
+          "byName": true
+        },
+        "bytes": 308,
+        "sha256": "a2a2bf76e94c634eb1f6601f9b8be7162378d547c7502f35b16296c68365df37"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 49,
+        "sha256": "89f3a9c4b10fab0f8522d5edfc91118d81ff54ecfd29b5e1e9695cf51f39261e"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 12575,
+        "sha256": "1bc0ce7788b224d25b3772b68aa8c8e9fa53bd152fd13123a834fcd0e32f4311"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "claude without ownedSkillEntries": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "d17e03c6251de772c948e6e43190b2a913544eef909a23aabc6768456775f7bb"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "keep": [],
+        "only": ["AGENTS.md", "hooks", "hooks.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "keep": [".system"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/config.toml",
+        "format": "toml",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "cli_auth_credentials_store": "file",
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules/ferretry.rules",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+          "key": "rules/ferretry.rules",
+          "byName": true
+        },
+        "bytes": 308,
+        "sha256": "a2a2bf76e94c634eb1f6601f9b8be7162378d547c7502f35b16296c68365df37"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 49,
+        "sha256": "89f3a9c4b10fab0f8522d5edfc91118d81ff54ecfd29b5e1e9695cf51f39261e"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 12575,
+        "sha256": "1bc0ce7788b224d25b3772b68aa8c8e9fa53bd152fd13123a834fcd0e32f4311"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "claude without fixedLayer": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "d17e03c6251de772c948e6e43190b2a913544eef909a23aabc6768456775f7bb"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 27,
+        "sha256": "e5a76fe3d134f87e636debc55cc15ac01dbd2bbf0ed1edac80c0f3b35a228eb3"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 2362,
+        "sha256": "5c85072d52195a2b10cfa93d3163bc58a0e4b22f2dcd871489d3be311dfc7232"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "keep": [],
+        "only": ["AGENTS.md", "hooks", "hooks.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "keep": [".system"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/config.toml",
+        "format": "toml",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "cli_auth_credentials_store": "file",
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules/ferretry.rules",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+          "key": "rules/ferretry.rules",
+          "byName": true
+        },
+        "bytes": 308,
+        "sha256": "a2a2bf76e94c634eb1f6601f9b8be7162378d547c7502f35b16296c68365df37"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 49,
+        "sha256": "89f3a9c4b10fab0f8522d5edfc91118d81ff54ecfd29b5e1e9695cf51f39261e"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 12575,
+        "sha256": "1bc0ce7788b224d25b3772b68aa8c8e9fa53bd152fd13123a834fcd0e32f4311"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "claude without all three": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "d17e03c6251de772c948e6e43190b2a913544eef909a23aabc6768456775f7bb"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 27,
+        "sha256": "e5a76fe3d134f87e636debc55cc15ac01dbd2bbf0ed1edac80c0f3b35a228eb3"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 2362,
+        "sha256": "5c85072d52195a2b10cfa93d3163bc58a0e4b22f2dcd871489d3be311dfc7232"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "keep": [],
+        "only": ["AGENTS.md", "hooks", "hooks.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "keep": [".system"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/config.toml",
+        "format": "toml",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "cli_auth_credentials_store": "file",
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules/ferretry.rules",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+          "key": "rules/ferretry.rules",
+          "byName": true
+        },
+        "bytes": 308,
+        "sha256": "a2a2bf76e94c634eb1f6601f9b8be7162378d547c7502f35b16296c68365df37"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 49,
+        "sha256": "89f3a9c4b10fab0f8522d5edfc91118d81ff54ecfd29b5e1e9695cf51f39261e"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 12575,
+        "sha256": "1bc0ce7788b224d25b3772b68aa8c8e9fa53bd152fd13123a834fcd0e32f4311"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "claude without its command": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "claude-code is not supported here",
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "fe50c09cf99b99a8dbfc051301ea2b3a7ea378c5cbfb8da9ea61419705af77f9"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 257,
+        "sha256": "b1402be1a6b2a133d7a966a086ab98018ecc15be256586d2f261b8ca6d982403"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "keep": [],
+        "only": ["AGENTS.md", "hooks", "hooks.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "keep": [".system"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/config.toml",
+        "format": "toml",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "cli_auth_credentials_store": "file",
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules/ferretry.rules",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+          "key": "rules/ferretry.rules",
+          "byName": true
+        },
+        "bytes": 308,
+        "sha256": "a2a2bf76e94c634eb1f6601f9b8be7162378d547c7502f35b16296c68365df37"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 49,
+        "sha256": "89f3a9c4b10fab0f8522d5edfc91118d81ff54ecfd29b5e1e9695cf51f39261e"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 12575,
+        "sha256": "1bc0ce7788b224d25b3772b68aa8c8e9fa53bd152fd13123a834fcd0e32f4311"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "codex without runtimeExtras": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "codex is not supported here",
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "ec213a5ab470e7742d86b2960862a1a7a80d72925e9e20eb85756d854762b9ba"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 248,
+        "sha256": "57192d8a3d05e10b1691ea9af7d91ec584030ef64de0751f487c96e2aea69621"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "codex without ownedSkillEntries": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "codex is not supported here",
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "ec213a5ab470e7742d86b2960862a1a7a80d72925e9e20eb85756d854762b9ba"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 248,
+        "sha256": "57192d8a3d05e10b1691ea9af7d91ec584030ef64de0751f487c96e2aea69621"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "codex without fixedLayer": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "codex is not supported here",
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "ec213a5ab470e7742d86b2960862a1a7a80d72925e9e20eb85756d854762b9ba"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 248,
+        "sha256": "57192d8a3d05e10b1691ea9af7d91ec584030ef64de0751f487c96e2aea69621"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "codex without its command": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "codex is not supported here",
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "ec213a5ab470e7742d86b2960862a1a7a80d72925e9e20eb85756d854762b9ba"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 248,
+        "sha256": "57192d8a3d05e10b1691ea9af7d91ec584030ef64de0751f487c96e2aea69621"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "codex without keepsSharedState": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "d17e03c6251de772c948e6e43190b2a913544eef909a23aabc6768456775f7bb"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "keep": [],
+        "only": ["AGENTS.md", "hooks", "hooks.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "keep": [".system"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/config.toml",
+        "format": "toml",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "cli_auth_credentials_store": "file",
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules/ferretry.rules",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+          "key": "rules/ferretry.rules",
+          "byName": true
+        },
+        "bytes": 308,
+        "sha256": "a2a2bf76e94c634eb1f6601f9b8be7162378d547c7502f35b16296c68365df37"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 49,
+        "sha256": "89f3a9c4b10fab0f8522d5edfc91118d81ff54ecfd29b5e1e9695cf51f39261e"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 12575,
+        "sha256": "1bc0ce7788b224d25b3772b68aa8c8e9fa53bd152fd13123a834fcd0e32f4311"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "codex an empty kit": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "codex is not supported here",
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "ec213a5ab470e7742d86b2960862a1a7a80d72925e9e20eb85756d854762b9ba"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 248,
+        "sha256": "57192d8a3d05e10b1691ea9af7d91ec584030ef64de0751f487c96e2aea69621"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "codex kit absent": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "codex is not supported here",
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "ec213a5ab470e7742d86b2960862a1a7a80d72925e9e20eb85756d854762b9ba"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy",
+        "keep": ["materialised.json", "fixed.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+        "keep": [],
+        "only": ["CLAUDE.md", "hooks"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/skills",
+        "keep": [],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/settings.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "statusLine": {
+                "type": "command",
+                "command": "'fy' statusline"
+              }
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.claude.json",
+        "format": "json",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "mcpServers": {}
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true,
+        "replaceKeys": ["mcpServers"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "priorMembers": {
+          "mcpServers": {}
+        }
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/fixed.json",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+          "key": ".fy/fixed.json",
+          "byName": true
+        },
+        "bytes": 214,
+        "sha256": "eeefa6cce3be865a513569251cb6c9c7de26ae7a8a9642991ddea75bfa5edbea"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 43,
+        "sha256": "2627ee809d32c57091c799ff6e6696a9bda7d6ceaf1c5abb7947549baefe4574"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 16059,
+        "sha256": "dc56584c8f932b46ca09901cfcefb587c345537b92e1880d5ef4629e70da21be"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 248,
+        "sha256": "57192d8a3d05e10b1691ea9af7d91ec584030ef64de0751f487c96e2aea69621"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "claude kit absent": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "claude-code is not supported here",
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": true,
+          "unavailableReason": null,
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "fe50c09cf99b99a8dbfc051301ea2b3a7ea378c5cbfb8da9ea61419705af77f9"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 257,
+        "sha256": "b1402be1a6b2a133d7a966a086ab98018ecc15be256586d2f261b8ca6d982403"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy",
+        "keep": ["materialised.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": ".fy"
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+        "keep": [],
+        "only": ["AGENTS.md", "hooks", "hooks.json"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "ownLinksUnder": "/fy/fleet/assets"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "mode": 448
+      },
+      {
+        "kind": "prune-directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/skills",
+        "keep": [".system"],
+        "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "recordedAs": "skills",
+        "ownLinksUnder": "/fy/fleet/assets/skills"
+      },
+      {
+        "kind": "settings",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/config.toml",
+        "format": "toml",
+        "layers": [
+          {
+            "from": "inline",
+            "settings": {
+              "cli_auth_credentials_store": "file",
+              "sqlite_home": "/fy/fleet/shared/codex/sqlite"
+            }
+          }
+        ],
+        "mode": 384,
+        "preserveExisting": true
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/rules/ferretry.rules",
+        "mode": 384,
+        "unlessUnrecorded": {
+          "record": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+          "key": "rules/ferretry.rules",
+          "byName": true
+        },
+        "bytes": 308,
+        "sha256": "a2a2bf76e94c634eb1f6601f9b8be7162378d547c7502f35b16296c68365df37"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b/.fy/materialised.json",
+        "mode": 384,
+        "recordsMaterialised": true,
+        "bytes": 49,
+        "sha256": "89f3a9c4b10fab0f8522d5edfc91118d81ff54ecfd29b5e1e9695cf51f39261e"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 12575,
+        "sha256": "1bc0ce7788b224d25b3772b68aa8c8e9fa53bd152fd13123a834fcd0e32f4311"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  },
+  "no kits at all": {
+    "manifest": {
+      "accounts": [
+        {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "kind": "claude",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/claude-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a",
+          "displayName": "claude-env",
+          "defaultModel": "claude-opus-5-5",
+          "models": [
+            {
+              "id": "claude-opus-5-5",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "claude-code is not supported here",
+          "secretEnv": {
+            "ANTHROPIC_API_KEY": "${secret:SYNTH_KEY}"
+          }
+        },
+        {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "kind": "codex",
+          "mode": "auto",
+          "wrapper": "/fy/fleet/bin/codex-env",
+          "home": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b",
+          "displayName": "codex-env",
+          "defaultModel": "gpt-6",
+          "models": [
+            {
+              "id": "gpt-6",
+              "available": true
+            }
+          ],
+          "available": false,
+          "unavailableReason": "codex is not supported here",
+          "secretEnv": {
+            "OPENAI_API_KEY": "${secret:SYNTH_OTHER}"
+          }
+        }
+      ],
+      "sha256": "ec6748e062f230bb6727ec8e422bd6ee3a54a8e532c0718bd8c9f4e8959ee446"
+    },
+    "manifestPath": "/fy/fleet/manifest.json",
+    "operations": [
+      {
+        "kind": "directory",
+        "path": "/fy/fleet",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/bin",
+        "mode": 448
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/homes",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/ids.json",
+        "mode": 384,
+        "bytes": 244,
+        "sha256": "df809a6fa8fe2a7f331c76f60ae37ed9bdc195340a002b5f7a7c913f10c31b57"
+      },
+      {
+        "kind": "directory",
+        "path": "/fy/fleet/shared/codex/sqlite",
+        "mode": 448
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/claude-env",
+        "mode": 493,
+        "bytes": 257,
+        "sha256": "b1402be1a6b2a133d7a966a086ab98018ecc15be256586d2f261b8ca6d982403"
+      },
+      {
+        "kind": "file",
+        "path": "/fy/fleet/bin/codex-env",
+        "mode": 493,
+        "bytes": 248,
+        "sha256": "57192d8a3d05e10b1691ea9af7d91ec584030ef64de0751f487c96e2aea69621"
+      },
+      {
+        "kind": "prune",
+        "path": "/fy/fleet/bin",
+        "marker": "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten",
+        "keep": ["claude-env", "codex-env"]
+      }
+    ],
+    "sharedHistoryRequests": [
+      {
+        "kind": "claude",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000a",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000a"
+          }
+        ]
+      },
+      {
+        "kind": "codex",
+        "poolRoot": "/fy/fleet/shared",
+        "homes": [
+          {
+            "account": "00000000-0000-4000-8000-00000000000b",
+            "path": "/fy/fleet/homes/00000000-0000-4000-8000-00000000000b"
+          }
+        ]
+      }
+    ],
+    "ids": {
+      "version": 1,
+      "runtimes": {
+        "claude-env": {
+          "id": "00000000-0000-4000-8000-00000000000a",
+          "formerNames": []
+        },
+        "codex-env": {
+          "id": "00000000-0000-4000-8000-00000000000b",
+          "formerNames": []
+        }
+      }
+    }
+  }
+}

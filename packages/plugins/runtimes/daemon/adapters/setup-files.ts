@@ -15,6 +15,7 @@ import type {
 } from '../lib/service/setup-service.ts';
 import { HostHarnessScanner, MAX_SKILL_FILE_BYTES, MAX_SKILL_TOTAL_BYTES } from './host-harness-scan.ts';
 import type { AdapterHost, ConfigFileService, HostFiles } from './ports.ts';
+import { isSupportedKind } from '../lib/harness-kind.ts';
 
 /** The largest file a folder read carries; a larger one is skipped and named. */
 const MAX_FOLDER_FILE_BYTES = MAX_SKILL_FILE_BYTES;
@@ -230,7 +231,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     ...(options.codexHome === undefined ? {} : { codexHome: options.codexHome }),
     // A harness through the daemon's one rule, never a second detector; an MCP command on `PATH`.
     commands: {
-      resolve: name => (name === 'claude' || name === 'codex' ? catalog.locate(name) : host.commands.which(name)),
+      resolve: name => (isSupportedKind(name) ? catalog.locate(name) : host.commands.which(name)),
     },
     logins: options.logins,
     maxDocumentBytes: MAX_HOST_DOCUMENT_BYTES,

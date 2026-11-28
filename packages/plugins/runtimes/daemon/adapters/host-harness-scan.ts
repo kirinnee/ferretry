@@ -34,7 +34,6 @@ import {
   type HostHarnessScan,
   type HostLogin,
   type HostSkill,
-  claudeProjectFolders,
   type ProjectInstructionHint,
   scannedMcpServers,
 } from '../lib/account/import.ts';
@@ -101,12 +100,12 @@ export class HostHarnessScanner {
     const ready = supportedKinds().map(harness => {
       const kit = kits?.get(harness);
       if (kit?.scanHost === undefined) throw new UnsupportedHarnessError(harness);
-      return { harness, scanHost: kit.scanHost.bind(kit) };
+      return { harness, kit, scanHost: kit.scanHost.bind(kit) };
     });
     return await Promise.all(
       ready.map(
-        async ({ harness, scanHost }) =>
-          await this.#complete({
+        async ({ harness, kit, scanHost }) =>
+          await this.#complete(kit, {
             harness,
             ...(await scanHost({
               userHome: this.deps.userHome,
@@ -115,7 +114,7 @@ export class HostHarnessScanner {
               readUserMcp: () => this.#readUserClaudeJson(),
               skills: (home, directory) => this.#skills(harness, home, directory),
               login: () => this.#login(harness),
-              projectInstructions: mcp => this.#projectInstructions({ harness, mcp } as HostHarnessScan),
+              projectInstructions: mcp => this.#projectInstructions(kit, mcp),
             })),
           }),
       ),
@@ -126,10 +125,13 @@ export class HostHarnessScanner {
    * The project folders Claude keeps state for, each with the instructions file it would read there. The folder is
    * never opened beyond one `lstat` of that file, and where the kernel does not serve it the hint is kept unverified.
    */
-  async #projectInstructions(scan: HostHarnessScan): Promise<ProjectInstructionHint[]> {
-    const file = 'CLAUDE.md';
+  async #projectInstructions(
+    kit: RuntimesHarnessKit,
+    mcp: HostDocumentRead | undefined,
+  ): Promise<ProjectInstructionHint[]> {
+    const file = kit.importSetup?.instructionsName ?? '';
     const hints: ProjectInstructionHint[] = [];
-    for (const path of claudeProjectFolders(scan)) {
+    for (const path of kit.projectFolders?.(mcp) ?? []) {
       try {
         const info = await this.deps.files.lstat(join(path, file));
         if (info === undefined) continue;
@@ -146,12 +148,15 @@ export class HostHarnessScanner {
    * scan may not look at (an absolute path outside the folders Runtimes may read) is neither found nor missing: it
    * is named as unchecked in the harness's problems, and the scan goes on.
    */
-  async #complete(scan: Omit<HostHarnessScan, 'command' | 'missingCommands'>): Promise<HostHarnessScan> {
+  async #complete(
+    kit: RuntimesHarnessKit,
+    scan: Omit<HostHarnessScan, 'command' | 'missingCommands'>,
+  ): Promise<HostHarnessScan> {
     const command = await this.deps.commands.resolve(scan.harness);
     const partial: HostHarnessScan = { ...scan, missingCommands: [] };
     const missing = new Set<string>();
     const unchecked = new Set<string>();
-    for (const server of scannedMcpServers(partial)) {
+    for (const server of scannedMcpServers(partial, kit)) {
       if (server.command === undefined) continue;
       try {
         if (!(await this.#commandExists(server.command))) missing.add(server.command);

@@ -115,9 +115,25 @@ function fixedLayer(input: KitFixedLayerInput): KitFixedLayerResult {
         `developer_instructions=${tomlString(instruction)}`,
       ],
       rules: codexKillRules(),
+      supersededFlags: SUPERSEDED_FLAGS,
     },
   };
 }
+
+/**
+ * The permission flags Codex's fixed layer replaces. `value` flags take the next token as their value unless written
+ * `--flag=value`; `config` is `-c key=value`, superseded only for the keys the layer sets.
+ */
+const SUPERSEDED_FLAGS = {
+  '--dangerously-bypass-approvals-and-sandbox': 'bare',
+  '--full-auto': 'bare',
+  '--ask-for-approval': 'value',
+  '-a': 'value',
+  '--sandbox': 'value',
+  '-s': 'value',
+  '--config': 'config',
+  '-c': 'config',
+} as const;
 
 /** What Runtimes builds the layer a launched Codex agent gets last from. */
 export const codexFixedLayerKit: RuntimesHarnessKit = { fixedLayer };

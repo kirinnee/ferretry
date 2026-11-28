@@ -23,7 +23,7 @@
  *
  * Pure: values only.
  */
-import { isKind, supportedKinds } from '../harness-kind.ts';
+import { kindOrUndefined, supportedKinds } from '../harness-kind.ts';
 import { slugName } from './document.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { StarterModels } from '../models/catalog.ts';
@@ -87,7 +87,7 @@ export const builtinProfileLayers = (
 ): readonly string[] => [
   ...(starters[harness] === undefined ? [] : [`modelSets/${modelSet}`]),
   `instructions/${AUTONOMOUS_INSTRUCTIONS_NAME}`,
-  ...(isKind(harness, 'claude') ? [`settings/${CLAUDE_COMFORT_NAME}`] : []),
+  ...(kindOrUndefined(harness) === 'claude' ? [`settings/${CLAUDE_COMFORT_NAME}`] : []),
 ];
 
 /** The built-in components by kind and name; an owner's component of the same name always wins over these. */

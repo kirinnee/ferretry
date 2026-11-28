@@ -5,6 +5,7 @@
  * behaviour fails closed with.
  */
 import { describe, it } from 'bun:test';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import {
   HARNESS_OWNED_SKILL_ENTRIES,
   ASSET_FIELDS,
@@ -12,15 +13,12 @@ import {
   harnessAsset,
   isHarnessOwnedSkillEntry,
 } from '../../../daemon/lib/assets.ts';
-import { HOST_INSTRUCTIONS_NAME } from '../../../daemon/lib/account/import.ts';
 import { HARNESS_DISPLAY_NAMES } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import {
-  byHarness,
   harnessKeyOfKind,
   harnessKindOfKey,
   HarnessKindSchema,
-  isKind,
   isSupportedKind,
   supportedKindOfKey,
   supportedKinds,
@@ -50,7 +48,9 @@ describe('harness word goldens', () => {
       supportedKinds: supportedKinds(),
       keyOfKind: Object.fromEntries(supportedKinds().map(kind => [kind, harnessKeyOfKind(kind)])),
       displayNames: HARNESS_DISPLAY_NAMES,
-      instructionsNames: HOST_INSTRUCTIONS_NAME,
+      instructionsNames: Object.fromEntries(
+        [...REAL_KITS].map(([kind, kit]) => [kind, kit.importSetup?.instructionsName]),
+      ),
       packages: HARNESS_PACKAGES,
       ownedSkillEntries: HARNESS_OWNED_SKILL_ENTRIES,
       assets: Object.fromEntries(
@@ -81,12 +81,7 @@ describe('harness word goldens', () => {
           {
             isSupportedKind: isSupportedKind(word),
             supportedKindOfKey: supportedKindOfKey(word) ?? null,
-            isKindClaude: isKind(word, 'claude'),
-            isKindCodex: isKind(word, 'codex'),
             kindOfKey: outcome(() => harnessKindOfKey(word as never)),
-            byHarness: outcome(() =>
-              byHarness(word, { claude: () => 'the Claude case', codex: () => 'the Codex case' }),
-            ),
             schema: HarnessKindSchema.safeParse(word).success
               ? 'accepted'
               : (HarnessKindSchema.safeParse(word).error?.issues.map(issue => issue.message) ?? []),

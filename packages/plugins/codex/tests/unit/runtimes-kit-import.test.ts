@@ -128,6 +128,42 @@ describe('Codex host harvest kit', () => {
     expect(result.mcpSource).toBe('/fixture/config.toml');
   });
 
+  it('names its MCP document: the mcp_servers table of config.toml, a disabled server left out', () => {
+    expect(codexImportKit.mcpImport).toEqual({
+      document: 'settings',
+      format: 'toml',
+      file: 'config.toml',
+      table: 'mcp_servers',
+      knownKeys: ['command', 'args', 'env', 'url', 'enabled'],
+      skipDisabled: true,
+    });
+  });
+
+  it("reads each profile's name and only its model and effort as hints, before it drops anything", () => {
+    const rest: Record<string, unknown> = {
+      profiles: {
+        deep: { model: 'fixture-model', model_reasoning_effort: 'high', approval_policy: 'never' },
+        modelOnly: { model: 'other-model' },
+        effortOnly: { model_reasoning_effort: 'low' },
+        blankKeys: { model: '', model_reasoning_effort: '' },
+        notATable: 'text',
+        '': { model: 'unnamed' },
+      },
+    };
+    const result = codexImportKit.harvest!(harvestWorld(rest).input);
+    expect(result.profileHints).toEqual([
+      { name: 'deep', model: 'fixture-model', effort: 'high' },
+      { name: 'modelOnly', model: 'other-model' },
+      { name: 'effortOnly', effort: 'low' },
+      { name: 'blankKeys' },
+    ]);
+  });
+
+  it('has no profile hints when the document declares no profiles table', () => {
+    expect(codexImportKit.harvest!(harvestWorld({}).input).profileHints).toEqual([]);
+    expect(codexImportKit.harvest!(harvestWorld({ profiles: ['a'] }).input).profileHints).toEqual([]);
+  });
+
   it('removes a policy that held only the environment, and imports nothing when the person skipped env', () => {
     const rest: Record<string, unknown> = { shell_environment_policy: { set: { FIXTURE: 'x' } } };
     const w = harvestWorld(rest, { skippedEnv: true });
