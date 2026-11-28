@@ -47,14 +47,18 @@
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames } from '../foreign.ts';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
-import { isSseUrl, type KitServerEnvironment, type RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
+import {
+  isSseUrl,
+  type KitPlumbingEntry,
+  type KitServerEnvironment,
+  type RuntimesHarnessKit,
+} from '../../../contract/harness-kit.ts';
 import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
 import { byHarness, harnessKeyOfKind, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
 import { deepMergeSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
 import { isBuiltinInstructions } from './builtin-autonomous.ts';
-import { CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY } from './credentials.ts';
 import {
   type Contribution,
   type FlatLayer,
@@ -306,6 +310,21 @@ function adaptInstructions(
 
 export { isSseUrl };
 
+/**
+ * What the kit of `harness` gives for `member`. A harness Runtimes has no behaviour for is refused by name whatever kit it
+ * is handed, and a known harness without its kit (or without that member) is refused too: no kit stands in for another's.
+ */
+function kitMember<M extends 'renderMcpServer' | 'configDocuments' | 'plumbing'>(
+  harness: string,
+  kit: RuntimesHarnessKit | undefined,
+  member: M,
+): NonNullable<RuntimesHarnessKit[M]> {
+  byHarness(harness, { claude: () => undefined, codex: () => undefined });
+  const given = kit?.[member];
+  if (given === undefined) throw new UnsupportedHarnessError(harness);
+  return given;
+}
+
 const splitEnvironment = (env: Readonly<Record<string, string>>): KitServerEnvironment => {
   const literal: Record<string, string> = {};
   const forwarded: string[] = [];
@@ -315,18 +334,6 @@ const splitEnvironment = (env: Readonly<Record<string, string>>): KitServerEnvir
   }
   return { literal, forwarded };
 };
-
-/** One server as Codex's `[mcp_servers.<name>]` table; a signed-in one names its token's variable. */
-function codexServer(server: McpComponent, env: KitServerEnvironment, bearer: string | undefined): SettingsObject {
-  if (server.url !== undefined)
-    return { url: server.url, ...(bearer === undefined ? {} : { bearer_token_env_var: bearer }) };
-  return {
-    command: server.command,
-    ...(server.args !== undefined && server.args.length > 0 ? { args: server.args } : {}),
-    ...(Object.keys(env.literal).length > 0 ? { env: env.literal } : {}),
-    ...(env.forwarded.length > 0 ? { env_vars: env.forwarded } : {}),
-  };
-}
 
 /**
  * Servers as the plan would write them for `harness`, whether or not the profile in effect has them. It is how an upgrade
@@ -388,13 +395,8 @@ function adaptMcp(
       bearer = names.variable;
       launchEnv[bearer] = secretReference(names.access);
     }
-    rendered[layer.name] = byHarness(harness, {
-      claude: () => {
-        if (kit?.renderMcpServer === undefined) throw new UnsupportedHarnessError(harness);
-        return kit.renderMcpServer(component, env, bearer);
-      },
-      codex: () => codexServer(component, env, bearer),
-    });
+    // Each harness's own plugin spells its servers; one without that member cannot.
+    rendered[layer.name] = kitMember(harness, kit, 'renderMcpServer')(component, env, bearer);
   }
   return rendered;
 }
@@ -530,24 +532,20 @@ const plumbingFor = (
   plumbing: AdaptPlumbing,
   settings: SettingsObject,
   kit: RuntimesHarnessKit | undefined,
-): readonly PlumbingEntry[] =>
-  byHarness<readonly PlumbingEntry[]>(plumbing.harness, {
-    claude: () => {
-      if (kit?.plumbing === undefined) throw new UnsupportedHarnessError(plumbing.harness);
-      return kit.plumbing({
-        settings,
-        statusLine: (plumbing as Extract<AdaptPlumbing, { harness: 'claude' }>).statusLine,
-      });
-    },
-    codex: () => [
-      { key: CODEX_CREDENTIAL_STORE_KEY, path: [CODEX_CREDENTIAL_STORE_KEY], value: CODEX_CREDENTIAL_STORE_FILE },
-      {
-        key: 'sqlite_home',
-        path: ['sqlite_home'],
-        value: (plumbing as Extract<AdaptPlumbing, { harness: 'codex' }>).sqliteHome,
-      },
-    ],
+): readonly KitPlumbingEntry[] => {
+  // Each harness's plugin reads the fact it is given: a status line for Claude, a history directory for Codex.
+  return kitMember(
+    plumbing.harness,
+    kit,
+    'plumbing',
+  )({
+    settings,
+    ...byHarness<{ statusLine: ClaudeStatuslineCommand } | { sqliteHome: string }>(plumbing.harness, {
+      claude: () => ({ statusLine: (plumbing as Extract<AdaptPlumbing, { harness: 'claude' }>).statusLine }),
+      codex: () => ({ sqliteHome: (plumbing as Extract<AdaptPlumbing, { harness: 'codex' }>).sqliteHome }),
+    }),
   });
+};
 
 /** What `value`, written at `path`, holds at the deeper `at`; `undefined` when nothing. */
 const valueBelow = (value: unknown, path: readonly string[], at: readonly string[]): unknown =>
@@ -668,29 +666,25 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
 
   const servers = adaptMcp(harness, resolved.mcp, launchEnv, problems, input.kit);
 
-  // Where the servers go: Claude's `.claude.json` (and its hooks block in settings), Codex's `mcp_servers` table in config.toml.
-  const documents = byHarness<{ readonly settings: SettingsObject; readonly claudeJson?: SettingsObject }>(harness, {
-    claude: () => {
-      if (input.kit?.configDocuments === undefined) throw new UnsupportedHarnessError(harness);
-      return input.kit.configDocuments({
-        settings: baseSettings,
-        servers,
-        ...(hooks.settingsBlock === undefined ? {} : { hooksBlock: hooks.settingsBlock }),
-      });
-    },
-    codex: () => {
-      let written = baseSettings;
-      for (const { layer } of resolved.mcp) {
-        const path = ['mcp_servers', layer.name];
-        for (const leaf of replacedLeaves(resolved.settings.leaves, path, servers[layer.name])) {
-          overrides.push({ key: leaf.key, path: leaf.path, value: leaf.value, layer: leaf.layer, by: layer.reference });
-        }
-        const existing = isPlainObject(written.mcp_servers) ? written.mcp_servers : {};
-        written = { ...written, mcp_servers: { ...existing, [layer.name]: servers[layer.name] } };
-      }
-      return { settings: written };
-    },
+  // Where the servers go is each harness's own plugin's to say (Claude's `.claude.json`, Codex's `mcp_servers` table).
+  const documents = kitMember(
+    harness,
+    input.kit,
+    'configDocuments',
+  )({
+    settings: baseSettings,
+    servers,
+    ...(hooks.settingsBlock === undefined ? {} : { hooksBlock: hooks.settingsBlock }),
   });
+  // A server written into the settings document replaces whatever the person's own settings held at its place.
+  if (documents.serversAt !== undefined) {
+    for (const { layer } of resolved.mcp) {
+      const path = [...documents.serversAt, layer.name];
+      for (const leaf of replacedLeaves(resolved.settings.leaves, path, servers[layer.name])) {
+        overrides.push({ key: leaf.key, path: leaf.path, value: leaf.value, layer: leaf.layer, by: layer.reference });
+      }
+    }
+  }
   let settings = documents.settings;
   const { claudeJson } = documents;
 
@@ -698,7 +692,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   const plumbingEntries = plumbing.harness === harness ? plumbingFor(plumbing, baseSettings, input.kit) : [];
   for (const entry of plumbingEntries) {
     // Claude's statusLine is chained, never replaced: the person's own command still runs.
-    if (isKind(harness, 'codex')) {
+    if (entry.replacesOwn === true) {
       for (const leaf of replacedLeaves(resolved.settings.leaves, entry.path, entry.value)) {
         overrides.push({ key: leaf.key, path: leaf.path, value: leaf.value, layer: leaf.layer, by: 'plumbing' });
       }
@@ -714,7 +708,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
     ...(claudeJson === undefined ? {} : { claudeJson }),
     launchEnv,
     harnessOwned: reserved.map(entry => `${skillsDest}/${entry}`),
-    plumbing: plumbingEntries,
+    plumbing: plumbingEntries.map(({ key, path, value }) => ({ key, path, value })),
     overrides,
     problems,
   };

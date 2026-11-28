@@ -46,6 +46,7 @@ import {
   AgentPinsFile,
   FerretDetailsFile,
   FerretLaunchEnvironmentFiles,
+  FerretLaunchSecretFiles,
   FerretSummaryFiles,
   FerretWaitFiles,
 } from '../contract/index.ts';
@@ -462,6 +463,9 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   const launch = new LaunchStepRegistry();
   const servicePorts = {
     launchEnvironment,
+    recordLaunchSecrets: async (ferret, names) => {
+      await kernel.state.write(FerretLaunchSecretFiles, { names: [...new Set(names)].sort() }, ferret);
+    },
     launchSections: {
       write: async (ferret, sections) => await kernel.state.write(FerretLaunchSectionsFiles, { sections }, ferret),
       forget: async ferret => await kernel.state.remove(FerretLaunchSectionsFiles, ferret),

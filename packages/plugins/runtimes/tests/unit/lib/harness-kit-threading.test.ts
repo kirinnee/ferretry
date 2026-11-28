@@ -1,9 +1,9 @@
 /**
  * The kit a harness's own plugin hands Runtimes reaches every group a materialisation asks about that harness (E-276 PR 1):
  * each group function is given the kit of the runtime's own harness, and a harness whose plugin gives none is given none —
- * never another harness's. Claude's MCP and document members are read now (E-276 PR 6), so a Claude runtime without its kit is
+ * never another harness's. Claude's and Codex's MCP and document members are read now (E-276 PR 6, PR 7), so a Claude runtime without its kit is
  * published UNAVAILABLE by name instead of written in another shape, and the rest of the plan still publishes; the same holds
- * for a Codex runtime whose plugin gives no extras (E-276 PR 12), whatever its credential store.
+ * for a Codex runtime whose plugin gives no kit (E-276 PR 7 documents, PR 12 extras), whatever its credential store.
  *
  * It is also the startup order: the settings sources can answer `unavailable` while plugins are still starting, so the
  * kit is read live with each plan and the first plan after a source comes online carries it.
@@ -121,6 +121,103 @@ describe('the kit threaded to the groups of a materialisation', () => {
     const claudeHome = accountOf(plans[0]?.manifest.accounts ?? [], 'claude-default').home;
     const written = (plans[0]?.operations ?? []).filter(
       operation => 'path' in operation && operation.path.startsWith(`${claudeHome}/`),
+    );
+    expect(written).toEqual([]);
+  });
+
+  it('should make a Codex runtime unavailable by name when its plugin gives no kit, and only that runtime', async () => {
+    spies.calls.length = 0;
+    const { service, plans } = twoHarnessWorld({ kits: () => new Map([['claude', CLAUDE_KIT]] as const) });
+    await expect(service.publishFromFiles()).resolves.toBe('applied');
+    expect(kitsOf('plumbingOf', 'codex')).toEqual([undefined]);
+    expect(kitsOf('plumbingOf', 'claude').every(kit => kit === CLAUDE_KIT)).toBe(true);
+    const accounts = plans[0]?.manifest.accounts ?? [];
+    expect(accountOf(accounts, 'codex-default')).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringContaining('codex is not supported here'),
+    });
+    expect(accountOf(accounts, 'claude-default').unavailableReason ?? '').not.toContain('is not supported here');
+    expect(wrapperText(plans[0] as FleetApplyPlan, 'codex-default')).toContain('is not supported here');
+    expect(wrapperText(plans[0] as FleetApplyPlan, 'claude-default')).not.toContain('is not supported here');
+  });
+
+  it('should make an environment-backed Codex runtime unavailable runtime-wide when its plugin gives no kit', async () => {
+    const model = parseAccountModel({
+      version: 1,
+      credentials: {
+        'codex-key': { harness: 'codex', store: 'environment', env: { OPENAI_API_KEY: 'sk-synthetic-not-a-key' } },
+        'claude-you': { harness: 'claude', store: 'host' },
+      },
+      components: { instructions: { notes: { file: 'components/instructions/notes.md' } } },
+      profiles: { default: { layers: ['instructions/notes'] } },
+      runtimes: {
+        'codex-env': { credential: 'codex-key', profile: 'default' },
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+      },
+    });
+    const { service, plans } = twoHarnessWorld({
+      kits: () => new Map([['claude', CLAUDE_KIT]] as const),
+      document: async () => ({
+        format: 'present',
+        model,
+        revision: 'rev-1',
+        unreadable: [],
+        stoodInLogins: [],
+        documents: () => [],
+      }),
+    });
+    await expect(service.publishFromFiles()).resolves.toBe('applied');
+    const plan = plans[0] as FleetApplyPlan;
+    expect(accountOf(plan.manifest.accounts, 'codex-env')).toMatchObject({
+      available: false,
+      unavailableReason: 'codex is not supported here',
+    });
+    expect(wrapperText(plan, 'codex-env')).toContain('codex is not supported here');
+    expect(wrapperText(plan, 'claude-default')).toContain('claude-default');
+  });
+
+  it.each([
+    ['codex', 'codex-env', 'codex-key', 'OPENAI_API_KEY', 'claude', 'codex is not supported here'],
+    ['claude', 'claude-env', 'claude-key', 'ANTHROPIC_API_KEY', 'codex', 'claude-code is not supported here'],
+  ] as const)(
+    'should append the kitless reason of an environment-backed %s runtime exactly once, in the manifest and the wrapper',
+    async (harness, runtimeName, credentialName, variable, otherKit, reason) => {
+      const model = parseAccountModel({
+        version: 1,
+        credentials: {
+          [credentialName]: { harness, store: 'environment', env: { [variable]: 'sk-synthetic-not-a-key' } },
+        },
+        components: { instructions: { notes: { file: 'components/instructions/notes.md' } } },
+        profiles: { default: { layers: ['instructions/notes'] } },
+        runtimes: { [runtimeName]: { credential: credentialName, profile: 'default' } },
+      });
+      const { service, plans } = twoHarnessWorld({
+        kits: () => new Map([[otherKit, otherKit === 'claude' ? CLAUDE_KIT : CODEX_KIT]] as const),
+        document: async () => ({
+          format: 'present',
+          model,
+          revision: 'rev-1',
+          unreadable: [],
+          stoodInLogins: [],
+          documents: () => [],
+        }),
+      });
+      await expect(service.publishFromFiles()).resolves.toBe('applied');
+      const plan = plans[0] as FleetApplyPlan;
+      const occurrences = (text: string) => text.split(reason).length - 1;
+      const published = accountOf(plan.manifest.accounts, runtimeName);
+      expect(published.available).toBe(false);
+      expect(occurrences(published.unavailableReason ?? '')).toBe(1);
+      expect(occurrences(wrapperText(plan, runtimeName))).toBe(1);
+    },
+  );
+
+  it('should write nothing into the home of a Codex runtime whose plugin gives no kit', async () => {
+    const { service, plans } = twoHarnessWorld({ kits: () => new Map([['claude', CLAUDE_KIT]] as const) });
+    await service.publishFromFiles();
+    const codexHome = accountOf(plans[0]?.manifest.accounts ?? [], 'codex-default').home;
+    const written = (plans[0]?.operations ?? []).filter(
+      operation => 'path' in operation && operation.path.startsWith(`${codexHome}/`),
     );
     expect(written).toEqual([]);
   });

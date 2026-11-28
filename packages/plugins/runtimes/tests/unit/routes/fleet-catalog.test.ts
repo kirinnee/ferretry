@@ -28,6 +28,7 @@ import {
 import { type CatalogFacts, componentCatalog, runtimeCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { type Hosted, hostRuntimes, PROPOSAL_ID } from './support.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const ID = PROPOSAL_ID;
 
@@ -523,6 +524,7 @@ const LEAK_FACTS: CatalogFacts = {
   runningSessions: 0,
   userHome: '/home/person',
   acceptsAutoPermissionMode: true,
+  kits: REAL_KITS,
 };
 
 describe('the components read — no credential in a flag or argument for any caller (R-0082, #39, #40)', () => {

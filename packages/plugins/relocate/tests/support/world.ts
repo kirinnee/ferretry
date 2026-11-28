@@ -1,9 +1,10 @@
 import type { DaemonIdentity } from '@ferretry/std/sealing';
 import type { Instant } from '@ferretry/std';
+import type { Redaction } from '@ferretry/kernel/contract';
 import { kernelWorkingTree } from '../../daemon/lib/git-bundle.ts';
 import { type MovedLedger, Relocation } from '../../daemon/lib/relocation.ts';
 import { type FakeFerrets, fakeFerrets, fakeSource, type FakeSourceOptions } from './fake-ferrets.ts';
-import { crypto, newIdentity, openOffer, type TestOffer } from './identity.ts';
+import { bundleSigner, crypto, newIdentity, openOffer, type TestOffer } from './identity.ts';
 import { makeRepository, realKernel, type Fixture } from './real-git.ts';
 
 const NOW_MS = Date.parse('2026-11-27T12:00:00.000Z');
@@ -31,11 +32,16 @@ export async function world(
     readonly state?: 'idle' | 'working' | 'stopped';
     readonly noTree?: boolean;
     readonly crypto?: typeof crypto;
+    readonly knownSecrets?: ReadonlyMap<string, string>;
+    readonly profileSecrets?: readonly string[];
+    readonly runtime?: string;
+    readonly redaction?: Redaction;
   } = {},
 ): Promise<World> {
   const fixture = makeRepository();
   const source = fakeSource(options);
   const ferrets = fakeFerrets({
+    runtime: options.runtime,
     state: options.state ?? 'idle',
     source,
     ...(options.noTree === true ? {} : { folder: fixture.folder }),
@@ -59,6 +65,20 @@ export async function world(
     movedLedger,
     now: NOW_MS,
     relocation: new Relocation({
+      profileSecrets: async () => options.profileSecrets ?? [],
+      signer: bundleSigner(sourceIdentity),
+      redaction: options.redaction ?? {
+        read: async work =>
+          await work({
+            text: text => text,
+            cells: grid => grid,
+            lines: lines => lines,
+            secretNamesIn: bytes =>
+              [...(options.knownSecrets ?? [])]
+                .filter(([, value]) => Buffer.from(bytes).includes(Buffer.from(value)))
+                .map(([name]) => name),
+          }),
+      },
       crypto: options.crypto ?? crypto,
       ferrets: ferrets.port,
       treeOf: folder => kernelWorkingTree(kernel, folder),

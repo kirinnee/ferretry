@@ -41,6 +41,12 @@ export class VaultRedaction implements Redaction {
     const scrub = this.compose(scrubValues(values));
     try {
       return await fn({
+        secretNamesIn: bytes => {
+          const haystack = Buffer.from(bytes);
+          return [...values()]
+            .filter(([, value]) => value !== '' && haystack.includes(Buffer.from(value)))
+            .map(([name]) => name);
+        },
         text: text => {
           values();
           return scrub.text(text);

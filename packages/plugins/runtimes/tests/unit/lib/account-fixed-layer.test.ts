@@ -14,7 +14,6 @@ import {
   CLAUDE_PROMPTS_SEEN,
   CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
-  claudeToolsConfig,
   codexNoticeOverride,
   codexToolsServer,
   codexTrustOverride,
@@ -40,6 +39,7 @@ import {
 import { type ResolvedProfile, resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { HarnessKind } from '../../../daemon/lib/manifest.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 /** What every lead agent is told (a lead's notify, board and lessons rules come from the plugins, not the wrapper): the always-on sections, in order, joined as the wrapper joins them. */
 const leadInstruction = (fy: string): string =>
@@ -53,6 +53,10 @@ const FY = '/opt/fy/bin/fy';
 const INSTRUCTION = AGENT_BASE_INSTRUCTION('fy');
 /** The commands no ferret may run (E176): by pattern or by name, one stray call stopped ~17 agents. */
 const CLAUDE_KILL_DENY = ['Bash(pkill:*)', 'Bash(killall:*)'];
+/** Claude's `--mcp-config` document for the tools server, as written out. */
+const claudeToolsConfig = (fy: string) => ({
+  mcpServers: { ferretry: { type: 'stdio', command: fy, args: ['mcp', 'serve'], env: { FY_TOKEN: '' } } },
+});
 
 /** What every Claude agent launch ends with: the tools server, and the instruction that names it. */
 const CLAUDE_TOOL_ARGS = [
@@ -85,7 +89,7 @@ const CODEX_TOOL_ARGS = [
 ];
 
 const layerOf = (input: FixedLayerInput): FixedLayer => {
-  const result = fixedLayerFor(input);
+  const result = fixedLayerFor(input, REAL_KITS);
   if (!result.ok) throw new Error(result.refusal.message);
   return result.layer;
 };
@@ -121,13 +125,16 @@ const profileWith = (
 describe('fixedLayerFor — Claude', () => {
   it('should launch Auto mode explicitly, with no questions and the trust and onboarding keys', () => {
     // Act
-    const actual = fixedLayerFor({
-      harness: 'claude',
-      agentPermissions: 'auto',
-      cwd: CWD,
-      fyCommand: FY,
-      acceptsAutoPermissionMode: true,
-    });
+    const actual = fixedLayerFor(
+      {
+        harness: 'claude',
+        agentPermissions: 'auto',
+        cwd: CWD,
+        fyCommand: FY,
+        acceptsAutoPermissionMode: true,
+      },
+      REAL_KITS,
+    );
 
     // Assert
     should(actual).deepEqual({
@@ -260,13 +267,16 @@ describe('fixedLayerFor — Claude', () => {
 
   it('should refuse Auto mode on a Claude that does not accept it, naming the fix (O4)', () => {
     // Act
-    const actual = fixedLayerFor({
-      harness: 'claude',
-      agentPermissions: 'auto',
-      cwd: CWD,
-      fyCommand: FY,
-      acceptsAutoPermissionMode: false,
-    });
+    const actual = fixedLayerFor(
+      {
+        harness: 'claude',
+        agentPermissions: 'auto',
+        cwd: CWD,
+        fyCommand: FY,
+        acceptsAutoPermissionMode: false,
+      },
+      REAL_KITS,
+    );
 
     // Assert
     should(actual.ok).be.false();

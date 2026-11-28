@@ -1,5 +1,38 @@
 import { type DaemonIdentity, toBase64Url, WebCryptoCloneCrypto, type PrivateKeyHandle } from '@ferretry/std/sealing';
 import { offerSignedBytes, type RelocateOffer } from '../../contract/index.ts';
+import { concatBytes, lengthPrefixed, utf8Bytes } from '@ferretry/std/sealing';
+import type { IdentitySigner } from '@ferretry/kernel/contract';
+
+export function bundleSigner(identity: DaemonIdentity): Pick<IdentitySigner, 'signRelocateBundle'> {
+  return {
+    signRelocateBundle: async request => {
+      const identityKey = toBase64Url(identity.publicKeySpki);
+      return {
+        daemonId: identity.daemonId,
+        identityKey,
+        signature: toBase64Url(
+          await crypto.signEd25519(
+            identity.privateKey,
+            concatBytes(
+              [
+                'ferretry-relocate-bundle-v1',
+                String(request.v),
+                request.offerId,
+                identity.daemonId,
+                identityKey,
+                request.targetDaemonId,
+                request.expiresAt,
+                request.ephemeralKey,
+                String(request.chunks),
+                String(request.bytes),
+              ].map(field => lengthPrefixed(utf8Bytes(field))),
+            ),
+          ),
+        ),
+      };
+    },
+  };
+}
 
 /** The crypto both ends use, bound once: the same adapter the daemon uses. */
 export const crypto = new WebCryptoCloneCrypto();

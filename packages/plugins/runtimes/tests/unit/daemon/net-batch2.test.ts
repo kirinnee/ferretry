@@ -17,6 +17,7 @@ import {
   runtimeCatalog,
 } from '../../../daemon/lib/service/catalog.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const W = 'Hy8cBt4Fg6SdJ1uE';
@@ -28,6 +29,7 @@ const FACTS: CatalogFacts = {
   runningSessions: 0,
   userHome: '/home/person',
   acceptsAutoPermissionMode: true,
+  kits: REAL_KITS,
 };
 const model = (components: Record<string, unknown>, profiles: Record<string, unknown> = {}, extra = {}) =>
   parseAccountModel({ version: 1, components, profiles, ...extra });

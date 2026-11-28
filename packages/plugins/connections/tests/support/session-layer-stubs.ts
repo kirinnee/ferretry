@@ -17,6 +17,12 @@ export const unusedSigner: IdentitySigner = {
   signSecretOffer: async () => {
     throw new Error('this test signs no secret offer');
   },
+  signRelocateOffer: async () => {
+    throw new Error('this test signs no move offer');
+  },
+  signRelocateBundle: async () => {
+    throw new Error('not used');
+  },
 };
 
 /** A session layer's multiplexed connection, for a test whose carrier opens one link per socket. */

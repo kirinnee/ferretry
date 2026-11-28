@@ -907,6 +907,7 @@ export class FleetCatalogService {
       missingCommands,
       credentialStatus: await this.#credentialStatus(),
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
+      ...(this.deps.kits === undefined ? {} : { kits: this.deps.kits() }),
       lastAutoResume: (await this.deps.lastAutoResume?.()) ?? null,
       now: this.deps.now(),
       ...this.#budgetHolds(),

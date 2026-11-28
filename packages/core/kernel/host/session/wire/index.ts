@@ -17,3 +17,4 @@ export * from './tunnel-request.ts';
 export * from './catalog-signature.ts';
 export * from './secret-offer.ts';
 export * from './link-store.ts';
+export * from './relocate-offer.ts';
