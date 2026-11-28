@@ -624,6 +624,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       )
     : undefined;
   const runner = new TmuxRunner({
+    scopes: panes,
     worktrees,
     tmux,
     typing,

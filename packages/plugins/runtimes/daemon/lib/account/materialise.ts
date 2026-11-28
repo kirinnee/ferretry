@@ -52,7 +52,7 @@ import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, Materialise
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../foreign.ts';
-import { harnessKeyOfKind, isKind, unsupportedHarnessSentence } from '../harness-kind.ts';
+import { harnessKeyOfKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import {
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
@@ -334,6 +334,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // A derived runtime whose pinned model is gone, or whose pins nobody could read, is refused by name: never moved to the live default.
     if (runtime.refused !== undefined) reasons.push(runtime.refused);
 
+    // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
+    const kit = input.kits?.get(harness);
+    // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
+    // ...and so is one of either harness whose kit gives no launch line (E-276 PR 8, PR 9), in the same words.
+    const kitMissing: KitRefusal | undefined =
+      missingKitRefusal(harness, kit) ??
+      (kit?.wrapper === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
+        : undefined);
     const store = resolveCredentialStore(
       runtime.credential,
       credential,
@@ -342,10 +351,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness,
       loginStores,
     );
-    if ('unavailable' in store)
-      reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
-    if (store.store === 'environment' && store.problem !== undefined) {
-      reasons.push(`its login "${runtime.credential}" cannot launch: ${store.problem}`);
+    // The typed refusal is the ONE reason a runtime gets when ANY kit member it needs is missing, whatever store its login is in (environment, stored or host):
+    // its login then has nothing further to say, and the reason is never said twice.
+    if (kitMissing !== undefined) reasons.push(kitMissing.message);
+    else {
+      if ('unavailable' in store)
+        reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
+      if (store.store === 'environment' && store.problem !== undefined) {
+        reasons.push(`its login "${runtime.credential}" cannot launch: ${store.problem}`);
+      }
     }
 
     const availableModels = input.availableModels?.[runtime.credential];
@@ -378,17 +392,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     // The fixed layer: computed for a placeholder folder, which never reaches a file.
     let fixed: FixedLayer | undefined;
-    // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
-    const kit = input.kits?.get(harness);
-    // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    // ...and so is one whose kit gives no launch line (E-276 PR 8), in the same words.
-    const kitMissing: KitRefusal | undefined =
-      missingKitRefusal(harness, kit) ??
-      (isKind(harness, 'claude') && kit?.wrapper === undefined
-        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
-        : undefined);
-    // (A login whose own store already says so is not said twice.)
-    if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing.message);
     const result = fixedLayerOf(
       harness,
       {

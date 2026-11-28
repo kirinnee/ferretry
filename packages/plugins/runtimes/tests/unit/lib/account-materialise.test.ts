@@ -1527,3 +1527,38 @@ describe('the variables a runtime publishes for a check to fill from', () => {
     should(account?.secretEnv).containEql({ ANTHROPIC_API_KEY: '${secret:WORK_KEY}' });
   });
 });
+
+// E-276 PR 5 (addendum 12): a harness whose plugin gives no kit is unavailable as a WHOLE, in every credential store.
+describe('a runtime whose harness has no kit', () => {
+  it('should make every Codex runtime unavailable as unsupported, in both credential stores, while Claude publishes, when only the Claude kit is present', () => {
+    // Arrange — Codex on an environment login and on the person's own login; only Claude has a kit.
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'host' },
+        'codex-env': { harness: 'codex', store: 'environment', env: { OPENAI_API_KEY: '${secret:WORK_KEY}' } },
+        'codex-host': { harness: 'codex', store: 'host' },
+      },
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'codex-env': { credential: 'codex-env', profile: 'default' },
+        'codex-host': { credential: 'codex-host', profile: 'default' },
+      },
+    });
+    const claudeOnly = new Map([...REAL_KITS].filter(([harness]) => harness === 'claude'));
+
+    // Act
+    const result = plan(model, { kits: claudeOnly });
+
+    // Assert — each Codex runtime is refused by name, with no Codex launch; Claude is untouched.
+    const reason = 'codex is not supported here';
+    const accountOf = (name: string) => result.manifest.accounts.find(account => account.displayName === name);
+    for (const name of ['codex-env', 'codex-host']) {
+      should(accountOf(name)).match({ available: false, unavailableReason: reason });
+      should(wrapperOf(result, name))
+        .containEql(`ferretry: ${name} cannot start: ${reason}`)
+        .and.not.containEql('exec codex');
+    }
+    should(accountOf('claude-default')).match({ available: true, unavailableReason: null });
+    should(wrapperOf(result, 'claude-default')).containEql('exec claude');
+  });
+});

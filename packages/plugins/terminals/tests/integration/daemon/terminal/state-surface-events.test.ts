@@ -33,6 +33,26 @@ async function terminalsState() {
 }
 
 describe('terminals.json on disk', () => {
+  it('should retain a launched scope independently of pane registration across a daemon restart', async () => {
+    const { home, port } = await terminalsState();
+    const panes = new StateTerminalPanes(port, file);
+    await panes.recordScope('fy-hadi', 'ferretry-agent-hadi-1.scope');
+    await panes.recordScope('fy-other', 'ferretry-agent-other-1.scope');
+    await new StateSurfaceEvents(port, file).publish('hadi', 'surface.note', {});
+    const restarted = state.createStatePort({
+      home,
+      pluginId: 'terminals',
+      files: manifest.data.state,
+      fs: state.createNodeHostFs(),
+    });
+    const records = new StateTerminalPanes(restarted, file);
+    should(await records.of('hadi')).be.undefined();
+    should(await records.scopeOf('fy-hadi')).equal('ferretry-agent-hadi-1.scope');
+    await records.recordScope('fy-hadi', undefined);
+    should(await records.scopeOf('fy-hadi')).be.undefined();
+    should(await records.scopeOf('fy-other')).equal('ferretry-agent-other-1.scope');
+  });
+
   it('should read an empty history and no pane before anything was written', async () => {
     // Arrange
     const { port } = await terminalsState();
@@ -107,6 +127,10 @@ describe('terminals.json on disk', () => {
         .register('hadi', { tmuxSession: 'fy-hadi', paneId: '%1', pid: 1, processStartTicks: 1 })
         .catch((error: unknown) => error),
       new StateTerminalPanes(damaged, file).of('hadi').catch((error: unknown) => error),
+      new StateTerminalPanes(damaged, file).scopeOf('fy-hadi').catch((error: unknown) => error),
+      new StateTerminalPanes(damaged, file)
+        .recordScope('fy-hadi', 'ferretry-agent-hadi-1.scope')
+        .catch((error: unknown) => error),
     ]);
 
     // Assert
