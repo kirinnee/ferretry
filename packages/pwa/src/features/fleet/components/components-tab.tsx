@@ -282,7 +282,13 @@ function ComponentPages(props: SharedProps & { reference: string; editing: boole
       </>
     );
   return props.editing ? (
-    <FormPage {...props} kind={component.kind} component={component} />
+    // Losing content discards the open draft synchronously, including its pending Save action.
+    <FormPage
+      key={`${component.reference}:${component.contentUnavailable ?? component.content?.form ?? 'unavailable'}`}
+      {...props}
+      kind={component.kind}
+      component={component}
+    />
   ) : (
     <DetailPage {...props} component={component} />
   );
@@ -316,6 +322,8 @@ function EnvList({ env }: { env: Extract<FleetComponentView['detail'], { kind: '
 function Content({ component }: { component: FleetComponentView }) {
   const detail = component.detail;
   const content = component.content;
+  if (component.contentUnavailable !== undefined)
+    return <Hint>This content is not served remotely. Edit it on the machine.</Hint>;
   switch (detail.kind) {
     case 'skills':
       return (
@@ -623,7 +631,8 @@ function FormPage(props: SharedProps & { kind: FleetComponentKind; component?: F
   const problem = draftProblem(draft, allComponents(catalog), editing ? component.name : undefined);
   const wide =
     component !== undefined && (component.usedBy.profiles.length > 1 || component.usedBy.runtimes.length > 1);
-  const submit = () =>
+  const submit = () => {
+    if (problem !== undefined) return;
     void changes.apply(componentChange(draft, !editing)).then(result => {
       if (result.kind !== 'applied') return;
       const reference = `${kind}/${draft.name.trim()}`;
@@ -632,6 +641,7 @@ function FormPage(props: SharedProps & { kind: FleetComponentKind; component?: F
         reference,
       });
     });
+  };
   return (
     <>
       <PageHead

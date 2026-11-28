@@ -6,6 +6,7 @@ import { DaemonConnectionStore } from '../../../../../src/lib/connections.ts';
 import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { type AppStore, StoreProvider } from '../../../../../src/lib/store.tsx';
 import { type Mounted, mount, must } from '../../../../support/dom.ts';
+import { configChangeHarness } from '../../../config-change-support.tsx';
 import {
   claudeSettings,
   component,
@@ -24,6 +25,7 @@ import {
   type Machine,
   mountSettled,
   scriptedMachine,
+  settle,
   stagedChanges,
   submit,
   tabProps,
@@ -46,6 +48,24 @@ const open = async (machine: Machine = scriptedMachine(), overrides: Parameters<
 const toDetail = async (root: HTMLElement, kind: string, reference: string) => {
   await click(root, `[data-component-kind="${kind}"]`);
   await click(root, `[data-component-row="${reference}"]`);
+};
+
+const withUnreadable = (original: typeof instructions, remote = false) => {
+  const catalog = studioCatalog();
+  return {
+    ...catalog,
+    components: {
+      ...catalog.components,
+      kinds: catalog.components.kinds.map(group => ({
+        ...group,
+        components: group.components.map(row =>
+          row.reference === original.reference
+            ? { ...row, content: undefined, ...(remote ? { contentUnavailable: 'not served remotely' as const } : {}) }
+            : row,
+        ),
+      })),
+    },
+  };
 };
 
 describe('ComponentsTab — reading', () => {
@@ -314,6 +334,79 @@ describe('ComponentsTab — delete (E21)', () => {
 });
 
 describe('ComponentsTab — edit and new (E20)', () => {
+  it.each(['', 'Unsaved changes'])(
+    'discards an open draft (%s) when a refreshed catalogue stops sharing its content',
+    async body => {
+      const machine = scriptedMachine();
+      const props = tabProps(machine);
+      const harness = configChangeHarness(props.connection.daemonId);
+      mounted = await mountSettled(harness.wrap(<ComponentsTab {...props} />));
+      const root = mounted.container;
+      await toDetail(root, 'instructions', instructions.reference);
+      await click(root, '[data-component-edit]');
+      await type(root, '[data-component-field="body"]', body);
+      machine.catalog = withUnreadable(instructions, true);
+      await harness.move(['components']);
+      await settle();
+      expect(root.querySelector('[data-component-field="body"]')).toBeNull();
+      expect(root.textContent).toContain('not served remotely');
+      expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(true);
+      await submit(root);
+      expect(stagedChanges(machine)).toEqual([]);
+      machine.catalog = studioCatalog();
+      await harness.move(['components']);
+      await settle();
+      expect(root.querySelector<HTMLTextAreaElement>('[data-component-field="body"]')?.value).toBe(
+        instructions.content?.form === 'text' ? instructions.content.text : undefined,
+      );
+    },
+  );
+
+  it.each([instructions, hooks, claudeSettings])(
+    'does not save omitted content from an older daemon: $kind',
+    async original => {
+      const machine = scriptedMachine({
+        catalog: withUnreadable(original),
+      });
+      const root = await open(machine);
+      await toDetail(root, original.kind, original.reference);
+      await click(root, '[data-component-edit]');
+      expect(root.querySelector('[data-component-field="body"]')).toBeNull();
+      expect(root.textContent).toContain('unavailable');
+      expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(true);
+      await submit(root);
+      expect(stagedChanges(machine)).toEqual([]);
+    },
+  );
+
+  it('shows refused content read-only and sends no change when an untouched draft is submitted', async () => {
+    const catalog = studioCatalog();
+    const refused = { ...instructions, content: undefined, contentUnavailable: 'not served remotely' as const };
+    const machine = scriptedMachine({
+      catalog: {
+        ...catalog,
+        components: {
+          ...catalog.components,
+          kinds: catalog.components.kinds.map(group =>
+            group.kind === 'instructions'
+              ? {
+                  ...group,
+                  components: [refused],
+                }
+              : group,
+          ),
+        },
+      },
+    });
+    const root = await open(machine);
+    await toDetail(root, 'instructions', instructions.reference);
+    expect(root.textContent).toContain('not served remotely');
+    await click(root, '[data-component-edit]');
+    expect(root.querySelector('[data-component-field="body"]')).toBeNull();
+    expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(true);
+    await submit(root);
+    expect(stagedChanges(machine)).toEqual([]);
+  });
   it('warns that an edit lands everywhere, saves for all, and keeps the environment', async () => {
     const machine = scriptedMachine();
     const root = await open(machine);

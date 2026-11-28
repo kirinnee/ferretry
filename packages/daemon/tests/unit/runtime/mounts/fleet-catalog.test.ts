@@ -9,6 +9,7 @@
 import { describe, it } from 'bun:test';
 import type {
   FleetAccountChange,
+  FleetComponentCatalog,
   FleetAccountChangeView,
   FleetMachineView,
   FleetProfileDraftRequest,
@@ -129,6 +130,120 @@ const post = (path: string, body?: string) =>
   });
 
 describe('the fleet catalogue mount', () => {
+  it.each([
+    { flags: ['--permission-mode', 'prefix-‹hidden›'] },
+    { entries: { theme: { value: 'prefix-‹hidden›' } } },
+    { entries: { theme: { value: { nested: ['prefix-‹hidden›'] } } } },
+  ])('should refuse remote hidden-marker settings writes, including older clients: %j', async fields => {
+    const { subsystem, calls } = stub();
+    const change = {
+      kind: 'component.put',
+      name: 'private',
+      component: { kind: 'settings', harness: 'claude', ...fields },
+      create: false,
+    };
+    const send = (loopback: boolean, paired = false) =>
+      dispatcher(subsystem).dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/fleet/proposals',
+          loopback,
+          headers: paired ? {} : human,
+          ...(paired ? { device: { deviceId: 'paired', appSession: 'paired-app' } } : {}),
+          body: JSON.stringify({ change }),
+        }),
+      );
+    should((await send(false)).status).equal(409);
+    should((await send(true, true)).status).equal(409);
+    should(calls.proposed).have.length(0);
+    should((await send(true)).status).equal(200);
+    should(calls.proposed).have.length(1);
+  });
+
+  it.each(['', ' \n\t', {}])('should refuse remote unavailable-content clears: %j', async empty => {
+    const kind = typeof empty === 'string' ? 'instructions' : 'settings';
+    const catalog: FleetComponentCatalog = {
+      format: 'version-2',
+      kinds: [
+        {
+          kind,
+          label: 'Instructions',
+          description: 'Guidance',
+          components: [
+            {
+              kind,
+              name: 'private',
+              reference: `${kind}/private`,
+              scope: kind === 'settings' ? 'claude' : 'generic',
+              detail: kind === 'settings' ? { kind, file: 'private.json', env: [] } : { kind, file: 'private.md' },
+              contentUnavailable: 'not served remotely',
+              partial: [],
+              warnings: [],
+              usedBy: { profiles: [], runtimes: [] },
+              editNote: 'Nothing uses it yet.',
+              remove: { available: true },
+            },
+          ],
+        },
+      ],
+    };
+    const reads: (boolean | undefined)[] = [];
+    const { subsystem, calls } = stub({
+      components: async remote => {
+        reads.push(remote);
+        return catalog;
+      },
+    });
+    const change = {
+      kind: 'component.put',
+      name: 'private',
+      component: typeof empty === 'string' ? { kind } : { kind, harness: 'claude', entries: empty },
+      ...(typeof empty === 'string' ? { content: empty } : {}),
+      create: false,
+    };
+    const send = (loopback: boolean, device?: { deviceId: string; appSession: string }) =>
+      dispatcher(subsystem).dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/fleet/proposals',
+          headers: device === undefined ? human : {},
+          loopback,
+          device,
+          body: JSON.stringify({ change }),
+        }),
+      );
+    should((await send(false)).status).equal(409);
+    should((await send(true, { deviceId: 'paired', appSession: 'paired-app' })).status).equal(409);
+    should(calls.proposed).have.length(0);
+    should(reads).deepEqual([true, true]);
+    should((await send(true)).status).equal(200);
+    const row = catalog.kinds[0]?.components[0];
+    const readable = {
+      ...catalog,
+      kinds: [
+        {
+          ...catalog.kinds[0],
+          components: [
+            {
+              ...row,
+              contentUnavailable: undefined,
+              content:
+                kind === 'settings'
+                  ? { form: 'entries', entries: [{ key: 'theme', value: 'dark' }] }
+                  : { form: 'text', text: 'Visible text', redacted: false },
+            },
+          ],
+        },
+      ],
+    } as FleetComponentCatalog;
+    const visible = stub({ components: async () => readable });
+    const cleared = await dispatcher(visible.subsystem).dispatch(
+      post('/v1/fleet/proposals', JSON.stringify({ change })),
+    );
+    should(cleared.status).equal(200);
+    should(visible.calls.proposed).deepEqual([change]);
+  });
+
   it('should answer all four reads through the shared schema and never let one be cached', async () => {
     // Arrange
     const { subsystem } = stub();

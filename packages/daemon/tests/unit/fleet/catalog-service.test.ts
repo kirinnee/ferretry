@@ -218,6 +218,39 @@ const refusal = async (work: Promise<unknown>, code: string): Promise<FleetCatal
   return error as FleetCatalogRefusal;
 };
 
+describe('remote catalogue bodies', () => {
+  it('should read every remote projection through the remote port, never the local one', async () => {
+    const fake = 'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=';
+    const fakeIv = 'Eyo3RFFea3iFkp+s';
+    let reads = 0;
+    const { service } = world({
+      readAsset: async () => {
+        throw new Error('remote read reached the local port');
+      },
+      readRemoteAsset: async path => {
+        reads++;
+        if (path.endsWith('broken.json')) return undefined;
+        if (path.endsWith('claude.json')) return JSON.stringify({ theme: fake, iv: fakeIv });
+        return ASSETS[path];
+      },
+    });
+    const components = await service.components(true);
+    const broken = components.kinds.flatMap(group => group.components).find(row => row.reference === 'settings/broken');
+    should(broken?.content).be.undefined();
+    should(broken?.contentUnavailable).equal('not served remotely');
+    for (const view of [
+      components,
+      await service.profiles(true),
+      await service.runtimes(true),
+      await service.previewProfile({ layers: ['settings/claude'] }, true),
+    ]) {
+      should(JSON.stringify(view)).not.containEql(fake);
+      should(JSON.stringify(view)).not.containEql(fakeIv);
+    }
+    should(reads).be.above(0);
+  });
+});
+
 const ADD_INSTRUCTIONS = {
   kind: 'component.put',
   name: 'extra',

@@ -45,6 +45,27 @@ function machine(store: 'multi-user' | 'single-user'): FakeGuardDisk {
 const fenceOf = (disk: FakeGuardDisk) => resolveSourceFence({ homes: [HOME], open: [`${HOME}/fleet/assets`] }, disk);
 
 describe('a hard-linked component source', () => {
+  it('should retain historical pins only for remote reads after a temp-and-rename rewrite and inode reuse', async () => {
+    const disk = machine('multi-user');
+    const credential = `${HOME}/api-token`;
+    const oldIdentity = disk.entries.get(credential);
+    const local = { homes: [HOME], open: [], pinned: [credential] };
+    const remote = { ...local, rememberPins: true };
+    await resolveSourceFence(local, disk);
+    await resolveSourceFence(remote, disk);
+    disk.file(`${HOME}/replacement`, 12, 'rotated key');
+    disk.move(`${HOME}/replacement`, credential);
+    // Simulate the filesystem reusing the freed inode for a new, unrelated component.
+    const source = '/home/me/notes/component.md';
+    if (oldIdentity === undefined || oldIdentity.kind !== 'file') throw new Error('missing fake credential');
+    disk.entries.set(source, { ...oldIdentity, text: 'benign component', size: 16 });
+    const current = await resolveSourceFence(local, disk);
+    should(await readFencedSource(current, source, 1024)).equal('benign component');
+    should(await assertSourceUnfenced(current, source)).equal(source);
+    const refused = await readFencedSource(await resolveSourceFence(remote, disk), source, 1024).catch(error => error);
+    should(refused).be.instanceOf(FencedSourceError);
+    should(refused.rule).equal('state-home');
+  });
   it('should be read from a multi-user Nix store, where identical files share one inode', async () => {
     // Arrange
     const disk = machine('multi-user');

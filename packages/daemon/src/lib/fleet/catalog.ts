@@ -161,6 +161,8 @@ export function editConsequence(usage: CatalogUsage): string | undefined {
 
 /** The facts a projection reads that the configuration does not hold. */
 export interface CatalogFacts {
+  /** False preserves the local catalogue's existing redaction contract. */
+  readonly remote?: boolean;
   readonly format: FleetCatalogFormat;
   readonly machineName: string;
   /** The command each harness resolves to on this machine, `undefined` when it is not installed. */
@@ -177,6 +179,8 @@ export interface CatalogFacts {
   readonly skillFrontmatter?: Readonly<Record<string, readonly string[]>>;
   /** Each hooks component's file text, for the edit screen and E30. */
   readonly hooksTexts?: Readonly<Record<string, string>>;
+  /** A file the remote body reader refused, shown with a plain reason instead of its body. */
+  readonly notServedRemotely?: ReadonlySet<string>;
   /** This machine's user home: a path under it is not one to check (E30). */
   readonly userHome: string;
   /** MCP commands this machine does not have (K6, E8). */
@@ -253,7 +257,11 @@ const envEntries = (env: Readonly<Record<string, string>> | undefined): FleetEnv
     .toSorted(([left], [right]) => byName(left, right))
     .map(([name, value]) => (looksSecret(name, value) ? { name, hidden: true as const } : { name, value }));
 
-function componentDetail(kind: ComponentKind, component: Record<string, unknown>): FleetComponentDetail {
+function componentDetail(
+  kind: ComponentKind,
+  component: Record<string, unknown>,
+  remote: boolean,
+): FleetComponentDetail {
   const env = component.env as Readonly<Record<string, string>> | undefined;
   const text = (key: string) => (typeof component[key] === 'string' ? { [key]: component[key] as string } : {});
   switch (kind) {
@@ -274,7 +282,9 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
       return {
         kind,
         ...text('file'),
-        ...(Array.isArray(component.flags) ? { flags: [...(component.flags as string[])] } : {}),
+        ...(Array.isArray(component.flags)
+          ? { flags: (component.flags as string[]).map(flag => (remote ? redactText(flag).text : flag)) }
+          : {}),
         env: envEntries(env),
       };
     case 'hooks':
@@ -326,6 +336,185 @@ const CONTEXT_FREE_SECRET = new RegExp(
   `-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[A-Za-z0-9+/=\\s]*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?|${SECRET_TOKEN_SOURCE}`,
   'gu',
 );
+
+/** Unnamed encoded values, including a vault key printed without a field name. */
+const ENCODED_RUN = /[A-Za-z0-9+/_-]{32,}={0,2}/gu;
+
+/** FileSecretKey.ensure writes 32 bytes as 44 base64 characters, including the final padding. */
+const VAULT_KEY = /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/u;
+/** Padded base64 ciphertext (AES-GCM appends its authentication tag to the encrypted bytes). */
+const PADDED_CIPHERTEXT = /^(?:[A-Za-z0-9+/]{4}){7,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)$/u;
+/** A complete 32-byte key can cross base64 slash characters inside a path, with optional padding. */
+const PATH_VAULT_KEY = /(^|\/)([A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=)(?=\/|$)/gu;
+const PATH_LAST_VAULT_KEY = /(^|\/)([A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=?)$/gu;
+const PATH_UNPADDED_VAULT_KEY = /(^|\/)([A-Za-z0-9+/]{42}[AEIMQUYcgkosw048])(?=\/|$)/gu;
+const PATH_FILE_SUFFIX = /(?:-[0-9]+[A-Za-z]?)?(?:\.[A-Za-z0-9]{1,8}){1,2}$/u;
+// Without padding, require mixed letter classes to distinguish aliases from ordinary lowercase source paths.
+const unpaddedKey = (value: string): boolean =>
+  VAULT_KEY.test(`${value}=`) && /[A-Z]/u.test(value) && /[a-z]/u.test(value);
+
+function redactPathKeys(word: string, hide: () => void): string {
+  const suffix = PATH_FILE_SUFFIX.exec(word)?.[0] ?? '';
+  const stem = word.slice(0, word.length - suffix.length);
+  const hiddenKey = (match: string, separator: string, value: string): string => {
+    if (!value.endsWith('=') && !unpaddedKey(value)) return match;
+    hide();
+    return `${separator}${HIDDEN_TEXT}`;
+  };
+  // End-anchored first: a slash in the key must not turn a preceding folder into a shorter key.
+  const keys = stem
+    .replace(PATH_LAST_VAULT_KEY, hiddenKey)
+    .replace(PATH_VAULT_KEY, hiddenKey)
+    .replace(PATH_UNPADDED_VAULT_KEY, hiddenKey);
+  return `${keys}${suffix}`;
+}
+
+function redactPathSegments(word: string, hide: () => void): string {
+  const keys = redactPathKeys(word, hide);
+  return keys
+    .split('/')
+    .map(segment => {
+      const basename = segment.replace(PATH_FILE_SUFFIX, '');
+      const redacted = basename.replace(ENCODED_RUN, value => {
+        if (!unpaddedKey(value) && !highEntropy(value)) return value;
+        hide();
+        return HIDDEN_TEXT;
+      });
+      return `${redacted}${segment.slice(basename.length)}`;
+    })
+    .join('/');
+}
+
+function highEntropy(value: string): boolean {
+  // A complete on-disk key or padded ciphertext is never a code identifier, whatever its entropy.
+  if (VAULT_KEY.test(value) || PADDED_CIPHERTEXT.test(value)) return true;
+  const counts = new Map<string, number>();
+  for (const char of value) counts.set(char, (counts.get(char) ?? 0) + 1);
+  let entropy = 0;
+  for (const count of counts.values()) {
+    const probability = count / value.length;
+    entropy -= probability * Math.log2(probability);
+  }
+  // Short hex IDs and 40-character Git SHAs are public references. Base64 needs mixed classes;
+  // long wordlike camel/Pascal runs inside an identifier (even with a year) are ordinary content.
+  // Every character must belong to a word segment; finding one word inside random bytes proves nothing.
+  // Strip segments (including the usual Id suffix) in one pass, without nested ambiguous repetitions.
+  const identifier =
+    value.replace(/[A-Z][a-z]{2,}|Id|[a-z]{3,}|[0-9]{1,4}/gu, '') === '' && /[a-z]{3}[A-Z][a-z]{2}/u.test(value);
+  return /^[a-fA-F0-9]+$/u.test(value)
+    ? value.length >= 64 && entropy >= 3
+    : entropy >= 4 && /[A-Z]/u.test(value) && /[a-z]/u.test(value) && /[0-9]/u.test(value) && !identifier;
+}
+
+/** Only a complete image container may bypass encoded-value masking, never just its base64 prefix. */
+function imagePayload(word: string, before: string): boolean {
+  if (word.length <= 44 || !/^(?:iVBORw0KGgo|\/9j\/|R0lGOD|UklGR)/u.test(word)) return false;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(word)) return false;
+  const declared = /data:image\/([a-z0-9.+-]+);base64,$/iu.exec(before)?.[1]?.toLowerCase();
+  const bytes = Buffer.from(word, 'base64');
+  if (bytes.toString('base64').replace(/=+$/u, '') !== word.replace(/=+$/u, '')) return false;
+  if ((!declared || declared === 'png') && word.startsWith('iVBORw0KGgo'))
+    return (
+      bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+      bytes.toString('ascii', 12, 16) === 'IHDR' &&
+      bytes.subarray(-12).equals(Buffer.from([0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]))
+    );
+  if ((!declared || declared === 'jpg' || declared === 'jpeg') && word.startsWith('/9j/'))
+    return bytes.at(-2) === 255 && bytes.at(-1) === 217;
+  if ((!declared || declared === 'gif') && word.startsWith('R0lGOD'))
+    return /^(?:GIF87a|GIF89a)$/u.test(bytes.toString('ascii', 0, 6)) && bytes.at(-1) === 59;
+  if ((!declared || declared === 'webp') && word.startsWith('UklGR'))
+    return (
+      bytes.toString('ascii', 0, 4) === 'RIFF' &&
+      bytes.toString('ascii', 8, 12) === 'WEBP' &&
+      bytes.readUInt32LE(4) === bytes.length - 8
+    );
+  return false;
+}
+
+/** A path is public only when each segment is wordlike; a root or extension alone proves nothing. */
+const wordlikePath = (value: string): boolean =>
+  value
+    .split('/')
+    .every(segment =>
+      segment
+        .split(/[-_.]/u)
+        .every(
+          part =>
+            /^(?:[a-z0-9]*|[A-Z][A-Z0-9]*)$/u.test(part) ||
+            (part.replace(/[A-Z][a-z]{2,}|Id|[a-z]{3,}|[0-9]{1,4}/gu, '') === '' &&
+              /[a-z]{3}[A-Z][a-z]{2}/u.test(part)),
+        ),
+    );
+
+function redactEncoded(text: string, hide: () => void): string {
+  return text.replace(WORD, (word, offset: number) => {
+    const image = imagePayload(word, text.slice(Math.max(0, offset - 100), offset));
+    // Keep the old path exemption only for ordinary references, never for complete encoded values.
+    const path =
+      !/^[A-Za-z0-9+/_-]{32,}={1,2}$/u.test(word) &&
+      (/^(?:[a-z][a-z0-9+.-]*:\/\/|\.?\.?\/|~\/|\$[A-Za-z_][A-Za-z0-9_]*\/)/iu.test(word) ||
+        /\.[A-Za-z0-9]{1,8}$/u.test(word));
+    // Keep filename punctuation outside the key scan, before ENCODED_RUN can consume '-7b'.
+    const keyed = path && !image ? redactPathKeys(word, hide) : word;
+    const force = keyed !== word && [...word.matchAll(ENCODED_RUN)].some(([value]) => highEntropy(value));
+    // Scan the whole word before any slash splitting: '/' can be part of the secret itself.
+    const encoded = keyed.replace(ENCODED_RUN, (value, at: number) => {
+      if ((!path || at === 0) && (VAULT_KEY.test(value) || PADDED_CIPHERTEXT.test(value))) {
+        // A complete validated image is public content; a key or ciphertext with its prefix is not.
+        if (image && value === word) return value;
+        hide();
+        return HIDDEN_TEXT;
+      }
+      // A key can follow arbitrary base64 letters or punctuation, not only a path separator.
+      let keys = value.replace(/[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=(?!=)/gu, () => {
+        hide();
+        return HIDDEN_TEXT;
+      });
+      if (path && !image) {
+        keys = redactPathKeys(keys, hide)
+          .split('/')
+          .map(segment => {
+            if (!PADDED_CIPHERTEXT.test(segment)) return segment;
+            hide();
+            return HIDDEN_TEXT;
+          })
+          .join('/');
+      }
+      // A base64 prefix can shift a padded ciphertext off a four-character boundary.
+      // Scan each maximal run once, then align its suffix; never retry from every offset.
+      keys = keys.replace(/[A-Za-z0-9+/]+={0,2}/gu, run => {
+        if (!run.endsWith('=')) return run;
+        const start = run.length % 4;
+        if (!PADDED_CIPHERTEXT.test(run.slice(start))) return run;
+        hide();
+        return `${run.slice(0, start)}${HIDDEN_TEXT}`;
+      });
+      // Removing a key must not revive low-entropy fragments that the whole-word rule hid.
+      const hideWhole = force || highEntropy(value);
+      const hideEncoded = (run: string): string => {
+        if (!hideWhole && !highEntropy(run)) return run;
+        hide();
+        return HIDDEN_TEXT;
+      };
+      if (keys !== value) return keys.replace(ENCODED_RUN, hideEncoded);
+      if (image && value === word) return value;
+      const before = text.slice(Math.max(0, offset + at - 100), offset + at);
+      if (!VAULT_KEY.test(value) && /(?:sha(?:256|512)|integrity|checksum)["']?\s*[:=-]\s*["']?$/iu.test(before))
+        return value;
+      if (path && !force && wordlikePath(value)) return value;
+      // A bare unpadded key followed by a folder is still one encoded run; preserve the folder.
+      const key = value.slice(0, 43);
+      if (value[43] === '/' && unpaddedKey(key)) {
+        hide();
+        return `${HIDDEN_TEXT}${value.slice(43).replace(ENCODED_RUN, hideEncoded)}`;
+      }
+      return hideEncoded(value);
+    });
+    // Path handling can only add masking; never replace the whole-word result with the original.
+    return path && !image ? redactPathSegments(encoded, hide) : encoded;
+  });
+}
 
 /** A line that ends in a name and its separator (`password =`), or opens a block value (`password: |`, `token: >-`). */
 const OPENS_VALUE = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=]([ \t]*[|>][-+0-9]*)?[ \t]*$/u;
@@ -491,13 +680,19 @@ function redactExpansions(
   return { text: out + text.slice(from), redacted };
 }
 
+/** Sealed login fields include a 16-character AES-GCM IV, shorter than an unnamed key. */
+const componentSecret = (name: string, value: string): boolean =>
+  looksSecret(name, value) ||
+  (/(?:^|[._-])(?:iv|ciphertext)$/iu.test(name) && /^[A-Za-z0-9+/]{16,}={0,2}$/u.test(value));
+
 /**
  * A component's text with every secret-looking value replaced by {@link HIDDEN_TEXT}. `isSecret` is the rule for
  * a value beside its name (the fleet's `looksSecret` unless a caller needs a stricter one).
  */
 export function redactText(
   text: string,
-  isSecret: (name: string, value: string) => boolean = looksSecret,
+  isSecret: (name: string, value: string) => boolean = componentSecret,
+  encodedValues = true,
 ): { readonly text: string; readonly redacted: boolean } {
   let redacted = false;
   let named = '';
@@ -536,7 +731,12 @@ export function redactText(
     redacted = true;
     return HIDDEN_TEXT;
   });
-  return { text: cut, redacted: redacted || lines.redacted };
+  const encoded = !encodedValues
+    ? cut
+    : redactEncoded(cut, () => {
+        redacted = true;
+      });
+  return { text: encoded, redacted: redacted || lines.redacted };
 }
 
 const isTable = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -565,21 +765,29 @@ export function flattenSettings(settings: SettingsObject): readonly (readonly [s
 export const settingsValueText = (value: unknown): string =>
   typeof value === 'string' ? value : JSON.stringify(value);
 
-function settingsEntries(settings: SettingsObject): FleetSettingsEntry[] {
+function settingsEntries(settings: SettingsObject, remote = true): FleetSettingsEntry[] {
   return flattenSettings(settings).map(([key, value]) => {
     const text = settingsValueText(value);
-    return looksSecret(key, text) ? { key, hidden: true as const } : { key, value: text };
+    return (remote ? componentSecret(key, text) || redactText(text).redacted : looksSecret(key, text))
+      ? { key, hidden: true as const }
+      : { key, value: text };
   });
 }
 
 function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts): FleetComponentContent | undefined {
+  if (facts.notServedRemotely?.has(`${kind}/${name}`) === true) return undefined;
   if (kind === 'settings') {
     const body = facts.settingsBodies?.[name];
-    return body === undefined ? undefined : { form: 'entries', entries: settingsEntries(body) };
+    return body === undefined ? undefined : { form: 'entries', entries: settingsEntries(body, facts.remote !== false) };
   }
   const text =
     kind === 'instructions' ? facts.instructionBodies?.[name] : kind === 'hooks' ? facts.hooksTexts?.[name] : undefined;
-  return text === undefined ? undefined : { form: 'text', ...redactText(text) };
+  return text === undefined
+    ? undefined
+    : {
+        form: 'text',
+        ...redactText(text, facts.remote === false ? looksSecret : componentSecret, facts.remote !== false),
+      };
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text (U15's clone uses the same). */
@@ -595,7 +803,7 @@ function checkPathOf(kind: ComponentKind, name: string, component: Record<string
   if (kind === 'hooks') texts.push(facts.hooksTexts?.[name] ?? '');
   if (kind === 'settings') {
     // A hidden value is never searched: its path would say what it was.
-    const entries = settingsEntries(facts.settingsBodies?.[name] ?? {});
+    const entries = settingsEntries(facts.settingsBodies?.[name] ?? {}, facts.remote !== false);
     texts.push(...entries.flatMap(entry => ('value' in entry ? [entry.value] : [])));
   }
   if (kind === 'mcp') {
@@ -606,7 +814,11 @@ function checkPathOf(kind: ComponentKind, name: string, component: Record<string
   }
   const home = facts.userHome;
   for (const text of texts) {
-    for (const match of redactText(text).text.matchAll(HOME_PATH)) {
+    for (const match of redactText(
+      text,
+      facts.remote === false ? looksSecret : componentSecret,
+      facts.remote !== false,
+    ).text.matchAll(HOME_PATH)) {
       const path = match[0];
       if (path !== home && !path.startsWith(`${home}/`)) return path;
     }
@@ -637,7 +849,7 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
             name,
             ...(harness === undefined ? {} : { harness }),
             scope: componentScope(group.kind, component),
-            detail: componentDetail(group.kind, component),
+            detail: componentDetail(group.kind, component, facts.remote !== false),
             partial: partial
               .filter(entry => entry.reference === reference)
               .map(entry => ({ harness: entry.harness, reason: describePartialSupport(entry) })),
@@ -650,6 +862,7 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
                 : `It is a layer in ${listed(usage.direct)}. Remove it from ${usage.direct.length === 1 ? 'that profile' : 'those profiles'} first.`,
             ),
             ...(content === undefined ? {} : { content }),
+            ...(facts.notServedRemotely?.has(reference) === true ? { contentUnavailable: 'not served remotely' } : {}),
             ...(checkPath === undefined ? {} : { checkPath }),
             ...(typeof component.clonedFrom === 'string' ? { clonedFrom: component.clonedFrom } : {}),
             ...(typeof component.clonedFromDaemon === 'string' ? { clonedFromDaemon: component.clonedFromDaemon } : {}),
@@ -697,12 +910,21 @@ function unavailableReason(resolved: ResolvedProfile): string | undefined {
 
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
-function conflictView(conflict: Conflict): FleetLayerConflict {
+// Keep the component reader's named IV/ciphertext rule when projecting parsed leaves too.
+const secretValue = (name: string, text: string): boolean => componentSecret(name, text) || redactText(text).redacted;
+
+function conflictView(conflict: Conflict, remote: boolean): FleetLayerConflict {
+  const setter = (value: Conflict['winner']): Conflict['winner'] => ({
+    ...value,
+    value: secretValue(conflict.key, shown(value.value)) ? HIDDEN_TEXT : value.value,
+  });
   return {
     harness: conflict.harness,
     field: conflict.field,
     key: conflict.key,
-    sentence: describeConflict(conflict),
+    sentence: describeConflict(
+      remote ? { ...conflict, winner: setter(conflict.winner), overridden: conflict.overridden.map(setter) } : conflict,
+    ),
     winner: layerName(conflict.winner.layer),
     overridden: conflict.overridden.map(setter => layerName(setter.layer)),
   };
@@ -726,7 +948,7 @@ function resolvedFor(
   return result.ok ? result.resolved : undefined;
 }
 
-function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind): FleetStackView {
+function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind, remote = true): FleetStackView {
   if (resolved === undefined) {
     return {
       harness,
@@ -745,7 +967,7 @@ function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind):
       reference: skip.layer.reference,
       sentence: skippedSentence(skip, harness),
     })),
-    conflicts: resolved.conflicts.map(conflictView),
+    conflicts: resolved.conflicts.map(conflict => conflictView(conflict, remote)),
     partial: resolved.partial.map(entry => ({ reference: entry.reference, reason: describePartialSupport(entry) })),
   };
 }
@@ -772,7 +994,9 @@ export function profileCatalog(model: AccountModel, facts: CatalogFacts): FleetL
             .filter(other => wouldIncludeItself(model.profiles, name, other))
             .toSorted(byName),
           scope: scopeView(profileScope(model, name), name),
-          harnesses: HARNESSES.map(harness => stackView(resolvedFor(model, name, harness, facts, partial), harness)),
+          harnesses: HARNESSES.map(harness =>
+            stackView(resolvedFor(model, name, harness, facts, partial), harness, facts.remote !== false),
+          ),
           remove: act(
             usage.direct.length === 0
               ? undefined
@@ -865,6 +1089,9 @@ function fixedLayerView(
         });
   if (!result.ok) return { refusal: result.refusal.message };
   const fixed = result.layer;
+  // Resolve the original parsed settings first; redacting inputs would erase real value conflicts.
+  const overriddenValue = (name: string, text: string): string =>
+    facts.remote !== false && secretValue(name, text) ? HIDDEN_TEXT : text;
   const overridden =
     resolved === undefined
       ? []
@@ -872,13 +1099,13 @@ function fixedLayerView(
           entry.kind === 'setting'
             ? {
                 key: entry.key,
-                value: shown(entry.value),
+                value: overriddenValue(entry.key, shown(entry.value)),
                 from: entry.layer.name,
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               }
             : {
-                key: entry.tokens[0] as string,
-                value: entry.tokens.join(' '),
+                key: facts.remote === false ? (entry.tokens[0] as string) : redactText(entry.tokens[0] as string).text,
+                value: overriddenValue(entry.tokens[0] as string, entry.tokens.join(' ')),
                 from: entry.layer.name,
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               },
@@ -909,7 +1136,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
         // A login that drives both CLIs runs the one this runtime is for.
         const harness = runtimeHarness(model, runtime) as HarnessKind;
         const resolved = resolvedFor(model, runtime.profile, harness, facts, partial);
-        const stack = stackView(resolved, harness);
+        const stack = stackView(resolved, harness, facts.remote !== false);
         const fixed = runtime.agent ? fixedLayerView(model, harness, resolved, facts) : {};
         const status = facts.credentialStatus?.[runtime.credential];
         const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND, facts.budgetHolds);
@@ -1028,8 +1255,12 @@ export function profileDraftView(
   const refusal = layersRefusal(model, name, request.layers, request.editing !== undefined);
   const stacks = HARNESSES.map(harness => ({ harness, resolved: resolvedFor(draft, name, harness, facts, partial) }));
   return {
-    harnesses: stacks.map(stack => stackView(stack.resolved, stack.harness)),
-    resolved: stacks.flatMap(stack => (stack.resolved === undefined ? [] : resolvedEntries(stack.resolved))),
+    harnesses: stacks.map(stack => stackView(stack.resolved, stack.harness, facts.remote !== false)),
+    resolved: stacks.flatMap(stack =>
+      stack.resolved === undefined
+        ? []
+        : resolvedEntries(stack.resolved, facts.remote === false ? looksSecret : secretValue),
+    ),
     scope: scopeView(layersScope(model, request.layers, name), request.editing),
     ...(refusal === undefined ? {} : { refusal }),
   };

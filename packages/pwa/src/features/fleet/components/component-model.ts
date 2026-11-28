@@ -160,6 +160,7 @@ export interface ComponentDraft {
   readonly flags: readonly string[];
   /** Instructions or hooks text the daemon cut a secret out of: it cannot be saved from here. */
   readonly redacted: boolean;
+  readonly unavailable?: string;
   /** Hooks read from a folder rather than one file: edited in that folder. */
   readonly directory: boolean;
   /** An MCP server at a web address that signs in with OAuth (docs/mcp-oauth.md). Kept by an edit. */
@@ -235,14 +236,26 @@ const lines = (text: string): readonly string[] =>
 
 /** The form's starting point for an existing component. */
 export function draftFromComponent(component: FleetComponentView): ComponentDraft {
-  const base = { ...blankDraft(component.kind), name: component.name, harness: component.harness };
+  const base = {
+    ...blankDraft(component.kind),
+    name: component.name,
+    harness: component.harness,
+    ...(component.contentUnavailable === undefined ? {} : { unavailable: component.contentUnavailable }),
+  };
   const content = component.content;
   const detail = component.detail;
+  // Older daemons omit unreadable content without the explicit refusal field. Absence is never an empty file.
+  const missing =
+    ((detail.kind === 'instructions' || (detail.kind === 'hooks' && detail.directory === undefined)) &&
+      content?.form !== 'text') ||
+    (detail.kind === 'settings' && content?.form !== 'entries');
+  const unavailable = component.contentUnavailable ?? (missing ? 'unavailable' : undefined);
   switch (detail.kind) {
     case 'instructions':
     case 'hooks':
       return {
         ...base,
+        ...(unavailable === undefined ? {} : { unavailable }),
         body: content?.form === 'text' ? content.text : '',
         redacted: content?.form === 'text' && content.redacted,
         directory: detail.kind === 'hooks' && detail.directory !== undefined,
@@ -260,10 +273,12 @@ export function draftFromComponent(component: FleetComponentView): ComponentDraf
       const entries = content?.form === 'entries' ? content.entries : [];
       return {
         ...base,
+        ...(unavailable === undefined ? {} : { unavailable }),
         body: entries.flatMap(entry => ('hidden' in entry ? [] : [`${entry.key} = ${entry.value}`])).join('\n'),
         hiddenKeys: entries.flatMap(entry => ('hidden' in entry ? [entry.key] : [])),
         keptEnv: detail.env.map(entry => entry.name),
         flags: detail.flags ?? [],
+        redacted: (detail.flags ?? []).some(flag => flag.includes('‹hidden›')),
       };
     }
     default:
@@ -311,6 +326,10 @@ export function draftProblem(
   editing?: string,
 ): string | undefined {
   const name = draft.name.trim();
+  if (draft.unavailable !== undefined)
+    return draft.unavailable === 'not served remotely'
+      ? 'This content is not served remotely. Edit it on the machine.'
+      : 'This content is unavailable. Edit it on the machine.';
   if (name === '') return 'Give it a name.';
   if (!FleetComponentNameSchema.safeParse(name).success) return 'Use a name without a slash or "..".';
   if (editing === undefined && existing.some(component => component.kind === draft.kind && component.name === name))
@@ -345,6 +364,8 @@ export const mcpDraftIsUrl = (draft: Pick<ComponentDraft, 'body'>): boolean => U
 
 /** The ONE change a saved form asks for. Call only when {@link draftProblem} says nothing. */
 export function componentChange(draft: ComponentDraft, create: boolean): FleetAccountChange {
+  if (draft.unavailable !== undefined) throw new Error('Unavailable component content cannot be saved.');
+  if (draft.redacted) throw new Error('Redacted component content cannot be saved.');
   const name = draft.name.trim();
   const put = (component: Extract<FleetAccountChange, { kind: 'component.put' }>['component'], content?: string) =>
     ({

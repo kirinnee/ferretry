@@ -11,7 +11,19 @@
  * together, inside one rollback boundary. No real harness, account or home is touched.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -32,9 +44,19 @@ import {
 import { ManifestAccountInventory } from '../../../src/adapters/core/manifest-account-inventory.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../../../src/adapters/fleet/runtime-ids-file.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
+import { FileSecretDocumentStore } from '../../../src/adapters/secrets/file-secret-document-store.ts';
+import { LOGIN_SECRETS_DOCUMENT } from '../../../src/adapters/secrets/file-login-index-store.ts';
+import { FileSecretKey, WebCryptoSecretCipher } from '../../../src/adapters/secrets/webcrypto-secret-cipher.ts';
+import { LIMITED_DEVICE_GRANTS, SecretNameSchema } from '@ferretry/protocol';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication, PublishedFleetInventory } from '../../../src/lib/fleet/publication.ts';
+import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { CapabilityGrantService, DEFAULT_CAPABILITY_GRANTS } from '../../../src/lib/grants/index.ts';
+import { jsonBody, request } from '../../unit/api/support.ts';
+import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
 import { type ConfigHome, configHome, sha256, writeModelFiles } from './config-files-fixture.ts';
 
 const directories: string[] = [];
@@ -89,12 +111,14 @@ const locations = (home: ConfigHome) => ({ configDirectory: home.paths.config, f
 async function machine(
   model = MODEL,
   sessionRecords?: Required<Pick<FleetCatalogServiceDeps, 'sessionRecords' | 'renameSessions'>>,
+  beforeBoot?: (home: ConfigHome) => Promise<void>,
 ): Promise<Machine> {
   const root = await temporary();
   const home = await configHome(path.join(root, 'state'));
   const userHome = path.join(root, 'person');
   await mkdir(userHome, { recursive: true });
   await writeModelFiles(home.paths.config, model);
+  await beforeBoot?.(home);
   const acknowledged: { path: string; text: string }[] = [];
   const handle: Machine = {
     ...home,
@@ -134,6 +158,7 @@ async function machine(
     ...(sessionRecords === undefined ? {} : { sessionRecords }),
     publication: handle.publication,
   });
+  await deps.sourceFenceReady;
   return Object.assign(handle, { catalog: new FleetCatalogService(deps), deps });
 }
 
@@ -600,6 +625,301 @@ describe('a reviewed change applied by the real provisioner', () => {
 
     // Assert
     should((error as NodeJS.ErrnoException).code).equal('EISDIR');
+  });
+});
+
+describe('remote component credential boundary', () => {
+  const values = [
+    '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb',
+    'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
+    'FAKEopaque0123456789abcdefXYZ123456789',
+  ];
+  const sources = ['fleet/credentials/C1/auth.json', 'state/secrets.key', 'state/login-secrets.json'];
+  const bodies = [
+    JSON.stringify({ tokens: { access_token: values[0] } }),
+    values[1] as string,
+    JSON.stringify({ github: { value: values[2] } }),
+  ];
+
+  const answer = async (host: Machine, loopback: boolean): Promise<string> => {
+    const api = new ApiDispatcher(new ApiRouter(fleetCatalogRoutes(host.catalog)), CREDENTIALS, GRANTED);
+    const response = await api.dispatch(
+      request({
+        path: '/v1/fleet/components',
+        loopback,
+        clientAddress: '127.0.0.1',
+        headers: { ...human, host: '127.0.0.1' },
+      }),
+    );
+    should(response.status).equal(200);
+    return JSON.stringify(jsonBody(response));
+  };
+
+  for (const operation of ['mv', 'cp'] as const) {
+    it(`should hide every fake credential after ${operation} into a declared component directory`, async () => {
+      // Arrange — files exist before boot; no catalogue read precedes the move.
+      const generatedBodies = [...bodies];
+      let generatedValues: readonly string[] = [];
+      const model = parseAccountModel({
+        version: 2,
+        components: {
+          instructions: Object.fromEntries(sources.map((_, i) => [`fake${i}`, { file: `components/fake${i}.md` }])),
+          settings: {
+            auth: { harness: 'claude', file: 'components/fake0.md' },
+            login: { harness: 'claude', file: 'components/fake2.md' },
+          },
+          hooks: { auth: { harness: 'claude', file: 'components/fake0.md' } },
+        },
+      });
+      const host = await machine(model, undefined, async home => {
+        const files = new StateFileSystem(home.paths);
+        const document = new FileSecretDocumentStore(home.paths, files, LOGIN_SECRETS_DOCUMENT);
+        const key = new FileSecretKey(document.keyFile, files, () =>
+          Uint8Array.from({ length: 32 }, (_, i) => (i * 31 + 17) % 256),
+        );
+        const cipher = new WebCryptoSecretCipher(key, () =>
+          Uint8Array.from({ length: 12 }, (_, i) => (i * 13 + 19) % 256),
+        );
+        const sealed = await cipher.seal(SecretNameSchema.parse('SYNTHETIC_LOGIN'), 'synthetic login password');
+        await document.write({
+          v: 1,
+          cipher: cipher.algorithm,
+          entries: {
+            SYNTHETIC_LOGIN: { ...sealed, createdAt: '2026-11-28T00:00:00Z', updatedAt: '2026-11-28T00:00:00Z' },
+          },
+        });
+        generatedBodies[1] = await readFile(document.keyFile, 'utf8');
+        generatedBodies[2] = await readFile(path.join(home.paths.state, LOGIN_SECRETS_DOCUMENT), 'utf8');
+        generatedValues = [values[0] as string, generatedBodies[1].trim(), sealed.iv, sealed.ciphertext];
+        should(generatedValues[1]).have.length(44);
+        for (const [i, source] of sources.entries()) {
+          const file = path.join(home.paths.home, source);
+          await mkdir(path.dirname(file), { recursive: true });
+          await writeFile(file, generatedBodies[i] as string);
+        }
+      });
+      const destination = path.join(host.paths.fleet, 'assets/components');
+      await mkdir(destination, { recursive: true });
+      for (const [i, source] of sources.entries()) {
+        const from = path.join(host.paths.home, source);
+        const to = path.join(destination, `fake${i}.md`);
+        if (operation === 'mv') await rename(from, to);
+        else await copyFile(from, to);
+      }
+
+      // Act
+      const remote = await answer(host, false);
+      const local = await answer(host, true);
+
+      // Assert — copies have fresh identities; each unnamed value must still be hidden.
+      for (const value of generatedValues) should(remote).not.containEql(value);
+      for (const [i] of sources.entries()) {
+        should(await host.deps.readAsset(path.join(destination, `fake${i}.md`))).equal(generatedBodies[i]);
+      }
+      if (operation === 'cp') should(local).containEql('‹hidden›');
+      else should(local).not.containEql('not served remotely');
+    });
+  }
+
+  it('should retain boot and rotated key identities after both source paths disappear', async () => {
+    // Arrange
+    const host = await machine(MODEL, undefined, async home => {
+      await writeFile(path.join(home.paths.state, 'secrets.key'), values[1] as string);
+    });
+    const directory = path.join(host.paths.fleet, 'assets');
+    await mkdir(directory, { recursive: true });
+    const key = path.join(host.paths.state, 'secrets.key');
+    const oldKey = path.join(directory, 'old.md');
+    const newKey = path.join(directory, 'new.md');
+    await rename(key, oldKey);
+    await writeFile(key, values[0] as string);
+    // A refresh sees a replacement identity without forgetting the boot identity.
+    await host.deps.readRemoteAsset?.(oldKey);
+    await rename(key, newKey);
+
+    // Act + Assert — repeated path misses never drop either identity.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      should(await host.deps.readRemoteAsset?.(oldKey)).be.undefined();
+      should(await host.deps.readRemoteAsset?.(newKey)).be.undefined();
+      should(await host.deps.readAsset(oldKey)).equal(values[1]);
+      should(await host.deps.readAsset(newKey)).equal(values[0]);
+    }
+  });
+
+  it('should refuse an escaping symlink remotely, preserve local text and serve a normal sibling', async () => {
+    // Arrange
+    const model = parseAccountModel({
+      version: 2,
+      components: {
+        instructions: {
+          escape: { file: 'components/escape.md' },
+          normal: { file: 'components/normal.md' },
+          state: { file: 'components/state.md' },
+        },
+      },
+    });
+    const host = await machine(model);
+    const directory = path.join(host.paths.fleet, 'assets/components');
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(host.root, 'outside.md'), 'outside private prose');
+    await writeFile(path.join(host.paths.state, 'other.md'), 'inside state prose');
+    await symlink(path.join(host.root, 'outside.md'), path.join(directory, 'escape.md'));
+    await symlink(path.join(host.paths.state, 'other.md'), path.join(directory, 'state.md'));
+    await writeFile(path.join(directory, 'normal.md'), '# Normal component\nUseful instructions.');
+
+    // Act
+    const remote = await answer(host, false);
+    const local = await answer(host, true);
+
+    // Assert — forged Host and peer look local; the carrier says otherwise.
+    should(remote).not.containEql('outside private prose');
+    should(remote).not.containEql('inside state prose');
+    should(remote).containEql('contentUnavailable');
+    should(remote).containEql('not served remotely');
+    should(remote).containEql('# Normal component');
+    should(local).containEql('outside private prose');
+    should(local).not.containEql('not served remotely');
+  });
+
+  it('should use remote bodies for a limited device on a loopback peer, including a caller-chosen conflict', async () => {
+    // A seeded 32-byte key that r2 mistook for an identifier. Only synthetic material is used.
+    const fake = '2tsNcUhfv26rC9AIL6wycpLvgsoQGsRqXVQ1OFbhK8A=';
+    const projectId = 'StudioProject2026InteractiveToolbarController';
+    const otherProjectId = 'StudioProject2027InteractiveToolbarController';
+    const model = parseAccountModel({
+      version: 2,
+      credentials: { login: { harness: 'claude', store: 'host' } },
+      components: {
+        instructions: { notes: { file: 'components/notes.md' } },
+        settings: {
+          moved: { harness: 'claude', file: 'components/moved.json' },
+          copied: { harness: 'claude', file: 'components/copied.json', flags: ['--permission-mode', fake] },
+          other: { harness: 'claude', file: 'components/other.json' },
+        },
+      },
+      profiles: { conflict: { layers: ['settings/moved', 'settings/copied', 'settings/other'] } },
+      runtimes: { worker: { credential: 'login', profile: 'conflict', agent: true } },
+    });
+    const host = await machine(model, undefined, async home => {
+      await writeFile(path.join(home.paths.state, 'secrets.key'), `${fake}\n`);
+      await writeFile(
+        path.join(home.paths.state, 'login-secrets.json'),
+        JSON.stringify({ theme: 'private moved value' }),
+      );
+    });
+    const directory = path.join(host.paths.fleet, 'assets/components');
+    await mkdir(directory, { recursive: true });
+    await copyFile(path.join(host.paths.state, 'secrets.key'), path.join(directory, 'notes.md'));
+    await rename(path.join(host.paths.state, 'login-secrets.json'), path.join(directory, 'moved.json'));
+    await writeFile(
+      path.join(directory, 'copied.json'),
+      JSON.stringify({
+        theme: fake,
+        opaqueValue: fake,
+        projectId,
+        permissions: { defaultMode: fake },
+      }),
+    );
+    await writeFile(path.join(directory, 'other.json'), JSON.stringify({ theme: 'light', projectId: otherProjectId }));
+    const grants = new CapabilityGrantService({
+      document: { read: async () => DEFAULT_CAPABILITY_GRANTS, written: async () => [], write: async () => undefined },
+      clock: { nowMs: () => Date.parse('2026-11-28T00:00:00.000Z') },
+      audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+      clientName: 'fy',
+    });
+    await grants.refresh();
+    const credentials = { ...CREDENTIALS, devices: { has: () => true, grants: () => LIMITED_DEVICE_GRANTS } };
+    let localReads = 0;
+    let remoteReads = 0;
+    const catalog = new FleetCatalogService({
+      ...host.deps,
+      readAsset: async file => {
+        localReads++;
+        return await host.deps.readAsset(file);
+      },
+      readRemoteAsset: async file => {
+        remoteReads++;
+        return await host.deps.readRemoteAsset?.(file);
+      },
+    });
+    const api = new ApiDispatcher(new ApiRouter(fleetCatalogRoutes(catalog)), credentials, grants);
+    for (const endpoint of ['components', 'profiles', 'runtimes', 'profiles/preview']) {
+      const preview = endpoint.endsWith('preview');
+      const response = await api.dispatch(
+        request({
+          path: `/v1/fleet/${endpoint}`,
+          method: preview ? 'POST' : 'GET',
+          loopback: true,
+          device: { deviceId: 'limited', appSession: 'limited-app' },
+          ...(preview
+            ? {
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ layers: ['settings/moved', 'settings/copied', 'settings/other'] }),
+              }
+            : {}),
+        }),
+      );
+      should(response.status).equal(200);
+      const body = JSON.stringify(jsonBody(response));
+      should(body).not.containEql(fake);
+      should(body).not.containEql('private moved value');
+      should(body).containEql(projectId);
+      should(body).containEql(otherProjectId);
+      if (endpoint === 'components') {
+        const components = await catalog.components(true);
+        should(
+          components.kinds.flatMap(group => group.components).find(row => row.name === 'notes')?.content,
+        ).deepEqual({
+          form: 'text',
+          text: '‹hidden›\n',
+          redacted: true,
+        });
+      }
+      if (preview) should(JSON.stringify(jsonBody(response).resolved)).containEql(otherProjectId);
+      if (preview) should(JSON.stringify(jsonBody(response).resolved)).not.containEql(fake);
+      if (preview || endpoint === 'profiles') should(body).containEql('overrides');
+      if (endpoint === 'runtimes') {
+        const runtimes = await catalog.runtimes(true);
+        should(runtimes.runtimes[0]?.fixedLayer?.overridden.map(row => row.value)).deepEqual(['‹hidden›', '‹hidden›']);
+      }
+    }
+    should(localReads).equal(0);
+    should(remoteReads).be.above(0);
+    // The copy is readable locally; remote masking, rather than an inode refusal, protects its bytes.
+    should(await host.deps.readAsset(path.join(directory, 'notes.md'))).equal(`${fake}\n`);
+    const localOverrides = (await host.catalog.runtimes(false)).runtimes[0]?.fixedLayer?.overridden;
+    should(localOverrides?.map(row => row.value)).deepEqual([fake, `--permission-mode ${fake}`]);
+    const localPreview = await host.catalog.previewProfile({ layers: ['settings/copied'] }, false);
+    should(JSON.stringify(localPreview.resolved)).containEql(fake);
+    const forbidden = await api.dispatch(
+      request({
+        path: '/v1/fleet/proposals',
+        method: 'POST',
+        loopback: true,
+        device: { deviceId: 'limited', appSession: 'limited-app' },
+        body: '{}',
+      }),
+    );
+    should(forbidden.status).equal(403);
+  });
+
+  it('should preserve benign code identifiers and inline Markdown images in local and remote component content', async () => {
+    const benign =
+      'Call `isUserVerifyingPlatformAuthenticatorAvailable()`.\n![dot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)\n';
+    const host = await machine(
+      parseAccountModel({ version: 2, components: { instructions: { benign: { file: 'components/benign.md' } } } }),
+    );
+    const file = path.join(host.paths.fleet, 'assets/components/benign.md');
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, benign);
+    for (const remote of [false, true]) {
+      const catalog = await host.catalog.components(remote);
+      should(catalog.kinds.flatMap(group => group.components).find(row => row.name === 'benign')?.content).deepEqual({
+        form: 'text',
+        text: benign,
+        redacted: false,
+      });
+    }
   });
 });
 

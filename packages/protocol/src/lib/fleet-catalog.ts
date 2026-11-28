@@ -313,6 +313,8 @@ export const FleetComponentViewSchema = z.strictObject({
   remove: FleetCatalogActSchema,
   /** What its file says: absent for MCP, skills and model sets, or when the file cannot be read or parsed. */
   content: FleetComponentContentSchema.optional(),
+  /** A refused remote read, separate from editable file content. */
+  contentUnavailable: z.literal('not served remotely').optional(),
   /** E30: a path under somebody else's home that this component names, to check on this machine. */
   checkPath: NonEmptyStringSchema.optional(),
   /** Set by Clone: the machine it was copied from, by the name that machine gave itself. */

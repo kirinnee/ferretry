@@ -12980,6 +12980,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         catalogLinks: { links: catalogLinks },
         connector: connector.provides.subsystem,
       };
+      // Finish synchronous subsystem construction before waiting, but publish no route before pins exist.
+      await fleetCatalogDeps.sourceFenceReady;
       return {
         mounted: builtSubsystems,
         modules: {

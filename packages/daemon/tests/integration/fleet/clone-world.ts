@@ -107,6 +107,7 @@ export async function machine(
     clientName: 'fy',
     publication: new FleetPublication(),
   });
+  await catalogDeps.sourceFenceReady;
   const setup = createFleetSetupSubsystem(
     fileFleetSetupDeps({
       catalog: catalogDeps,

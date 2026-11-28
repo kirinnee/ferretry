@@ -8,6 +8,8 @@
  * accepted by the protocol schema the route will answer with.
  */
 import { describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
+
 import {
   type AccountModel,
   builtInModelCatalogs,
@@ -1358,6 +1360,46 @@ describe('runtimeCatalog', () => {
     ]);
   });
 
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])('should redact overridden settings and flags only for remote readers: %s, inline: %s', (remote, inline) => {
+    const fake = '2tsNcUhfv26rC9AIL6wycpLvgsoQGsRqXVQ1OFbhK8A=';
+    const model = parseAccountModel({
+      version: 2,
+      credentials: { login: { harness: 'claude', store: 'host' } },
+      components: {
+        settings: {
+          opaque: {
+            harness: 'claude',
+            file: 'opaque.json',
+            flags: inline ? [`--permission-mode=${fake}`] : ['--permission-mode', fake],
+          },
+        },
+      },
+      profiles: { default: { layers: ['settings/opaque'] } },
+      runtimes: { agent: { credential: 'login', profile: 'default', agent: true } },
+    });
+    const facts = factsOf({ remote, settingsBodies: { opaque: { permissions: { defaultMode: fake } } } });
+    const runtimes = runtimeCatalog(model, facts);
+    const overrides = runtimeNamed(runtimes, 'agent').fixedLayer?.overridden;
+    const firstToken = inline ? `--permission-mode=${fake}` : '--permission-mode';
+    should(overrides?.map(row => [row.key, row.value])).deepEqual([
+      ['permissions.defaultMode', remote ? '‹hidden›' : fake],
+      [
+        remote && inline ? '--permission-mode=‹hidden›' : firstToken,
+        remote ? '‹hidden›' : inline ? firstToken : `--permission-mode ${fake}`,
+      ],
+    ]);
+    const components = JSON.stringify(componentCatalog(model, facts));
+    if (remote) {
+      should(components).not.containEql(fake);
+      should(JSON.stringify(runtimes)).not.containEql(fake);
+    } else should(components).containEql(fake);
+  });
+
   it('should show a setting that is not text as the JSON it is when it is overridden', () => {
     // Arrange
     const model = modelOf({ machine: { agentPermissions: 'skip' } });
@@ -1979,11 +2021,28 @@ describe('redactText: a well-known token anywhere', () => {
   );
 
   it.each(TOKENS.flatMap(token => GLUED.map(before => [token, before] as const)))(
-    'should leave %s after a letter or digit (%s) as a word that only ends the way a token starts',
+    'should judge %s after a letter or digit (%s), including unnamed high entropy tails',
     (token, before) => {
-      should(redactText(`a ${before}${token} z`)).deepEqual({ text: `a ${before}${token} z`, redacted: false });
+      const text = `a ${before}${token} z`;
+      // A missing provider-token boundary does not exempt an unnamed base64url-shaped value.
+      const encoded =
+        token.startsWith('github_pat_') || (before === 'Z' && /^(?:gh[opsur]_|npm_|sk-ant-)/u.test(token));
+      if (token.startsWith('AIza') || encoded) {
+        should(redactText(text).text).not.containEql(token);
+        should(redactText(text).redacted).equal(true);
+      } else {
+        should(redactText(text)).deepEqual({ text, redacted: false });
+      }
     },
   );
+
+  it.each(GLUED)('should hide an unnamed high-entropy Google-shaped run even after %s', before => {
+    // Act + Assert — the new unnamed-value rule applies even without a token boundary.
+    should(redactText(`a ${before}AIzaSyabcdefghijklmnopqrstuvwxyz012345 z`)).deepEqual({
+      text: 'a ‹hidden› z',
+      redacted: true,
+    });
+  });
 
   it('should hide every token of a text and stop at the end of each', () => {
     should(redactText('x<&ghp_abcdefghijklmnop12{(sk-qrstuvwxyz012345)plain!').text).equal(
@@ -2358,5 +2417,203 @@ describe('redactText: a pointer is only a name, and a default is a value', () =>
     should(redactText('${A_TOKEN-hunter2hunter2xyz} and ${B_TOKEN+hunter2hunter2xyz}').text).equal(
       '${A_TOKEN-‹hidden›} and ${B_TOKEN+‹hidden›}',
     );
+  });
+});
+
+describe('unnamed high entropy component values', () => {
+  const seededBytes = (sample: number, length: number): Buffer => {
+    const bytes = Buffer.alloc(length);
+    for (let offset = 0; offset < length; offset += 32) {
+      createHash('sha256').update(`v4-redaction-r3:${sample}:${offset}`).digest().copy(bytes, offset);
+    }
+    return bytes;
+  };
+
+  it('should hide all 10,000 seeded keys in the exact FileSecretKey on-disk format', () => {
+    const missed: number[] = [];
+    for (let sample = 0; sample < 10_000; sample++) {
+      const key = seededBytes(sample, 32).toString('base64');
+      if (redactText(`${key}\n`).text !== '‹hidden›\n') missed.push(sample);
+    }
+    should(missed).deepEqual([]);
+    // A key's alphabet may happen to resemble an image header or contain no mixed classes.
+    for (const key of [`iVBORw0KGgo${'A'.repeat(32)}=`, `${'A'.repeat(43)}=`]) {
+      should(redactText(key).text).equal('‹hidden›');
+      should(redactText(`checksum: ${key}`).text).equal('checksum: ‹hidden›');
+    }
+  });
+
+  it.each([
+    ['$VAR/', '', true],
+    ['$RELAY/', '', true],
+    ['$HOME/x/', '', true],
+    ['$X/models/', '', true],
+    ['$X/', '', false],
+    ['./', '', false],
+    ['~/', '', false],
+    ['/abs/', '', true],
+    ['', '/suffix', true],
+    ['', '/suffix', false],
+    ['', '.v2', false],
+    ['', '-7b.gguf', false],
+    ['./', '.v2', false],
+  ] as const)('should hide all 10,000 seeded vault keys inside %s%s (padded: %s)', (prefix, suffix, padded) => {
+    const missed: number[] = [];
+    for (let sample = 0; sample < 10_000; sample++) {
+      const encoded = seededBytes(sample, 32).toString('base64');
+      const key = padded ? encoded : encoded.replace(/=$/u, '');
+      if (redactText(`${prefix}${key}${suffix}`).text !== `${prefix}‹hidden›${suffix}`) missed.push(sample);
+    }
+    should(missed).deepEqual([]);
+  });
+
+  it.each(['$RELAY/', '$HOME/x/', '/abs/', ''])('should hide canonical key path segments after %s', prefix => {
+    const key = '2tsNcUhfv26rC9AIL6wycpLvgsoQGsRqXVQ1OFbhK8A=';
+    const suffix = prefix === '' ? '/suffix' : '';
+    should(redactText(`${prefix}${key}${suffix}`)).deepEqual({ text: `${prefix}‹hidden›${suffix}`, redacted: true });
+  });
+
+  it('should hide padded ciphertext segments while keeping the surrounding path', () => {
+    const ciphertext = `${'Ab19'.repeat(15)}AA==`;
+    should(redactText(`$HOME/x/${ciphertext}/notes.md`)).deepEqual({
+      text: '$HOME/x/‹hidden›/notes.md',
+      redacted: true,
+    });
+  });
+
+  it('should finish on a long dotted path whose suffix never closes', () => {
+    const text = `./${'.a'.repeat(100_000)}!`;
+    should(redactText(text)).deepEqual({ text, redacted: false });
+  });
+
+  // Measured on a45817b5d3 (r1): 0, 0 and 14 misses. r2 had 63, 235 and 588; path scanning closes the residual too.
+  it.each([
+    [148, 0],
+    [616, 0],
+    [2016, 0],
+  ])('should hide seeded AES-GCM %s-byte values at least as well as r1', (length, baseline) => {
+    const missed: number[] = [];
+    for (let sample = 0; sample < 1_000; sample++) {
+      const ciphertext = seededBytes(sample, length).toString('base64');
+      if (redactText(JSON.stringify({ login: { value: ciphertext } })).text.includes(ciphertext)) missed.push(sample);
+    }
+    should(missed.length).be.belowOrEqual(baseline);
+  });
+
+  it('should keep seeded iv:ct misses at the r1 baseline and hide every base64url key', () => {
+    let missedCiphertext = 0;
+    const missedKeys: number[] = [];
+    for (let sample = 0; sample < 1_000; sample++) {
+      const ciphertext = seededBytes(sample, 616).toString('base64');
+      const iv = seededBytes(sample, 12).toString('base64');
+      const key = seededBytes(sample, 32).toString('base64url');
+      if (redactText(`${iv}:${ciphertext}`).text.includes(ciphertext)) missedCiphertext++;
+      if (redactText(key).text.includes(key)) missedKeys.push(sample);
+    }
+    should(missedCiphertext).equal(0);
+    should(missedKeys).deepEqual([]);
+  });
+
+  it.each([
+    [32, 6],
+    [40, 2],
+    [64, 0],
+  ])('should keep seeded base62 %s-character misses at the r1 baseline', (length, baseline) => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let missed = 0;
+    for (let sample = 0; sample < 1_000; sample++) {
+      const value = [...seededBytes(sample, length)].map(byte => alphabet[byte % alphabet.length]).join('');
+      if (redactText(value).text.includes(value)) missed++;
+    }
+    should(missed).be.belowOrEqual(baseline);
+  });
+  it('should keep a remote refusal outside the editable component content', () => {
+    const model = parseAccountModel({ version: 2, components: { instructions: { refused: { file: 'refused.md' } } } });
+    const catalog = FleetComponentCatalogSchema.parse(
+      componentCatalog(
+        model,
+        factsOf({
+          notServedRemotely: new Set(['instructions/refused']),
+        }),
+      ),
+    );
+    const row = catalog.kinds.flatMap(group => group.components)[0];
+    should(row?.content).be.undefined();
+    should(row?.contentUnavailable).equal('not served remotely');
+  });
+  it('should preserve the main-line local content and settings redaction contract byte for byte', () => {
+    const body =
+      'Call `isUserVerifyingPlatformAuthenticatorAvailable()`.\n![dot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)\n';
+    const key = 'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=';
+    const model = parseAccountModel({
+      version: 2,
+      components: {
+        instructions: { benign: { file: 'benign.md' }, opaque: { file: 'opaque.md' } },
+        settings: { opaque: { harness: 'claude', file: 'opaque.json' } },
+      },
+    });
+    const catalog = componentCatalog(
+      model,
+      factsOf({
+        remote: false,
+        instructionBodies: { benign: body, opaque: key },
+        settingsBodies: { opaque: { theme: key } },
+      }),
+    );
+    const rows = catalog.kinds.flatMap(group => group.components);
+    should(rows.find(row => row.reference === 'instructions/benign')?.content).deepEqual({
+      form: 'text',
+      text: body,
+      redacted: false,
+    });
+    should(rows.find(row => row.reference === 'instructions/opaque')?.content).deepEqual({
+      form: 'text',
+      text: key,
+      redacted: false,
+    });
+    should(rows.find(row => row.reference === 'settings/opaque')?.content).deepEqual({
+      form: 'entries',
+      entries: [{ key: 'theme', value: key }],
+    });
+  });
+  it.each([
+    '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb62714c0a8e39b5d62f1c0479',
+    'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
+    '/Z9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
+    'FAKEopaque0123456789abcdefXYZ123456789',
+  ])('should hide a bare key %s without a secret name', value => {
+    // Act + Assert
+    should(redactText(`value: "${value}"`).text).not.containEql(value);
+    should(redactText(value).redacted).equal(true);
+  });
+
+  it.each([
+    'Ordinary prose describes how to write useful instructions.',
+    '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb',
+    'uses: some/action@1234567890abcdef1234567890abcdef12345678',
+    'sha256:7b3c91af0826d54e10f9ab7d62483c5e91ad02fb62714c0a8e39b5d62f1c0479',
+    'isUserVerifyingPlatformAuthenticatorAvailable()',
+    'StudioProject2026InteractiveToolbarController',
+    'buildId20261128InteractiveToolbarController',
+    'projectId: StudioProject2026InteractiveToolbarController',
+    'commitId: 1234567890abcdef1234567890abcdef12345678',
+    'buildId: buildId20261128InteractiveToolbarController',
+    'sessionId: Session2026InteractiveToolbarController',
+    '![dot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)',
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    '# Markdown\n\n**Read the guide**, then run `bun test`.',
+    '/home/person/projects/ordinary-component/instructions.md',
+    '/home/person/docs/7b3c91af0826d54e10f9ab7d62483c5e91ad02fb/guide.md',
+    'components/instructions/ordinary-component-name.md',
+    'components/7b3c91af0826d54e10f9ab7d62483c5e91ad02fb/instructions.md',
+    '$RELAY/v1/rendezvous/fy_daemon_AAAA…/client',
+    '$HOSTED_RELAY_ORIGIN/v1/operator/tunnels',
+    'tech-guy-1991-A/vosk-model-small-en-us-0.15',
+    'https://example.com/documentation/ordinary-component-name?view=all',
+    '[Guide](https://example.com/docs/7b3c91af0826d54e10f9ab7d62483c5e91ad02fb)',
+    'supercalifragilisticexpialidocious',
+  ])('should preserve ordinary prose, markdown, paths and URLs: %s', text => {
+    // Act + Assert
+    should(redactText(text)).deepEqual({ text, redacted: false });
   });
 });

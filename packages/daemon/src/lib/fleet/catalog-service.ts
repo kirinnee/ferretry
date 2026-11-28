@@ -214,6 +214,8 @@ export interface FleetCatalogServiceDeps {
   document(fresh?: boolean): Promise<AccountDocumentReading>;
   /** One file a component names, by absolute path. `undefined` when it is absent or cannot be read. */
   readAsset(path: string): Promise<string | undefined>;
+  /** Remote reads stay under the declared file's own directory and refuse credential identities. */
+  readRemoteAsset?(path: string): Promise<string | undefined>;
   /** What a document is now: its sha256, or `ABSENT_DOCUMENT_REVISION`. */
   documentRevision(path: string): Promise<string>;
   /** `ids.json`; `undefined` when there is none yet. */
@@ -335,7 +337,9 @@ function parsed(text: string | undefined, format: 'json' | 'toml'): SettingsObje
 
 /** The bodies a materialisation reads, and each hooks file's text as the edit screen shows it. */
 interface ReadBodies extends MaterialiseBodies {
+  readonly remote: boolean;
   readonly hooksTexts: Readonly<Record<string, string>>;
+  readonly notServedRemotely?: ReadonlySet<string>;
 }
 
 /** The configuration's file paths are relative to the asset tree, or `~`/absolute. */
@@ -439,15 +443,15 @@ export class FleetCatalogService {
   }
 
   /** `GET /v1/fleet/components`. */
-  async components(): Promise<FleetComponentCatalog> {
+  async components(remote = false): Promise<FleetComponentCatalog> {
     const reading = await this.#read();
-    return componentCatalog(reading.model, await this.#facts(reading));
+    return componentCatalog(reading.model, await this.#facts(reading, await this.#bodies(reading.model, [], remote)));
   }
 
   /** `GET /v1/fleet/profiles`. */
-  async profiles(): Promise<FleetLayeredProfileCatalog> {
+  async profiles(remote = false): Promise<FleetLayeredProfileCatalog> {
     const reading = await this.#read();
-    return profileCatalog(reading.model, await this.#facts(reading));
+    return profileCatalog(reading.model, await this.#facts(reading, await this.#bodies(reading.model, [], remote)));
   }
 
   /** The earliest `disabled.until` still ahead on any login or runtime (ms), or `undefined` when none is. */
@@ -465,9 +469,9 @@ export class FleetCatalogService {
   }
 
   /** `GET /v1/fleet/runtimes`. */
-  async runtimes(): Promise<FleetRuntimeCatalog> {
+  async runtimes(remote = false): Promise<FleetRuntimeCatalog> {
     const reading = await this.#read();
-    return runtimeCatalog(reading.model, await this.#facts(reading));
+    return runtimeCatalog(reading.model, await this.#facts(reading, await this.#bodies(reading.model, [], remote)));
   }
 
   /**
@@ -534,9 +538,13 @@ export class FleetCatalogService {
   }
 
   /** `POST /v1/fleet/profiles/preview`: a profile's layers before they are saved. Writes nothing. */
-  async previewProfile(request: FleetProfileDraftRequest): Promise<FleetProfileDraftView> {
+  async previewProfile(request: FleetProfileDraftRequest, remote = false): Promise<FleetProfileDraftView> {
     const reading = await this.#read();
-    return profileDraftView(reading.model, request, await this.#facts(reading));
+    return profileDraftView(
+      reading.model,
+      request,
+      await this.#facts(reading, await this.#bodies(reading.model, [], remote)),
+    );
   }
 
   /**
@@ -683,29 +691,40 @@ export class FleetCatalogService {
   }
 
   /** The component bodies the model names, with the documents a change is about to write in their place. */
-  async #bodies(model: AccountModel, pending: readonly AccountComponentFile[] = []): Promise<ReadBodies> {
+  async #bodies(
+    model: AccountModel,
+    pending: readonly AccountComponentFile[] = [],
+    remote = false,
+  ): Promise<ReadBodies> {
     const layout = this.deps.layout;
     const overlay = new Map(pending.map(file => [assetPath(layout, file.file), file.content]));
-    const text = async (file: string): Promise<string | undefined> => {
+    const notServedRemotely = new Set<string>();
+    const text = async (file: string, reference?: string): Promise<string | undefined> => {
       const path = assetPath(layout, file);
+      if (remote) {
+        const body = await this.deps.readRemoteAsset?.(path);
+        if (body === undefined && reference !== undefined) notServedRemotely.add(reference);
+        return body;
+      }
       return overlay.get(path) ?? (await this.deps.readAsset(path));
     };
     const instructions: Record<string, string> = {};
     for (const [name, component] of Object.entries(model.components.instructions)) {
-      const body = await text(component.file);
+      const body = await text(component.file, `instructions/${name}`);
       if (body !== undefined) instructions[name] = body;
     }
     const settings: Record<string, SettingsObject> = {};
     for (const [name, component] of Object.entries(model.components.settings)) {
       if (component.file === undefined) continue;
-      const body = parsed(await text(component.file), SETTINGS_FORMAT[component.harness]);
+      const body = parsed(await text(component.file, `settings/${name}`), SETTINGS_FORMAT[component.harness]);
+      // Keep original values for conflict detection; remote views redact them, including fixed-layer overrides.
       if (body !== undefined) settings[name] = body;
     }
     const hooks: Record<string, SettingsObject> = {};
     const hooksTexts: Record<string, string> = {};
     for (const [name, component] of Object.entries(model.components.hooks)) {
       if (component.file === undefined) continue;
-      const raw = await text(component.file);
+      const raw = await text(component.file, `hooks/${name}`);
       const body = parsed(raw, 'json');
       if (body === undefined) continue;
       hooks[name] = body;
@@ -717,7 +736,7 @@ export class FleetCatalogService {
       const body = await text(`${skillSourceReference(item)}/SKILL.md`);
       if (body !== undefined) skillFrontmatter[item] = skillFrontmatterKeys(body);
     }
-    return { instructions, settings, hooks, skillFrontmatter, hooksTexts };
+    return { instructions, settings, hooks, skillFrontmatter, hooksTexts, notServedRemotely, remote };
   }
 
   async #runningSessions(): Promise<number> {
@@ -733,6 +752,7 @@ export class FleetCatalogService {
     );
     return {
       format: reading.format,
+      remote: bodies.remote,
       machineName: this.deps.machineName(),
       tools: { claude: this.deps.locate('claude'), codex: this.deps.locate('codex') },
       runningSessions: await this.#runningSessions(),
@@ -742,6 +762,7 @@ export class FleetCatalogService {
       instructionBodies: bodies.instructions ?? {},
       skillFrontmatter: bodies.skillFrontmatter ?? {},
       hooksTexts: bodies.hooksTexts,
+      ...(bodies.notServedRemotely === undefined ? {} : { notServedRemotely: bodies.notServedRemotely }),
       userHome: this.deps.layout.userHome,
       missingCommands,
       credentialStatus: await this.#credentialStatus(),

@@ -46,7 +46,7 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
-  FleetCatalogService,
+  type FleetCatalogService,
 } from '../../fleet/catalog-service.ts';
 
 /** The machine, its components, profiles and runtimes, and every change to them. */
@@ -100,7 +100,8 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       caller: 'any',
       capability: USE,
       noStore: true,
-      handle: async () => await answer(FleetComponentCatalogSchema, () => subsystem.components()),
+      handle: async context =>
+        await answer(FleetComponentCatalogSchema, () => subsystem.components(context.presentation?.loopback !== true)),
     },
     {
       method: 'GET',
@@ -109,7 +110,10 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       caller: 'any',
       capability: USE,
       noStore: true,
-      handle: async () => await answer(FleetLayeredProfileCatalogSchema, () => subsystem.profiles()),
+      handle: async context =>
+        await answer(FleetLayeredProfileCatalogSchema, () =>
+          subsystem.profiles(context.presentation?.loopback !== true),
+        ),
     },
     {
       // A read with a body: it resolves a draft and writes nothing, so it is `use`.
@@ -121,7 +125,9 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, FleetProfileDraftRequestSchema);
-        return await answer(FleetProfileDraftViewSchema, () => subsystem.previewProfile(request));
+        return await answer(FleetProfileDraftViewSchema, () =>
+          subsystem.previewProfile(request, context.presentation?.loopback !== true),
+        );
       },
     },
     {
@@ -131,7 +137,8 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       caller: 'any',
       capability: USE,
       noStore: true,
-      handle: async () => await answer(FleetRuntimeCatalogSchema, () => subsystem.runtimes()),
+      handle: async context =>
+        await answer(FleetRuntimeCatalogSchema, () => subsystem.runtimes(context.presentation?.loopback !== true)),
     },
     {
       method: 'POST',
@@ -144,6 +151,40 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
         const request = await parseBody(context.request, FleetAccountChangeRequestSchema, {
           maxBytes: MAX_CHANGE_BODY_BYTES,
         });
+        // Older clients can turn an omitted body into an empty draft. Never let that erase a file
+        // this remote caller could not read. Local edits and deliberate clears of visible text still work.
+        const change = request.change;
+        // A cached client can round-trip masked flags or settings. A placeholder is never their replacement.
+        if (
+          context.presentation?.loopback !== true &&
+          change.kind === 'component.put' &&
+          change.component.kind === 'settings' &&
+          JSON.stringify({
+            content: change.content,
+            flags: change.component.flags,
+            entries: change.component.entries,
+          }).includes('‹hidden›')
+        )
+          throw new ApiError(409, 'This content is unavailable. Edit it on the machine.', 'fleet_content_unavailable');
+        if (
+          context.presentation?.loopback !== true &&
+          change.kind === 'component.put' &&
+          (change.content?.trim() === '' ||
+            (change.component.kind === 'settings' &&
+              change.component.entries !== undefined &&
+              Object.keys(change.component.entries).length === 0))
+        ) {
+          const catalog = await subsystem.components(true);
+          const current = catalog.kinds
+            .flatMap(group => group.components)
+            .find(row => row.kind === change.component.kind && row.name === change.name);
+          if (current !== undefined && (current.contentUnavailable !== undefined || current.content === undefined))
+            throw new ApiError(
+              409,
+              'This content is unavailable. Edit it on the machine.',
+              'fleet_content_unavailable',
+            );
+        }
         // Staging a clone describes it for THIS caller: a settings document the caller may not write is refused now.
         const caller = {
           governance: context.governance,

@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type { StateHomeFence } from '../lib/state-home-fence.ts';
 import {
   copyTreeIntoFolder,
@@ -44,9 +45,16 @@ export interface SourceFence extends StateHomeFence {
   readonly hardLinkRoots?: readonly string[];
   /** The home's key files and folders, judged by identity wherever they are met (`resolveStateHomes`). */
   readonly pinned?: readonly string[];
+  /** Credential trees: pin every entry without following symbolic links. */
+  readonly pinnedTrees?: readonly string[];
+  /** Remote disclosure only: retain credential identities across rotations and moves until shutdown. */
+  readonly rememberPins?: boolean;
   /** A home not made yet is fenced by name instead of failing closed (`resolveStateHomes`). */
   readonly homesMayBeUnmade?: boolean;
 }
+
+/** One fence belongs to one daemon; rotations add identities, and path misses never remove them. */
+const rememberedPins = new WeakMap<SourceFence, Map<string, StateHomes['pinned'][number]>>();
 
 /** The fence as the disk has it now. */
 export interface ResolvedSourceFence {
@@ -95,22 +103,39 @@ export async function resolveSourceFence(
   fence: SourceFence,
   disk: GuardDisk & FolderDisk = new NodeGuardDisk(),
 ): Promise<ResolvedSourceFence> {
+  let pins = fence.rememberPins === true ? rememberedPins.get(fence) : undefined;
+  if (pins === undefined) {
+    pins = new Map();
+    if (fence.rememberPins === true) rememberedPins.set(fence, pins);
+  }
+  const pinned = [...(fence.pinned ?? [])];
+  const visit = async (path: string): Promise<void> => {
+    const entry = await disk.identity(path);
+    if (entry === undefined) return;
+    pinned.push(path);
+    if (entry.kind === 'directory') {
+      for (const name of await disk.list(path)) await visit(join(path, name));
+    }
+  };
+  for (const tree of fence.pinnedTrees ?? []) await visit(tree);
   const openings: string[] = [];
   for (const directory of fence.open) {
     if ((await disk.realpath(directory).catch(() => undefined)) !== undefined) openings.push(directory);
   }
   // A store that cannot be proven immutable (absent, or writable by this user) is no exception at all.
   const immutable = await resolveImmutableRoots(fence.hardLinkRoots ?? HARD_LINK_ROOTS, disk).catch(() => undefined);
+  const homes = await resolveStateHomes(
+    {
+      homes: fence.homes,
+      openings,
+      pinned,
+      ...(fence.homesMayBeUnmade === true ? { homesMayBeUnmade: true } : {}),
+    },
+    disk,
+  );
+  for (const pin of homes.pinned) pins.set(`${pin.device}:${pin.inode}`, pin);
   return {
-    homes: await resolveStateHomes(
-      {
-        homes: fence.homes,
-        openings,
-        ...(fence.pinned === undefined ? {} : { pinned: fence.pinned }),
-        ...(fence.homesMayBeUnmade === true ? { homesMayBeUnmade: true } : {}),
-      },
-      disk,
-    ),
+    homes: { ...homes, pinned: [...pins.values()] },
     links: { hops: 'every', hardLinks: immutable === undefined ? 'refuse' : { allowUnder: immutable } },
     disk,
   };

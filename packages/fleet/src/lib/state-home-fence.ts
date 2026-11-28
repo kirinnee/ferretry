@@ -54,6 +54,7 @@ export function stateHomeFence(home: string): PinnedStateHomeFence {
       ),
       join(state, 'daemon-identity.json'),
       fleet,
+      join(fleet, 'credentials'),
       join(fleet, 'homes'),
       join(state, 'sessions'),
     ],
