@@ -221,6 +221,7 @@ const refusal = async (work: Promise<unknown>, code: string): Promise<FleetCatal
 describe('remote catalogue bodies', () => {
   it('should read every remote projection through the remote port, never the local one', async () => {
     const fake = 'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=';
+    const fakeIv = 'Eyo3RFFea3iFkp+s';
     let reads = 0;
     const { service } = world({
       readAsset: async () => {
@@ -229,7 +230,7 @@ describe('remote catalogue bodies', () => {
       readRemoteAsset: async path => {
         reads++;
         if (path.endsWith('broken.json')) return undefined;
-        if (path.endsWith('claude.json')) return JSON.stringify({ theme: fake });
+        if (path.endsWith('claude.json')) return JSON.stringify({ theme: fake, iv: fakeIv });
         return ASSETS[path];
       },
     });
@@ -244,6 +245,7 @@ describe('remote catalogue bodies', () => {
       await service.previewProfile({ layers: ['settings/claude'] }, true),
     ]) {
       should(JSON.stringify(view)).not.containEql(fake);
+      should(JSON.stringify(view)).not.containEql(fakeIv);
     }
     should(reads).be.above(0);
   });

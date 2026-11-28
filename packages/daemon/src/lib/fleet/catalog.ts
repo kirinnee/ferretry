@@ -766,7 +766,8 @@ function unavailableReason(resolved: ResolvedProfile): string | undefined {
 
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
-const secretValue = (name: string, text: string): boolean => looksSecret(name, text) || redactText(text).redacted;
+// Keep the component reader's named IV/ciphertext rule when projecting parsed leaves too.
+const secretValue = (name: string, text: string): boolean => componentSecret(name, text) || redactText(text).redacted;
 
 function conflictView(conflict: Conflict, remote: boolean): FleetLayerConflict {
   const setter = (value: Conflict['winner']): Conflict['winner'] => ({
