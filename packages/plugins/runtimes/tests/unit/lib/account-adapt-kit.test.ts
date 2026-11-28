@@ -100,11 +100,8 @@ describe('a Claude runtime without its plugin kit, as data', () => {
       kind: 'harness-unsupported',
       message: 'codex is not supported here',
     });
-    // A kit that says nothing of what its harness adds to a launch, or of its fixed layer, cannot run it: the same refusal for both.
-    expect(missingKitRefusal('claude', {} as RuntimesHarnessKit)).toEqual({
-      kind: 'harness-unsupported',
-      message: 'claude-code is not supported here',
-    });
+    // Claude is refused only for want of a kit, as it always was; Codex's kit must also give what it adds to a launch and its fixed layer.
+    expect(missingKitRefusal('claude', {} as RuntimesHarnessKit)).toBeUndefined();
     expect(
       missingKitRefusal('codex', {
         runtimeExtras: () => ({ env: {} }),

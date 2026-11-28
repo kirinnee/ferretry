@@ -54,7 +54,13 @@ import {
   type RuntimesHarnessKit,
 } from '../../../contract/harness-kit.ts';
 import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
-import { harnessKeyOfKind, kindOf, supportedKinds, UnsupportedHarnessError } from '../harness-kind.ts';
+import {
+  harnessKeyOfKind,
+  kindOf,
+  neededKitMembers,
+  supportedKinds,
+  UnsupportedHarnessError,
+} from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
 import { deepMergeSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
@@ -573,6 +579,15 @@ export interface KitRefusal {
   readonly message: string;
 }
 
+const refusalOf = (harness: string): KitRefusal => ({
+  kind: 'harness-unsupported',
+  message: unsupportedHarnessSentence(harnessKeyOfKind(kindOf(harness))),
+});
+
+/** Whether `kit` gives every member of `names`. */
+const gives = (kit: RuntimesHarnessKit, names: readonly (keyof RuntimesHarnessKit)[]): boolean =>
+  names.every(name => kit[name] !== undefined);
+
 /**
  * The typed refusal for a runtime of `harness` that cannot be planned without its plugin's kit, or `undefined` when it can. Claude's MCP
  * servers and config documents are the Claude kit's (E-276 PR 6) and Codex's variables and files and fixed layer are the Codex kit's (PRs 3 and 12), so a
@@ -580,13 +595,11 @@ export interface KitRefusal {
  * credential store. Only that runtime is affected: the rest of the plan is made as usual.
  */
 export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
-  kit?.runtimeExtras === undefined || kit.fixedLayer === undefined
-    ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(kindOf(harness))) }
-    : undefined;
+  kit === undefined || !gives(kit, neededKitMembers(kindOf(harness), 'planned')) ? refusalOf(harness) : undefined;
 
 /**
  * The ONE runtime-wide kit decision, for the account plan and the catalog alike: `missingKitRefusal`, and also a kit that gives no launch
- * line, command or home variable, or (Codex) no list of the skill folders it keeps for itself, in the same words. `undefined` when the
+ * line, command or home variable, or none of what its harness needs to launch (Codex's list of the skill folders it keeps for itself), in the same words. `undefined` when the
  * runtime can be planned and launched.
  */
 export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
@@ -594,8 +607,8 @@ export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit 
   (kit?.wrapper === undefined ||
   kit.command === undefined ||
   kit.homeEnv === undefined ||
-  kit.ownedSkillEntries === undefined
-    ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
+  !gives(kit, neededKitMembers(harness, 'launched'))
+    ? refusalOf(harness)
     : undefined);
 
 /** What a runtime that cannot be planned for want of its kit writes: nothing. Never reaches a file. */

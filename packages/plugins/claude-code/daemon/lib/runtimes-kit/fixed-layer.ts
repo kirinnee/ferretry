@@ -111,5 +111,17 @@ function fixedLayer(input: KitFixedLayerInput): KitFixedLayerResult {
   };
 }
 
+/**
+ * The permission flags Claude's fixed layer replaces: a profile's own are dropped (and reported as overridden), the layer's stand.
+ * `value` flags take the next token as their value unless written `--flag=value`.
+ */
+const SUPERSEDED_FLAGS = {
+  '--permission-mode': 'value',
+  '--dangerously-skip-permissions': 'bare',
+  '--allow-dangerously-skip-permissions': 'bare',
+  // The person's own instruction is APPENDED to, not replaced: Runtimes' `appendedInstructions` joins the two.
+  '--append-system-prompt': 'value',
+} as const;
+
 /** What Runtimes builds the layer a launched Claude agent gets last from. */
-export const claudeFixedLayerKit: RuntimesHarnessKit = { fixedLayer };
+export const claudeFixedLayerKit: RuntimesHarnessKit = { fixedLayer, supersededFlags: SUPERSEDED_FLAGS };

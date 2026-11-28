@@ -7,7 +7,7 @@
  * nothing here.
  */
 import type { KitExtras, RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
-import { type HarnessKind, kindOf } from '../harness-kind.ts';
+import { type HarnessKind, keepsSharedStateOf, kindOf } from '../harness-kind.ts';
 import type { RuntimeModels } from '../models/runtime.ts';
 import { joinPath } from '../paths.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -17,11 +17,8 @@ import { sharedHistoryPoolDirectory } from '../shared-history.ts';
 export const sqliteHomeOf = (fleetDirectory: string, kind: HarnessKind): string =>
   joinPath(sharedHistoryPoolDirectory(fleetDirectory, kind), 'sqlite');
 
-/** Whether runtimes of `kind` keep their state in {@link sqliteHomeOf}, so the directory has to exist: its kit says so. */
-export const usesSqliteHome = (
-  kind: HarnessKind,
-  kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined,
-): boolean => kits?.get(kind)?.keepsSharedState === true;
+/** Whether runtimes of `kind` keep their state in {@link sqliteHomeOf}, so the directory has to exist: the table of words says so (whether or not its plugin is on). */
+export const usesSqliteHome = (kind: HarnessKind): boolean => keepsSharedStateOf(kind);
 
 export interface RuntimeExtras {
   /** Variables the runtime's launch environment adds. */

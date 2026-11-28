@@ -77,3 +77,37 @@ export const kindOf = (harness: string): HarnessKind => {
   if (kind === undefined) throw new UnsupportedHarnessError(harness);
   return kind;
 };
+
+/** The kit members a harness cannot be planned or launched without, by what each needs. */
+type NeededMember = 'runtimeExtras' | 'fixedLayer' | 'ownedSkillEntries';
+
+/**
+ * Two facts about a harness that hold WHETHER OR NOT its plugin is on, so a kit cannot be where they are read from: a runtime
+ * whose plugin is off is still planned and refused by name, and the plan it makes is byte for byte what it always was. They are
+ * rows of this table of words (not behaviour), and the plugins' own kits say the same: a drift test per kit pins
+ * `keepsSharedState` and the members each kit gives against this table.
+ *  - `keepsSharedState`: its runtimes keep one state database in the shared history pool, so that directory is made for them.
+ *  - `needs`: the kit members a runtime of it is refused without, to plan (`planned`) and then to launch (`launched`).
+ */
+const KIT_FACTS = {
+  claude: { keepsSharedState: false, needs: { planned: [], launched: [] } },
+  codex: {
+    keepsSharedState: true,
+    needs: { planned: ['runtimeExtras', 'fixedLayer'], launched: ['ownedSkillEntries'] },
+  },
+} as const satisfies Readonly<
+  Record<
+    HarnessKind,
+    {
+      readonly keepsSharedState: boolean;
+      readonly needs: { readonly planned: readonly NeededMember[]; readonly launched: readonly NeededMember[] };
+    }
+  >
+>;
+
+/** Whether runtimes of `kind` keep their state database in the shared history pool (made for them even when their plugin is off). */
+export const keepsSharedStateOf = (kind: HarnessKind): boolean => KIT_FACTS[kind].keepsSharedState;
+
+/** The kit members a runtime of `kind` needs: to be planned, and then (`launched`) to be started. */
+export const neededKitMembers = (kind: HarnessKind, stage: 'planned' | 'launched'): readonly NeededMember[] =>
+  KIT_FACTS[kind].needs[stage];

@@ -305,7 +305,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
   for (const kind of new Set(
     runtimeNames.map(name => kindOrUndefined(model.credentials[model.runtimes[name]?.credential ?? '']?.harness ?? '')),
   )) {
-    if (kind !== undefined && usesSqliteHome(kind, input.kits))
+    if (kind !== undefined && usesSqliteHome(kind))
       operations.push({ kind: 'directory', path: sqliteHomeOf(fleet, kind), mode: DIRECTORY_MODE });
   }
 

@@ -5,6 +5,19 @@
 # both ways), and a row the base ref does not hold is refused (the ratchet). Never add a row to bless new code: put what the
 # harness does in its plugin's kit (packages/plugins/runtimes/contract/harness-kit.ts) and look it up by the runtime's harness.
 #
+# The rows are PINNED in scripts/validate/no-harness-literal.ts (PINNED): this list can only lose rows or lower a count.
+#
+# Tables keyed by a harness whose keys are identifiers, not string literals, so no row can count them, and which this PR left where
+# they are (moving one would thread the kits through callers the frozen goldens construct without them). Each is named here so
+# none is a silent leftover; E-276 PR 17b moves them with the rows below:
+#   lib/assets.ts          HARNESS_ASSETS (2 keys) and HARNESS_OWNED_SKILL_ENTRIES (2 keys): words.golden and assets.test read them;
+#                          drift-tested equal to the kits' ownedSkillEntries
+#   lib/settings.ts        SETTINGS_FORMAT (2 keys): read with no kit by mutations.ts, owner-components.ts, setup-service.ts, catalog-service.ts
+#   lib/models/catalog.ts  SIGN_IN_MODEL_CATALOGS (2 keys): loginModelCatalog / starterModelsOf are called with no kit (kit `signInCatalog`)
+#   lib/service/foreign.ts HARNESS_LABELS (2 keys), beside HARNESS_PACKAGES (kit `install`)
+#   adapters/host-harness-scan.ts  the two host-home dependencies (`claudeConfigDir`, `codexHome`), named by the composition root
+#   lib/harness-kind.ts    KIT_FACTS (2 keys): what must hold with a plugin OFF (a kit cannot say it); pinned to the kits by a drift test
+#
 # Every row below waits for E-276 PR 17b, because each needs a kit member AND the frozen goldens' SETUP threaded with the real kits:
 #   builtin-autonomous.ts  Claude's comfort settings and the layer that names them (kit `comfortSettings`; BUILTIN_COMPONENTS is read
 #                          with no kit by runtimes-model.ts, derived-runtimes.ts, runtimes-edits.ts and consumers.golden / world.ts)

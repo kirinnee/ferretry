@@ -70,6 +70,9 @@ export const HARNESS_PACKAGES: Readonly<
   codex: { npm: '@openai/codex', cask: 'codex', nixpkgs: 'codex' },
 };
 
+/** Each harness's product name, for sentences. Spelled beside {@link HARNESS_PACKAGES}: both are the harness's install facts (E-276 PR 17b: its kit's `install`). */
+export const HARNESS_LABELS: Readonly<Record<HarnessKind, string>> = { claude: 'Claude Code', codex: 'Codex' };
+
 // ── sessions ─────────────────────────────────────────────────────────────────────────────────────
 
 /**

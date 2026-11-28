@@ -24,10 +24,12 @@
  * "installed" means this daemon can now find the tool, not merely that a manager exited zero.
  */
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
+import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { scrubInstallOutput } from './install-output.ts';
 import {
   type ExecutableResolverPort,
+  HARNESS_LABELS,
   HARNESS_PACKAGES,
   type HarnessLocation,
   stripTerminalEscapes,
@@ -45,16 +47,16 @@ type PackageManager = 'brew' | 'apt' | 'npm';
  * an apt package, so neither has an `apt` entry and apt is never offered — adding one here is the whole
  * change if that ever stops being true.
  */
-const TOOL_PACKAGES: Readonly<Record<HarnessKind, Readonly<Partial<Record<PackageManager, readonly string[]>>>>> = {
-  claude: {
-    brew: ['install', '--cask', HARNESS_PACKAGES.claude.cask],
-    npm: ['install', '-g', HARNESS_PACKAGES.claude.npm],
-  },
-  codex: {
-    brew: ['install', '--cask', HARNESS_PACKAGES.codex.cask],
-    npm: ['install', '-g', HARNESS_PACKAGES.codex.npm],
-  },
-};
+const TOOL_PACKAGES: Readonly<Record<HarnessKind, Readonly<Partial<Record<PackageManager, readonly string[]>>>>> =
+  (() => {
+    const table: Partial<Record<HarnessKind, Partial<Record<PackageManager, readonly string[]>>>> = {};
+    for (const kind of supportedKinds())
+      table[kind] = {
+        brew: ['install', '--cask', HARNESS_PACKAGES[kind].cask],
+        npm: ['install', '-g', HARNESS_PACKAGES[kind].npm],
+      };
+    return table as Record<HarnessKind, Partial<Record<PackageManager, readonly string[]>>>;
+  })();
 
 /**
  * Where each manager usually lives when this daemon's own `PATH` does not say.
@@ -83,8 +85,8 @@ const MANAGER_NAME: Readonly<Record<PackageManager, string>> = { brew: 'Homebrew
  */
 const SUDO_REMEDY: Readonly<Record<PackageManager, boolean>> = { brew: false, apt: true, npm: true };
 
-/** Each harness's product name, for sentences. */
-const TOOL_NAME: Readonly<Record<HarnessKind, string>> = { claude: 'Claude Code', codex: 'Codex' };
+/** Each harness's product name, for sentences: the one table it is spelled in (`foreign.ts`). */
+const TOOL_NAME: Readonly<Record<HarnessKind, string>> = HARNESS_LABELS;
 
 /** How long one install may run before it is stopped. A cask download on a slow link takes minutes. */
 const TOOL_INSTALL_TIMEOUT_MINUTES = 15;

@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+const SCANNER = 'scripts/validate/no-harness-literal.ts';
 export const LEDGER = 'scripts/validate/no-harness-literal-remaining.txt';
 /** The base the list may not grow from when CI names none: the branch every pull request lands in. */
 export const DEFAULT_BASE = 'origin/rebuild/5.0-after';
@@ -27,15 +28,83 @@ export const SPELLING_FILES: ReadonlySet<string> = new Set([
 /** `path` to its count. */
 export type Counts = ReadonlyMap<string, number>;
 
+/**
+ * THE PIN: the only rows the list may ever hold, with the highest count each may have. They are the four files whose literals
+ * E-276 PR 17b moves (each needs a kit member AND the frozen goldens' setup threaded with the real kits), approved when the close-out
+ * was split. The list may lower a count or delete a row; it may never add a row or raise a count past this pin, whatever the code
+ * holds and whatever the base ref says (a base that predates the list, or a base that was itself loosened, pins nothing). Editing
+ * this constant is a change to the gate itself and is reviewed as one.
+ */
+export const PINNED: Counts = new Map([
+  [`${SCOPE}lib/account/builtin-autonomous.ts`, 2],
+  [`${SCOPE}lib/account/layering.ts`, 2],
+  [`${SCOPE}lib/account/scope.ts`, 4],
+  [`${SCOPE}lib/service/foreign.ts`, 2],
+]);
+
 const HARNESS_WORDS: ReadonlySet<string> = new Set(['claude', 'codex']);
 
+/** What may stand before a `/` for it to open a regular expression rather than divide. */
+const BEFORE_REGEX = new Set([
+  '(',
+  ',',
+  '=',
+  ':',
+  '[',
+  '!',
+  '&',
+  '|',
+  '?',
+  '{',
+  '}',
+  ';',
+  '+',
+  '-',
+  '*',
+  '%',
+  '<',
+  '>',
+  '~',
+  '^',
+]);
+
 /**
- * How many string literals of `text` are exactly `claude` or `codex`. Comments are skipped and a string is read to its closing
- * quote (an escape skips one character); a template literal counts only when it holds no placeholder.
+ * How many string literals of `text` are exactly `claude` or `codex`, read the way TypeScript reads them: comments are skipped,
+ * a quoted string is read to its closing quote (an escape skips one character), a regular expression is skipped whole, and a
+ * template literal is read as its text AND its `${ ... }` code, nested to any depth, so a literal inside an interpolation (or a
+ * template inside one) counts like any other. A template with no placeholder counts when its whole text is the word.
  */
 export const countLiterals = (text: string): number => {
   let count = 0;
   let at = 0;
+  let last = '';
+  /** One entry per open `{` of code: `'template'` when it is a `${` that returns to its template text on its `}`. */
+  const braces: ('block' | 'template')[] = [];
+  /** Every template being read, innermost last: where it opens and whether it has a placeholder yet. */
+  const templateStarts: { readonly at: number; placeholder: boolean }[] = [];
+
+  /** Reads template text from `at` to its closing backtick or its next `${` (which returns to code). */
+  const readTemplateText = (): void => {
+    const open = templateStarts[templateStarts.length - 1] as { readonly at: number; placeholder: boolean };
+    while (at < text.length) {
+      const char = text[at];
+      if (char === '\\') at += 2;
+      else if (char === '`') {
+        if (!open.placeholder && HARNESS_WORDS.has(text.slice(open.at + 1, at))) count++;
+        templateStarts.pop();
+        at++;
+        last = '`';
+        return;
+      } else if (char === '$' && text[at + 1] === '{') {
+        open.placeholder = true;
+        braces.push('template');
+        at += 2;
+        last = '{';
+        return;
+      } else at++;
+    }
+  };
+
   while (at < text.length) {
     const char = text[at] as string;
     const next = text[at + 1];
@@ -44,19 +113,43 @@ export const countLiterals = (text: string): number => {
     } else if (char === '/' && next === '*') {
       const end = text.indexOf('*/', at + 2);
       at = end < 0 ? text.length : end + 2;
-    } else if (char === "'" || char === '"' || char === '`') {
+    } else if (char === '/' && (last === '' || BEFORE_REGEX.has(last))) {
+      let inClass = false;
+      at++;
+      while (at < text.length && text[at] !== '\n' && (inClass || text[at] !== '/')) {
+        if (text[at] === '\\') at++;
+        else if (text[at] === '[') inClass = true;
+        else if (text[at] === ']') inClass = false;
+        at++;
+      }
+      at++;
+      last = '/';
+    } else if (char === "'" || char === '"') {
       let end = at + 1;
-      let plain = true;
       while (end < text.length && text[end] !== char) {
         if (text[end] === '\\') end++;
-        else if (char === '`' && text[end] === '$' && text[end + 1] === '{') plain = false;
-        else if (char !== '`' && text[end] === '\n') break;
+        else if (text[end] === '\n') break;
         end++;
       }
-      const body = text.slice(at + 1, end);
-      if (plain && HARNESS_WORDS.has(body)) count++;
+      if (HARNESS_WORDS.has(text.slice(at + 1, end))) count++;
       at = end + 1;
-    } else at++;
+      last = char;
+    } else if (char === '`') {
+      templateStarts.push({ at, placeholder: false });
+      at++;
+      readTemplateText();
+    } else if (char === '{') {
+      braces.push('block');
+      at++;
+      last = '{';
+    } else if (char === '}') {
+      at++;
+      last = '}';
+      if (braces.pop() === 'template') readTemplateText();
+    } else {
+      if (!/\s/u.test(char)) last = char;
+      at++;
+    }
   }
   return count;
 };
@@ -108,13 +201,10 @@ export const diffExact = (ledger: Counts, actual: Counts): string[] => {
 };
 
 /** The ratchet: a row the base list does not hold, or holds at a lower count, is growth. */
-export const growth = (ledger: Counts, base: Counts): string[] =>
+export const growth = (ledger: Counts, base: Counts, holds = 'the base holds'): string[] =>
   [...ledger]
     .filter(([key, n]) => n > (base.get(key) ?? 0))
-    .map(
-      ([key, n]) =>
-        `+ ${key}::${n}${base.has(key) ? ` (the base holds ${base.get(key)})` : ' (the base holds no such row)'}`,
-    )
+    .map(([key, n]) => `+ ${key}::${n}${base.has(key) ? ` (${holds} ${base.get(key)})` : ` (${holds} no such row)`}`)
     .sort();
 
 export type Base =
@@ -158,6 +248,15 @@ export const run = (
     );
     console.error("   A '<' row is a file that is now clean or lower: delete or lower its row.");
     for (const row of delta) console.error(row);
+  }
+
+  const beyondPin = growth(ledger, PINNED, 'the pin holds');
+  if (beyondPin.length > 0) {
+    failed = true;
+    console.error(
+      `❌ ${LEDGER} holds more than the pinned four rows of E-276 PR 17b (PINNED in ${SCANNER}): a row is never added and a count never goes up, even when the code matches it.`,
+    );
+    for (const row of beyondPin) console.error(row);
   }
 
   const base = readBase(root, env.FY_CHECK_BASE || DEFAULT_BASE);

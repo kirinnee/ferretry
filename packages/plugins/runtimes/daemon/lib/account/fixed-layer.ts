@@ -489,19 +489,25 @@ export function fixedLayerFor(
   });
   if (!result.ok) return result;
   const { layer } = result;
-  return {
-    ok: true,
-    layer: {
-      harness,
-      agentPermissions,
-      entries: layer.entries.map(fixed => entry(fixed.purpose, fixed.target, fixed.path, fixed.value)),
-      args: layer.args,
-      ...(layer.settingsOverlay === undefined ? {} : { claudeSettingsOverlay: layer.settingsOverlay }),
-      ...(layer.rules === undefined ? {} : { codexRules: layer.rules }),
-      ...(layer.configJson === undefined ? {} : { claudeJson: layer.configJson }),
-    },
+  const made: FixedLayer = {
+    harness,
+    agentPermissions,
+    entries: layer.entries.map(fixed => entry(fixed.purpose, fixed.target, fixed.path, fixed.value)),
+    args: layer.args,
+    ...(layer.settingsOverlay === undefined ? {} : { claudeSettingsOverlay: layer.settingsOverlay }),
+    ...(layer.rules === undefined ? {} : { codexRules: layer.rules }),
+    ...(layer.configJson === undefined ? {} : { claudeJson: layer.configJson }),
   };
+  SUPERSEDED_FLAGS.set(made, kit.supersededFlags ?? {});
+  return { ok: true, layer: made };
 }
+
+/**
+ * The permission flags a layer's harness replaces, from its plugin's kit (`kit.supersededFlags`), by the layer `fixedLayerFor` made.
+ * Kept beside the layer and not on it, so the layer stays the plain data it always was (the wrapper golden pins it whole). A layer
+ * nobody made through `fixedLayerFor` replaces no flag of a profile's.
+ */
+const SUPERSEDED_FLAGS = new WeakMap<FixedLayer, Readonly<Record<string, 'bare' | 'value' | 'config'>>>();
 
 // ── Applying it ──────────────────────────────────────────────────────────────────────────────────
 
@@ -533,31 +539,6 @@ export interface AgentLaunch {
   readonly overridden: readonly FixedOverride[];
 }
 
-/**
- * The permission flags each harness's fixed layer replaces. `value` flags take the next token as
- * their value unless written `--flag=value`; `config` is Codex's `-c key=value`, superseded only for
- * the keys the fixed layer sets.
- */
-const SUPERSEDED_FLAGS: Readonly<Record<HarnessKind, Readonly<Record<string, 'bare' | 'value' | 'config'>>>> = {
-  claude: {
-    '--permission-mode': 'value',
-    '--dangerously-skip-permissions': 'bare',
-    '--allow-dangerously-skip-permissions': 'bare',
-    // The person's own instruction is APPENDED to, not replaced: see `appendedInstructions`.
-    '--append-system-prompt': 'value',
-  },
-  codex: {
-    '--dangerously-bypass-approvals-and-sandbox': 'bare',
-    '--full-auto': 'bare',
-    '--ask-for-approval': 'value',
-    '-a': 'value',
-    '--sandbox': 'value',
-    '-s': 'value',
-    '--config': 'config',
-    '-c': 'config',
-  },
-};
-
 const CODEX_FIXED_CONFIG_KEYS: ReadonlySet<string> = new Set([
   'approval_policy',
   'sandbox_mode',
@@ -572,11 +553,10 @@ const isFixedCodexKey = (key: string): boolean =>
 
 /** Split a profile's flags into the ones the launch keeps and the ones the fixed layer replaces. */
 function partitionFlags(
-  harness: HarnessKind,
+  table: Readonly<Record<string, 'bare' | 'value' | 'config'>>,
   flags: readonly FlagContribution[],
   fixedArgs: readonly string[],
 ): { readonly kept: readonly string[]; readonly dropped: readonly FixedOverride[] } {
-  const table = SUPERSEDED_FLAGS[kindOf(harness)];
   const fixedTokens = new Set(fixedArgs.filter(arg => CARRIED_FLAGS.has(arg)));
   const kept: string[] = [];
   const dropped: FixedOverride[] = [];
@@ -642,7 +622,7 @@ export function applyFixedLayer(resolved: ResolvedProfile, given: FixedLayer): A
       });
     }
   }
-  const flags = partitionFlags(fixed.harness, resolved.flags, fixed.args);
+  const flags = partitionFlags(SUPERSEDED_FLAGS.get(given) ?? {}, resolved.flags, fixed.args);
   return {
     fixed,
     settings: deepMergeSettings(resolved.settings.value, fixedSettingsDocument(fixed.entries)),
@@ -664,6 +644,7 @@ function appendedInstructions(
 ): { readonly fixed: FixedLayer; readonly absorbed: (entry: FixedOverride) => boolean } {
   const own = fixed.entries.find(entry => entry.purpose === 'instructions');
   if (own === undefined) return { fixed, absorbed: () => false };
+  kindOf(fixed.harness); // a harness Runtimes has no behaviour for is refused by name, never folded as one of the two
   const name = own.path[0] as string;
   const asFlag = own.target === 'launch';
   const theirs: string[] = [];

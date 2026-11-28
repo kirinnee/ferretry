@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { countLiterals } from './no-harness-literal.ts';
+import { countLiterals, PINNED } from './no-harness-literal.ts';
 
 const root = join(import.meta.dir, '../..');
 const GATE = 'scripts/validate/no-harness-literal.sh';
@@ -70,6 +70,21 @@ describe('countLiterals', () => {
     ).toBe(0);
   });
 
+  test('counts a literal inside a template interpolation, however deep', () => {
+    expect(countLiterals("const a = `kind ${x === 'claude' ? 'codex' : 'other'}`;")).toBe(2);
+    expect(countLiterals("const a = `a ${`b ${y('codex')} c`} d`;")).toBe(1);
+    expect(countLiterals("const a = `${ { k: 'claude' }.k }`; const b = 'codex';")).toBe(2);
+  });
+
+  test('counts a plain template after an interpolation closed, and keeps the template text out of the count', () => {
+    expect(countLiterals('const a = `claude ${x} codex`; const b = `codex`;')).toBe(1);
+  });
+
+  test('does not read a quote inside a regular expression or a comment as a string', () => {
+    expect(countLiterals("const a = /'/u.test(x); const b = 'claude';")).toBe(1);
+    expect(countLiterals("const a = x / 2; const b = 'codex'; // 'claude'")).toBe(1);
+  });
+
   test('reads a string to its closing quote, so an escaped quote does not end it early', () => {
     expect(countLiterals(String.raw`const a = 'it\'s claude'; const b = 'codex';`)).toBe(1);
   });
@@ -88,16 +103,19 @@ describe('the harness-literal gate', () => {
     expect(result.status).toBe(0);
   });
 
-  const FILE = `${DAEMON}/lib/a.ts`;
+  /** A pinned file: the list may hold it, at most at its pinned count. */
+  const FILE = `${DAEMON}/lib/account/scope.ts`;
+  /** A file the pin does not name. */
+  const NEW_FILE = `${DAEMON}/lib/a.ts`;
 
   test('refuses a harness literal in a Runtimes daemon file', () => {
-    const result = run({ [FILE]: "export const kind = 'codex';\n" });
+    const result = run({ [NEW_FILE]: "export const kind = 'codex';\n" });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`${FILE}::1`);
+    expect(result.stderr).toContain(`${NEW_FILE}::1`);
   });
 
   test('refuses a literal in a double-quoted comparison too', () => {
-    expect(run({ [FILE]: 'if (x === "claude") go();\n' }).status).toBe(1);
+    expect(run({ [NEW_FILE]: 'if (x === "claude") go();\n' }).status).toBe(1);
   });
 
   test('does not read the four files that spell the stored word, a test, or another package', () => {
@@ -146,6 +164,47 @@ describe('the harness-literal gate', () => {
     const two = "export const a = 'codex';\nexport const b = 'claude';\n";
     expect(run({ [FILE]: two }, { ledger: `${FILE}::2\n`, base: `${FILE}::1\n` }).status).toBe(1);
     expect(run({ [FILE]: two }, { ledger: `${FILE}::2\n`, base: `${FILE}::2\n` }).status).toBe(0);
+  });
+
+  test('the pin names exactly the four rows of E-276 PR 17b, with their counts', () => {
+    expect([...PINNED].map(([path, n]) => `${path.slice(DAEMON.length + 1)}::${n}`).toSorted()).toEqual([
+      'lib/account/builtin-autonomous.ts::2',
+      'lib/account/layering.ts::2',
+      'lib/account/scope.ts::4',
+      'lib/service/foreign.ts::2',
+    ]);
+  });
+
+  test('a NEW row with matching code is refused even when the base predates the list (the bootstrap)', () => {
+    const result = run(
+      { [NEW_FILE]: "export const kind = 'codex';\n" },
+      { ledger: `${NEW_FILE}::1  # a blessed row\n` },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('the pin holds no such row');
+  });
+
+  test('a RAISED count with matching code is refused even when the base predates the list', () => {
+    const five = Array.from({ length: 5 }, (_, i) => `export const k${i} = 'codex';`).join('\n');
+    const result = run({ [FILE]: `${five}\n` }, { ledger: `${FILE}::5\n` });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('(the pin holds 4)');
+  });
+
+  test('a pinned row at or below its pinned count passes against a base that predates the list', () => {
+    const four = Array.from({ length: 4 }, (_, i) => `export const k${i} = 'codex';`).join('\n');
+    expect(run({ [FILE]: `${four}\n` }, { ledger: `${FILE}::4\n` }).status).toBe(0);
+    expect(run({ [FILE]: "export const k = 'codex';\n" }, { ledger: `${FILE}::1\n` }).status).toBe(0);
+  });
+
+  test('a literal inside a template interpolation is refused, listed or not', () => {
+    const planted = "export const label = `kind: ${flag ? 'claude' : 'other'}`;\n";
+    const bare = run({ [NEW_FILE]: planted });
+    expect(bare.status).toBe(1);
+    expect(bare.stderr).toContain(`${NEW_FILE}::1`);
+    const listed = run({ [NEW_FILE]: planted }, { ledger: `${NEW_FILE}::1\n` });
+    expect(listed.status).toBe(1);
+    expect(listed.stderr).toContain('the pin holds no such row');
   });
 
   test('a base that cannot be read is a broken gate, never skipped', () => {

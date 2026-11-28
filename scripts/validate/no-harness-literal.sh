@@ -9,12 +9,14 @@ set -euo pipefail
 # nowhere else (they are the stored file shapes and the one table of words: lib/harness-kind.ts, lib/account/schema.ts,
 # lib/account/halves.ts, lib/config.ts).
 #
-# HOW. `no-harness-literal.ts` reads every tracked packages/plugins/runtimes/daemon/**/*.ts(x), drops comments, and counts the
-# string literals that are exactly `claude` or `codex` (either quote style, or a template with no placeholder), per file.
+# HOW. `no-harness-literal.ts` reads every tracked packages/plugins/runtimes/daemon/**/*.ts(x) the way TypeScript does (comments and
+# regular expressions skipped, templates read as text AND `${ ... }` code, to any depth) and counts the string literals that are
+# exactly `claude` or `codex` (either quote style, a template with no placeholder, or one inside an interpolation), per file.
 #
 # THE LIST. `scripts/validate/no-harness-literal-remaining.txt` names what a part of E-276 has not moved yet as `path::N  # why`.
 # It is a named, shrinking list and never an exemption: exact both ways against the tree (a new literal, a higher count, or a
-# row for a file that is now clean all fail) and a ratchet against the base ref (CI's FY_CHECK_BASE; origin/rebuild/5.0-after
+# row for a file that is now clean all fail), a PIN in the scanner (`PINNED`: the four rows E-276 PR 17b moves, each at its count: no
+# other row is ever accepted and no count goes above its pin, even when the code matches, and whatever the base says) and a ratchet against the base ref (CI's FY_CHECK_BASE; origin/rebuild/5.0-after
 # locally): a row the base does not hold, or a count above the base's, fails.
 #
 # `--print` writes the rows for the current tree. Exit codes follow the repo convention: 0 clean, 1 a violation, 2 a broken gate.
