@@ -19,7 +19,7 @@ const LAYOUT: FleetLayout = {
   homesDirectory: '/fy/fleet/homes',
   assetsDirectory: '/fy/fleet/assets',
   manifestPath: '/fy/fleet/manifest.json',
-  defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
+  defaultHomeDirectories: ['/home/person/.claude', '/home/person/.codex'],
 };
 
 const ID_A = '00000000-0000-4000-8000-00000000000a';

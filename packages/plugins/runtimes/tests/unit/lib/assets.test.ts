@@ -1,13 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  ASSET_FIELDS,
-  HARNESS_ASSETS,
-  HARNESS_OWNED_SKILL_ENTRIES,
-  harnessAsset,
-  isHarnessOwnedSkillEntry,
-  isUsableSkillItemName,
-} from '../../../daemon/lib/assets.ts';
+import { ASSET_FIELDS, HARNESS_ASSETS, harnessAsset, isUsableSkillItemName } from '../../../daemon/lib/assets.ts';
 
 describe('HARNESS_ASSETS', () => {
   it.each(['claude', 'codex'] as const)('should give %s harness assets distinct destinations', kind => {
@@ -102,19 +95,5 @@ describe('isUsableSkillItemName', () => {
   it.each(['', '.', '..', 'a/b'])('should refuse %s as a destination name', name => {
     // Act / Assert — each of these would compose a destination outside the item it names.
     should(isUsableSkillItemName(name)).be.false();
-  });
-});
-
-describe('isHarnessOwnedSkillEntry', () => {
-  it("should name Codex's bundled skills folder as Codex's own", () => {
-    // Assert — Codex writes it on first start; sweeping it would delete Codex's own skills.
-    HARNESS_OWNED_SKILL_ENTRIES.codex.should.deepEqual(['.system']);
-    isHarnessOwnedSkillEntry('codex', '.system').should.be.true();
-    isHarnessOwnedSkillEntry('codex', 'review').should.be.false();
-  });
-
-  it('should name nothing for Claude, which writes nothing into its skills folder', () => {
-    // Assert
-    isHarnessOwnedSkillEntry('claude', '.system').should.be.false();
   });
 });

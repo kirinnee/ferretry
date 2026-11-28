@@ -23,6 +23,7 @@ import {
   type FleetLayout,
   type FleetModelApplyPlan,
 } from '../lib/provisioning.ts';
+import { hostFolderOf, supportedKinds } from '../lib/harness-kind.ts';
 import type { ClaudeStatuslineCommand } from '../lib/account/adapt.ts';
 import type { AdapterHost, ConfigFilesPort, HostFiles, SharedHistoryPooling } from './ports.ts';
 import { FileFleetProvisioner } from './file-provisioner.ts';
@@ -259,7 +260,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     homesDirectory: join(paths.fleet, 'homes'),
     assetsDirectory: join(paths.fleet, 'assets'),
     manifestPath: paths.fleetManifest,
-    defaultHomeDirectories: { claude: join(userHome, '.claude'), codex: join(userHome, '.codex') },
+    defaultHomeDirectories: supportedKinds().map(kind => join(userHome, hostFolderOf(kind))),
   };
   // Strict, unlike a component read: an `ids.json` that exists and cannot be read must refuse the
   // change, because planning without it would give every runtime a new id and a new directory.

@@ -30,7 +30,7 @@ const LAYOUT = {
   homesDirectory: '/fy/fleet/homes',
   assetsDirectory: '/fy/fleet/assets',
   manifestPath: '/fy/fleet/manifest.json',
-  defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
+  defaultHomeDirectories: ['/home/person/.claude', '/home/person/.codex'],
 } as const;
 
 /** The service over fakes, and every plan it handed the provisioner to apply. */

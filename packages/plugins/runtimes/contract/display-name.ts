@@ -21,26 +21,23 @@
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
+import { harnessWords } from './harness-words.ts';
 import type { CredentialStore } from './wire/shared.ts';
 
-// Words by harness key, read by lookup so a harness this table does not know still has a name (its own key) and no
-// branch here names a harness.
-/** The harness as a person says it. */
-const HARNESS_WORD: Readonly<Record<string, string>> = { 'claude-code': 'Claude', codex: 'Codex' };
+// The words come from the one table of harness words (`./harness-words.ts`), read by lookup so a harness that table does not know still
+// has a name (its own key) and no branch here names a harness.
 
-/** The word a machine-made runtime name starts with: the CLI's short name, not the wire harness key. */
-const CLI_WORD: Readonly<Record<string, string>> = { 'claude-code': 'claude', codex: 'codex' };
-
-/** Where a ferretry-store sign-in comes from, which is the harness maker's own account. */
+/** Where a ferretry-store sign-in comes from, which is the harness maker's own account. (Kept here: the table of words' own shape is pinned by the words golden.) */
 const FERRETRY_SIGN_IN: Readonly<Record<string, string>> = {
   'claude-code': 'Claude.ai sign-in',
   codex: 'ChatGPT sign-in',
 };
 
 /** A harness as a person says it: "Claude", "Codex". */
-export const harnessWord = (harness: HarnessKey): string => HARNESS_WORD[harness] ?? harness;
+export const harnessWord = (harness: HarnessKey): string => harnessWords(harness)?.short ?? harness;
 
-const cliWordOf = (harness: HarnessKey): string => CLI_WORD[harness] ?? harness;
+/** The word a machine-made runtime name starts with: the CLI's short name, not the wire harness key. */
+const cliWordOf = (harness: HarnessKey): string => harnessWords(harness)?.commandWord ?? harness;
 
 /** What {@link runtimeDisplayName} reads: the fields `GET /v1/runtimes` already carries. */
 export interface RuntimeNameSource {

@@ -280,7 +280,9 @@ describe('HostHarnessScanner — where the setup lives', () => {
     await put(path.join(claudeDir, 'CLAUDE.md'), 'moved');
     await put(path.join(claudeDir, '.claude.json'), JSON.stringify({ mcpServers: {} }));
     await put(path.join(codexDir, 'AGENTS.md'), 'moved');
-    const [claude, codex] = await scanner(user, { claudeConfigDir: claudeDir, codexHome: codexDir }).scan();
+    const [claude, codex] = await scanner(user, {
+      environment: { CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: codexDir },
+    }).scan();
     // Found where they were moved to (an absent document would say so) and read there.
     should(claude?.instructions).match({ kind: 'text', source: path.join(claudeDir, 'CLAUDE.md'), text: 'moved' });
     should(claude?.mcp).match({ kind: 'text', source: path.join(claudeDir, '.claude.json') });
@@ -289,7 +291,9 @@ describe('HostHarnessScanner — where the setup lives', () => {
 
   it('should say when CLAUDE_CONFIG_DIR or CODEX_HOME is a relative path', async () => {
     const user = await home();
-    const [claude, codex] = await scanner(user, { claudeConfigDir: 'rel', codexHome: 'rel' }).scan();
+    const [claude, codex] = await scanner(user, {
+      environment: { CLAUDE_CONFIG_DIR: 'rel', CODEX_HOME: 'rel' },
+    }).scan();
     should(claude?.problems).deepEqual([
       `CLAUDE_CONFIG_DIR is the relative path "rel", so ${path.join(user, '.claude')} was read instead.`,
     ]);

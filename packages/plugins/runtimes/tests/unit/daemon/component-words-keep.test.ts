@@ -7,6 +7,7 @@
  * Every secret here is an obviously fake one.
  */
 import { describe, it } from 'bun:test';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import should from 'should';
 import type { ComponentView } from '../../../contract/index.ts';
 import { componentChange, draftFromComponent } from '../../../app/features/fleet/components/component-model.ts';
@@ -58,6 +59,7 @@ const derive = (model: AccountModel, change: object) =>
   deriveAccountChange(model, change as Parameters<typeof deriveAccountChange>[1], {
     machineName: 'box',
     runningSessions: 0,
+    kits: REAL_KITS,
   });
 
 const putFlags = (flags: readonly unknown[], flagsEtag?: string) => ({

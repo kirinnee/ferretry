@@ -60,19 +60,6 @@ export function fastSupportOf(
   return kit?.fastSupport === undefined ? {} : { fast: kit.fastSupport(model) };
 }
 
-/**
- * The one place a harness's package names are spelled. GAP(updates): the harness update owns this table.
- */
-export const HARNESS_PACKAGES: Readonly<
-  Record<HarnessKind, { readonly npm: string; readonly cask: string; readonly nixpkgs: string }>
-> = {
-  claude: { npm: '@anthropic-ai/claude-code', cask: 'claude-code', nixpkgs: 'claude-code' },
-  codex: { npm: '@openai/codex', cask: 'codex', nixpkgs: 'codex' },
-};
-
-/** Each harness's product name, for sentences. Spelled beside {@link HARNESS_PACKAGES}: both are the harness's install facts (E-276 PR 17b: its kit's `install`). */
-export const HARNESS_LABELS: Readonly<Record<HarnessKind, string>> = { claude: 'Claude Code', codex: 'Codex' };
-
 // ── sessions ─────────────────────────────────────────────────────────────────────────────────────
 
 /**

@@ -34,7 +34,6 @@ import {
   describeConflict,
   type FlatLayer,
   flattenProfile,
-  HARNESS_DISPLAY_NAMES,
   type PartialSupport,
   type ResolvedProfile,
   resolveProfile,
@@ -44,7 +43,7 @@ import { componentPartialSupport, describePartialSupport, runtimeKitRefusal } fr
 import { freeName } from '../account/import.ts';
 import { findFlagSecrets, looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 import { hooksDocumentRefusedLines } from './hooks-document-net.ts';
-import { supportedKinds } from '../harness-kind.ts';
+import { displayNameOf, supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { runtimeDisable, type BudgetHolds } from '../account/disabled-runtime.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -236,7 +235,7 @@ export function machineView(model: AccountModel, facts: CatalogFacts, authority:
       const command = facts.tools[harness];
       return {
         harness: harnessKey(harness),
-        label: HARNESS_DISPLAY_NAMES[harness],
+        label: displayNameOf(harness),
         installed: command !== undefined,
         ...(command === undefined ? {} : { command }),
       };
@@ -1147,9 +1146,9 @@ const KIND_LABELS: Readonly<Record<ComponentKind, string>> = {
 function skippedSentence(skip: SkippedLayer, harness: HarnessKind): string {
   const what = `${KIND_LABELS[skip.layer.componentKind]} ${skip.layer.name}`;
   if (skip.reason === 'no-model-for-harness') {
-    return `${what} has no ${HARNESS_DISPLAY_NAMES[harness]} model, so it is skipped on ${HARNESS_DISPLAY_NAMES[harness]}.`;
+    return `${what} has no ${displayNameOf(harness)} model, so it is skipped on ${displayNameOf(harness)}.`;
   }
-  return `${what} is for ${HARNESS_DISPLAY_NAMES[skip.harness ?? harness]} only, so it is skipped on ${HARNESS_DISPLAY_NAMES[harness]}.`;
+  return `${what} is for ${displayNameOf(skip.harness ?? harness)} only, so it is skipped on ${displayNameOf(harness)}.`;
 }
 
 /** P5, E14: why a profile cannot be used with a login of this harness. */
@@ -1158,10 +1157,10 @@ function unavailableReason(resolved: ResolvedProfile): string | undefined {
   if (availability.available) return undefined;
   if (availability.reason === 'empty') return 'This profile has no layers yet.';
   const owners = new Set(resolved.skipped.flatMap(skip => (skip.harness === undefined ? [] : [skip.harness])));
-  const only = owners.size === 1 ? HARNESS_DISPLAY_NAMES[[...owners][0] as HarnessKind] : undefined;
+  const only = owners.size === 1 ? displayNameOf([...owners][0] as HarnessKind) : undefined;
   return only === undefined
-    ? `Nothing here applies on ${HARNESS_DISPLAY_NAMES[resolved.harness]}.`
-    : `Only ${only} settings. Nothing here applies on ${HARNESS_DISPLAY_NAMES[resolved.harness]}.`;
+    ? `Nothing here applies on ${displayNameOf(resolved.harness)}.`
+    : `Only ${only} settings. Nothing here applies on ${displayNameOf(resolved.harness)}.`;
 }
 
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
@@ -1399,7 +1398,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
             : kitRefusal !== undefined
               ? kitRefusal.message
               : facts.tools[harness] === undefined
-                ? `Install ${HARNESS_DISPLAY_NAMES[harness]} to launch`
+                ? `Install ${displayNameOf(harness)} to launch`
                 : status === 'needs_sign_in'
                   ? 'Sign in to launch'
                   : stack.available.available

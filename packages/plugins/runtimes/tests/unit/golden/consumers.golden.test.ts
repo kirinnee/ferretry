@@ -57,6 +57,12 @@ const apiOver = (logins: readonly LoginView[], runtimes: Record<string, RuntimeF
     now: () => Date.parse('2026-11-08T12:00:00Z'),
   });
 
+/** The real kits of the two shipped harnesses, in setup only (the settings format each reads is its plugin's). */
+const GOLDEN_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
+
 describe('data-word consumer goldens', () => {
   it('should prefer a Claude runtime that can launch over a Codex one, and a Codex one over nothing, exactly as the base does', async () => {
     const scenarios: Record<string, readonly LoginView[]> = {
@@ -111,6 +117,7 @@ describe('data-word consumer goldens', () => {
     const facts: AccountChangeFacts = {
       machineName: 'box',
       runningSessions: 0,
+      kits: GOLDEN_KITS,
       settingsBodies: {
         'cl-settings': { permissions: { keepMe: 'yes' } },
         'cx-settings': { shell_environment_policy: { keepMe: 'yes' } },
@@ -195,6 +202,10 @@ describe('data-word consumer goldens', () => {
       next,
       file => assets[file],
       prefix => files[prefix] ?? [],
+      [],
+      () => [],
+      () => ({}),
+      GOLDEN_KITS,
     );
     const answers: Record<string, OwnerWriteOutcome> = {
       'mcp/claude-files': { outcome: 'written' },
@@ -323,6 +334,11 @@ describe('data-word consumer goldens', () => {
       let primed = 0;
       const installer = toolInstaller({
         commands: cache,
+        kits: () =>
+          new Map([
+            ['claude', claudeRuntimesKit],
+            ['codex', codexRuntimesKit],
+          ] as const),
         platform: { name: () => scenario.platform, prime: async () => void primed++ },
         spawn: () =>
           ({
@@ -427,7 +443,7 @@ describe('data-word consumer goldens', () => {
           homesDirectory: '/fy/fleet/homes',
           assetsDirectory: '/fy/fleet/assets',
           manifestPath: '/fy/fleet/manifest.json',
-          defaultHomeDirectories: { claude: `${HOST_HOME}/.claude`, codex: `${HOST_HOME}/.codex` },
+          defaultHomeDirectories: [`${HOST_HOME}/.claude`, `${HOST_HOME}/.codex`],
         },
         locate: (harness: string) => {
           asked.push(`catalogue ${harness}`);
@@ -512,8 +528,9 @@ describe('data-word consumer goldens', () => {
         homesDirectory: '/fy/fleet/homes',
         assetsDirectory: '/fy/fleet/assets',
         manifestPath: '/fy/fleet/manifest.json',
-        defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
+        defaultHomeDirectories: ['/home/person/.claude', '/home/person/.codex'],
       },
+      kits: () => GOLDEN_KITS,
       claudeStatusline: () => "'fy' statusline",
       fyCommand: '/opt/ferretry/bin/fy',
     } as never;

@@ -7,6 +7,8 @@ import type { RuntimesHarnessKit } from '@ferretry/plugin-runtimes/contract';
  */
 export const codexWordsKit: RuntimesHarnessKit = {
   command: 'codex',
+  settingsFile: { format: 'toml', file: 'config.toml', directory: '.codex' },
+  install: { npm: '@openai/codex', cask: 'codex', nixpkgs: 'codex', label: 'Codex' },
   homeEnv: 'CODEX_HOME',
   keepsSharedState: true,
   ownedSkillEntries: ['.system'],

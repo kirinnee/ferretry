@@ -29,7 +29,7 @@ const LAYOUT: FleetLayout = {
   homesDirectory: '/state/fleet/homes',
   assetsDirectory: '/state/fleet/assets',
   manifestPath: '/state/fleet/manifest.json',
-  defaultHomeDirectories: { claude: `${HOST_HOME}/.claude`, codex: `${HOST_HOME}/.codex` },
+  defaultHomeDirectories: [`${HOST_HOME}/.claude`, `${HOST_HOME}/.codex`],
 };
 
 const MACHINE = {

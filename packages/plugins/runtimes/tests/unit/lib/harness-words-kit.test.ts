@@ -4,12 +4,12 @@
  * them; a runtime whose kit gives no command or home variable (Codex: or no skill folder list) is published unavailable with the
  * one typed `harness-unsupported` refusal (whatever its credential store), and the rest of the fleet still publishes.
  *
- * The tables that the frozen goldens still import (`HARNESS_OWNED_SKILL_ENTRIES`, `claudeFastSupport`) are pinned equal to the
+ * The table that the frozen goldens still import (`claudeFastSupport`) are pinned equal to the
  * kit's words here, so the two cannot drift while both exist.
  */
 import { describe, expect, it } from 'bun:test';
 import type { RuntimesHarnessKit } from '../../../contract/index.ts';
-import { HARNESS_OWNED_SKILL_ENTRIES, ownedSkillEntriesOf } from '../../../daemon/lib/assets.ts';
+import { ownedSkillEntriesOf } from '../../../daemon/lib/assets.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
 import { claudeFastSupport, fastSupportOf } from '../../../daemon/lib/service/foreign.ts';
@@ -76,7 +76,6 @@ describe("Claude's words, as its kit gives them", () => {
   });
 
   it('should agree with the tables the frozen goldens still import, so the two cannot drift', () => {
-    expect(CLAUDE_KIT.ownedSkillEntries).toEqual(HARNESS_OWNED_SKILL_ENTRIES.claude);
     for (const model of MODELS) expect(CLAUDE_KIT.fastSupport?.(model)).toBe(claudeFastSupport(model));
   });
 });
@@ -87,10 +86,6 @@ describe("Codex's words, as its kit gives them", () => {
     expect(CODEX_KIT.homeEnv).toBe('CODEX_HOME');
     expect(CODEX_KIT.ownedSkillEntries).toEqual(['.system']);
     expect(CODEX_KIT.fastSupport).toBeUndefined();
-  });
-
-  it('should agree with the table the frozen goldens still import, so the two cannot drift', () => {
-    expect(CODEX_KIT.ownedSkillEntries).toEqual(HARNESS_OWNED_SKILL_ENTRIES.codex);
   });
 });
 

@@ -10,6 +10,8 @@
  * without a filesystem.
  */
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
+import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
+import { kindOrUndefined } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 
 /** The config formats the supported harnesses read. */
@@ -17,8 +19,17 @@ export type SettingsFormat = 'json' | 'toml';
 
 export type SettingsObject = Readonly<Record<string, unknown>>;
 
-/** The document format each harness's settings file is in. */
-export const SETTINGS_FORMAT = { claude: 'json', codex: 'toml' } as const satisfies Record<HarnessKind, SettingsFormat>;
+/** What a settings document needs of a harness plugin: the file it reads and its format (`kit.settingsFile`). */
+export type SettingsKits = ReadonlyMap<HarnessKind, Pick<RuntimesHarnessKit, 'settingsFile'>>;
+
+/**
+ * The document format a harness's settings file is in: its plugin's word (`kit.settingsFile`), or `undefined` when Runtimes has no
+ * behaviour for the harness or its plugin gives none (the caller says so by name, and no other harness's format is borrowed).
+ */
+export function settingsFormatOf(kits: SettingsKits | undefined, harness: string): SettingsFormat | undefined {
+  const kind = kindOrUndefined(harness);
+  return kind === undefined ? undefined : kits?.get(kind)?.settingsFile?.format;
+}
 
 const isPlainObject = (value: unknown): value is SettingsObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

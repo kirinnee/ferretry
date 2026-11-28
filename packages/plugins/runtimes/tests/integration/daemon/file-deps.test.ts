@@ -80,7 +80,7 @@ describe('the catalogue’s collaborators over the fleet folder', () => {
       assetsDirectory: join(directory, 'assets'),
       manifestPath: join(directory, 'manifest.json'),
       userHome: world.person,
-      defaultHomeDirectories: { claude: join(world.person, '.claude'), codex: join(world.person, '.codex') },
+      defaultHomeDirectories: [join(world.person, '.claude'), join(world.person, '.codex')],
     });
     expect(deps.now()).toBe(1_000);
     expect(deps.fyCommand).toBe('fy');

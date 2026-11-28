@@ -45,7 +45,7 @@ const LAYOUT = {
   homesDirectory: '/fy/fleet/homes',
   assetsDirectory: '/fy/fleet/assets',
   manifestPath: '/fy/fleet/manifest.json',
-  defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
+  defaultHomeDirectories: ['/home/person/.claude', '/home/person/.codex'],
 } as const;
 
 /** One read of the configuration: what stands in in it and the revision it was read at (the world's, when not given). */

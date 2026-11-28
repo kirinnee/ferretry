@@ -19,7 +19,8 @@
  * Pure.
  */
 import type { LocalModels } from '@ferretry/plugin-logins/contract';
-import { HARNESS_DISPLAY_NAMES, type ResolvedModelSet } from '../account/layering.ts';
+import { displayNameOf } from '../harness-kind.ts';
+import type { ResolvedModelSet } from '../account/layering.ts';
 import type { Credential } from '../account/schema.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { loginModelCatalog, type ModelCatalogSources } from './catalog.ts';
@@ -146,7 +147,7 @@ export function noModelReason(
 ): string | undefined {
   const catalog = sources === undefined ? {} : loginModelCatalog(credential, harness, sources);
   return runtimeModels({ harness, modelSet, ...catalog }).default === undefined
-    ? `No model list for ${HARNESS_DISPLAY_NAMES[harness]} yet`
+    ? `No model list for ${displayNameOf(harness)} yet`
     : undefined;
 }
 

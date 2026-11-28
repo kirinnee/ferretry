@@ -5,6 +5,7 @@
  * and that a POST on a cold daemon plans against managers it has looked up.
  */
 import { describe, it } from 'bun:test';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import should from 'should';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
@@ -59,7 +60,7 @@ function machine() {
   const clock = { after: () => () => undefined, nowMs: () => 1_000 } as unknown as Clock;
   const commands = new CommandCache(source, () => 1_000);
   const platform = new HostPlatform(() => spawn);
-  const installer = toolInstaller({ commands, platform, spawn: () => spawn, clock });
+  const installer = toolInstaller({ commands, kits: () => REAL_KITS, platform, spawn: () => spawn, clock });
   return { state, commands, platform, installer };
 }
 

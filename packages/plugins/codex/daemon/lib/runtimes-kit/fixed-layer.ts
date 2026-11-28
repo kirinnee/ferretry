@@ -116,6 +116,8 @@ function fixedLayer(input: KitFixedLayerInput): KitFixedLayerResult {
       ],
       rules: codexKillRules(),
       supersededFlags: SUPERSEDED_FLAGS,
+      carriedFlags: [CODEX_NO_ALT_SCREEN_FLAG],
+      fixedConfigKeys: ['approval_policy', 'sandbox_mode', 'developer_instructions'],
     },
   };
 }

@@ -6,16 +6,10 @@
  */
 import { describe, it } from 'bun:test';
 import { REAL_KITS } from '../../support/real-kits.ts';
-import {
-  HARNESS_OWNED_SKILL_ENTRIES,
-  ASSET_FIELDS,
-  HARNESS_ASSETS,
-  harnessAsset,
-  isHarnessOwnedSkillEntry,
-} from '../../../daemon/lib/assets.ts';
-import { HARNESS_DISPLAY_NAMES } from '../../../daemon/lib/account/layering.ts';
+import { ASSET_FIELDS, HARNESS_ASSETS, harnessAsset, ownedSkillEntriesOf } from '../../../daemon/lib/assets.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import {
+  displayNameOf,
   harnessKeyOfKind,
   harnessKindOfKey,
   HarnessKindSchema,
@@ -24,7 +18,7 @@ import {
   supportedKinds,
   unsupportedHarnessSentence,
 } from '../../../daemon/lib/harness-kind.ts';
-import { claudeFastSupport, HARNESS_PACKAGES } from '../../../daemon/lib/service/foreign.ts';
+import { claudeFastSupport } from '../../../daemon/lib/service/foreign.ts';
 import {
   harnessName,
   harnessWords,
@@ -47,12 +41,17 @@ describe('harness word goldens', () => {
     expectGolden('words/tables', {
       supportedKinds: supportedKinds(),
       keyOfKind: Object.fromEntries(supportedKinds().map(kind => [kind, harnessKeyOfKind(kind)])),
-      displayNames: HARNESS_DISPLAY_NAMES,
+      displayNames: Object.fromEntries(supportedKinds().map(kind => [kind, displayNameOf(kind)])),
       instructionsNames: Object.fromEntries(
         [...REAL_KITS].map(([kind, kit]) => [kind, kit.importSetup?.instructionsName]),
       ),
-      packages: HARNESS_PACKAGES,
-      ownedSkillEntries: HARNESS_OWNED_SKILL_ENTRIES,
+      packages: Object.fromEntries(
+        [...REAL_KITS].map(([kind, kit]) => [
+          kind,
+          { npm: kit.install?.npm, cask: kit.install?.cask, nixpkgs: kit.install?.nixpkgs },
+        ]),
+      ),
+      ownedSkillEntries: Object.fromEntries([...REAL_KITS].map(([kind, kit]) => [kind, ownedSkillEntriesOf(kit)])),
       assets: Object.fromEntries(
         supportedKinds().map(kind => [
           kind,
@@ -60,9 +59,9 @@ describe('harness word goldens', () => {
         ]),
       ),
       ownedEntry: {
-        '.system': isHarnessOwnedSkillEntry('codex', '.system'),
-        claudeSystem: isHarnessOwnedSkillEntry('claude', '.system'),
-        mine: isHarnessOwnedSkillEntry('codex', 'mine'),
+        '.system': ownedSkillEntriesOf(REAL_KITS.get('codex')).includes('.system'),
+        claudeSystem: ownedSkillEntriesOf(REAL_KITS.get('claude')).includes('.system'),
+        mine: ownedSkillEntriesOf(REAL_KITS.get('codex')).includes('mine'),
       },
       fastMode: Object.fromEntries(
         ['claude-opus-5-5', 'claude-opus-4-8', 'Claude-OPUS-5', 'claude-sonnet-5-5', 'gpt-6'].map(id => [

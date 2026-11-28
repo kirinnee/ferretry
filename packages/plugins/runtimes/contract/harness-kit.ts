@@ -114,6 +114,10 @@ export type KitFixedLayerResult =
          * saying which of a profile's it replaces would launch with BOTH options and lose the override report.
          */
         readonly supersededFlags: Readonly<Record<string, 'bare' | 'value' | 'config'>>;
+        /** Bare flags the layer passes itself: a profile that carries the same flag does not pass it twice (a strict parser refuses that). Absent: none. */
+        readonly carriedFlags?: readonly string[];
+        /** The `-c key` settings the layer decides, for the flags whose `config` shape it replaces by key (the tools server's own table is always the layer's). Absent: none. */
+        readonly fixedConfigKeys?: readonly string[];
       };
     }
   | { readonly ok: false; readonly refusal: { readonly kind: string; readonly message: string } };
