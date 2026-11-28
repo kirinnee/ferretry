@@ -8,7 +8,7 @@
  * there to answer an UNATTENDED agent: Claude's `--disallowed-tools=AskUserQuestion` (withheld from every ferret,
  * owner !A527) and Codex's `--no-alt-screen`.
  *
- * It also refuses `pkill` and `killall` in every agent runtime (`KILL_COMMANDS`, E176), in each harness's own settings
+ * It also refuses `pkill` and `killall` in every agent runtime (E176), in each harness's own settings
  * and not by a hook: Claude's `permissions.deny` in the overlay below, Codex's forbidden prefix rules in its `rules/` folder.
  *
  * It also puts the Ferretry tools in every agent runtime — the `fy mcp serve` MCP server, through which
@@ -79,7 +79,7 @@ import {
   settingsKey,
 } from './layering.ts';
 import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
-import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
+import { FERRETRY_MCP_SERVER, tomlString } from '../../../contract/tools-server.ts';
 import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
 import { byHarness, harnessKeyOfKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { AgentPermissions } from './schema.ts';
@@ -159,24 +159,11 @@ export type FixedLayerInput =
       readonly fyCommand: string;
     };
 
-/**
- * The shell commands no ferret may run (E176, owner): a pattern kill (`pkill -f`) or a kill by name (`killall`) reaches every
- * process on the machine, not only the caller's. One stray `pkill -f` once stopped ~17 agents and 13 panes. Each harness
- * refuses them in its OWN fixed settings layer, which outranks every file a person can edit and holds in the skip mode
- * too (measured on Claude 2.1.327 and Codex 0.170, both with the bypass modes on): Claude as `permissions.deny` in the
- * `--settings` overlay, Codex as a `forbidden` prefix rule in the home's `rules/` folder. Settings, never a hook.
- */
-const KILL_COMMANDS = ['pkill', 'killall'] as const;
-
-/** The Codex home file the {@link codexKillRules} are written to (beside `default.rules`, which Codex keeps for itself). */
+/** The Codex home file the kill-deny rules (Codex's plugin writes their text, `rules` of its fixed layer) are written to (beside `default.rules`, which Codex keeps for itself). */
 export const CODEX_KILL_RULES_FILE = 'rules/ferretry.rules';
 
-/** Codex's rules (Starlark): one `forbidden` prefix rule per {@link KILL_COMMANDS}, which holds whatever the approval policy is. */
-const codexKillRules = (): string =>
-  `${KILL_COMMANDS.map(
-    command =>
-      `prefix_rule(pattern=[${JSON.stringify(command)}], decision="forbidden", justification="${command} can stop other ferrets' processes; stop the one process you started instead")`,
-  ).join('\n')}\n`;
+/** A TOML basic string, as a `-c` override spells one (the one spelling, in the contract); Runtimes' wrapper and the person's own instruction use it too. */
+export { tomlString };
 
 /**
  * The one-time screens Claude records as SEEN in a config directory's `.claude.json`, each a dialog
@@ -200,31 +187,6 @@ export const CLAUDE_PROMPTS_SEEN = {
 } as const;
 
 /**
- * Codex's `[notice]` keys that hide a one-shot prompt, read off codex-cli 0.156.1's `Notice` table.
- * Every one is a boolean "hide it"; `fast_default_opt_out` and `model_migrations` are choices rather
- * than hides, so they are left alone.
- */
-export const CODEX_HIDDEN_NOTICES: readonly string[] = [
-  'hide_full_access_warning',
-  'hide_world_writable_warning',
-  'hide_rate_limit_model_nudge',
-  'hide_gpt5_1_migration_prompt',
-  'hide_gpt-5.1-codex-max_migration_prompt',
-];
-
-/** The `-c notice={…}` inline table hiding every {@link CODEX_HIDDEN_NOTICES}. */
-export const codexNoticeOverride = (): string =>
-  `notice={${CODEX_HIDDEN_NOTICES.map(key => `${/^[A-Za-z0-9_-]+$/.test(key) ? key : tomlString(key)}=true`).join(',')}}`;
-
-/** Codex's spelling of each Agent permissions choice (§3.6). */
-const CODEX_PERMISSIONS: Readonly<
-  Record<AgentPermissions, { readonly approvalPolicy: string; readonly sandboxMode: string }>
-> = {
-  auto: { approvalPolicy: 'on-request', sandboxMode: 'workspace-write' },
-  skip: { approvalPolicy: 'never', sandboxMode: 'danger-full-access' },
-};
-
-/**
  * Owner !A527 (was O3): the tool that asks a question is withheld from EVERY agent ferret, an interactive one
  * included, so none stops on a form only the pane shows; it asks through the agenda. The wrapper
  * (`../wrappers.ts`) applies the flag at exec time.
@@ -244,25 +206,6 @@ export { SESSION_MODE_ENV };
 export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 
 const CARRIED_FLAGS: ReadonlySet<string> = new Set([CLAUDE_NO_QUESTIONS_FLAG, CODEX_NO_ALT_SCREEN_FLAG]);
-
-/**
- * The variables the tools server needs from the agent's environment: where the daemon is, and the
- * agent session's own credential — the one thing that tells the daemon which session is calling, and
- * the whole of the server's authority. NOT `FY_TOKEN`: the host's admin token is no part of it. Codex
- * hands a stdio server only a short default list, so these are named for it; Claude hands it the whole
- * environment, so its entry blanks `FY_TOKEN` instead.
- *
- * The credential travels under both its names: `FY_SESSION_TOKEN` is the documented one the server
- * presents as its bearer, and `FY_SESSION_BOARD_CAPABILITY` is kept for one release so a server from
- * before the rename still finds it.
- */
-export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
-  'FY_HOME',
-  'FY_URL',
-  'FY_SESSION_ID',
-  'FY_SESSION_TOKEN',
-  'FY_SESSION_BOARD_CAPABILITY',
-];
 
 /**
  * THE PER-FERRET SECTIONS of the appended system prompt: hypermedia ({@link HYPERMEDIA_ENV}), Pack mode
@@ -388,32 +331,6 @@ export const BROWSER_INSTRUCTION = {
   off: 'Never solve captchas, spoof a browser or identity.',
   on: "On the owner's identities the browser passes bot checks and solves token checks (Turnstile, reCAPTCHA, hCaptcha) itself. You may try a simple picture puzzle shown in the page yourself; never use outside tools or services to solve or bypass a check, and never change the browser's identity. If a check stays, ask the owner (browser_ask_owner).",
 } as const;
-
-/** Codex's `mcp_servers.ferretry` table for the tools server. */
-export const codexToolsServer = (fyCommand: string): SettingsObject => ({
-  command: fyCommand,
-  args: [...FERRETRY_MCP_ARGS],
-  env_vars: [...FERRETRY_MCP_ENV_VARS],
-});
-
-/** A TOML array of basic strings, for a `-c` override. */
-const tomlArray = (values: readonly string[]): string => `[${values.map(tomlString).join(',')}]`;
-
-/** A TOML basic string: what a `-c` override needs to carry any folder path. */
-export function tomlString(value: string): string {
-  const escaped = [...value]
-    .map(character => {
-      if (character === '\\') return '\\\\';
-      if (character === '"') return '\\"';
-      const code = character.codePointAt(0) as number;
-      return code < 0x20 || code === 0x7f ? `\\u${code.toString(16).padStart(4, '0')}` : character;
-    })
-    .join('');
-  return `"${escaped}"`;
-}
-
-/** The measured Codex trust override for one folder: a TOML inline table, never a dotted key. */
-export const codexTrustOverride = (cwd: string): string => `projects={${tomlString(cwd)}={trust_level="trusted"}}`;
 
 const entry = (
   purpose: FixedEntryPurpose,
@@ -566,51 +483,43 @@ export function fixedLayerFor(
     case 'claude':
       return claudeFixedLayer(kits?.get('claude'), input);
     case 'codex':
-      return codexFixedLayer(input);
+      return codexFixedLayer(kits?.get('codex'), input);
     default:
       throw new UnsupportedHarnessError(String((input as { harness: string }).harness));
   }
 }
 
-/** A Codex agent runtime's fixed layer: still decided here until Codex's own plugin takes it (E-276 PR 3). */
-function codexFixedLayer(input: Extract<FixedLayerInput, { readonly harness: 'codex' }>): FixedLayerResult {
+/** A Codex agent runtime's fixed layer, as Codex's own plugin builds it; Runtimes adds the words every agent is told. */
+function codexFixedLayer(
+  kit: RuntimesHarnessKit | undefined,
+  input: Extract<FixedLayerInput, { readonly harness: 'codex' }>,
+): FixedLayerResult {
+  if (kit?.fixedLayer === undefined)
+    return {
+      ok: false,
+      refusal: {
+        kind: 'harness-unsupported',
+        message: unsupportedHarnessSentence(harnessKeyOfKind('codex')),
+      },
+    };
   const { agentPermissions, cwd, fyCommand } = input;
-  const instruction = AGENT_BASE_INSTRUCTION(binaryName(fyCommand));
-  const { approvalPolicy, sandboxMode } = CODEX_PERMISSIONS[agentPermissions];
+  const result = kit.fixedLayer({
+    agentPermissions,
+    cwd,
+    fyCommand,
+    acceptsAutoPermissionMode: false,
+    instruction: AGENT_BASE_INSTRUCTION(binaryName(fyCommand)),
+  });
+  if (!result.ok) return result;
+  const { layer } = result;
   return {
     ok: true,
     layer: {
       harness: 'codex',
       agentPermissions,
-      entries: [
-        entry('permission-mode', 'settings', ['approval_policy'], approvalPolicy),
-        entry('permission-mode', 'settings', ['sandbox_mode'], sandboxMode),
-        entry('trust', 'settings', ['projects', cwd, 'trust_level'], 'trusted'),
-        entry('no-alt-screen', 'launch', [CODEX_NO_ALT_SCREEN_FLAG], true),
-        ...CODEX_HIDDEN_NOTICES.map(key => entry('one-time-prompts', 'settings', ['notice', key], true)),
-        entry('tools', 'settings', ['mcp_servers', FERRETRY_MCP_SERVER], codexToolsServer(fyCommand)),
-        entry('instructions', 'settings', ['developer_instructions'], instruction),
-      ],
-      args: [
-        '-c',
-        `approval_policy=${tomlString(approvalPolicy)}`,
-        '-c',
-        `sandbox_mode=${tomlString(sandboxMode)}`,
-        '-c',
-        codexTrustOverride(cwd),
-        CODEX_NO_ALT_SCREEN_FLAG,
-        '-c',
-        codexNoticeOverride(),
-        '-c',
-        `mcp_servers.${FERRETRY_MCP_SERVER}.command=${tomlString(fyCommand)}`,
-        '-c',
-        `mcp_servers.${FERRETRY_MCP_SERVER}.args=${tomlArray(FERRETRY_MCP_ARGS)}`,
-        '-c',
-        `mcp_servers.${FERRETRY_MCP_SERVER}.env_vars=${tomlArray(FERRETRY_MCP_ENV_VARS)}`,
-        '-c',
-        `developer_instructions=${tomlString(instruction)}`,
-      ],
-      codexRules: codexKillRules(),
+      entries: layer.entries.map(fixed => entry(fixed.purpose, fixed.target, fixed.path, fixed.value)),
+      args: layer.args,
+      ...(layer.rules === undefined ? {} : { codexRules: layer.rules }),
     },
   };
 }
@@ -902,6 +811,6 @@ export function fixedLayerOf(harness: string, request: FixedLayerRequest, kit?: 
         acceptsAutoPermissionMode: request.acceptsAutoPermissionMode,
         fyCommand,
       }),
-    codex: () => codexFixedLayer({ harness: 'codex', agentPermissions, cwd, fyCommand }),
+    codex: () => codexFixedLayer(kit, { harness: 'codex', agentPermissions, cwd, fyCommand }),
   });
 }

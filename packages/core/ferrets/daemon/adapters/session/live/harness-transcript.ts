@@ -14,11 +14,12 @@ import type { LiveActivityReads } from './storage-live-activity.ts';
 export type HarnessOf = (ferret: FerretId) => Harness | undefined;
 
 /**
- * The transcript format family a harness key reads as, or `undefined` for a harness this live readout has no parser for.
- * It never answers Claude for a key it does not know: a third harness's tail is `unreadable`, not read as Claude's.
+ * The transcript parser family a harness reads as, from the format id its own facts declare (`HarnessFacts.transcriptFormat`),
+ * or `undefined` for a format this live readout has no parser for.
+ * It never answers Claude for a format it does not know: a third harness's tail is `unreadable`, not read as Claude's.
  */
-const harnessName = (key: HarnessKey): TranscriptHarness | undefined =>
-  key === 'codex' ? 'codex' : key === 'claude-code' ? 'claude' : undefined;
+const harnessName = (format: string): TranscriptHarness | undefined =>
+  format === 'claude' || format === 'codex' ? format : undefined;
 
 /**
  * One tail record as the normalized event the turn fold and the live readout read. A record carries no text (the
@@ -161,7 +162,7 @@ export class HarnessTranscript {
         cached.limit >= limit
       )
         return { kind: 'read', events: cached.events.slice(-limit) };
-      const name = harnessName(key);
+      const name = harnessName(harness.facts.transcriptFormat);
       if (name === undefined) return { kind: 'unreadable' };
       const read = await harness.transcriptTail(ferret, limit).catch(() => undefined);
       if (read === undefined) return { kind: 'unreadable' };

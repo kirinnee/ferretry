@@ -1007,6 +1007,34 @@ describe('materialiseFleet', () => {
     should(wrapperOf(result, 'codex-default')).containEql('exec codex');
   });
 
+  // E-276 PR 3 (addendum 12): the same typed, runtime-wide refusal for a Codex runtime whose plugin gives no kit.
+  it('should make an environment-backed Codex runtime unavailable, once and by name, and no Codex wrapper launchable, when only the Claude kit is present', () => {
+    // Arrange — an environment login, not the host's own (a host login has its own refusal that would hide this).
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'ferretry' },
+        'codex-work': { harness: 'codex', store: 'environment', env: { OPENAI_API_KEY: '${secret:WORK_KEY}' } },
+      },
+    });
+    const claudeOnly = new Map([...REAL_KITS].filter(([harness]) => harness === 'claude'));
+
+    // Act
+    const result = plan(model, { kits: claudeOnly });
+
+    // Assert — Codex is refused by name, once, never as an auto refusal, and writes nothing; Claude still publishes healthy.
+    const reason = 'codex is not supported here';
+    const codex = result.manifest.accounts.find(account => account.displayName === 'codex-default');
+    should(codex).match({ available: false, unavailableReason: reason });
+    should(codex?.autoRefusal).be.undefined();
+    should(codex?.unavailableReason?.split(reason).length).equal(2);
+    const wrapper = wrapperOf(result, 'codex-default');
+    should(wrapper).containEql(`ferretry: codex-default cannot start: ${reason}`).and.containEql('exit 1');
+    should(wrapper).not.containEql('exec codex');
+    const claude = result.manifest.accounts.find(account => account.displayName === 'claude-default');
+    should(claude).match({ available: true, unavailableReason: null });
+    should(wrapperOf(result, 'claude-default')).containEql('exec claude');
+  });
+
   // A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, ^A500). Claude Code ranks
   // a folder's `env` above the process environment and a `--settings` file above the folder, so the ONLY way a login's value
   // could beat a repo's is by being written into a `--settings` file. It never is: the login's variables are the process

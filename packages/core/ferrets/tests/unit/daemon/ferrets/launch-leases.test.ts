@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { factsOfKey } from '../../../support/daemon/harness-facts.ts';
 import { ok } from '@ferretry/std';
 import {
   ConversationIdSchema,
@@ -58,7 +59,7 @@ function built(options: { readonly empty?: boolean; readonly resumable?: boolean
   const store = new ConversationLeaseStore(disk, () => NOW);
   const leases = new ConversationLeases(
     store,
-    registryLeaseSessions(base.registry, async () => ({ status: 'running' })),
+    registryLeaseSessions(base.registry, async () => ({ status: 'running' }), factsOfKey),
     4000,
   );
   const service = new FerretsService(base.registry, base.tokens, { ...base.ports, runner: () => runner, leases });

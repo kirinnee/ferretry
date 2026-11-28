@@ -3,7 +3,7 @@
  * each group function is given the kit of the runtime's own harness, and a harness whose plugin gives none is given none —
  * never another harness's. Claude's and Codex's MCP and document members are read now (E-276 PR 6, PR 7), so a Claude runtime without its kit is
  * published UNAVAILABLE by name instead of written in another shape, and the rest of the plan still publishes; the same holds
- * for a Codex runtime whose plugin gives no kit (E-276 PR 7 documents, PR 12 extras), whatever its credential store.
+ * for a Codex runtime whose plugin gives no kit (E-276 PR 7 documents, PR 12 extras, PR 9 launch line), whatever its credential store.
  *
  * It is also the startup order: the settings sources can answer `unavailable` while plugins are still starting, so the
  * kit is read live with each plan and the first plan after a source comes online carries it.
@@ -321,6 +321,21 @@ describe('a Codex runtime without its plugin kit', () => {
     expect(plan.operations.some(operation => 'path' in operation && operation.path.startsWith(`${claudeHome}/`))).toBe(
       true,
     );
+  });
+
+  it('should refuse a Codex runtime whose kit gives no fixed layer the same way, once, and never as an auto refusal', async () => {
+    const { service, plans } = environmentWorld(
+      () =>
+        new Map<'claude' | 'codex', RuntimesHarnessKit>([
+          ['claude', CLAUDE_KIT],
+          ['codex', { command: 'codex', runtimeExtras: () => ({ env: {} }) }],
+        ]),
+    );
+    await service.publishFromFiles();
+    const account = accountOf((plans[0] as FleetApplyPlan).manifest.accounts, 'codex-env');
+    expect(account.available).toBe(false);
+    expect(account.unavailableReason).toBe('codex is not supported here');
+    expect('autoRefusal' in account && account.autoRefusal).toBeFalsy();
   });
 
   it('should refuse a Codex runtime whose kit gives no extras the same way', async () => {

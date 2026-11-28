@@ -6,6 +6,7 @@ import {
   JobKeeper,
   type RuntimeStartResolution,
   Harnesses,
+  harnessKeyOfRecorded,
   RUNTIME_START_DEADLINE_MS,
   RUNTIME_START_KEY,
   Runners,
@@ -98,6 +99,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       jobs: keeper,
       storage: sessionStore,
       clientName: 'fy',
+      // The facts of the harness a session records: a family word (`claude`) names its plugin key first.
+      harnessFacts: harness => {
+        const found = hooks.provider(Harnesses, harnessKeyOfRecorded(harness));
+        return found === 'unavailable' ? undefined : found.facts;
+      },
       move: {
         sessions: directory,
         pane,

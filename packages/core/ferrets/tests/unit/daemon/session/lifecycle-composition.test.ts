@@ -59,7 +59,7 @@ describe('the composition root', () => {
 
     // Assert
     expect(deps).toMatch(
-      /registryLeaseSessions\(registry, async id => await sessionStore\.readState\(id\)\),\s*process\.pid,/u,
+      /registryLeaseSessions\(\s*registry,\s*async id => await sessionStore\.readState\(id\),\s*key => harnessOf\(key\)\?\.facts,\s*\),\s*process\.pid,/u,
     );
   });
 });

@@ -1,6 +1,7 @@
 import { commandLabel } from '@ferretry/std';
 import type { SessionStatus } from '../protocol/session-base.ts';
 import type { SessionTurnState } from '../protocol/session.ts';
+import type { HarnessFacts } from '../../../contract/index.ts';
 import type { MoveRefusal } from '../../../contract/move.ts';
 import { type AgentJob, blockingAgentJobs } from './agent-jobs.ts';
 import { backgroundTerminalCount } from './background-terminals.ts';
@@ -24,7 +25,7 @@ import { COMMAND_NOT_FOUND, joinOpenTools } from './tool-inventory.ts';
 /** The session facts the preflight needs, projected out of whatever served them. */
 export interface MoveTargetView {
   readonly sessionId: string;
-  /** The harness family. Only `codex` reports background terminals in its pane footer. */
+  /** The harness the session records (a family or a key); its facts say whether its pane footer reports background terminals. */
   readonly harness: string;
   /** The ferret's pane, reached through its runner: the process tree and the codex footer are read from it. */
   readonly pane: MovePane;
@@ -41,8 +42,6 @@ export interface MoveTargetView {
   readonly openTools: readonly string[] | undefined;
   readonly subprocessSince?: string;
 }
-
-const CODEX_HARNESS = 'codex';
 
 /**
  * The open tool call that IS the requesting call: the harness records the command the agent wrote, and the proven tool
@@ -110,7 +109,11 @@ function detail(error: unknown): string {
  * gate then refuses on. Losing a signal must never look like the absence of work.
  */
 export class MovePreflight {
-  constructor(private readonly inventory: ProcessInventoryPort) {}
+  constructor(
+    private readonly inventory: ProcessInventoryPort,
+    /** The facts of the harness a session records, or `undefined` for one no harness answers for: it reports no terminals. */
+    private readonly factsOf: (harness: string) => HarnessFacts | undefined,
+  ) {}
 
   /** `chatTail` is the transcript window the session's open tool ids are joined against. */
   async inspect(
@@ -148,7 +151,7 @@ export class MovePreflight {
   private async countBackgroundTerminals(
     view: MoveTargetView,
   ): Promise<{ readonly count: number; readonly blindSpots: readonly string[] }> {
-    if (view.harness !== CODEX_HARNESS) return { count: 0, blindSpots: [] };
+    if (this.factsOf(view.harness)?.paneReportsBackgroundTerminals !== true) return { count: 0, blindSpots: [] };
     try {
       const visible = await view.pane.screen();
       // A pane that is gone ran nothing: reporting zero here is an observation, not an assumption.
