@@ -578,9 +578,9 @@ export interface KitRefusal {
 
 /**
  * The typed refusal for a runtime of `harness` that cannot be planned without its plugin's kit, or `undefined` when it can. Claude's MCP
- * servers and config documents are the Claude kit's (E-276 PR 6), so a Claude runtime whose plugin is off is published
- * unavailable with this refusal (`claude-code is not supported here`); Codex still branches in Runtimes and needs none. Only that runtime is affected: the
- * rest of the plan is made as usual.
+ * servers and config documents are the Claude kit's (E-276 PR 6) and Codex's credential store is the Codex kit's (E-276 PR 5), so a
+ * runtime whose plugin is off is published unavailable with this refusal (`claude-code is not supported here`), in every credential
+ * store and launch mode. Only that runtime is affected: the rest of the plan is made as usual.
  */
 export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
   byHarness<KitRefusal | undefined>(harness, {
@@ -588,7 +588,10 @@ export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | und
       kit === undefined
         ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
         : undefined,
-    codex: () => undefined,
+    codex: () =>
+      kit === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('codex')) }
+        : undefined,
   });
 
 /** What a runtime that cannot be planned for want of its kit writes: nothing. Never reaches a file. */

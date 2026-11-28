@@ -38,8 +38,6 @@ import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { looksSecret, namesCredential } from '@ferretry/std/credential-words';
 import type { z } from 'zod';
 import type { CompactAtSchema, RuntimesHarnessKit } from '../../../contract/index.ts';
-import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
-import { harnessKeyOfKind } from '../harness-kind.ts';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
 import {
   buildFleetManifest,
@@ -335,6 +333,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // A derived runtime whose pinned model is gone, or whose pins nobody could read, is refused by name: never moved to the live default.
     if (runtime.refused !== undefined) reasons.push(runtime.refused);
 
+    // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
+    const kit = input.kits?.get(harness);
+    // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
+    const kitMissing = missingKitRefusal(harness, kit);
     const store = resolveCredentialStore(
       runtime.credential,
       credential,
@@ -343,9 +345,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness,
       loginStores,
     );
-    // A harness whose plugin gives no kit refuses the WHOLE runtime, whatever store its login is in (environment, stored or
-    // host); its credential has nothing further to say.
-    if (input.kits?.get(harness) === undefined) reasons.push(unsupportedHarnessSentence(harnessKeyOfKind(harness)));
+    // The typed refusal is the WHOLE runtime's, whatever store its login is in (environment, stored or host): its login then adds nothing.
+    if (kitMissing !== undefined) reasons.push(kitMissing.message);
     else {
       if ('unavailable' in store)
         reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
@@ -384,12 +385,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     // The fixed layer: computed for a placeholder folder, which never reaches a file.
     let fixed: FixedLayer | undefined;
-    // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
-    const kit = input.kits?.get(harness);
-    // A Claude runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    const kitMissing = missingKitRefusal(harness, kit);
-    // (A login whose own store already says so is not said twice.)
-    if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing.message);
     const result = fixedLayerOf(
       harness,
       {

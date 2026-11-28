@@ -37,7 +37,7 @@ const accountOf = (accounts: readonly { readonly displayName: string }[], name: 
 };
 
 const CLAUDE_KIT = REAL_KITS.get('claude') as RuntimesHarnessKit;
-const CODEX_KIT: RuntimesHarnessKit = { command: 'codex' };
+const CODEX_KIT = REAL_KITS.get('codex') as RuntimesHarnessKit;
 const GROUPS = ['fixedLayerOf', 'plumbingOf', 'priorServersOf', 'runtimeExtras', 'autonomousPreparation'] as const;
 
 const source = (kit: RuntimesHarnessKit): ProfileComponentSource => ({
