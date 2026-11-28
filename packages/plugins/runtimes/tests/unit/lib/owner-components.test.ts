@@ -77,6 +77,21 @@ describe('ownerWrites', () => {
     should(writes.find(write => write.kind === 'skills')?.file).equal('skills/skills.yaml');
   });
 
+  it("should say a settings document cannot be made when its harness's plugin gives no format", () => {
+    const write = ownerWrites(
+      BEFORE,
+      NEXT,
+      () => '{"theme":"dark"}',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new Map(),
+    ).find(candidate => candidate.kind === 'settings');
+    should(write?.text).be.undefined();
+    should(write?.problem).equal('claude-code is not supported here');
+  });
+
   it('should say why a settings document could not be made instead of handing over a half one', () => {
     // Act
     const missing = ownerWrites(BEFORE, NEXT, () => undefined).find(write => write.kind === 'settings');

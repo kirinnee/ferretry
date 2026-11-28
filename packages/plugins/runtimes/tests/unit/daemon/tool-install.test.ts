@@ -8,6 +8,7 @@ import should from 'should';
 import { REAL_KITS } from '../../support/real-kits.ts';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import type { HarnessKind } from '../../../daemon/lib/manifest.ts';
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import type { ExecutableResolverPort, HarnessLocation } from '../../../daemon/lib/service/foreign.ts';
 import {
   ToolInstallRefusal,
@@ -33,6 +34,8 @@ interface WorldOptions {
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly timeoutMinutes?: number;
   readonly refresh?: () => Promise<void>;
+  /** What each plugin gives (the real kits when absent); `new Map()` is a fleet whose plugins give nothing. */
+  readonly kits?: ReadonlyMap<HarnessKind, Pick<RuntimesHarnessKit, 'install'>>;
 }
 
 function world(options: WorldOptions = {}) {
@@ -49,7 +52,7 @@ function world(options: WorldOptions = {}) {
       : { kind: harness, outcome: 'absent', searched: [] };
   };
   const service = new ToolInstallService({
-    kits: () => REAL_KITS,
+    kits: () => options.kits ?? REAL_KITS,
     platform: options.platform ?? 'darwin',
     executables,
     locate,
@@ -163,6 +166,15 @@ describe('ToolInstallService.plans', () => {
 });
 
 describe('ToolInstallService.install refusals', () => {
+  it('should offer no install for a harness whose plugin gives none, and refuse it by name', async () => {
+    const { service, runs } = world({ onPath: { npm: '/x/npm' }, found: ['codex'], kits: new Map() });
+    should(service.plans(['claude', 'codex'])).eql([{ harness: 'codex', installed: true, path: '/bin/codex' }]);
+    const error = await service.install({ harnesses: ['claude'] }, OWNER).catch((e: unknown) => e);
+    should((error as ToolInstallRefusal).code).equal('tool_install_invalid');
+    should((error as ToolInstallRefusal).message).equal('Claude Code is not supported here');
+    should(runs).have.length(0);
+  });
+
   it('should refuse a caller nobody can place, before anything runs', async () => {
     const { service, runs } = world({ onPath: { npm: '/x/npm' } });
     const error = await service.install({ harnesses: ['claude'] }, undefined).catch((e: unknown) => e);
