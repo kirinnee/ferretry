@@ -592,6 +592,16 @@ export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | und
         : undefined,
   });
 
+/**
+ * The ONE runtime-wide kit decision, for the account plan and the catalog alike: `missingKitRefusal`, and also a kit that gives no launch
+ * line, or (Claude) no command or home variable, in the same words. `undefined` when the runtime can be planned and launched.
+ */
+export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
+  missingKitRefusal(harness, kit) ??
+  (kit?.wrapper === undefined || (isKind(harness, 'claude') && (kit.command === undefined || kit.homeEnv === undefined))
+    ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
+    : undefined);
+
 /** What a runtime that cannot be planned for want of its kit writes: nothing. Never reaches a file. */
 export const kitlessAdaptation = (harness: HarnessKind): AdaptedRuntime => ({
   harness,

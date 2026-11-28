@@ -52,7 +52,6 @@ import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, Materialise
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../foreign.ts';
-import { harnessKeyOfKind, isKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import {
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
@@ -69,9 +68,9 @@ import {
   componentPartialSupport,
   type KitRefusal,
   kitlessAdaptation,
-  missingKitRefusal,
   plumbingOf,
   priorServersOf,
+  runtimeKitRefusal,
   SKILLS_STORE_DIRECTORY,
 } from './adapt.ts';
 import {
@@ -339,12 +338,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
     // ...and so is one of either harness whose kit gives no launch line (E-276 PR 8, PR 9), or a Claude kit with no command or home
     // variable (PR 13), in the same words: ONE decision, made before the credential store.
-    const kitMissing: KitRefusal | undefined =
-      missingKitRefusal(harness, kit) ??
-      (kit?.wrapper === undefined ||
-      (isKind(harness, 'claude') && (kit.command === undefined || kit.homeEnv === undefined))
-        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
-        : undefined);
+    const kitMissing: KitRefusal | undefined = runtimeKitRefusal(harness, kit);
     const store = resolveCredentialStore(
       runtime.credential,
       credential,
@@ -408,7 +402,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // A missing kit (`harness-unsupported`) refuses the WHOLE runtime above, so it is never also an auto refusal. Any other
     // refusal is an auto launch the harness cannot honour: it refuses THAT launch only, so the person's own run and an
     // interactive ferret never get the fixed layer and are not stopped by it.
-    const autoRefusal = result.ok || result.refusal.kind === 'harness-unsupported' ? undefined : result.refusal.message;
+    const autoRefusal =
+      kitMissing !== undefined || result.ok || result.refusal.kind === 'harness-unsupported'
+        ? undefined
+        : result.refusal.message;
     const launch = fixed === undefined ? undefined : applyFixedLayer(resolved, fixed);
 
     const adapted =

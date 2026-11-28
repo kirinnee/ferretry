@@ -40,7 +40,7 @@ import {
   resolveProfile,
   type SkippedLayer,
 } from '../account/layering.ts';
-import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
+import { componentPartialSupport, describePartialSupport, runtimeKitRefusal } from '../account/adapt.ts';
 import { freeName } from '../account/import.ts';
 import { findFlagSecrets, looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 import { hooksDocumentRefusedLines } from './hooks-document-net.ts';
@@ -1395,16 +1395,20 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
         const fixed = fixedLayerView(model, harness, resolved, facts);
         const status = facts.credentialStatus?.[runtime.credential];
         const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND, facts.budgetHolds);
+        // The runtime-wide kit refusal the account plan makes (one decision), read before the install, Auto and login checks.
+        const kitRefusal = runtimeKitRefusal(harness, facts.kits?.get(harness));
         const blocked =
           off !== undefined
             ? off.clauses.join('. ')
-            : facts.tools[harness] === undefined
-              ? `Install ${HARNESS_DISPLAY_NAMES[harness]} to launch`
-              : status === 'needs_sign_in'
-                ? 'Sign in to launch'
-                : stack.available.available
-                  ? (fixed.refusal ?? noModelReason(resolved?.modelSet, harness, credential, facts.modelCatalogs))
-                  : stack.available.reason;
+            : kitRefusal !== undefined
+              ? kitRefusal.message
+              : facts.tools[harness] === undefined
+                ? `Install ${HARNESS_DISPLAY_NAMES[harness]} to launch`
+                : status === 'needs_sign_in'
+                  ? 'Sign in to launch'
+                  : stack.available.available
+                    ? (fixed.refusal ?? noModelReason(resolved?.modelSet, harness, credential, facts.modelCatalogs))
+                    : stack.available.reason;
         // A runtime whose apply never landed has no id yet; its name stands in, and it cannot have
         // a session for any other id to name.
         const id = facts.runtimeIds?.[name] ?? name;

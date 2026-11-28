@@ -27,7 +27,7 @@ const LAYOUT: FleetLayout = {
   defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
 };
 
-const MODEL = parseAccountModel({
+const BASE_MODEL = {
   version: 1,
   credentials: {
     'claude-env': { harness: 'claude', store: 'environment', env: { ANTHROPIC_API_KEY: '${secret:SYNTH_KEY}' } },
@@ -48,7 +48,10 @@ const MODEL = parseAccountModel({
     'claude-kept': { credential: 'claude-kept', profile: 'default' },
     'codex-env': { credential: 'codex-env', profile: 'default' },
   },
-});
+};
+const MODEL = parseAccountModel(BASE_MODEL);
+/** The same fleet where agents run in auto permission mode, which the harness build here cannot honour. */
+const AUTO_MODEL = parseAccountModel({ ...BASE_MODEL, machine: { agentPermissions: 'auto' } });
 
 const CLAUDE_RUNTIMES = ['claude-env', 'claude-host', 'claude-kept'] as const;
 /** The ids the plan mints, in runtime-name order. */
@@ -59,17 +62,17 @@ const CLAUDE_IDS = {
 } as const;
 const CODEX_ID = '00000000-0000-4000-8000-000000000004';
 
-const plan = (kits: ReadonlyMap<'claude' | 'codex', RuntimesHarnessKit>) => {
+const plan = (kits: ReadonlyMap<'claude' | 'codex', RuntimesHarnessKit>, autoUnsupported = false) => {
   const ids = [1, 2, 3, 4].map(n => `00000000-0000-4000-8000-00000000000${n}`);
   return materialiseFleet({
-    model: MODEL,
+    model: autoUnsupported ? AUTO_MODEL : MODEL,
     layout: LAYOUT,
     ids: EMPTY_RUNTIME_IDS,
     mint: () => ids.shift() ?? 'exhausted',
     generatedAt: '2026-10-13T08:00:00.000Z',
     claudeStatusline: () => "'fy' statusline",
     fyCommand: '/opt/ferretry/bin/fy',
-    acceptsAutoPermissionMode: true,
+    acceptsAutoPermissionMode: !autoUnsupported,
     // A Ferretry-kept login Logins knows, with no sign-in file.
     loginStores: [{ id: 'claude-kept', variables: {} }],
     kits,
@@ -151,5 +154,46 @@ describe.each([
     expect(rows['codex-env']?.available).toBe(true);
     expect(result.operations.some(operation => operation.path.includes(`/homes/${CODEX_ID}`))).toBe(true);
     expect(wrapperOf(result, 'codex-env')).toBe(wrapperOf(plan(REAL_KITS), 'codex-env'));
+  });
+});
+
+describe.each([
+  [
+    'a Claude kit with no command',
+    new Map([
+      ['claude', commandless],
+      ['codex', codex],
+    ] as const),
+  ],
+  [
+    'a Claude kit with no home variable',
+    new Map([
+      ['claude', homeless],
+      ['codex', codex],
+    ] as const),
+  ],
+  [
+    'a Claude kit with no launch line',
+    new Map([
+      ['claude', wrapperless],
+      ['codex', codex],
+    ] as const),
+  ],
+])('Claude with %s, when auto permission mode is also unsupported', (_label, kits) => {
+  const result = plan(kits, true);
+  const rows = Object.fromEntries(result.manifest.accounts.map(row => [row.displayName, row]));
+
+  for (const name of CLAUDE_RUNTIMES) {
+    it(`should give ${name} the one runtime-wide reason and no auto refusal`, () => {
+      expect(rows[name]?.available).toBe(false);
+      expect(rows[name]?.unavailableReason).toBe('claude-code is not supported here');
+      expect(rows[name]?.autoRefusal).toBeUndefined();
+    });
+  }
+
+  it('should still say the auto refusal for a Claude runtime whose kit is whole, so only the missing kit hides it', () => {
+    const whole = plan(REAL_KITS, true).manifest.accounts.find(row => row.displayName === 'claude-env');
+    expect(whole?.available).toBe(true);
+    expect(whole?.autoRefusal).toBeDefined();
   });
 });
