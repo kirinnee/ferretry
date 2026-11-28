@@ -1,7 +1,7 @@
 /**
  * "Move to another machine…" IN THE FERRET'S ACTIONS MENU (`ferrets.actions-row`). Relocate owns the move, so the row is
  * Relocate's. The panel draws nothing of its own: it offers the row only while this connection may change the ferret AND
- * another machine is paired where Relocate is on, takes it back otherwise, and opens the move from `run`.
+ * the source is reachable. With no available target it opens recovery only, so an interrupted export can still be released.
  */
 import { daemonOfClient, useEveryDaemon, type DaemonReach } from '@ferretry/app';
 import { type ActionsRowOffer, isActionsRowSlotProps } from '@ferretry/core-ferrets/contract';
@@ -22,8 +22,8 @@ const rowOf = (run: () => void): ActionsRowOffer => ({
   run,
 });
 
-/** A row is offered only to a caller who may control the ferret and only where there is another machine to move to. */
-export const offersMove = (canControl: boolean, daemons: number): boolean => canControl && daemons >= 2;
+/** The source alone is enough for recovery. The dialog offers a new move only when a target is available. */
+export const offersMove = (canControl: boolean, daemons: number): boolean => canControl && daemons >= 1;
 
 /** Unknown or refused grants never offer a move; a press may confirm a known step-up or unlock. */
 const mayMove = (reach: DaemonReach): boolean =>

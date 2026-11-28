@@ -64,10 +64,12 @@ export async function releaseMove(ferret: string, from: Machine): Promise<void> 
   await on(from, () => from.client.call('POST /v1/relocate/exports/release', { body: { ferretId: ferret } }));
 }
 
-/** Recover a held move from the source when the dialog has no receipt of its own. */
+/** A pressed recovery check: explicitly asks for step-up even during the shell's fresh-session grace. */
 export async function hasHeldMove(ferret: string, from: Machine): Promise<boolean> {
   return HeldMoveSchema.parse(
-    await on(from, () => from.client.call('GET /v1/relocate/:ferretId/held', { params: { ferretId: ferret } })),
+    await on(from, () =>
+      from.client.call('GET /v1/relocate/:ferretId/held', { params: { ferretId: ferret }, quiet: false }),
+    ),
   ).held;
 }
 

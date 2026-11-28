@@ -8,9 +8,9 @@
  * Set `FY_MOVE_SHOTS_DIR` to keep `<width>-<scheme>-<style>-<state>.png`.
  */
 import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describeRoundMisses, roundSafeMisses, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 import type { Browser, Page } from 'playwright-core';
 
@@ -29,6 +29,8 @@ beforeAll(async () => {
   const build = async (entry: string, out: string, script: string) => {
     const child = Bun.spawn([process.execPath, sceneBuilder, '--out', out, '--entry', entry], {
       cwd: packageRoot,
+      // The composition fixture lives outside the scene cache's package globs.
+      env: { ...process.env, ...(entry.includes('recover-scene') ? { FY_FIXTURE_CACHE: 'off' } : {}) },
       stderr: 'pipe',
       stdout: 'pipe',
     });
@@ -50,12 +52,21 @@ beforeAll(async () => {
     join(directory, 'actions'),
     '/actions.js',
   );
+  // scripts/test composes packages without owning workspace dependencies. Build the verbatim fixture in a disposable
+  // workspace with Relocate's existing dependency links; never install into or write the checkout during a test.
+  const workspace = join(directory, 'recover-workspace');
+  const entry = join(workspace, 'scripts/test/relocate/recover-scene.tsx');
+  await mkdir(join(workspace, 'scripts/test/relocate'), { recursive: true });
+  await symlink(resolve(packageRoot, '../../../node_modules'), join(workspace, 'node_modules'), 'dir');
+  await symlink(resolve(packageRoot, '../../../../..'), join(workspace, 'packages'), 'dir');
+  await copyFile(resolve(packageRoot, '../../../../../../scripts/test/relocate/recover-scene.tsx'), entry);
+  const recover = await build(entry, join(directory, 'recover'), '/recover.js');
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: Number(process.env.FY_MOVE_TEST_PORT ?? 7489),
     fetch: request => {
       const path = new URL(request.url).pathname;
-      const scene = path.startsWith('/actions') ? actions : move;
+      const scene = path.startsWith('/recover') ? recover : path.startsWith('/actions') ? actions : move;
       return path.endsWith('.js')
         ? new Response(scene.js, { headers: { 'content-type': 'text/javascript' } })
         : new Response(scene.html, { headers: { 'content-type': 'text/html' } });
@@ -206,6 +217,7 @@ async function states(width: number, scheme: string, style: string): Promise<voi
         await abandoned.getByRole('button', { name: 'Reopen move' }).click();
       } else await abandoned.getByRole('button', { name: 'Start over' }).click();
       await abandoned.waitForSelector('[data-move-step="pick"]');
+      await abandoned.getByRole('button', { name: 'Check for an interrupted move' }).click();
       await abandoned.waitForSelector('[data-move-release]', { timeout: 3000 });
       expect(await abandoned.textContent('[data-move-release]')).toContain('A previous move was interrupted');
       await settle(abandoned, `held-${action}`);
@@ -220,7 +232,8 @@ async function states(width: number, scheme: string, style: string): Promise<voi
     }
 
     const otherHeld = await open('&otherHold=1');
-    await otherHeld.waitForTimeout(200);
+    await otherHeld.getByRole('button', { name: 'Check for an interrupted move' }).click();
+    await otherHeld.getByRole('status').filter({ hasText: 'has no interrupted move' }).waitFor();
     expect(await otherHeld.locator('[data-move-release]').count()).toBe(0);
 
     const interrupted = await open('&interrupt=1&recovery=1');
@@ -271,4 +284,107 @@ describe('the move dialog', () => {
         it(`${String(width)} ${scheme} ${style}: pick, review, refused, moving and done each fit their box`, async () => {
           await states(width, scheme, style);
         });
+});
+
+const countsOf = (tab: Page) =>
+  tab.evaluate(
+    () =>
+      (window as unknown as { recoveryCounts: { held: number; releases: number; ceremonies: number } }).recoveryCounts,
+  );
+
+describe('recovery from real Actions', () => {
+  it('keeps recovery reachable with the target offline, at every size and rounding', async () => {
+    for (const width of WIDTHS)
+      for (const scheme of SCHEMES)
+        for (const style of STYLES) {
+          const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: scheme });
+          try {
+            const tab = await context.newPage();
+            await tab.goto(`${server?.url.origin}/recover?offline=1&scheme=${scheme}&style=${style}`);
+            const entry = tab.getByRole('button', { name: 'Move to another machine…', exact: true });
+            await entry.waitFor({ timeout: 3000 });
+            expect(await countsOf(tab)).toEqual({ held: 0, releases: 0, ceremonies: 0 });
+            await entry.click();
+            await tab.waitForSelector('[data-move-step="pick"]');
+            expect(await tab.getByRole('button', { name: 'Check what would move' }).count()).toBe(0);
+            expect(await tab.locator('[data-move-release]').count()).toBe(0);
+            expect((await countsOf(tab)).held).toBe(0);
+            const shot = async (state: string) => {
+              expect(await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(
+                0,
+              );
+              const misses = await roundSafeMisses(tab);
+              expect(misses.length, describeRoundMisses(misses)).toBe(0);
+              if (shotsDir !== '')
+                await tab.screenshot({ path: join(shotsDir, `${width}-${scheme}-${style}-${state}.png`) });
+            };
+            await shot('offline-check');
+            await tab.getByRole('button', { name: 'Check for an interrupted move' }).click();
+            await tab.waitForSelector('[data-move-release]');
+            await shot('offline-held');
+            await tab.getByRole('button', { name: 'Release this move on Desk' }).click();
+            await tab.waitForFunction(() =>
+              document.querySelector('[data-move-release]')?.textContent?.includes('Its move slot is free'),
+            );
+            expect((await countsOf(tab)).releases).toBe(1);
+            await shot('offline-released');
+          } finally {
+            await context.close();
+          }
+        }
+  });
+
+  it('asks only on an explicit recovery check in a fresh session; Cancel says why, retry steps up then Releases', async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 900 } });
+    try {
+      const tab = await context.newPage();
+      await tab.goto(`${server?.url.origin}/recover?stepup=1`);
+      await tab.getByRole('button', { name: 'Move to another machine…', exact: true }).click();
+      await tab.waitForSelector('[data-move-step="pick"]');
+      expect(await countsOf(tab)).toEqual({ held: 0, releases: 0, ceremonies: 0 });
+      const check = tab.getByRole('button', { name: 'Check for an interrupted move' });
+      await check.click();
+      const prompt = tab.getByRole('dialog', { name: 'Confirm it’s you' });
+      await prompt.waitFor({ timeout: 3000 });
+      await prompt.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await tab.getByRole('alert').filter({ hasText: 'Confirm with your passkey on Desk, then try again.' }).waitFor();
+      expect(await tab.locator('[data-move-release]').count()).toBe(0);
+      expect((await countsOf(tab)).releases).toBe(0);
+      await check.click();
+      await prompt.getByRole('button', { name: 'Use passkey' }).click();
+      await tab.waitForSelector('[data-move-release]');
+      expect((await countsOf(tab)).ceremonies).toBe(1);
+      await tab.getByRole('button', { name: 'Release this move on Desk' }).click();
+      await tab.waitForFunction(() =>
+        document.querySelector('[data-move-release]')?.textContent?.includes('Its move slot is free'),
+      );
+      expect((await countsOf(tab)).releases).toBe(1);
+    } finally {
+      await context.close();
+    }
+  });
+
+  it('shows a denied recovery read, and never Releases another ferret’s hold', async () => {
+    for (const query of ['deny=1', 'other=1']) {
+      const context = await browser.newContext();
+      try {
+        const tab = await context.newPage();
+        await tab.goto(`${server?.url.origin}/recover?${query}`);
+        await tab.getByRole('button', { name: 'Move to another machine…', exact: true }).click();
+        await tab.getByRole('button', { name: 'Check for an interrupted move' }).click();
+        await tab
+          .getByText(
+            query === 'deny=1'
+              ? 'Desk: This device may not move ferrets on Desk.'
+              : 'Desk has no interrupted move for Zoe.',
+            { exact: true },
+          )
+          .waitFor();
+        expect(await tab.locator('[data-move-release]').count()).toBe(0);
+        expect((await countsOf(tab)).releases).toBe(0);
+      } finally {
+        await context.close();
+      }
+    }
+  });
 });

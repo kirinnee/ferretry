@@ -7,7 +7,7 @@
 import { type DaemonReach, useScreenHref } from '@ferretry/app';
 import { Spinner, useDialogFocus } from '@ferretry/app/ui';
 import { Check, Circle, X } from 'lucide-react';
-import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useId, useRef, useState } from 'react';
 import {
   carry,
   hasHeldMove,
@@ -70,6 +70,8 @@ export function MoveMachine({
   const [releaseNote, setReleaseNote] = useState('');
   const [released, setReleased] = useState(false);
   const [held, setHeld] = useState(false);
+  const [checkNote, setCheckNote] = useState('');
+  const [checkFailed, setCheckFailed] = useState(false);
   const [picked, setPicked] = useState<string | undefined>(candidates.find(each => each.online)?.daemon);
   const [folder, setFolder] = useState('');
   const hrefOf = useScreenHref();
@@ -78,24 +80,23 @@ export function MoveMachine({
     if (!busy) onClose();
   });
 
-  useEffect(() => {
-    if (phase.kind !== 'pick') return;
-    let current = true;
-    setHeld(false);
-    setReleased(false);
-    setReleaseNote('');
-    void hasHeldMove(ferret, machineOf(from)).then(
-      confirmed => {
-        if (current) setHeld(confirmed);
-      },
-      () => {
-        /* An unavailable or refused read is not proof of a held move. */
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [ferret, from, phase.kind]);
+  const checkHeld = async (): Promise<void> => {
+    setRetrying(true);
+    setCheckNote('');
+    setCheckFailed(false);
+    try {
+      const confirmed = await hasHeldMove(ferret, machineOf(from));
+      setHeld(confirmed);
+      setReleased(false);
+      setReleaseNote('');
+      if (!confirmed) setCheckNote(`${from.machine} has no interrupted move for ${name}.`);
+    } catch (error) {
+      setCheckNote(messageOf(error));
+      setCheckFailed(true);
+    } finally {
+      setRetrying(false);
+    }
+  };
 
   const look = async (to: DaemonReach, cloneInto: string): Promise<void> => {
     setPhase({ kind: 'looking', to });
@@ -167,45 +168,62 @@ export function MoveMachine({
 
         {phase.kind === 'pick' ? (
           <section className="flex flex-col gap-sm" data-move-step="pick">
-            <p className="m-0 text-meta text-muted">
-              {name} stops here, is sealed so only the other machine can open it, and starts there on that machine’s own
-              login. This machine keeps every file and shows where it went.
-            </p>
-            <div role="radiogroup" aria-label="Machine to move to" className="flex flex-col gap-xs">
-              {candidates.map(machine => (
-                <label
-                  className="flex items-center gap-sm rounded-control border border-border px-control-x py-2 text-cell"
-                  key={machine.daemon}
-                >
-                  <input
-                    checked={picked === machine.daemon}
-                    disabled={!machine.online}
-                    name="machine"
-                    onChange={() => setPicked(machine.daemon)}
-                    type="radio"
-                  />
-                  <span className="min-w-0 flex-1 truncate">{machine.machine}</span>
-                  {machine.online ? null : <span className="text-meta text-muted">offline</span>}
-                </label>
-              ))}
-            </div>
-            <div className="flex justify-end gap-sm">
-              <button type="button" className="kt-btn" onClick={onClose}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="kt-btn"
-                data-variant="primary"
-                disabled={picked === undefined}
-                onClick={() => {
-                  const to = candidates.find(each => each.daemon === picked);
-                  if (to !== undefined) void look(to, folder);
-                }}
-              >
-                Check what would move
-              </button>
-            </div>
+            {candidates.length === 0 ? (
+              <p className="m-0 text-meta text-muted">
+                No other machine is available. You can check for an interrupted move on {from.machine} and release it
+                here.
+              </p>
+            ) : held && !released ? null : (
+              <>
+                <p className="m-0 text-meta text-muted">
+                  {name} stops here, is sealed so only the other machine can open it, and starts there on that machine’s
+                  own login. This machine keeps every file and shows where it went.
+                </p>
+                <div role="radiogroup" aria-label="Machine to move to" className="flex flex-col gap-xs">
+                  {candidates.map(machine => (
+                    <label
+                      className="flex items-center gap-sm rounded-control border border-border px-control-x py-2 text-cell"
+                      key={machine.daemon}
+                    >
+                      <input
+                        checked={picked === machine.daemon}
+                        disabled={!machine.online}
+                        name="machine"
+                        onChange={() => setPicked(machine.daemon)}
+                        type="radio"
+                      />
+                      <span className="min-w-0 flex-1 truncate">{machine.machine}</span>
+                      {machine.online ? null : <span className="text-meta text-muted">offline</span>}
+                    </label>
+                  ))}
+                </div>
+                <div className="flex justify-end gap-sm">
+                  <button type="button" className="kt-btn" onClick={onClose}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="kt-btn"
+                    data-variant="primary"
+                    disabled={picked === undefined}
+                    onClick={() => {
+                      const to = candidates.find(each => each.daemon === picked);
+                      if (to !== undefined) void look(to, folder);
+                    }}
+                  >
+                    Check what would move
+                  </button>
+                </div>
+              </>
+            )}
+            <button type="button" className="kt-btn self-end" disabled={busy} onClick={() => void checkHeld()}>
+              Check for an interrupted move
+            </button>
+            {checkNote === '' ? null : (
+              <p className="m-0 text-meta" role={checkFailed ? 'alert' : 'status'}>
+                {checkNote}
+              </p>
+            )}
           </section>
         ) : null}
 

@@ -1,4 +1,4 @@
-/** U16: "Move to another machine…" in the Actions menu appears only where there is another machine to move to. */
+/** U16: Actions offers a move to an available target, or source-only recovery when none is available. */
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { FC } from 'react';
 import {
@@ -107,16 +107,21 @@ describe('the move-machine row', () => {
     expect(document.querySelector('[data-moved-to]')?.textContent).toContain('Moved to another machine');
     expect(document.querySelector('[data-moved-to]')?.textContent).not.toContain('fy_daemon_');
   });
-  it('is offered only for a controlling caller with at least two machines', () => {
+  it('is offered to a controlling caller with a source, including source-only recovery', () => {
     expect(offersMove(true, 2)).toBe(true);
-    expect(offersMove(true, 1)).toBe(false);
+    expect(offersMove(true, 1)).toBe(true);
+    expect(offersMove(true, 0)).toBe(false);
     expect(offersMove(false, 3)).toBe(false);
   });
 
-  it('is withdrawn when this is the only paired machine', async () => {
+  it('opens recovery only when this is the only paired machine', async () => {
     const offers = await mountRow(['alpha']);
-    expect(offers.at(-1)).toEqual(['move-machine', null]);
-    expect(offers.some(([, row]) => row !== null)).toBe(false);
+    await interact(async () => {
+      await must(offers.at(-1)?.[1], 'recovery row').run();
+    });
+    expect(document.querySelector('[data-move-step="pick"]')?.textContent).toContain('No other machine is available');
+    expect(document.querySelector('[role="radiogroup"]')).toBeNull();
+    expect(document.querySelector('[data-move-release]')).toBeNull();
   });
 
   it('is offered, in the move group, when a second machine is paired, and opens the picker from run', async () => {
@@ -149,6 +154,9 @@ describe('the move-machine row', () => {
   for (const capability of ['fleet', 'filesystem'])
     it(`excludes a target whose ${capability} authority refuses the move`, async () => {
       const offers = await mountRow(['alpha', 'beta'], true, 'beta', capability);
-      expect(offers.some(([, row]) => row !== null)).toBe(false);
+      await interact(async () => {
+        await must(offers.at(-1)?.[1], 'recovery row').run();
+      });
+      expect(document.querySelector('[role="radiogroup"]')).toBeNull();
     });
 });
