@@ -152,6 +152,10 @@ export default implementDaemon(manifest, {
     };
 
     const routes = {
+      'GET /v1/relocate/:ferretId/held': async (call: CallContext) => {
+        mayReadTree(call);
+        return jsonResponse(await relocation.held(param(call, 'ferretId')).catch(refused));
+      },
       'POST /v1/relocate/exports/release': async (call: CallContext) => {
         mayReadTree(call);
         const body = ReleaseRequestSchema.safeParse(await readJson(call));

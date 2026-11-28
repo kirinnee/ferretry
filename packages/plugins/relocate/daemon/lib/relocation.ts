@@ -7,6 +7,7 @@ import {
   type CompleteRequest,
   type CompleteResponse,
   type ExportResponse,
+  type HeldMove,
   type PreflightResponse,
   RELOCATE_CHUNK_BYTES,
   RELOCATE_EXPORT_TTL_MS,
@@ -91,6 +92,15 @@ export class Relocation {
   #releasing = false;
 
   constructor(private readonly deps: RelocationDeps) {}
+
+  async held(ferretId: string): Promise<HeldMove> {
+    const summary = await this.deps.ferrets.get(ferretId as FerretId);
+    if (summary === undefined) throw new RelocateRefused(404, 'this machine has no such ferret', 'not_found');
+    const open = [...this.#exports.values()].find(each => each.ferret === summary.id);
+    return open === undefined
+      ? { held: false }
+      : { held: true, since: new Date(open.createdAtMs).toISOString() as Instant };
+  }
 
   async preflight(ferretId: string, to: string): Promise<PreflightResponse> {
     if (to === this.deps.daemonId)

@@ -10,6 +10,7 @@ import type { PluginClient } from '@ferretry/kernel/manifest';
 import { toBase64Url } from '@ferretry/std/sealing';
 import {
   ExportResponseSchema,
+  HeldMoveSchema,
   ImportResponseSchema,
   type ImportResponse,
   type MoveRow,
@@ -61,6 +62,13 @@ async function on<T>(machine: Machine, act: () => Promise<T>): Promise<T> {
 /** A person releases A's held export explicitly; the daemon confirms A is stopped or fenced before freeing its slot. */
 export async function releaseMove(ferret: string, from: Machine): Promise<void> {
   await on(from, () => from.client.call('POST /v1/relocate/exports/release', { body: { ferretId: ferret } }));
+}
+
+/** Recover a held move from the source when the dialog has no receipt of its own. */
+export async function hasHeldMove(ferret: string, from: Machine): Promise<boolean> {
+  return HeldMoveSchema.parse(
+    await on(from, () => from.client.call('GET /v1/relocate/:ferretId/held', { params: { ferretId: ferret } })),
+  ).held;
 }
 
 /** What the person reads before agreeing: both machines' preflights, with the offer that makes the target's answer good. */

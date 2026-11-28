@@ -86,7 +86,8 @@ never move itself or another ([grants.md](grants.md)). Reading the stub ledger n
   resumes A; it retains completion for retry. A lost completion reply can be retried with the same export id and destination,
   including after A restarts following durable completion. A different destination is refused. An unconfirmed receipt says
   A's current state is unknown, since a restart can forget a transfer before its fence was written.
-  **Release this move** is available on A's move dialog, including after reopening it: it confirms A is stopped or fenced
+  **Release this move** is available on A's move dialog, including after reopening it or choosing Start over when A confirms
+  a held export for this ferret (never another ferret's): it confirms A is stopped or fenced
   before freeing the export slot, never resumes A, and removes the completion retry for a released transfer. It does not
   cancel or delete a partial import on B; check both machines before deliberately resuming either copy.
   A lost start answer reports B's state as

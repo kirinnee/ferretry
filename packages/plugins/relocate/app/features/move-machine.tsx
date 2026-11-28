@@ -7,9 +7,10 @@
 import { type DaemonReach, useScreenHref } from '@ferretry/app';
 import { Spinner, useDialogFocus } from '@ferretry/app/ui';
 import { Check, Circle, X } from 'lucide-react';
-import { type ReactNode, useId, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import {
   carry,
+  hasHeldMove,
   type Machine,
   type Moved,
   MoveStopped,
@@ -68,6 +69,7 @@ export function MoveMachine({
   const [retrying, setRetrying] = useState(false);
   const [releaseNote, setReleaseNote] = useState('');
   const [released, setReleased] = useState(false);
+  const [held, setHeld] = useState(false);
   const [picked, setPicked] = useState<string | undefined>(candidates.find(each => each.online)?.daemon);
   const [folder, setFolder] = useState('');
   const hrefOf = useScreenHref();
@@ -75,6 +77,25 @@ export function MoveMachine({
   const { onKeyDown } = useDialogFocus(true, ref, () => {
     if (!busy) onClose();
   });
+
+  useEffect(() => {
+    if (phase.kind !== 'pick') return;
+    let current = true;
+    setHeld(false);
+    setReleased(false);
+    setReleaseNote('');
+    void hasHeldMove(ferret, machineOf(from)).then(
+      confirmed => {
+        if (current) setHeld(confirmed);
+      },
+      () => {
+        /* An unavailable or refused read is not proof of a held move. */
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [ferret, from, phase.kind]);
 
   const look = async (to: DaemonReach, cloneInto: string): Promise<void> => {
     setPhase({ kind: 'looking', to });
@@ -88,6 +109,7 @@ export function MoveMachine({
     }
   };
   const move = async (to: DaemonReach, reviewed: Review): Promise<void> => {
+    setHeld(false);
     setReleased(false);
     setReleaseNote('');
     let exported = false;
@@ -346,12 +368,13 @@ export function MoveMachine({
           </section>
         ) : null}
         {!busy &&
-        ((phase.kind === 'failed' && phase.interrupted) ||
+        ((phase.kind === 'pick' && held) ||
+          (phase.kind === 'failed' && phase.interrupted) ||
           (phase.kind === 'done' && phase.moved.stub === 'unmarked')) ? (
           <section className="flex flex-col gap-sm" data-move-release="">
             <p className="m-0 text-meta text-muted">
-              Interrupted move? Release keeps {name} stopped or read-only on {from.machine} and frees its move slot.
-              Check the other machine before starting either copy.
+              A previous move was interrupted. Release keeps {name} stopped or read-only on {from.machine} and frees its
+              move slot. Check the other machine before starting either copy.
             </p>
             {releaseNote === '' ? null : (
               <p className="m-0 text-meta" role="status">

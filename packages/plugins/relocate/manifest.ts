@@ -31,6 +31,14 @@ export default definePlugin({
 
   actions: {
     routes: [
+      route('GET /v1/relocate/:ferretId/held', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: { skip: 'a read of whether this ferret holds an export; changes nothing' },
+        guard: { none: 'a boolean and creation instant only; no export id, token or file content' },
+      }),
       route('POST /v1/relocate/exports/release', {
         minimum: 'operator',
         caller: 'person',

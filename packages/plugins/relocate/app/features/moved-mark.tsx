@@ -16,7 +16,7 @@ export function MovedMark({ store, ferret }: { readonly store: MovedStore; reado
   if (gone === undefined) return null;
   const there = machines.find(machine => machine.daemon === gone.daemonId);
   const href = hrefOf(gone.daemonId, 'conversation', 'chat', { ferret: gone.ferretId });
-  const words = `Moved to ${there?.machine ?? gone.machine ?? gone.daemonId}`;
+  const words = `Moved to ${there?.machine ?? 'another machine'}`;
   return href === undefined ? (
     <span className="text-meta text-muted" data-moved-to="">
       {words}

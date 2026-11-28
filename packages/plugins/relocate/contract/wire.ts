@@ -186,6 +186,13 @@ export type BundleManifest = z.infer<typeof BundleManifestSchema>;
 export const PreflightRequestSchema = z.strictObject({ to: DaemonIdSchema });
 export type PreflightRequest = z.infer<typeof PreflightRequestSchema>;
 
+/** The source's held move for this ferret only; never its export id or ciphertext. */
+export const HeldMoveSchema = z.union([
+  z.strictObject({ held: z.literal(false) }),
+  z.strictObject({ held: z.literal(true), since: InstantSchema }),
+]);
+export type HeldMove = z.infer<typeof HeldMoveSchema>;
+
 export const MoveRowSchema = z.strictObject({ id: z.string(), label: z.string(), why: z.string().optional() });
 
 export const PreflightResponseSchema = z.strictObject({
