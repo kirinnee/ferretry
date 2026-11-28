@@ -30,5 +30,12 @@ export const reviveRuling = (ferret: Pick<FerretSummary, 'state' | 'finishedAt'>
  * ferret plus the one thing only this connection knows: whether it may change anything. A surface that decides from
  * `state` itself will one day disagree with the others.
  */
-export const reviveOffer = (ferret: Pick<FerretSummary, 'state' | 'finishedAt'>, canControl: boolean): ReviveOffer =>
-  canControl ? reviveRuling(ferret) : { offered: false, reason: 'This connection can look but not change anything.' };
+export const reviveOffer = (
+  ferret: Pick<FerretSummary, 'state' | 'finishedAt' | 'movedTo'>,
+  canControl: boolean,
+): ReviveOffer =>
+  ferret.movedTo !== undefined
+    ? { offered: false, reason: `Moved to ${ferret.movedTo.machine}.` }
+    : canControl
+      ? reviveRuling(ferret)
+      : { offered: false, reason: 'This connection can look but not change anything.' };

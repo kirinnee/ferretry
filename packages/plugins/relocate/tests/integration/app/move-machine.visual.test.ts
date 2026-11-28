@@ -18,6 +18,7 @@ setDefaultTimeout(90_000);
 
 const packageRoot = import.meta.dir;
 const shotsDir = process.env.FY_MOVE_SHOTS_DIR ?? '';
+const shotStates = new Set(process.env.FY_MOVE_SHOT_STATES?.split(',') ?? []);
 
 let browser: Browser;
 let directory = '';
@@ -25,28 +26,40 @@ let server: ReturnType<typeof Bun.serve> | undefined;
 
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'ferretry-move-'));
-  const child = Bun.spawn([process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/move-scene.tsx'], {
-    cwd: packageRoot,
-    stderr: 'pipe',
-    stdout: 'pipe',
-  });
-  const [stdout, stderr, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  if (code !== 0) throw new Error(`the move scene did not build (${code}):\n${stderr}\n${stdout}`);
-  const built = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
-  const css = await readFile(built.css, 'utf8');
-  const js = await readFile(built.js, 'utf8');
-  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
+  const build = async (entry: string, out: string, script: string) => {
+    const child = Bun.spawn([process.execPath, sceneBuilder, '--out', out, '--entry', entry], {
+      cwd: packageRoot,
+      stderr: 'pipe',
+      stdout: 'pipe',
+    });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    if (code !== 0) throw new Error(`the move scene did not build (${code}):\n${stderr}\n${stdout}`);
+    const built = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
+    const css = await readFile(built.css, 'utf8');
+    const js = await readFile(built.js, 'utf8');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="${script}"></script></body></html>`;
+    return { html, js };
+  };
+  const move = await build('fixtures/move-scene.tsx', directory, '/app.js');
+  const actions = await build(
+    '../../../../../core/ferrets/tests/integration/app/fixtures/offered-rows-scene.tsx',
+    join(directory, 'actions'),
+    '/actions.js',
+  );
   server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    fetch: request =>
-      new URL(request.url).pathname === '/app.js'
-        ? new Response(js, { headers: { 'content-type': 'text/javascript' } })
-        : new Response(html, { headers: { 'content-type': 'text/html' } }),
+    fetch: request => {
+      const path = new URL(request.url).pathname;
+      const scene = path.startsWith('/actions') ? actions : move;
+      return path.endsWith('.js')
+        ? new Response(scene.js, { headers: { 'content-type': 'text/javascript' } })
+        : new Response(scene.html, { headers: { 'content-type': 'text/html' } });
+    },
   });
   browser = await sharedChromium();
   if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
@@ -78,15 +91,19 @@ async function states(width: number, scheme: string, style: string): Promise<voi
   const open = async (query: string): Promise<Page> => {
     const tab = await context.newPage();
     tab.on('pageerror', error => problems.push(error.message));
-    await tab.goto(`${origin}/?theme=studio-${scheme}&style=${style}${query}`);
-    await tab.waitForSelector('[data-move-step="pick"]');
+    const actions = query.includes('actions=1');
+    await tab.goto(
+      `${origin}/${actions ? 'actions' : ''}?theme=studio-${scheme}&style=${style}${query}${actions ? `&move=1&compact=${phone ? '1' : '0'}` : ''}`,
+    );
+    await tab.waitForSelector('[data-move-step="pick"], [data-actions-scene], [data-stub-scene]');
     return tab;
   };
   const name = (state: string) => `${String(width)}-${scheme}-${style}-${state}`;
   const settle = async (tab: Page, state: string) => {
     await tab.mouse.move(0, 0);
     await tab.waitForTimeout(350);
-    if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name(state)}.png`) });
+    if (shotsDir !== '' && (shotStates.size === 0 || shotStates.has(state)))
+      await tab.screenshot({ path: join(shotsDir, `${name(state)}.png`) });
     expect(
       await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
       `${name(state)}: no sideways scroll`,
@@ -95,6 +112,14 @@ async function states(width: number, scheme: string, style: string): Promise<voi
     expect(misses.length, `${name(state)}: ${describeRoundMisses(misses)}`).toBe(0);
   };
   try {
+    const actions = await open('&actions=1');
+    expect(await actions.textContent('[data-actions-scene]')).toContain('Move to another machine…');
+    await settle(actions, 'actions-row');
+    const stub = await open('&moved=1');
+    expect(await stub.textContent('[data-stub-scene]')).toContain('Moved to Laptop');
+    expect(await stub.textContent('[data-stub-scene]')).toContain('Open there');
+    expect(await stub.getAttribute('[data-moved-to]', 'href')).toContain('/chat/g9');
+    await settle(stub, 'moved-stub');
     const picker = await open('');
     expect(await picker.textContent('[data-move-step="pick"]')).toContain('Laptop');
     expect(await picker.textContent('[data-move-step="pick"]')).toContain('offline');
@@ -111,6 +136,17 @@ async function states(width: number, scheme: string, style: string): Promise<voi
     expect(await picker.textContent('[data-move-step="done"]')).toContain('Open on Laptop');
     expect(await picker.getAttribute('[data-move-step="done"] a', 'href')).toContain('/chat/g9');
     await settle(picker, 'done');
+
+    const recovery = await open('&recovery=1');
+    await recovery.click('text=Check what would move');
+    await recovery.click('text=Move to Laptop');
+    await recovery.waitForSelector('[data-move-step="done"]');
+    const receipt = (await recovery.textContent('[data-move-step="done"]')) ?? '';
+    expect(receipt).toContain('stopped');
+    expect(receipt).toContain('Turns and attachments could not be restored.');
+    expect(receipt).toContain('/work/project-feature-handoff-ab12');
+    expect(receipt).not.toContain('now running');
+    await settle(recovery, 'recovery');
 
     const refused = await open('&refuse=1');
     await refused.click('text=Check what would move');

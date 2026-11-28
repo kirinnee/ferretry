@@ -3,11 +3,12 @@
  * Relocate's. The panel draws nothing of its own: it offers the row only while this connection may change the ferret AND
  * another machine is paired where Relocate is on, takes it back otherwise, and opens the move from `run`.
  */
-import { daemonOfClient, useEveryDaemon } from '@ferretry/app';
+import { daemonOfClient, useEveryDaemon, type DaemonReach } from '@ferretry/app';
 import { type ActionsRowOffer, isActionsRowSlotProps } from '@ferretry/core-ferrets/contract';
 import type { AppComponent, PanelProps, PluginClient } from '@ferretry/kernel/manifest';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { MoveMachine } from '../features/move-machine.tsx';
+import { MovedMark } from '../features/moved-mark.tsx';
 import type { MovedStore } from '../lib/moved-store.ts';
 
 const MOVE_MACHINE_ROW_ID = 'move-machine';
@@ -23,6 +24,17 @@ const rowOf = (run: () => void): ActionsRowOffer => ({
 
 /** A row is offered only to a caller who may control the ferret and only where there is another machine to move to. */
 export const offersMove = (canControl: boolean, daemons: number): boolean => canControl && daemons >= 2;
+
+/** Unknown or refused grants never offer a move; a press may confirm a known step-up or unlock. */
+const mayMove = (reach: DaemonReach): boolean =>
+  reach.online &&
+  [
+    ['fleet', 'configure'],
+    ['filesystem', 'use'],
+  ].every(([capability, axis]) => {
+    const kind = reach.authority(capability as 'fleet' | 'filesystem', axis as 'configure' | 'use').kind;
+    return kind === 'open' || kind === 'step-up' || kind === 'locked';
+  });
 
 function MoveMachineRow({
   client,
@@ -42,9 +54,13 @@ function MoveMachineRow({
   const reaches = useEveryDaemon();
   const here = useMemo(() => daemonOfClient(client), [client]);
   const from = reaches.find(reach => reach.daemon === here);
-  const others = useMemo(() => reaches.filter(reach => reach.daemon !== here), [reaches, here]);
+  const others = useMemo(() => reaches.filter(reach => reach.daemon !== here && mayMove(reach)), [reaches, here]);
+  const ledger = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
   const [open, setOpen] = useState(false);
-  const offered = offersMove(canControl, from === undefined ? 0 : reaches.length);
+  const offered = offersMove(
+    canControl && ledger.moved[ferret] === undefined && from !== undefined && mayMove(from),
+    others.length + 1,
+  );
   useEffect(() => {
     if (!offered) {
       offer(MOVE_MACHINE_ROW_ID, null);
@@ -56,6 +72,7 @@ function MoveMachineRow({
     );
     return () => offer(MOVE_MACHINE_ROW_ID, null);
   }, [offer, offered]);
+  if (ledger.moved[ferret] !== undefined) return <MovedMark ferret={ferret} store={store} />;
   return open && offered && from !== undefined ? (
     <MoveMachine
       candidates={others}

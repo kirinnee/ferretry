@@ -56,6 +56,7 @@ export interface RelocationDeps {
   readonly redaction: Redaction;
   readonly crypto: CloneCrypto;
   readonly ferrets: Pick<FerretsApi, 'get' | 'workFolder' | 'relocationSource' | 'stop' | 'resume'>;
+  readonly protect: NonNullable<FerretsApi['relocationProtect']>;
   readonly treeOf: (folder: string) => WorkingTree;
   readonly daemonId: string;
   readonly clock: Pick<Clock, 'now' | 'nowMs' | 'after'>;
@@ -229,9 +230,15 @@ export class Relocation {
       throw new RelocateRefused(403, 'this export was sealed for another machine', 'wrong_target');
     if (open.completing === true) throw new RelocateRefused(409, 'this move is already being committed', 'export_busy');
     const at = this.deps.clock.now();
-    const entry = { daemonId: request.to.daemonId, ferretId: request.to.ferretId, at };
+    const entry = {
+      daemonId: request.to.daemonId,
+      ferretId: request.to.ferretId,
+      at,
+      ...(request.to.machine === undefined ? {} : { machine: request.to.machine }),
+    };
     open.completing = true;
     try {
+      await this.deps.protect(open.ferret, { ...request.to, machine: request.to.machine ?? request.to.daemonId });
       await this.deps.moved.record(open.ferret, entry);
       this.#exports.delete(exportId);
       return { ferretId: open.ferret, movedTo: entry };

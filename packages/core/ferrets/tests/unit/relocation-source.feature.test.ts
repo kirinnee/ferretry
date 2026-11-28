@@ -1,7 +1,13 @@
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { RelocationStubsFile } from '../../contract/state/relocation-stubs.state.ts';
+import type { FerretsService } from '../../daemon/lib/ferrets/service.ts';
 import { describe, expect, test } from 'bun:test';
-import type { FerretId } from '@ferretry/kernel/contract';
+import type { FerretId, StatePort } from '@ferretry/kernel/contract';
 import { FERRET_READABLE_FOLDERS, Harnesses, JobKeeper } from '../../contract/index.ts';
-import relocationFeature, { relocationPortFor } from '../../daemon/features/relocation-source.feature.ts';
+import relocationFeature, {
+  RelocationFence,
+  relocationPortFor,
+} from '../../daemon/features/relocation-source.feature.ts';
 import type { FerretsContext } from '../../daemon/features/types.ts';
 
 const ID = 'f-move-1' as FerretId;
@@ -340,4 +346,60 @@ describe('relocationRestore writes a move’s session files into the NEW ferret,
     for (const other of ['conversation', 'tidy', 'mcp', 'warden'])
       expect(relocationPortFor(other, port as never)).not.toHaveProperty('relocationRestore');
   });
+});
+
+const id = 'f1' as FerretId;
+const to = { daemonId: 'beta-daemon', ferretId: 'g1', machine: 'Laptop' };
+const records = () => [{ id, name: 'marin', folder: '/synthetic/work', state: 'stopped' as const }];
+
+test('the durable fence survives a new reader and resolves callsigns with the daemon’s address rules', async () => {
+  const state = new MemoryStateFolder().port([RelocationStubsFile]);
+  const fence = new RelocationFence(state, records);
+  await fence.loaded;
+  expect(fence.refusal(id)).toBeUndefined();
+  await fence.protect(id, to);
+  const restarted = new RelocationFence(state, records);
+  await restarted.loaded;
+  for (const reference of [id, 'marin', ' MARIN '])
+    expect(restarted.refusal(reference)).toBe('This ferret moved to Laptop and is read-only here.');
+  expect(restarted.refusal('unrelated')).toBeUndefined();
+});
+
+test('an unreadable fence fails closed; a running source cannot be committed as a moved-away stub', async () => {
+  const broken = new RelocationFence({ read: async () => ({ ok: false }) } as unknown as StatePort, records);
+  await expect(broken.loaded).rejects.toThrow('could not be read');
+  expect(broken.refusal(id)).toContain('could not be checked');
+  const state = new MemoryStateFolder().port([RelocationStubsFile]);
+  const running = new RelocationFence(state, () => [{ ...records()[0]!, state: 'idle' }]);
+  await expect(running.protect(id, to)).rejects.toThrow('only a stopped ferret');
+});
+
+test('in-process launch and mutation families cannot bypass the fence through the Ferrets service', async () => {
+  const state = new MemoryStateFolder().port([RelocationStubsFile]);
+  const fence = new RelocationFence(state, records);
+  await fence.protect(id, to);
+  const called: string[] = [];
+  const fake = Object.fromEntries(
+    ['start', 'resume', 'rename', 'stop', 'launchHeld', 'move', 'attach', 'revokeToken', 'get'].map(key => [
+      key,
+      async () => {
+        called.push(key);
+      },
+    ]),
+  );
+  const service = fence.guard(fake as unknown as FerretsService);
+  for (const key of ['resume', 'rename', 'stop', 'launchHeld', 'move', 'attach', 'revokeToken'])
+    await expect(
+      (service as unknown as Record<string, (id: FerretId) => Promise<unknown>>)[key]!(id),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: 'moved_away',
+      message: 'This ferret moved to Laptop and is read-only here.',
+    });
+  await expect(service.start({ folder: '/synthetic/work' } as never, { kind: 'person' })).rejects.toMatchObject({
+    code: 'moved_away',
+  });
+  expect(called).toEqual([]);
+  await service.get(id);
+  expect(called).toEqual(['get']);
 });

@@ -181,6 +181,11 @@ export interface ReadsApi {
    * nothing it could not name, for a ferret this daemon does not know or a path outside the three folders.
    */
   relocationRestore?(ferret: FerretId, files: readonly RelocatedFile[]): Promise<void>;
+  /** Relocate alone permanently protects a stopped source stub, without rewriting any of its original files. */
+  relocationProtect?(
+    ferret: FerretId,
+    to: { readonly daemonId: string; readonly ferretId: string; readonly machine: string },
+  ): Promise<void>;
 }
 
 /** One file a move restores: its path below the ferret's session folder and its bytes. */

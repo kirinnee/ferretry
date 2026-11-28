@@ -219,7 +219,11 @@ export const ExportResponseSchema = z.strictObject({
 export type ExportResponse = z.infer<typeof ExportResponseSchema>;
 
 export const CompleteRequestSchema = z.strictObject({
-  to: z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1).max(128) }),
+  to: z.strictObject({
+    daemonId: DaemonIdSchema,
+    ferretId: z.string().min(1).max(128),
+    machine: z.string().min(1).max(256).optional(),
+  }),
 });
 export type CompleteRequest = z.infer<typeof CompleteRequestSchema>;
 
@@ -227,7 +231,12 @@ export type CompleteRequest = z.infer<typeof CompleteRequestSchema>;
 export const MovedDocumentSchema = z.strictObject({
   moved: z.record(
     z.string(),
-    z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1), at: InstantSchema }),
+    z.strictObject({
+      daemonId: DaemonIdSchema,
+      ferretId: z.string().min(1),
+      at: InstantSchema,
+      machine: z.string().min(1).max(256).optional(),
+    }),
   ),
 });
 export type MovedDocument = z.infer<typeof MovedDocumentSchema>;

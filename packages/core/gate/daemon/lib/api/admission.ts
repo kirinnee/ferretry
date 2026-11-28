@@ -193,10 +193,28 @@ export class GateAdmission implements Admission {
   }
 
   admit(input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }): AdmissionDecision {
-    return this.#authorize(input.descriptor, input.request, input.params, input.table);
+    const decision = this.#authorize(input.descriptor, input.request, input.params, input.table);
+    if (decision.outcome === 'refused') return decision;
+    const reference = input.params.get('ferretId');
+    if (
+      reference !== undefined &&
+      ((input.table === 'socket' && input.descriptor.capability?.capability === 'terminal') ||
+        !['GET', 'HEAD', 'OPTIONS'].includes(input.request.method))
+    ) {
+      const reason = this.deps.ferrets()?.mutationRefusal?.(decodeURIComponent(reference));
+      if (reason !== undefined) return refused(errorResponse(409, reason, 'moved_away'));
+    }
+    return decision;
   }
 
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
+    const reference = /^\/v1\/ferrets\/([^/]+)(?:\/|$)/u.exec(request.path)?.[1];
+    if (
+      descriptor.capability?.capability === 'terminal' &&
+      reference !== undefined &&
+      this.deps.ferrets()?.mutationRefusal?.(decodeURIComponent(reference)) !== undefined
+    )
+      return false;
     // No path parameters on a re-ask: only a warden remedy reads them, and readmit re-asks the descriptor, not one call.
     return this.#authorize(descriptor, request, new Map()).outcome === 'admitted';
   }

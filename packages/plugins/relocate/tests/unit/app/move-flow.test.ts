@@ -176,7 +176,9 @@ describe('carrying', () => {
     // the source is told where it went only after the target had it
     const order = [...w.source.calls.map(call => `A ${call.route}`), ...w.to.calls.map(call => `B ${call.route}`)];
     expect(w.source.calls.at(-1)?.route).toBe('POST /v1/relocate/exports/:exportId/complete');
-    expect(w.source.calls.at(-1)?.body).toEqual({ to: { daemonId: w.to.machine.daemon, ferretId: 'g9' } });
+    expect(w.source.calls.at(-1)?.body).toEqual({
+      to: { daemonId: w.to.machine.daemon, ferretId: 'g9', machine: 'Laptop' },
+    });
     expect(order.length).toBeGreaterThan(6);
     expect(steps.map(step => step.step)).toEqual(
       expect.arrayContaining(['sealing', 'carrying', 'receiving', 'finishing', 'done']),

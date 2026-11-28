@@ -279,7 +279,7 @@ export class Importer {
                 : undefined,
               unrestored === undefined
                 ? undefined
-                : `the ferret runs, but its turns and attachments were not all restored (${unrestored}); the other machine still has every one`,
+                : `its turns and attachments were not all restored (${unrestored}); the other machine still has every one`,
             ]
               .filter(line => line !== undefined)
               .join('; '),

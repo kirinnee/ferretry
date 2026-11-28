@@ -68,6 +68,7 @@ export type ChatSessionState = Partial<
 };
 
 export interface ChatSession {
+  readonly movedTo?: FerretSummary['movedTo'];
   readonly config: ChatSessionConfig;
   readonly state: ChatSessionState;
   readonly context?: FerretContext | undefined;
@@ -136,6 +137,7 @@ const usageOf = (quota: FerretSummary['quota']): ChatSessionState => {
 
 /** Ferrets' summary of one ferret, with what the observer recorded about its turn (when that was read), as the chat draws it. */
 export const chatSessionOf = (summary: FerretSummary, prompt?: ChatPrompt): ChatSession => ({
+  ...(summary.movedTo === undefined ? {} : { movedTo: summary.movedTo }),
   config: {
     id: summary.id,
     teammate: summary.name,

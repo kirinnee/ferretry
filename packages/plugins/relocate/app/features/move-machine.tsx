@@ -258,11 +258,24 @@ export function MoveMachine({
         {phase.kind === 'done' ? (
           <section className="flex flex-col gap-sm" data-move-step="done" role="status">
             <p className="m-0 text-cell">
-              {name} is now running on {phase.to.machine}.
+              {phase.moved.received.recovery === undefined
+                ? `${name} is now running on ${phase.to.machine}.`
+                : `${name} needs recovery on ${phase.to.machine}; its state is ${phase.moved.received.recovery.state}.`}
               {phase.moved.stub === 'marked'
                 ? ` ${from.machine} keeps every file and shows where it went.`
                 : ` ${from.machine} could not leave its note (${phase.moved.stubNote ?? 'no reason given'}); the ferret there is stopped.`}
             </p>
+            {phase.moved.received.recovery === undefined ? null : (
+              <div className="flex flex-col gap-xs text-cell" data-move-recovery="" role="alert">
+                <p className="m-0">{phase.moved.received.recovery.message}</p>
+                <p className="m-0 break-all text-meta">
+                  Ferret {phase.moved.received.ferretId} · {phase.moved.received.folder}
+                </p>
+                <p className="m-0 text-meta">
+                  Open it on {phase.to.machine} to recover it. {from.machine} still keeps every original file.
+                </p>
+              </div>
+            )}
             <div className="flex justify-end gap-sm">
               <button type="button" className="kt-btn" onClick={onClose}>
                 Close

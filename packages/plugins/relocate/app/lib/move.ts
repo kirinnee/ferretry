@@ -189,7 +189,7 @@ export async function carry(
     await on(from, () =>
       from.client.call('POST /v1/relocate/exports/:exportId/complete', {
         params: { exportId: sealed.exportId },
-        body: { to: { daemonId: to.daemon, ferretId: received.ferretId } },
+        body: { to: { daemonId: to.daemon, ferretId: received.ferretId, machine: to.name } },
       }),
     );
   } catch (error) {

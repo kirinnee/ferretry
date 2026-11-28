@@ -1,9 +1,16 @@
 import type { FencedPath, FerretId, RootEntry, RootHandle } from '@ferretry/kernel/contract';
+import type { StatePort } from '@ferretry/kernel/contract';
+import { ApiError } from '@ferretry/kernel/contract';
+import type { FerretsService } from '../lib/ferrets/service.ts';
+import { RelocationStubsFile } from '../../contract/state/relocation-stubs.state.ts';
+import { resolveAgentAddress } from '../../contract/agent-address.ts';
 import {
   FERRET_READABLE_FOLDERS,
   Harnesses,
   JobKeeper,
   type FerretsApi,
+  type FerretSummary,
+  type FerretState,
   type RelocationFile,
   type RelocationSource,
 } from '../../contract/index.ts';
@@ -18,6 +25,95 @@ const HISTORY_PAGE = 1_000;
 /** The deepest folder a listing descends and the most names it walks: a session folder is a handful of folders. */
 const MAX_DEPTH = 6;
 const MAX_NAMES = 20_000;
+
+type Destination = { readonly daemonId: string; readonly ferretId: string; readonly machine: string };
+
+/** The daemon's one durable moved-away decision, shared by Gate, launches and the fleet's reads. */
+export class RelocationFence {
+  readonly loaded: Promise<void>;
+  #moved: Record<string, Destination> = {};
+  #readable = false;
+  readonly #marked = new WeakMap<FerretSummary, FerretSummary>();
+  constructor(
+    private readonly state: StatePort,
+    private readonly records: () => readonly { id: FerretId; name?: string; folder: string; state: FerretState }[],
+  ) {
+    this.loaded = (async () => {
+      const read = await state.read(RelocationStubsFile);
+      if (!read.ok) throw new Error('the moved-away stubs could not be read');
+      this.#moved = read.value?.moved ?? {};
+      this.#readable = true;
+    })();
+    void this.loaded.catch(() => undefined);
+  }
+  destination(id: string): Destination | undefined {
+    return this.#moved[id];
+  }
+  mark(summary: FerretSummary): FerretSummary {
+    const movedTo = this.destination(summary.id);
+    if (movedTo === undefined) return summary;
+    const known = this.#marked.get(summary);
+    if (known?.movedTo === movedTo) return known;
+    const marked = { ...summary, movedTo };
+    this.#marked.set(summary, marked);
+    return marked;
+  }
+  /** In-process callers and bulk routes use the same fence as Gate, before the service can change a stub. */
+  guard(service: FerretsService): FerretsService {
+    const writes = new Set([
+      'start',
+      'resume',
+      'launchHeld',
+      'stop',
+      'stopHeld',
+      'rename',
+      'attach',
+      'move',
+      'revokeToken',
+      'adoptTitle',
+      'setCompactAt',
+      'markStalled',
+    ]);
+    return new Proxy(service, {
+      get: (target, key) => {
+        const member = Reflect.get(target, key);
+        if (typeof member !== 'function') return member;
+        return (...args: unknown[]) => {
+          if (writes.has(String(key))) {
+            const start = key === 'start' ? (args[0] as { folder: string }) : undefined;
+            const reason = start === undefined ? this.refusal(String(args[0])) : this.refusal('', start.folder);
+            if (reason !== undefined) return Promise.reject(new ApiError(409, reason, 'moved_away'));
+          }
+          return Reflect.apply(member, target, args);
+        };
+      },
+    });
+  }
+  refusal(reference: string, folder?: string): string | undefined {
+    if (!this.#readable) return 'The moved-away stubs could not be checked; try again.';
+    const records = this.records();
+    const resolved = resolveAgentAddress(
+      reference,
+      records.map(each => ({ ...each, status: each.state })),
+    );
+    const id =
+      folder === undefined
+        ? resolved.kind === 'session'
+          ? resolved.id
+          : reference
+        : records.find(each => each.folder === folder)?.id;
+    const to = id === undefined ? undefined : this.#moved[id];
+    return to === undefined ? undefined : `This ferret moved to ${to.machine} and is read-only here.`;
+  }
+  async protect(id: FerretId, to: Destination): Promise<void> {
+    await this.loaded;
+    if (this.records().find(each => each.id === id)?.state !== 'stopped')
+      throw new Error('only a stopped ferret can become a moved-away stub');
+    const saved = await this.state.update(RelocationStubsFile, current => ({ moved: { ...current?.moved, [id]: to } }));
+    if (!saved.ok) throw new Error('the moved-away stub could not be protected');
+    this.#moved = saved.value.moved;
+  }
+}
 
 /**
  * What a ferret holds that may leave this machine in a move (`FerretsApi.relocationSource`, C-45): its journal and the
@@ -158,6 +254,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
 
   return {
     port: {
+      relocationProtect: async (ferret, to) => {
+        await ready();
+        await f.relocations.protect(ferret, to);
+        f.publishChanged(ferret);
+      },
       relocationSource: async ferret => {
         await ready();
         return registry.get(ferret) === undefined ? undefined : sourceOf(ferret);
@@ -193,12 +294,13 @@ function register(f: FerretsContext): FeatureContribution | undefined {
 
 /** Only Relocate is handed `relocationSource` and `relocationRestore`: it reads session files no other plugin may. */
 export function relocationPortFor(needer: string, port: Partial<FerretsApi>): Partial<FerretsApi> {
-  const { relocationSource, relocationRestore, ...rest } = port;
+  const { relocationSource, relocationRestore, relocationProtect, ...rest } = port;
   if (needer !== 'relocate') return rest;
   return {
     ...rest,
     ...(relocationSource === undefined ? {} : { relocationSource }),
     ...(relocationRestore === undefined ? {} : { relocationRestore }),
+    ...(relocationProtect === undefined ? {} : { relocationProtect }),
   };
 }
 

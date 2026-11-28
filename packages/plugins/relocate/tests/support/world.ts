@@ -65,6 +65,7 @@ export async function world(
     movedLedger,
     now: NOW_MS,
     relocation: new Relocation({
+      protect: async () => undefined,
       profileSecrets: async () => options.profileSecrets ?? [],
       signer: bundleSigner(sourceIdentity),
       redaction: options.redaction ?? {

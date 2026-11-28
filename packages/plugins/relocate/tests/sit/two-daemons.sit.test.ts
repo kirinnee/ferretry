@@ -10,6 +10,7 @@ import { carry, review } from '../../app/lib/move.ts';
 import { MovedDocumentSchema } from '../../contract/index.ts';
 import { normalizeRemote } from '../../daemon/lib/remote.ts';
 import { deviceClient } from '../support/device-client.ts';
+import { testPasskey } from '../support/passkey.ts';
 import { git, makeRepository, REMOTE_URL } from '../support/real-git.ts';
 
 setDefaultTimeout(180_000);
@@ -32,6 +33,7 @@ const LOGIN_SECRET = 'SYNTHETIC-LOGIN-VALUE-u16-5c1e9a';
 const ATTACHMENT = Buffer.from([0, 1, 2, 250, 251, 252, 0, 80, 78, 71, 13, 10, 26, 10, 255]);
 const TURN_ONE = 'the assigned task\n';
 const TURN_TWO = 'a second turn with “unicode” and a plain line\n';
+const EXPECTED_TRANSCRIPT = ['hello there', 'a reply', 'one more question', 'one more answer'];
 
 interface Sandbox {
   readonly name: string;
@@ -41,6 +43,7 @@ interface Sandbox {
   readonly daemonId: string;
   readonly full: { readonly id: string; readonly key: CryptoKey };
   readonly limited: { readonly id: string; readonly key: CryptoKey };
+  readonly passkey: Awaited<ReturnType<typeof testPasskey>>;
   admin: string;
   child?: ReturnType<typeof Bun.spawn>;
   logs: string;
@@ -124,6 +127,11 @@ async function sandbox(name: string): Promise<Sandbox> {
   );
   const port = await claimTestPort();
   const url = `http://127.0.0.1:${port}`;
+  const passkey = await testPasskey(full.id, 'https://ferretry.pages.dev', STAMP);
+  await writeFile(
+    path.join(home, 'state/access/passkeys.json'),
+    JSON.stringify({ format: 1, passkeys: [passkey.record] }),
+  );
   return {
     name,
     home,
@@ -131,6 +139,7 @@ async function sandbox(name: string): Promise<Sandbox> {
     daemonId,
     full: { id: full.id, key: full.key },
     limited: { id: limited.id, key: limited.key },
+    passkey,
     admin: '',
     logs: '',
     environment: {
@@ -181,7 +190,19 @@ async function boot(m: Sandbox, extra: Record<string, string> = {}): Promise<voi
 async function admin(m: Sandbox, method: string, route: string, body?: unknown) {
   const response = await fetch(`${m.url}${route}`, {
     method,
-    headers: { authorization: `Bearer ${m.admin}`, 'content-type': 'application/json' },
+    headers: {
+      authorization: `Bearer ${m.admin}`,
+      'content-type': 'application/json',
+      'x-fy-request-id': crypto.randomUUID(),
+      ...(route.endsWith('/stream')
+        ? {
+            upgrade: 'websocket',
+            connection: 'Upgrade',
+            'sec-websocket-version': '13',
+            'sec-websocket-key': 'c3ludGhldGljLXRlc3Qta2V5',
+          }
+        : {}),
+    },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const text = await response.text();
@@ -207,35 +228,24 @@ async function deviceOf(m: Sandbox, kind: 'full' | 'limited'): Promise<Device> {
 }
 
 /**
- * One machine as the app's flow sees it: the plugin's client, every body captured. `owner` is the host's own loopback token
- * (ungoverned, as at the machine: the SIT has no passkey to confirm a governed device's step-up); `full` and `limited` are the
- * synthetic paired devices, over the DIRECT carrier and under the real Gate.
+ * The app's flow, always a paired DIRECT device under the real Gate. Each press proves a test-only passkey on that daemon.
  */
-function machineOf(m: Sandbox, kind: 'owner' | 'full' | 'limited' = 'owner'): Machine {
+function machineOf(m: Sandbox, kind: 'full' | 'limited' = 'full'): Machine {
   return {
     daemon: m.daemonId,
     name: m.name,
-    press: async act => await act(),
+    press: async act => {
+      if (kind === 'full') await m.passkey.prove((await deviceOf(m, kind)).request);
+      return await act();
+    },
     client: {
       call: (async (route: string, init?: { params?: Record<string, string>; body?: unknown }) => {
         const [method = 'GET', template = ''] = route.split(' ');
         const target = template.replace(/:(\w+)/gu, (_, key: string) => encodeURIComponent(init?.params?.[key] ?? ''));
         const sent = init?.body === undefined ? '' : JSON.stringify(init.body);
-        let status: number;
-        let bytes: Uint8Array;
-        if (kind === 'owner') {
-          const response = await fetch(`${m.url}${target}`, {
-            method,
-            headers: { authorization: `Bearer ${m.admin}`, 'content-type': 'application/json' },
-            ...(init?.body === undefined ? {} : { body: sent }),
-          });
-          status = response.status;
-          bytes = new Uint8Array(await response.arrayBuffer());
-        } else {
-          const answer = await (await deviceOf(m, kind)).request(method, target, init?.body);
-          status = answer.status ?? 0;
-          bytes = new TextEncoder().encode(answer.body ?? '');
-        }
+        const answer = await (await deviceOf(m, kind)).request(method, target, init?.body);
+        const status = answer.status ?? 0;
+        const bytes = answer.bytes ?? new TextEncoder().encode(answer.body ?? '');
         const got = new TextDecoder('latin1').decode(bytes);
         traffic.push({ machine: m.name, method, path: target, sent, got });
         if (status >= 400) {
@@ -461,6 +471,7 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
     messages?: string[];
     head?: string;
     diff?: string;
+    worktree?: Record<string, string>;
   } = {};
   let moved: Awaited<ReturnType<typeof carry>>;
   let reviewed: Awaited<ReturnType<typeof review>>;
@@ -479,6 +490,8 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
       ),
     };
     sourceBefore.messages = await messages(a, 'f1');
+    expect(sourceBefore.messages).toEqual(EXPECTED_TRANSCRIPT);
+    sourceBefore.worktree = await hashes(fixture.folder);
     sourceBefore.head = git(fixture.folder, 'rev-parse', 'HEAD');
     sourceBefore.diff = git(fixture.folder, 'diff', 'HEAD');
     reviewed = await review('f1', machineOf(a), machineOf(b));
@@ -535,7 +548,7 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
   });
 
   it('B’s reader shows the same transcript, and the scripted harness was launched in B’s own tree', async () => {
-    expect(await messages(b, moved.received.ferretId)).toEqual(sourceBefore.messages as string[]);
+    expect(await messages(b, moved.received.ferretId)).toEqual(EXPECTED_TRANSCRIPT);
     const until = Date.now() + 30_000;
     let launched = '';
     while (Date.now() < until && launched === '') {
@@ -564,6 +577,7 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
     };
     expect(after).toEqual(sourceBefore.tree as Record<string, string>);
     expect(git(fixture.folder, 'rev-parse', 'HEAD')).toBe(sourceBefore.head as string);
+    expect(await hashes(fixture.folder)).toEqual(sourceBefore.worktree as Record<string, string>);
     expect(await readFile(path.join(fixture.folder, '.env'), 'utf8')).toBe(`${fixture.secrets['.env']}\n`);
     const ledger = MovedDocumentSchema.parse(await machineOf(a).client.call('GET /v1/relocate/moved'));
     expect(ledger.moved.f1).toMatchObject({ daemonId: b.daemonId, ferretId: moved.received.ferretId });
@@ -571,7 +585,55 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
     expect(still.status, still.text).toBe(200);
   });
 
-  it('no secret value, key or plaintext crossed anywhere the app could see', () => {
+  it('A’s daemon refuses every mutation of the moved stub and names its destination', async () => {
+    for (const [method, route, body] of [
+      ['POST', '/v1/ferrets/f1/rename', { name: 'changed-name' }],
+      ['POST', '/v1/ferrets/f1/resume', {}],
+      ['POST', '/v1/ferrets/f1/send', { message: 'should not run' }],
+      ['POST', '/v1/ferrets/f1/stop', {}],
+      ['POST', '/v1/ferrets', { folder: fixture.folder, harness: 'claude-code', mode: 'interactive' }],
+      ['POST', '/v1/ferrets/f1/terminals', { name: 'should-not-open' }],
+      ['PATCH', '/v1/ferrets/f1/terminals/t1', { name: 'should-not-rename' }],
+      ['DELETE', '/v1/ferrets/f1/terminals/t1', undefined],
+      ['POST', '/v1/ferrets/f1/console/input', { text: 'should-not-type' }],
+      ['GET', '/v1/ferrets/f1/terminals/t1/stream', undefined],
+      ['POST', '/v1/ferrets/MOVER/send', { message: 'should-not-run' }],
+    ] as const) {
+      const refused = await admin(a, method, route, body);
+      expect(refused.status, `${method} ${route}: ${refused.text}`).toBe(409);
+      expect(refused.json).toMatchObject({
+        code: 'moved_away',
+        error: `This ferret moved to beta and is read-only here.`,
+      });
+    }
+    expect((await admin(a, 'GET', '/v1/ferrets/f1')).json.movedTo).toMatchObject({
+      machine: 'beta',
+      daemonId: b.daemonId,
+    });
+    expect(await hashes(fixture.folder)).toEqual(sourceBefore.worktree as Record<string, string>);
+    expect(await messages(a, 'f1')).toEqual(EXPECTED_TRANSCRIPT);
+  });
+
+  it('the source fence survives restarting its daemon', async () => {
+    for (const [key, device] of devices)
+      if (key.startsWith(`${a.name}:`)) {
+        device.close();
+        devices.delete(key);
+      }
+    a.child?.kill('SIGTERM');
+    await a.child?.exited;
+    a.logs = '';
+    await boot(a);
+    const refused = await admin(a, 'POST', '/v1/ferrets/f1/rename', { name: 'after-restart' });
+    expect(refused.status).toBe(409);
+    expect(refused.json).toMatchObject({
+      code: 'moved_away',
+      error: 'This ferret moved to beta and is read-only here.',
+    });
+    expect((await admin(a, 'GET', '/v1/ferrets/f1')).json.movedTo).toMatchObject({ machine: 'beta' });
+  });
+
+  const noSecrets = () => {
     const everything = traffic.map(line => `${line.sent}\n${line.got}`).join('\n');
     expect(traffic.length).toBeGreaterThan(8);
     for (const value of [LOGIN_SECRET, ...Object.values(fixture.secrets)])
@@ -581,7 +643,7 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
       expect(everything.includes(plain)).toBe(false);
     expect(everything.includes(ATTACHMENT.toString('base64'))).toBe(false);
     expect(/BEGIN (PRIVATE|OPENSSH) /u.test(everything)).toBe(false);
-  });
+  };
 
   it('a limited device is refused on both machines, and nothing changed there', async () => {
     const limitedA = machineOf(a, 'limited');
@@ -600,7 +662,11 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
   });
 
   it('a governed device holding every grant is still asked for its passkey on each machine before any step', async () => {
-    // The SIT has no passkey to give, so this is the Gate's own answer: the app's `press` is what raises that prompt, per machine.
+    // A fresh app session has no proof, even though the previous session proved its own passkey on every press.
+    for (const m of [a, b]) {
+      devices.get(`${m.name}:full`)?.close();
+      devices.delete(`${m.name}:full`);
+    }
     const fullA = machineOf(a, 'full');
     const fullB = machineOf(b, 'full');
     for (const refused of [
@@ -611,4 +677,6 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
     ])
       expect((refused as { code?: string }).code).toBe('grant_step_up_required');
   });
+
+  it('no secret value, key or plaintext crossed, including every refusal body', noSecrets);
 });

@@ -81,6 +81,11 @@ export default implementDaemon(manifest, {
       redaction: kernel.redaction,
       crypto,
       ferrets: needs.ferrets,
+      protect: async (ferret, to) => {
+        if (needs.ferrets.relocationProtect === undefined)
+          throw new RelocateRefused(409, 'this daemon cannot protect a moved-away stub', 'move_refused');
+        await needs.ferrets.relocationProtect(ferret, to);
+      },
       treeOf: folder => kernelWorkingTree(kernel, folder),
       daemonId: kernel.identity.daemonId,
       clock: kernel.clock,

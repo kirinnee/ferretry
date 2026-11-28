@@ -14,7 +14,6 @@ import {
   ListOrdered,
   Plug,
   Puzzle,
-  Server,
   ShieldQuestion,
   Sparkles,
   Trash2,
@@ -35,7 +34,6 @@ const OFFERED_ROW_ICONS: Readonly<Record<string, LucideIcon>> = {
   'clear-stuck-messages': Trash2,
   'dismiss-cancelled-messages': CircleX,
   'open-queue': ListOrdered,
-  'move-machine': Server,
 };
 
 /** The icon an offered row is drawn with. */

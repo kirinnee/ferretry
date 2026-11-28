@@ -6,6 +6,7 @@ import {
   encodeFrame,
   encodeHandshakeMessage,
   FRAME_KINDS,
+  fromBase64Url,
   openChannel,
   openRecord,
   sealRecord,
@@ -87,7 +88,13 @@ export async function deviceClient(url: string, daemon: string, device: string, 
       const opened = await openRecord(codec, channel, frame);
       if (!opened.ok) throw new Error(opened.reason);
       channel = opened.state;
-      return JSON.parse(new TextDecoder().decode(opened.plaintext)) as { t: string; status?: number; body?: string };
+      return JSON.parse(new TextDecoder().decode(opened.plaintext)) as {
+        t: string;
+        status?: number;
+        body?: string;
+        headers?: Record<string, string>;
+        more?: boolean;
+      };
     };
     const appSession = toBase64Url(codec.randomBytes(16));
     const proof = await codec.signEd25519(
@@ -109,7 +116,17 @@ export async function deviceClient(url: string, daemon: string, device: string, 
         });
         const response = await receive();
         if (response.t !== 'res') throw new Error('missing request response');
-        return response;
+        let receivedBody = response.body ?? '';
+        let more = response.more;
+        while (more) {
+          const part = await receive();
+          if (part.t !== 'res-more') throw new Error('missing response continuation');
+          receivedBody += part.body ?? '';
+          more = part.more;
+        }
+        const encoding = response.headers?.['content-transfer-encoding'];
+        const bytes = encoding === 'base64url' ? (fromBase64Url(receivedBody) ?? undefined) : undefined;
+        return { ...response, body: receivedBody, ...(bytes === undefined ? {} : { bytes }) };
       },
     };
   } catch (error) {

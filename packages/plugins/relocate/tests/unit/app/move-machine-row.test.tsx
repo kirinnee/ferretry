@@ -26,10 +26,22 @@ afterEach(async () => {
 
 const client = { call: async () => ({ moved: {} }) } as unknown as PluginClient;
 
-async function mountRow(daemons: readonly string[], canControl = true) {
+async function mountRow(daemons: readonly string[], canControl = true, refused?: string, capability = 'fleet') {
   noteClientDaemon(client, 'alpha');
   const harness = deviceViewHarness({ plugin: 'relocate', fragments: [] });
-  harness.setRows(daemons.map(daemon => fakeReachRow({ daemon, client, machine: `${daemon}-box` })));
+  harness.setRows(
+    daemons.map(daemon => ({
+      ...fakeReachRow({ daemon, client, machine: `${daemon}-box` }),
+      ...(daemon === refused
+        ? {
+            authority: (asked: string) =>
+              asked === capability
+                ? { kind: 'refused' as const, refusal: 'device-not-granted' as const }
+                : { kind: 'open' as const },
+          }
+        : {}),
+    })),
+  );
   const offers: (readonly [string, ActionsRowOffer | null])[] = [];
   const Panel = createMoveMachineRowPanel(client, createMovedStore(client)) as unknown as FC<Record<string, unknown>>;
   await interact(async () => {
@@ -79,4 +91,16 @@ describe('the move-machine row', () => {
     const offers = await mountRow(['alpha', 'beta'], false);
     expect(offers.some(([, row]) => row !== null)).toBe(false);
   });
+
+  for (const capability of ['fleet', 'filesystem'])
+    it(`reads source ${capability} authority even when the host defaults canControl to true`, async () => {
+      const offers = await mountRow(['alpha', 'beta'], true, 'alpha', capability);
+      expect(offers.some(([, row]) => row !== null)).toBe(false);
+    });
+
+  for (const capability of ['fleet', 'filesystem'])
+    it(`excludes a target whose ${capability} authority refuses the move`, async () => {
+      const offers = await mountRow(['alpha', 'beta'], true, 'beta', capability);
+      expect(offers.some(([, row]) => row !== null)).toBe(false);
+    });
 });

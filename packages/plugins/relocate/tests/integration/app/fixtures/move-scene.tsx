@@ -8,6 +8,7 @@
 import { ScreenHrefProvider, type DaemonReach } from '@ferretry/app';
 import { createRoot } from 'react-dom/client';
 import { MoveMachine } from '../../../../app/features/move-machine.tsx';
+import { MovedMark } from '../../../../app/features/moved-mark.tsx';
 
 const params = new URLSearchParams(window.location.search);
 const root = document.documentElement;
@@ -16,6 +17,8 @@ const style = params.get('style');
 if (style !== null) root.dataset.style = style;
 const hold = params.get('hold') === '1';
 const refuse = params.get('refuse') === '1';
+const recovery = params.get('recovery') === '1';
+document.body.style.fontFamily = 'DejaVu Sans';
 
 const SOURCE = `fy_daemon_${'A'.repeat(43)}`;
 const TARGET = `fy_daemon_${'B'.repeat(43)}`;
@@ -121,6 +124,15 @@ const answerOf = (daemon: string) => async (route: string, init?: { params?: Rec
         ferretId: 'g9',
         folder: '/work/project-feature-handoff-ab12',
         movedFrom: { daemonId: SOURCE, ferretId: 'f1' },
+        ...(recovery
+          ? {
+              recovery: {
+                code: 'session_unrestored',
+                state: 'stopped',
+                message: 'Turns and attachments could not be restored.',
+              },
+            }
+          : {}),
       };
   }
   throw new Error(`unscripted ${route}`);
@@ -142,18 +154,28 @@ const reach = (daemon: string, machine: string, online = true): DaemonReach =>
 
 const FROM = reach(SOURCE, 'Desk');
 const CANDIDATES = [reach(TARGET, 'Laptop'), reach(`fy_daemon_${'C'.repeat(43)}`, 'Studio', false)];
+const MOVED = {
+  moved: { f1: { daemonId: TARGET, ferretId: 'g9', machine: 'Laptop', at: '2026-11-27T00:00:00.000Z' as never } },
+};
+const movedStore = { snapshot: () => MOVED, subscribe: () => () => undefined, refresh: async () => undefined };
 
 function Dialog() {
   return (
     <ScreenHrefProvider href={(daemon, _plugin, _screen, ids) => `/d/${daemon}/chat/${ids?.ferret ?? ''}`}>
-      <MoveMachine
-        candidates={CANDIDATES}
-        ferret="f1"
-        from={FROM}
-        name="Zoe"
-        onClose={() => undefined}
-        onMoved={() => undefined}
-      />
+      {params.get('moved') === '1' ? (
+        <div data-stub-scene="" style={{ padding: 24 }}>
+          <MovedMark ferret="f1" store={movedStore} />
+        </div>
+      ) : (
+        <MoveMachine
+          candidates={CANDIDATES}
+          ferret="f1"
+          from={FROM}
+          name="Zoe"
+          onClose={() => undefined}
+          onMoved={() => undefined}
+        />
+      )}
     </ScreenHrefProvider>
   );
 }

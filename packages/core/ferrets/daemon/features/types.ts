@@ -18,6 +18,7 @@ import type { FerretsService } from '../lib/ferrets/service.ts';
 import type { LaunchInstructionSectionId } from '../lib/protocol/session.ts';
 import type { FerretRegistry } from '../lib/registry/registry.ts';
 import type { StateHomeLaunchReach } from '../lib/route-security/state-home.ts';
+import type { RelocationFence } from './relocation-source.feature.ts';
 
 /**
  * A Ferrets FEATURE: one file under `daemon/features/`, one default export, nothing else to edit. The generator
@@ -64,6 +65,7 @@ type WaitDocument = typeof FerretWaitFiles extends StateFileDef<string, infer Sh
 
 /** The shared composition every feature registers against: what `index.ts` builds once, in one place. */
 export interface FerretsContext {
+  readonly relocations: RelocationFence;
   /** The context the kernel handed Ferrets' `build` (a feature that composes another module's `needs` takes it whole). */
   readonly daemon: Daemon;
   readonly kernel: Daemon['kernel'];

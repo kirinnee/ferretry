@@ -109,6 +109,10 @@ interface FerretsApiAtBase {
   runtimeControl?: RuntimeControlApi['runtimeControl'];
   relocationSource?(ferret: FerretId): Promise<RelocationSource | undefined>;
   relocationRestore?(ferret: FerretId, files: readonly RelocatedFile[]): Promise<void>;
+  relocationProtect?(
+    ferret: FerretId,
+    to: { readonly daemonId: string; readonly ferretId: string; readonly machine: string },
+  ): Promise<void>;
   forks?: ForksApi['forks'];
 }
 

@@ -70,13 +70,19 @@ never move itself or another ([grants.md](grants.md)). Reading the stub ledger n
   outside the tree, no `.git/`, no escaping link, no submodule) **before** any persistent git write.
 - **A failure takes back exactly what this import made and nothing else**; the moved working tree is written only through the
   kernel's `worktrees` root, which refuses a `..` or a link out.
-- **The source keeps every byte.** After a move it is stopped, read-only, and says where the ferret went; nothing of it is deleted.
+- **The source keeps every original byte.** Completing a move permanently protects its stopped source copy. The daemon refuses
+  mutations (including send, resume, rename, start in its folder, terminal input/create/delete and socket access) with
+  “This ferret moved to <machine> and is read-only here.” This survives a daemon restart and turning Relocate off. The app hides
+  mutation actions, the composer and terminal modes, and shows “Moved to <machine>” with “Open there”. The original worktree,
+  transcript, turns and attachments remain untouched; a separate daemon-owned fence records the destination. There is no
+  owner-remove exception or resume action for this stub.
+- **A partial import is a recovery receipt.** If turns/attachments or origin could not be recorded after launch, the app shows
+  the recovery message, the target's actual running/stopped/unknown state, its ferret id and its folder, with an Open action.
 
 ## 6. Declared gaps
 
 - **The journal** (`history.jsonl`) is sealed and verified but is not replayed into the new ferret's own journal: it stays with
   the stub on the source, and the conversation carries the words.
-- **A stopped source ferret** is not stopped from resuming by the daemon; "Resume ferret" on the stub is still drawn.
 - **An interrupted move** restarts from the beginning; a chunked resume over the relay from a phone is a later unit.
 - **The fleet list's "Moved to" mark** is drawn only for a row that has a runtime, as every list-row mark is.
 - **The real Claude or Codex resume on the target** is the owner's walk; the acceptance runs a scripted harness CLI.
