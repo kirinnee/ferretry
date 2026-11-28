@@ -52,12 +52,14 @@ function ownStatuslineCommand(settings: KitSettingsObject): string | undefined {
 
 /** The keys every Claude runtime's settings carry: the status line, chained with the person's own command. */
 function plumbing(input: KitPlumbingInput): readonly KitPlumbingEntry[] {
+  const { statusLine } = input;
+  if (statusLine === undefined) return [];
   return [
     { key: 'statusLine.type', path: ['statusLine', 'type'], value: 'command' },
     {
       key: 'statusLine.command',
       path: ['statusLine', 'command'],
-      value: input.statusLine(ownStatuslineCommand(input.settings)),
+      value: statusLine(ownStatuslineCommand(input.settings)),
     },
   ];
 }
