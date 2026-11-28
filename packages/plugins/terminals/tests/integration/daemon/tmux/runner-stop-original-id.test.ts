@@ -10,6 +10,7 @@ import { TmuxRunner, ferretTmuxSession } from '../../../../daemon/adapters/tmux/
 import { agentScopeName, ferretSliceName } from '../../../../daemon/lib/cgroups/scope.ts';
 
 const homes: string[] = [];
+const linuxTest = test.skipIf(process.platform !== 'linux');
 afterEach(async () => {
   for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
 });
@@ -113,14 +114,14 @@ test('R4-1: schema-valid ids that collapse to one unit part require the ORIGINAL
   expect(ownedScopePath(unit, metadata, foreign)).toBe(`/fleet/${slice}/${unit}`);
 });
 
-test('R4-1: a colliding foreign record is refused before enumeration and sends zero signals', async () => {
+linuxTest('R4-1: a colliding foreign record is refused before enumeration and sends zero signals', async () => {
   const w = await world('own-', 'own', true);
   await w.stop('now');
   expect(w.enumerations()).toBe(0);
   expect(w.signals).toEqual([]);
 });
 
-test('R4-1: the original id still stops its own helper when its unit part collides with another id', async () => {
+linuxTest('R4-1: the original id still stops its own helper when its unit part collides with another id', async () => {
   const w = await world('own-', 'own-', true);
   await w.stop('now');
   expect(w.signals).toEqual(['SIGTERM:10', 'SIGTERM:12', 'SIGKILL:12']);
@@ -128,26 +129,32 @@ test('R4-1: the original id still stops its own helper when its unit part collid
 });
 
 for (const record of [false, true]) {
-  test(`R4-2: attaching remembers the original 78-char id for a later stop (${record ? 'valid' : 'missing'} record)`, async () => {
-    const original = 'a'.repeat(78);
-    const w = await world(original, original, record);
-    await w.attachAndStop();
-    expect(w.signals).toEqual(['SIGTERM:10', 'SIGTERM:12', 'SIGKILL:12']);
-    expect(w.proofs.every(id => id === original)).toBe(true);
-  });
+  linuxTest(
+    `R4-2: attaching remembers the original 78-char id for a later stop (${record ? 'valid' : 'missing'} record)`,
+    async () => {
+      const original = 'a'.repeat(78);
+      const w = await world(original, original, record);
+      await w.attachAndStop();
+      expect(w.signals).toEqual(['SIGTERM:10', 'SIGTERM:12', 'SIGKILL:12']);
+      expect(w.proofs.every(id => id === original)).toBe(true);
+    },
+  );
   for (const stale of [false, true]) {
     for (const how of ['now', 'polite'] as const) {
-      test(`R4-2: 78-char original id ends its helper (${record ? 'valid' : 'missing'} record, ${stale ? 'stale' : 'live'} handle, ${how})`, async () => {
-        const original = 'a'.repeat(78);
-        expect(ferretTmuxSession(original).slice(3)).not.toBe(original);
-        const w = await world(original, original, record, stale);
-        await w.stop(how);
-        expect(w.signals).toEqual(['SIGTERM:10', 'SIGTERM:12', 'SIGKILL:12']);
-        expect(w.proofs.length).toBeGreaterThan(0);
-        expect(w.proofs.every(id => id === original)).toBe(true);
-        if (record) expect(w.enumerations()).toBeGreaterThan(0);
-        else expect(w.enumerations()).toBe(0);
-      });
+      linuxTest(
+        `R4-2: 78-char original id ends its helper (${record ? 'valid' : 'missing'} record, ${stale ? 'stale' : 'live'} handle, ${how})`,
+        async () => {
+          const original = 'a'.repeat(78);
+          expect(ferretTmuxSession(original).slice(3)).not.toBe(original);
+          const w = await world(original, original, record, stale);
+          await w.stop(how);
+          expect(w.signals).toEqual(['SIGTERM:10', 'SIGTERM:12', 'SIGKILL:12']);
+          expect(w.proofs.length).toBeGreaterThan(0);
+          expect(w.proofs.every(id => id === original)).toBe(true);
+          if (record) expect(w.enumerations()).toBeGreaterThan(0);
+          else expect(w.enumerations()).toBe(0);
+        },
+      );
     }
   }
 }
