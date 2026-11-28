@@ -434,6 +434,21 @@ describe('parseStoredAttachmentManifest', () => {
 });
 
 describe('ferretScopedAttachments', () => {
+  it('looks up parsed metadata without reading original bytes, scoped to an existing session', async () => {
+    const { store, originals } = harness();
+    const uploaded = await uploadPdf(store);
+    const entry = originals.tree('session-a').get(uploaded.id);
+    if (entry === undefined) throw new Error('fixture attachment missing');
+    delete entry.original;
+    const scoped = ferretScopedAttachments(store, async id => id !== 'gone');
+
+    should(await scoped.lookup('session-a', uploaded.id)).deepEqual(uploaded);
+    should(await refusal(scoped.lookup('session-b', uploaded.id))).have.property('failure', 'not_found');
+    should(await refusal(scoped.lookup('gone', uploaded.id))).have.property('failure', 'not_found');
+    entry.manifest = '{}';
+    should(await refusal(scoped.lookup('session-a', uploaded.id))).have.property('failure', 'corrupt');
+  });
+
   it('reaches the store only for a session that exists, and zeroes a vanished session plaintext', async () => {
     const { store, decrypted } = harness();
     const live = new Set(['session-a']);

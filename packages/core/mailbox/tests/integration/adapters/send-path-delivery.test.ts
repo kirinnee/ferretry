@@ -263,10 +263,10 @@ describe('SendPathQueueTransport', () => {
 });
 
 describe('typedRequestOf', () => {
-  it('should not carry attachments to the typing send: they were handed to the agent when the message was accepted', () => {
+  it('should retain delivered attachment ids as metadata for the typing send’s ledger', () => {
     const request = typedRequestOf(one(message({ attachmentIds: ['a-1'] })));
 
-    should(request).not.have.property('attachmentIds');
+    should(request.attachmentIds).eql(['a-1']);
   });
 
   it('should mark a Monitor wake as a notice that never revives, and no other daemon sender as one', () => {

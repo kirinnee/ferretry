@@ -188,7 +188,10 @@ export default {
           stamp: async (log, ferret) =>
             (await kernel.state.version(log === 'sends' ? SENDS_STATE : QUEUE_STATE, ferret))?.etag ?? 'absent',
           // The stored originals a send hands to the agent (the reading feature owns the store).
-          attachments: { download: (ferret, id) => built(f.late.reading, 'reading half').download(ferret, id) },
+          attachments: {
+            lookup: (ferret, id) => built(f.late.reading, 'reading half').lookupAttachment(ferret, id),
+            download: (ferret, id) => built(f.late.reading, 'reading half').download(ferret, id),
+          },
           clearSentDraft: sentDraftClearer(built(f.late.drafts, 'shared draft')),
         };
         return {
