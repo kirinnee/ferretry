@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { QueuedMessage } from '../../../contract/index.ts';
 import should from 'should';
-import { requestOf } from '../../../daemon/adapters/send-path-delivery.ts';
+import { requestOf, typedRequestOf } from '../../../daemon/adapters/send-path-delivery.ts';
 import { at } from '../../support/instant.ts';
 
 /** How a queue delivery becomes the one request the send path takes: a single message as it is, a batch folded together. */
@@ -74,5 +74,10 @@ describe('the send path request for a queue delivery', () => {
 
   it('refuses an empty delivery', () => {
     should(() => requestOf({ sendId: 'a', members: [] })).throw();
+  });
+
+  it('keeps delivered attachment metadata through the typing transport for the hand-off ledger', () => {
+    const delivery = { sendId: 'a', members: [message('a', { attachmentIds: ['att-1'] })] };
+    should(typedRequestOf(delivery).attachmentIds).eql(['att-1']);
   });
 });

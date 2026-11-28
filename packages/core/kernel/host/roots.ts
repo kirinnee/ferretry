@@ -166,7 +166,7 @@ const SESSION_FOLDER = /^[a-z0-9][a-z0-9_-]{0,127}$/u;
  * (`<ferret>/attachments`, so a writer of files an agent is sent holds THAT folder alone, with no link from the home down
  * to it, instead of the whole session where a link to a sibling folder would still be inside the fence), or its own
  * `media` folder (`<ferret>/media`: what its agent made to show the person, read back by the file route's
- * `scope=media`, held the same no-link way). Nothing else.
+ * `scope=media`, held the same no-link way), or `channel` for queued-message reads. Nothing else.
  */
 function sessionFolder(subfolder: string | undefined): string | undefined {
   if (subfolder === undefined) return undefined;
@@ -175,9 +175,9 @@ function sessionFolder(subfolder: string | undefined): string | undefined {
 }
 const SESSION_ATTACHMENTS = '/attachments';
 const SESSION_MEDIA = '/media';
-/** The nested folder a `sessions` subfolder names (`/attachments` or `/media`), or `undefined` for a ferret's own folder. */
+/** The nested folder a `sessions` subfolder names (`/attachments`, `/media`, `/channel`), or `undefined` for its own folder. */
 const nestedSessionScope = (subfolder: string): string | undefined =>
-  [SESSION_ATTACHMENTS, SESSION_MEDIA].find(nested => subfolder.endsWith(nested));
+  [SESSION_ATTACHMENTS, SESSION_MEDIA, '/channel'].find(nested => subfolder.endsWith(nested));
 
 /**
  * The folder below an internal root's anchor that a handle scoped to `subfolder` names, or `undefined` when the
