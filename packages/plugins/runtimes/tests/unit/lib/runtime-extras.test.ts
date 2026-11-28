@@ -66,6 +66,11 @@ describe('runtimeExtras', () => {
         message: unsupportedHarnessSentence('codex'),
       });
     }
-    expect(missingKitRefusal('codex', { runtimeExtras: () => ({ env: {} }) })).toBeUndefined();
+    expect(
+      missingKitRefusal('codex', {
+        runtimeExtras: () => ({ env: {} }),
+        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [] } }),
+      }),
+    ).toBeUndefined();
   });
 });

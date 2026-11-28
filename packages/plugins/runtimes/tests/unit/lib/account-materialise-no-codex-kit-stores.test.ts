@@ -1,5 +1,5 @@
 /**
- * A Codex runtime whose kit is absent, or whose kit gives no launch line, is refused by the ONE runtime-wide
+ * A Codex runtime whose kit is absent, or whose kit gives no runtime extras, no fixed layer or no launch line, is refused by the ONE runtime-wide
  * `harness-unsupported` decision in EVERY credential store: environment, the person's own (host) home even when it cannot be
  * named, and a Ferretry-kept login with no sign-in file. Its login then has nothing further to say, nothing is written into
  * its home, both launch modes of its wrapper refuse, and Claude still publishes (E-276 PR 9, review r1 MUST 1).
@@ -85,6 +85,7 @@ const claude = REAL_KITS.get('claude') as RuntimesHarnessKit;
 const codex = REAL_KITS.get('codex') as RuntimesHarnessKit;
 const wrapperless = { ...codex, wrapper: undefined } as RuntimesHarnessKit;
 const extrasless = { ...codex, runtimeExtras: undefined } as RuntimesHarnessKit;
+const fixedlayerless = { ...codex, fixedLayer: undefined } as RuntimesHarnessKit;
 
 describe.each([
   ['no Codex kit', new Map([['claude', claude]] as const)],
@@ -93,6 +94,13 @@ describe.each([
     new Map([
       ['claude', claude],
       ['codex', extrasless],
+    ] as const),
+  ],
+  [
+    'a Codex kit with no fixed layer',
+    new Map([
+      ['claude', claude],
+      ['codex', fixedlayerless],
     ] as const),
   ],
   [

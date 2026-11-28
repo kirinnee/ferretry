@@ -15,7 +15,7 @@ import path from 'node:path';
 import should from 'should';
 
 import { unavailableSharedHistory } from '../../daemon/adapters/shared-history-unavailable.ts';
-import { CODEX_QUESTIONS_OFF_OVERRIDE, codexTrustOverride } from '../../daemon/lib/account/fixed-layer.ts';
+import { CODEX_QUESTIONS_OFF_OVERRIDE, tomlString } from '../../daemon/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../daemon/lib/account/ids.ts';
 import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
 import { REAL_KITS } from '../support/real-kits.ts';
@@ -565,7 +565,7 @@ describe('a runtime wrapper, run', () => {
       '-c',
       CODEX_QUESTIONS_OFF_OVERRIDE,
       '-c',
-      codexTrustOverride(cwd),
+      `projects={${tomlString(cwd)}={trust_level="trusted"}}`,
       'resume',
       '--last',
     ]);
