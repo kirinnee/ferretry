@@ -243,7 +243,8 @@ const hooksFileDest = (kit: AssetsKit | undefined): string | undefined => harnes
 
 /** Where a document lands: what the kit says, or (a kit that names no settings file or instructions file) where the harness has always kept it. */
 const destOf = (harness: HarnessKind, kit: AssetsKit | undefined, field: 'memory' | 'skills' | 'settings') =>
-  harnessAsset(kit, field, kitDocumentsOf(harness)) ?? kitless(harness);
+  // Present for every harness: the kit says them, or `kitDocumentsOf` does, and the skills folder is every harness's.
+  harnessAsset(kit, field, kitDocumentsOf(harness)) as NonNullable<ReturnType<typeof harnessAsset>>;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -320,10 +321,6 @@ export { isSseUrl };
  * What the kit of `harness` gives for `member`. A harness Runtimes has no behaviour for is refused by name whatever kit it
  * is handed, and a known harness without its kit (or without that member) is refused too: no kit stands in for another's.
  */
-function kitless(harness: string): never {
-  throw new UnsupportedHarnessError(harness);
-}
-
 function kitMember<M extends 'renderMcpServer' | 'configDocuments' | 'plumbing'>(
   harness: string,
   kit: RuntimesHarnessKit | undefined,
