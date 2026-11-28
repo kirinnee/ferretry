@@ -46,7 +46,7 @@
  */
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames } from '../foreign.ts';
-import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
+import { harnessAsset, HARNESS_ASSETS, ownedSkillEntriesOf, type HarnessAssetTable } from '../assets.ts';
 import {
   isSseUrl,
   type KitPlumbingEntry,
@@ -640,7 +640,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   if (instructions !== undefined) entries.push(instructions);
 
   const skillsDest = destOf(assets, harness, 'skills').dest;
-  const reserved = HARNESS_OWNED_SKILL_ENTRIES[harness];
+  const reserved = ownedSkillEntriesOf(harness, input.kit);
   for (const { item, layer } of resolved.skills) {
     if (input.bodies?.skillItems?.has(item) === false) continue;
     if (reserved.includes(item)) {

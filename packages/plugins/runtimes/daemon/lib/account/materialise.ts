@@ -38,7 +38,7 @@ import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { looksSecret, namesCredential } from '@ferretry/std/credential-words';
 import type { z } from 'zod';
 import type { CompactAtSchema, RuntimesHarnessKit } from '../../../contract/index.ts';
-import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
+import { HARNESS_ASSETS, harnessAsset, ownedSkillEntriesOf } from '../assets.ts';
 import {
   buildFleetManifest,
   type FleetManifestModel,
@@ -337,10 +337,11 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
     // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    // ...and so is one whose kit gives no launch line (E-276 PR 8), in the same words.
+    // ...and so is one whose kit gives no launch line or no command or home variable (E-276 PRs 8 and 13), in the same words.
     const kitMissing: KitRefusal | undefined =
       missingKitRefusal(harness, kit) ??
-      (isKind(harness, 'claude') && kit?.wrapper === undefined
+      (isKind(harness, 'claude') &&
+      (kit?.wrapper === undefined || kit.command === undefined || kit.homeEnv === undefined)
         ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
         : undefined);
     const store = resolveCredentialStore(
@@ -503,6 +504,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
           codexRules: fixed?.codexRules,
           credentialLink: codexCredentialLink(home, store),
           layout,
+          kit,
         }),
       );
 
@@ -652,6 +654,8 @@ interface ConfigDirectoryInput {
   readonly codexCatalog: { readonly file: string; readonly text: string } | undefined;
   readonly credentialLink: ReturnType<typeof codexCredentialLink>;
   readonly layout: FleetLayout;
+  /** What this harness's plugin hands Runtimes (its own skill entries are read from it). */
+  readonly kit: RuntimesHarnessKit | undefined;
 }
 
 /**
@@ -705,7 +709,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
     path: skillsContainer,
     keep: [
       ...skillEntries.map(entry => entry.dest.slice(skillsDest.length + 1)),
-      ...HARNESS_OWNED_SKILL_ENTRIES[harness],
+      ...ownedSkillEntriesOf(harness, input.kit),
     ],
     // Skills the person or the harness added by hand live here too: only what the last apply recorded may go.
     record,

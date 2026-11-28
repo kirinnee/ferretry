@@ -59,17 +59,28 @@ export interface ResolvedCommand {
 export const MANAGED_MARKER =
   "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten";
 
-/** The executable each harness launches. */
-const HARNESS_BINARIES: Readonly<Record<HarnessKind, string>> = {
-  claude: 'claude',
-  codex: 'codex',
-};
+/** The executable Codex launches; Claude's is its plugin's word (`RuntimesHarnessKit.command`). */
+const CODEX_BINARY = 'codex';
 
-/** The variable each harness reads its configuration directory from. */
-const HARNESS_HOME_ENV: Readonly<Record<HarnessKind, string>> = {
-  claude: 'CLAUDE_CONFIG_DIR',
-  codex: 'CODEX_HOME',
-};
+/** The variable Codex reads its configuration directory from; Claude's is its plugin's word (`RuntimesHarnessKit.homeEnv`). */
+const CODEX_HOME_ENV = 'CODEX_HOME';
+
+/**
+ * A word of a harness's own that its plugin gives (Claude's command, its home variable). A harness whose plugin gave none cannot
+ * be launched: it is refused by name and never handed another harness's word.
+ */
+function kitWord(harness: string, word: string | undefined): string {
+  if (word === undefined) throw new UnsupportedHarnessError(harness);
+  return word;
+}
+
+/** The executable `harness` launches. */
+const binaryOf = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): string =>
+  byHarness<string>(harness, { claude: () => kitWord(harness, kit?.command), codex: () => CODEX_BINARY });
+
+/** The variable `harness` reads its configuration directory from. */
+const homeEnvOf = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): string =>
+  byHarness<string>(harness, { claude: () => kitWord(harness, kit?.homeEnv), codex: () => CODEX_HOME_ENV });
 
 const ENV_REFERENCE = /^\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})$/;
 
@@ -405,9 +416,8 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ].join('\n');
   }
   const environment = environmentLines(input.env, input.secretsFile);
-  const harness =
-    input.harnessCommand === undefined ? HARNESS_BINARIES[input.harness] : shellPath(input.harnessCommand);
   const { kit } = input;
+  const harness = input.harnessCommand === undefined ? binaryOf(input.harness, kit) : shellPath(input.harnessCommand);
   const defaults = defaultModelArgs(input.harness, input.defaultModel, kit);
   // What the wrapper supplies itself (the question tool's flag), so the exec line does not repeat the fixed layer's copy.
   // Claude's plugin names its own; every other harness drops the same flag as before, since a Codex settings component may carry it.
@@ -455,7 +465,7 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ...header,
     ...sourceSecretsLines(input.secretsFile),
     ...(environment.guards.length > 0 ? [...environment.guards, ''] : []),
-    `export ${HARNESS_HOME_ENV[input.harness]}=${shellPath(input.configDirectory)}`,
+    `export ${homeEnvOf(input.harness, kit)}=${shellPath(input.configDirectory)}`,
     ...environment.exports,
     ...(input.signInLink === undefined ? [] : signInLinkLines(input.signInLink)),
     ...autoBlock,
@@ -577,7 +587,7 @@ function promptSnapshotLines(
 /** What an auto launch prepares first for Claude, as the lines its plugin writes; Codex's trusted folder is `codexTrustLines`. */
 function autonomousPreludeLines(harness: HarnessKind, kit: RuntimesHarnessKit | undefined): readonly string[] {
   return byHarness<readonly string[]>(harness, {
-    claude: () => wrapperOf(harness, kit).autonomousPrelude?.({ homeEnv: HARNESS_HOME_ENV[harness] }) ?? [],
+    claude: () => wrapperOf(harness, kit).autonomousPrelude?.({ homeEnv: homeEnvOf(harness, kit) }) ?? [],
     codex: () => [],
   });
 }

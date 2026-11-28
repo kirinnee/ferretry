@@ -9,6 +9,8 @@
  * destination for a harness is a *declared* absence ({@link harnessAsset} returns `undefined`) rather
  * than an absent file nobody notices.
  */
+import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
+import { byHarness } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 import type { SettingsFormat } from './settings.ts';
 
@@ -28,6 +30,19 @@ export const HARNESS_OWNED_SKILL_ENTRIES: Readonly<Record<HarnessKind, readonly 
   claude: [],
   codex: ['.system'],
 };
+
+/**
+ * The entries `harness` keeps for itself in its skills destination. Claude's are its plugin's word (`kit.ownedSkillEntries`; it
+ * writes none); Codex's are the table's. A Claude plugin that gives none reserves nothing.
+ */
+export const ownedSkillEntriesOf = (
+  harness: HarnessKind,
+  kit: Pick<RuntimesHarnessKit, 'ownedSkillEntries'> | undefined,
+): readonly string[] =>
+  byHarness<readonly string[]>(harness, {
+    claude: () => kit?.ownedSkillEntries ?? [],
+    codex: () => HARNESS_OWNED_SKILL_ENTRIES.codex,
+  });
 
 /** Whether `entry`, directly inside `kind`'s skills destination, belongs to the harness itself. */
 export function isHarnessOwnedSkillEntry(kind: HarnessKind, entry: string): boolean {

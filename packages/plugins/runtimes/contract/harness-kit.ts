@@ -392,6 +392,8 @@ export interface RuntimesHarnessKit {
   readonly signInCatalog?: string;
   /** Skill folders the harness keeps for itself, which a skills component may not use. */
   readonly ownedSkillEntries?: readonly string[];
+  /** Whether the harness offers fast mode on a model, from the id alone. Claude's is a rule on the id; Codex's is the live account's to say. */
+  fastSupport?(model: string): boolean;
 
   // The layer every launched agent gets last.
   fixedLayer?(input: KitFixedLayerInput): KitFixedLayerResult;

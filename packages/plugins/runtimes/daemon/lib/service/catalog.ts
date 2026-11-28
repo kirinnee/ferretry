@@ -1279,6 +1279,7 @@ function modelsView(
   harness: HarnessKind,
   credential: AccountModel['credentials'][string],
   sources: ModelCatalogSources | undefined,
+  kit: RuntimesHarnessKit | undefined,
 ): { readonly models?: RuntimeModels } {
   if (sources === undefined) return {};
   const derived = runtimeModels({
@@ -1294,7 +1295,7 @@ function modelsView(
         ...model,
         efforts: [...model.efforts],
         // Claude's fast mode is a rule on the model id; Codex's is the live account's to say.
-        ...fastSupportOf(harness, model.id),
+        ...fastSupportOf(harness, model.id, kit),
       })),
       ...(derived.default === undefined ? {} : { default: derived.default }),
       ...(derived.local === undefined ? {} : { local: derived.local }),
@@ -1425,7 +1426,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
             profile: runtime.profile,
             stack,
             modelSet: modelSetView(resolved),
-            ...modelsView(resolved, harness, credential, facts.modelCatalogs),
+            ...modelsView(resolved, harness, credential, facts.modelCatalogs, facts.kits?.get(harness)),
             ...(fixed.view === undefined ? {} : { fixedLayer: fixed.view }),
             launch: act(blocked),
             // A budget alone is no switch: the runtime cannot launch (its `launch` says why), but nothing is off.
