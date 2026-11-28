@@ -10,7 +10,6 @@
  * than an absent file nobody notices.
  */
 import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
-import { byHarness } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 import type { SettingsFormat } from './settings.ts';
 
@@ -32,17 +31,13 @@ export const HARNESS_OWNED_SKILL_ENTRIES: Readonly<Record<HarnessKind, readonly 
 };
 
 /**
- * The entries `harness` keeps for itself in its skills destination. Claude's are its plugin's word (`kit.ownedSkillEntries`; it
- * writes none); Codex's are the table's. A Claude plugin that gives none reserves nothing.
+ * The entries a harness keeps for itself in its skills destination: its plugin's word (`kit.ownedSkillEntries`; Claude writes
+ * none, Codex's is `.system`). A plugin that gives none reserves nothing; a runtime planned from such a kit is refused first
+ * (`runtimeKitRefusal`), so Codex's `.system` is never left unreserved.
  */
 export const ownedSkillEntriesOf = (
-  harness: HarnessKind,
   kit: Pick<RuntimesHarnessKit, 'ownedSkillEntries'> | undefined,
-): readonly string[] =>
-  byHarness<readonly string[]>(harness, {
-    claude: () => kit?.ownedSkillEntries ?? [],
-    codex: () => HARNESS_OWNED_SKILL_ENTRIES.codex,
-  });
+): readonly string[] => kit?.ownedSkillEntries ?? [];
 
 /** Whether `entry`, directly inside `kind`'s skills destination, belongs to the harness itself. */
 export function isHarnessOwnedSkillEntry(kind: HarnessKind, entry: string): boolean {

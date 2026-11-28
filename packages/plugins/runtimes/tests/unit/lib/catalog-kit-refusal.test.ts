@@ -1,6 +1,6 @@
 /**
  * The catalogue's launch state reads the SAME runtime-wide kit refusal the account plan does (E-276 PR 13): a runtime whose
- * harness kit is absent, or gives no launch line (or, for Claude, no command or home variable), shows
+ * harness kit is absent, or gives no launch line (or no command or home variable, or, for Codex, no skill folder list), shows
  * `launch.available = false` with `<harness> is not supported here` — BEFORE the install check, Auto support and the login
  * status, so it never says "Sign in to launch" and never `available: true`. A whole kit is unchanged, and the other harness
  * is unaffected.
@@ -65,6 +65,9 @@ const CODEX_KITS = [
   ['no launch line', { ...codex, wrapper: undefined } as RuntimesHarnessKit],
   ['no runtime extras', { ...codex, runtimeExtras: undefined } as RuntimesHarnessKit],
   ['no fixed layer', { ...codex, fixedLayer: undefined } as RuntimesHarnessKit],
+  ['no command', { ...codex, command: undefined } as RuntimesHarnessKit],
+  ['no home variable', { ...codex, homeEnv: undefined } as RuntimesHarnessKit],
+  ['no skill folder list', { ...codex, ownedSkillEntries: undefined } as RuntimesHarnessKit],
 ] as const;
 
 const SITUATIONS: readonly (readonly [string, Partial<CatalogFacts>])[] = [
