@@ -219,6 +219,18 @@ describe('carrying', () => {
   });
 });
 
+describe('a chunk that is not ciphertext', () => {
+  it('stops the move before the target is sent anything', async () => {
+    const w = await world();
+    const reviewed = await review(FERRET, w.source.machine, w.to.machine);
+    const odd = scripted(w.source.machine.daemon, 'Desk', (route, init) =>
+      route.includes('/chunks/') ? 'not bytes' : w.source.machine.client.call(route, init as never),
+    );
+    await expect(carry(FERRET, odd.machine, w.to.machine, reviewed)).rejects.toThrow('not ciphertext');
+    expect(w.to.calls.some(call => call.route.startsWith('PUT'))).toBe(false);
+  });
+});
+
 describe('sizes', () => {
   it('reads as a person would', () => {
     expect([sizeWords(12), sizeWords(2048), sizeWords(5 * 1024 * 1024), sizeWords(300 * 1024 * 1024)]).toEqual([
@@ -227,5 +239,26 @@ describe('sizes', () => {
       '5.0 MB',
       '300 MB',
     ]);
+  });
+});
+
+describe('what the review says', () => {
+  it('lays the preflight out as moves, stays and what is left behind by name', async () => {
+    const { tableOf } = await import('../../../app/lib/move.ts');
+    const view = {
+      moves: [{ id: 'turns', label: 'Turns' }],
+      stays: [{ id: 'jobs', label: 'Jobs', why: 'refused while running' }],
+      ignored: ['.env'],
+      withheld: ['deploy.pem'],
+      files: 3,
+      bytes: 2048,
+    } as never;
+    expect(tableOf(view)).toEqual({
+      moves: [{ id: 'turns', label: 'Turns' }],
+      stays: [{ id: 'jobs', label: 'Jobs', why: 'refused while running' }],
+      left: ['.env', 'deploy.pem'],
+      files: 3,
+      bytes: 2048,
+    });
   });
 });
