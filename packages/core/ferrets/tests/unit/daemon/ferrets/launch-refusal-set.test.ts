@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { factsOfKey } from '../../../support/daemon/harness-facts.ts';
 import { err, ok, type Result } from '@ferretry/std';
 import { ConversationIdSchema, ConversationLeaseStore } from '../../../../contract/conversation-lease.ts';
 import {
@@ -116,7 +117,7 @@ function rig(options: Options = {}) {
   const store = new ConversationLeaseStore(disk, () => NOW);
   const real = new ConversationLeases(
     store,
-    registryLeaseSessions(base.registry, async () => ({ status: 'running' })),
+    registryLeaseSessions(base.registry, async () => ({ status: 'running' }), factsOfKey),
     4000,
   );
   /** The real leases, logged; a row can make any call fail, or let another writer in between two calls. */

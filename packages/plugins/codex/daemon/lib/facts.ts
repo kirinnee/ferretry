@@ -11,4 +11,6 @@ export const CODEX_FACTS: HarnessFacts = {
   mcp: { format: 'toml', file: 'config.toml' },
   transcriptFormat: 'codex',
   catalogHalf: 'codex',
+  historyPool: 'codex',
+  paneReportsBackgroundTerminals: true,
 };

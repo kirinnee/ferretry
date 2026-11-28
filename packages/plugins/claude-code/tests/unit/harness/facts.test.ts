@@ -13,6 +13,7 @@ describe('Claude Code’s facts', () => {
       mcp: { format: 'json', file: 'mcp.json' },
       transcriptFormat: 'claude',
       catalogHalf: 'claude',
+      historyPool: 'claude',
     });
   });
 

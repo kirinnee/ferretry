@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { HarnessTailRecord } from '../../../../../contract/index.ts';
-import { FakeHarness } from '../../../../../contract/testing/index.ts';
+import { FAKE_HARNESS_FACTS, FakeHarness } from '../../../../../contract/testing/index.ts';
 import { eventOfRecord, HarnessTranscript } from '../../../../../daemon/adapters/session/live/harness-transcript.ts';
 import {
   PolledTranscriptEvents,
@@ -36,6 +36,28 @@ describe('HarnessTranscript (U5)', () => {
       () => 'claude-code',
     );
     expect(await none.tail.tail(FERRET, 10)).toEqual({ kind: 'unresolved' });
+  });
+
+  test('the format a harness declares in its facts decides how its tail is read, never the key it is registered under', async () => {
+    const ferret = FERRET;
+    const tailOf = async (key: string, format: string) => {
+      const harness = new FakeHarness(key as never, undefined, { ...FAKE_HARNESS_FACTS, transcriptFormat: format });
+      harness.transcripts.set(ferret, {
+        stamp: { file: '/t/a.jsonl', size: 5, mtimeMs: 7 },
+        records: [{ kind: 'turn', state: 'started', at: AT }],
+      });
+      const result = await new HarnessTranscript(
+        () => harness,
+        () => key as never,
+      ).tail.tail(ferret, 10);
+      return result.kind === 'read' ? result.events.map(event => event.harness) : result.kind;
+    };
+
+    // A third key declaring Codex's format reads as Codex; Claude's own key declaring a format with no parser is unreadable.
+    expect(await tailOf('fake-third', 'codex')).toEqual(['codex']);
+    expect(await tailOf('claude-code', 'claude')).toEqual(['claude']);
+    expect(await tailOf('claude-code', 'fake-jsonl')).toBe('unreadable');
+    expect(await tailOf('codex', 'fake-jsonl')).toBe('unreadable');
   });
 
   test('the records become the events the turn fold reads: the newest one decides who has the turn', async () => {

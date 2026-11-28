@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { factsOfKey } from '../../../../support/daemon/harness-facts.ts';
 import should from 'should';
 import {
   type ConversationId,
@@ -10,7 +11,7 @@ import {
   type HistoryHarness,
 } from '../../../../../contract/conversation-lease.ts';
 import type { FerretState } from '../../../../../contract/index.ts';
-import { ferretId } from '../../../../../contract/testing/index.ts';
+import { FAKE_HARNESS_FACTS, ferretId } from '../../../../../contract/testing/index.ts';
 import {
   ConversationLeases,
   type ConversationLeaseSessions,
@@ -368,7 +369,7 @@ describe('registryLeaseSessions', () => {
           ? { harness: 'codex' as const, state: 'stopped' as const }
           : undefined,
   };
-  const sessions = registryLeaseSessions(registry, async () => ({ status: 'running' }));
+  const sessions = registryLeaseSessions(registry, async () => ({ status: 'running' }), factsOfKey);
 
   it("should name a ferret's history pool and runtime from its registry record", () => {
     // Act
@@ -378,6 +379,35 @@ describe('registryLeaseSessions', () => {
     // Assert
     should(fern).deepEqual({ harness: 'claude', runtime: 'claude-review' });
     should(plain).deepEqual({ harness: 'codex' });
+  });
+
+  it("should read the pool from the harness's own facts, so a third harness that declares one is leased in it", () => {
+    // Arrange — a key no table here knows, whose facts name the Codex pool
+    const third = registryLeaseSessions(
+      { get: () => ({ harness: 'fake-third', runtime: 'third-run', state: 'working' as const }) },
+      async () => ({}),
+      key => (key === 'fake-third' ? { ...FAKE_HARNESS_FACTS, historyPool: 'codex' } : undefined),
+    );
+
+    // Act / Assert
+    should(third.launchOf(ferretId('any') as unknown as SessionId)).deepEqual({
+      harness: 'codex',
+      runtime: 'third-run',
+    });
+  });
+
+  it('should launch nothing leasable for a harness without the fact, whatever its key says (today’s default)', () => {
+    // Arrange — the key is `claude-code`, but its facts declare no pool, a pool the leases do not know, or nothing answers
+    const answers = [FAKE_HARNESS_FACTS, { ...FAKE_HARNESS_FACTS, historyPool: 'elsewhere' }, undefined].map(facts =>
+      registryLeaseSessions(
+        { get: () => ({ harness: 'claude-code' as const, runtime: 'r', state: 'working' as const }) },
+        async () => ({}),
+        () => facts,
+      ).launchOf(ferretId('any') as unknown as SessionId),
+    );
+
+    // Assert
+    should(answers).deepEqual([undefined, undefined, undefined]);
   });
 
   it("should answer a session's live state from the registry, and nothing for one it does not hold", () => {

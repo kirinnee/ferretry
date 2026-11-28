@@ -3,6 +3,8 @@ import should from 'should';
 import type { ProcessObservation } from '../../../../daemon/lib/moves/inflight-report.ts';
 import { type MoveTargetView, MovePreflight } from '../../../../daemon/lib/moves/preflight-service.ts';
 import type { MovePane, ProcessInventoryPort } from '../../../../daemon/lib/moves/process-inventory-port.ts';
+import { factsOfRecorded } from '../../../support/daemon/harness-facts.ts';
+import { FAKE_HARNESS_FACTS } from '../../../../contract/testing/index.ts';
 
 class StubInventory implements ProcessInventoryPort {
   /** The pane each collect was handed: the preflight addresses a pane only through the view's own. */
@@ -40,7 +42,7 @@ class PreflightOver extends MovePreflight {
     inventory: ProcessInventoryPort,
     private readonly pane: MovePane,
   ) {
-    super(inventory);
+    super(inventory, factsOfRecorded);
   }
 
   override async inspect(
@@ -126,6 +128,35 @@ describe('MovePreflight', () => {
     should(codex.worstVerdict).equal('unknown');
     should(claude.codexBackgroundTerminals).equal(0);
     should(claude.empty).be.true();
+  });
+
+  it('should count the footer for any harness whose facts say its pane reports terminals, and for none that does not say so', async () => {
+    // Arrange — a third harness that declares the flag, and the same footer under a harness whose facts omit it
+    const footer = 'Esc to interrupt · 2 background terminals running';
+    const inventory = new StubInventory({ kind: 'observed', processes: [] });
+    const declares = (harness: string) =>
+      harness === 'fake-third' ? { ...FAKE_HARNESS_FACTS, paneReportsBackgroundTerminals: true } : FAKE_HARNESS_FACTS;
+    const silentPane = new StubPanes(footer);
+
+    // Act
+    const third = await new MovePreflight(inventory, declares).inspect({
+      ...view({ harness: 'fake-third' }),
+      pane: new StubPanes(footer),
+    });
+    const omitted = await new MovePreflight(inventory, declares).inspect({
+      ...view({ harness: 'codex' }),
+      pane: silentPane,
+    });
+    const unknown = await new MovePreflight(inventory, () => undefined).inspect({
+      ...view({ harness: 'codex' }),
+      pane: silentPane,
+    });
+
+    // Assert — the fact decides, never the harness's name; a harness without the fact counts none and never reads the footer
+    should(third.codexBackgroundTerminals).equal(2);
+    should(omitted.codexBackgroundTerminals).equal(0);
+    should(unknown.codexBackgroundTerminals).equal(0);
+    should(silentPane.reads).equal(0);
   });
 
   it('should turn an unreadable codex pane into a blind spot rather than a zero count', async () => {

@@ -259,6 +259,13 @@ export interface HarnessFacts {
   readonly transcriptFormat: TranscriptFormatId;
   /** The key of this harness's half in a model catalog file (`claude`, `codex`): the catalog side's name for it. */
   readonly catalogHalf: string;
+  /**
+   * The conversation-history pool the harness writes its conversations to, as the conversation lease names it (`claude`,
+   * `codex`). Absent: the harness has no pool the daemon can name, so a ferret on it launches nothing that can be leased.
+   */
+  readonly historyPool?: string;
+  /** Whether the harness's pane footer reports background terminals (only Codex's does). Absent: it does not, and none is counted. */
+  readonly paneReportsBackgroundTerminals?: boolean;
 }
 
 /**

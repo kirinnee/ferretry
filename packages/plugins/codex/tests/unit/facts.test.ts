@@ -12,6 +12,8 @@ describe('Codex’s facts', () => {
       mcp: { format: 'toml', file: 'config.toml' },
       transcriptFormat: 'codex',
       catalogHalf: 'codex',
+      historyPool: 'codex',
+      paneReportsBackgroundTerminals: true,
     });
     expect(CODEX_FACTS.skillsDir).toBe(SKILLS_FOLDER);
   });

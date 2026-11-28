@@ -1,8 +1,15 @@
 import { describe, it } from 'bun:test';
 import { ApiError, type FerretId } from '@ferretry/kernel/contract';
 import { ownerStanding } from '@ferretry/core-gate/contract/testing';
-import type { HarnessKey, HarnessTailRecord } from '../../../contract/index.ts';
-import { FakeHarness, THIRD_HARNESS_KEY } from '../../../contract/testing/index.ts';
+import { CLAUDE_CODE_FACTS } from '../../../../../plugins/claude-code/daemon/lib/harness/facts.ts';
+import { CODEX_FACTS } from '../../../../../plugins/codex/daemon/lib/facts.ts';
+import {
+  type HarnessFacts,
+  type HarnessKey,
+  type HarnessTailRecord,
+  harnessKeyOfRecorded,
+} from '../../../contract/index.ts';
+import { FakeHarness, THIRD_HARNESS_FACTS, THIRD_HARNESS_KEY } from '../../../contract/testing/index.ts';
 import { eventOfRecord, HarnessTranscript } from '../../../daemon/adapters/session/live/harness-transcript.ts';
 import { StorageLiveActivitySource } from '../../../daemon/adapters/session/live/storage-live-activity.ts';
 import { FY_REQUEST_ID_HEADER } from '../../../daemon/lib/protocol/headers.ts';
@@ -63,6 +70,10 @@ const RECORDS: Record<string, HarnessTailRecord> = {
 /** The keys every decision is asked about: both shipped harnesses, a third, the family word, and an empty key. */
 const KEYS = ['claude-code', 'codex', THIRD_HARNESS_KEY, 'claude', ''] as const;
 
+/** SETUP: the REAL facts of the two shipped harnesses; any other key answers as the fake third harness (no pool, no flag, no known format). */
+const factsOfKey = (key: string): HarnessFacts =>
+  key === 'claude-code' ? CLAUDE_CODE_FACTS : key === 'codex' ? CODEX_FACTS : THIRD_HARNESS_FACTS;
+
 describe('E-276 0b golden: which transcript format a harness is read as', () => {
   it('should pin eventOfRecord for every record kind in each family', () => {
     const events: Record<string, unknown> = {};
@@ -75,7 +86,7 @@ describe('E-276 0b golden: which transcript format a harness is read as', () => 
     const ferret = 'wren-1' as FerretId;
     const answers: Record<string, unknown> = {};
     for (const key of KEYS) {
-      const harness = new FakeHarness(key as HarnessKey);
+      const harness = new FakeHarness(key as HarnessKey, undefined, factsOfKey(key));
       harness.transcripts.set(ferret, {
         stamp: { file: '<TRANSCRIPT>', size: 5, mtimeMs: 7 },
         records: [RECORDS['messageBare']!, RECORDS['workAt']!, RECORDS['turnCompleted']!],
@@ -87,7 +98,7 @@ describe('E-276 0b golden: which transcript format a harness is read as', () => 
       answers[`key=${key === '' ? '<empty>' : key}`] = await transcript.tail.tail(ferret, 10);
     }
     // A ferret whose key nobody can name is unresolved, whatever its harness offers.
-    const harness = new FakeHarness('claude-code');
+    const harness = new FakeHarness('claude-code', undefined, CLAUDE_CODE_FACTS);
     harness.transcripts.set(ferret, { stamp: { file: '<TRANSCRIPT>', size: 5, mtimeMs: 7 }, records: [] });
     answers['key=<undefined>'] = await new HarnessTranscript(
       () => harness,
@@ -187,6 +198,7 @@ describe('E-276 0b golden: which transcript format a harness is read as', () => 
       const sessions = registryLeaseSessions(
         { get: () => ({ harness: key as HarnessKey, runtime: 'runtime-a', state: 'running' }) as never },
         async () => ({}),
+        factsOfKey,
       );
       answers[`key=${key === '' ? '<empty>' : key}`] = sessions.launchOf('s1' as never) ?? null;
     }
@@ -209,7 +221,9 @@ describe('E-276 0b golden: which transcript format a harness is read as', () => 
         turn: 3,
         openTools: [],
       };
-      const report = await new MovePreflight(inventory).inspect(view);
+      const report = await new MovePreflight(inventory, harness => factsOfKey(harnessKeyOfRecorded(harness))).inspect(
+        view,
+      );
       answers[`harness=${harness}`] = {
         codexBackgroundTerminals: report.codexBackgroundTerminals,
         blindSpots: report.blindSpots,
