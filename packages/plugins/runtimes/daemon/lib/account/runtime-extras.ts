@@ -7,7 +7,7 @@
  * nothing here.
  */
 import type { KitExtras, RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
-import { byHarness, harnessKeyOfKind, isKind, unsupportedHarnessSentence } from '../harness-kind.ts';
+import { byHarness, isKind } from '../harness-kind.ts';
 import type { RuntimeModels } from '../models/runtime.ts';
 import { joinPath } from '../paths.ts';
 import type { SettingsObject } from '../settings.ts';
@@ -25,8 +25,6 @@ export interface RuntimeExtras {
   readonly env: Readonly<Record<string, string>>;
   /** The catalog file the runtime reads, when the login's models need one. */
   readonly catalog?: KitExtras['catalog'];
-  /** Why the runtime cannot be launched: its harness's plugin gives Runtimes no extras to ask. */
-  readonly unavailable?: string;
 }
 
 /**
@@ -47,9 +45,9 @@ export function runtimeExtras(
   return byHarness<RuntimeExtras>(harness, {
     claude: () => ({ env: {} }),
     codex: () => {
-      // No kit (the plugin is off): Codex's variables and files are never guessed, and the runtime says why it cannot launch.
-      if (kit?.runtimeExtras === undefined)
-        return { env: {}, unavailable: unsupportedHarnessSentence(harnessKeyOfKind('codex')) };
+      // No kit (the plugin is off): Codex's variables and files are never guessed. The caller has already refused the runtime
+      // (`missingKitRefusal`) and plans nothing for it.
+      if (kit?.runtimeExtras === undefined) return { env: {} };
       return kit.runtimeExtras({
         sqliteHome: input.sqliteHome,
         statePath: input.statePath,

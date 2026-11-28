@@ -17,6 +17,7 @@ import should from 'should';
 import { unavailableSharedHistory } from '../../daemon/adapters/shared-history-unavailable.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../daemon/lib/account/ids.ts';
 import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
+import { REAL_KITS } from '../support/real-kits.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../daemon/lib/account/schema.ts';
 import type { FleetLayout } from '../../daemon/lib/provisioning.ts';
 import { fleetWorld } from '../unit/support/fleet-world.ts';
@@ -108,6 +109,7 @@ async function machine() {
       fyCommand: fakeFy,
       hostCodexHome,
       acceptsAutoPermissionMode: true,
+      kits: REAL_KITS,
     });
     ids = plan.ids;
     return await provisioner.apply(plan);

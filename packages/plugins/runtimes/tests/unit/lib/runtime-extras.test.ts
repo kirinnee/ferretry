@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import type { KitExtrasInput, RuntimesHarnessKit } from '../../../contract/index.ts';
+import { missingKitRefusal } from '../../../daemon/lib/account/adapt.ts';
 import { runtimeExtras } from '../../../daemon/lib/account/runtime-extras.ts';
 import { unsupportedHarnessSentence } from '../../../daemon/lib/harness-kind.ts';
 import type { RuntimeModels } from '../../../daemon/lib/models/runtime.ts';
@@ -57,9 +58,14 @@ describe('runtimeExtras', () => {
     expect('catalog' in (seen[0]?.models ?? {})).toBe(false);
   });
 
-  it('should refuse a Codex runtime whose plugin gives no extras, in the sentence for it, and guess nothing', () => {
+  it('should guess nothing for a Codex runtime whose plugin gives no extras; the caller refuses it with the typed refusal', () => {
     for (const kit of [undefined, {}]) {
-      expect(runtimeExtras('codex', input, kit)).toEqual({ env: {}, unavailable: unsupportedHarnessSentence('codex') });
+      expect(runtimeExtras('codex', input, kit)).toEqual({ env: {} });
+      expect(missingKitRefusal('codex', kit)).toEqual({
+        kind: 'harness-unsupported',
+        message: unsupportedHarnessSentence('codex'),
+      });
     }
+    expect(missingKitRefusal('codex', { runtimeExtras: () => ({ env: {} }) })).toBeUndefined();
   });
 });

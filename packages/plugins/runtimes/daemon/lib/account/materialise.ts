@@ -66,6 +66,8 @@ import {
   CLAUDE_JSON_FILE,
   type ClaudeStatuslineCommand,
   componentPartialSupport,
+  kitlessAdaptation,
+  missingKitRefusal,
   plumbingOf,
   priorServersOf,
   SKILLS_STORE_DIRECTORY,
@@ -376,6 +378,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     let fixed: FixedLayer | undefined;
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
+    // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
+    const kitMissing = missingKitRefusal(harness, kit);
+    // (A login whose own store already says so is not said twice.)
+    if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing.message);
     const result = fixedLayerOf(
       harness,
       {
@@ -392,18 +398,26 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const autoRefusal = result.ok ? undefined : result.refusal.message;
     const launch = fixed === undefined ? undefined : applyFixedLayer(resolved, fixed);
 
-    const adapted = adaptProfile({
-      resolved,
-      plumbing: plumbingOf(harness, { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome }, kit),
-      bodies: {
-        ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
-        ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
-        // A skill item whose `SKILL.md` the caller could not read has no copy in the asset tree: nothing to link.
-        ...(input.bodies?.skillFrontmatter === undefined
-          ? {}
-          : { skillItems: new Set(Object.keys(input.bodies.skillFrontmatter)) }),
-      },
-    });
+    const adapted =
+      kitMissing !== undefined
+        ? kitlessAdaptation(harness)
+        : adaptProfile({
+            resolved,
+            plumbing: plumbingOf(
+              harness,
+              { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome },
+              kit,
+            ),
+            kit,
+            bodies: {
+              ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
+              ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
+              // A skill item whose `SKILL.md` the caller could not read has no copy in the asset tree: nothing to link.
+              ...(input.bodies?.skillFrontmatter === undefined
+                ? {}
+                : { skillItems: new Set(Object.keys(input.bodies.skillFrontmatter)) }),
+            },
+          });
     for (const problem of adapted.problems) problems.push({ runtime: name, message: problem.message });
 
     // The launch environment: the credential's, the profile's, the MCP servers' forwarded secrets,
@@ -449,36 +463,37 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       },
       kit,
     );
-    if (extras.unavailable !== undefined) reasons.push(extras.unavailable);
     Object.assign(env, extras.env);
     const codexCatalog = extras.catalog;
 
-    operations.push(
-      ...configDirectoryOperations({
-        home,
-        harness,
-        codexCatalog,
-        entries: adapted.entries,
-        absent: adapted.absent,
-        settings: adapted.settings,
-        claudeJson: adapted.claudeJson,
-        // A callback: a harness whose document keeps no prior servers never filters them.
-        priorServers: priorServersOf(
+    // An unavailable runtime for want of its kit writes nothing into its home.
+    if (kitMissing === undefined)
+      operations.push(
+        ...configDirectoryOperations({
+          home,
           harness,
-          () =>
-            Object.fromEntries(
-              Object.entries(model.components.mcp).filter(
-                ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+          codexCatalog,
+          entries: adapted.entries,
+          absent: adapted.absent,
+          settings: adapted.settings,
+          claudeJson: adapted.claudeJson,
+          // A callback: a harness whose document keeps no prior servers never filters them.
+          priorServers: priorServersOf(
+            harness,
+            () =>
+              Object.fromEntries(
+                Object.entries(model.components.mcp).filter(
+                  ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+                ),
               ),
-            ),
-          kit,
-        ),
-        overlay: fixed?.claudeSettingsOverlay,
-        codexRules: fixed?.codexRules,
-        credentialLink: codexCredentialLink(home, store),
-        layout,
-      }),
-    );
+            kit,
+          ),
+          overlay: fixed?.claudeSettingsOverlay,
+          codexRules: fixed?.codexRules,
+          credentialLink: codexCredentialLink(home, store),
+          layout,
+        }),
+      );
 
     const fixedSettingsArgs =
       fixed?.claudeSettingsOverlay === undefined

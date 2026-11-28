@@ -45,6 +45,7 @@ import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { JobRunner } from '../../../../../core/kernel/host/jobs.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 import { faultingDisk } from '../support/faulting-disk.ts';
+import { settingsOwners } from '../../support/settings-owners.ts';
 import { createHash } from 'node:crypto';
 
 afterEach(cleanupWorlds);
@@ -660,6 +661,7 @@ async function compose(
   const world = await fleetWorld();
   const host = await testHost({
     plugins: [
+      ...settingsOwners(),
       runtimesDaemon(ctx =>
         hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
       ) as DaemonImplementation<any>,
@@ -911,6 +913,7 @@ async function scheduledCompose(failures = 0, unpublishable = false) {
   let assembled: ReturnType<typeof hostAssembly> | undefined;
   const host = await testHost({
     plugins: [
+      ...settingsOwners(),
       runtimesDaemon(ctx => {
         const jobs = ctx.kernel.jobs;
         const add = jobs.add.bind(jobs);

@@ -16,6 +16,7 @@ import {
   codexCatalogArguments,
   renderCodexModelCatalog,
 } from '../../../../codex/daemon/lib/runtimes-kit/model-catalog.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import { expectGolden } from './support/golden.ts';
 import { outcome, THIRD_KEY } from './support/thrown.ts';
 
@@ -36,11 +37,14 @@ describe('mcp goldens', () => {
   for (const harness of ['claude', 'codex'] as const) {
     for (const [kind, server] of Object.entries(SERVERS)) {
       it(`should render a ${kind} server for ${harness} exactly as the base does`, () => {
-        expectGolden(`mcp/${harness}-${kind}`, renderMcpComponents(harness, { golden: server }));
+        expectGolden(
+          `mcp/${harness}-${kind}`,
+          renderMcpComponents(harness, { golden: server }, REAL_KITS.get(harness)),
+        );
       });
     }
     it(`should render every server kind at once for ${harness} exactly as the base does`, () => {
-      expectGolden(`mcp/${harness}-all`, renderMcpComponents(harness, SERVERS));
+      expectGolden(`mcp/${harness}-all`, renderMcpComponents(harness, SERVERS, REAL_KITS.get(harness)));
     });
   }
 
@@ -54,7 +58,9 @@ describe('mcp goldens', () => {
           'https://a.example.test/sse/x',
         ].map(url => [url, isSseUrl(url)]),
       ),
-      thirdKey: outcome(() => renderMcpComponents(THIRD_KEY as never, { golden: SERVERS.stdio as McpComponent })),
+      thirdKey: outcome(() =>
+        renderMcpComponents(THIRD_KEY as never, { golden: SERVERS.stdio as McpComponent }, REAL_KITS.get('claude')),
+      ),
       frontmatter: skillFrontmatterKeys('---\nname: golden\nallowed-tools: Bash\nmodel: x\n---\nbody\n'),
     });
   });

@@ -102,14 +102,44 @@ export interface KitCredentialLink {
 
 /** What a plugin is asked for to write the config documents of one runtime home. */
 export interface KitDocumentsInput {
-  readonly home: string;
+  /** The settings the runtime would write, with the profile's layers and the fixed layer already merged. */
   readonly settings: KitSettingsObject;
+  /** The servers the profile contributes, each already rendered by {@link RuntimesHarnessKit.renderMcpServer}, by name. */
   readonly servers: Readonly<Record<string, KitSettingsObject>>;
-  readonly fixed?: KitFixedLayerResult;
+  /** The merged `hooks` block of a hooks component, when the profile has one; the harness chooses which document holds it. */
+  readonly hooksBlock?: KitSettingsObject;
 }
 
-/** The documents one runtime home holds, by file name under the home. */
-export type KitDocuments = Readonly<Record<string, KitSettingsObject>>;
+/** The documents one runtime home holds. */
+export interface KitDocuments {
+  readonly settings: KitSettingsObject;
+  /** A second document whose top-level keys are each replaced whole before launch (Claude's `.claude.json`). */
+  readonly claudeJson?: KitSettingsObject;
+}
+
+/** One setting a plumbing key writes: a settings path and its value. */
+export interface KitPlumbingEntry {
+  readonly key: string;
+  readonly path: readonly string[];
+  readonly value: unknown;
+}
+
+/** What a plugin is asked for to name the plumbing keys a runtime's settings always carry. */
+export interface KitPlumbingInput {
+  /** The settings the runtime would write, so a command the person already set can be chained. */
+  readonly settings: KitSettingsObject;
+  /** The status line command for this runtime, given the person's own command when their settings name one. */
+  readonly statusLine: (ownCommand?: string) => string;
+}
+
+/**
+ * Whether a server reached at `url` speaks the older SSE transport rather than streamable HTTP. Read from the path's last
+ * segment (`…/sse`), the convention every SSE server Ferretry has seen follows.
+ */
+export function isSseUrl(url: string): boolean {
+  const pathname = new URL(url).pathname.replace(/\/+$/, '');
+  return pathname.split('/').at(-1)?.toLowerCase() === 'sse';
+}
 
 /** One login a host scan found. Display only. */
 export interface KitHostLogin {
@@ -326,6 +356,7 @@ export interface RuntimesHarnessKit {
     readonly skipDisabled: boolean;
   };
   configDocuments?(input: KitDocumentsInput): KitDocuments;
+  plumbing?(input: KitPlumbingInput): readonly KitPlumbingEntry[];
 
   // Login notes and host import.
   loginNote?(login: KitHostLogin): string;
