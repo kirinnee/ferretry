@@ -84,9 +84,17 @@ const wrapperOf = (result: ReturnType<typeof plan>, name: string): string => {
 const claude = REAL_KITS.get('claude') as RuntimesHarnessKit;
 const codex = REAL_KITS.get('codex') as RuntimesHarnessKit;
 const wrapperless = { ...codex, wrapper: undefined } as RuntimesHarnessKit;
+const extrasless = { ...codex, runtimeExtras: undefined } as RuntimesHarnessKit;
 
 describe.each([
   ['no Codex kit', new Map([['claude', claude]] as const)],
+  [
+    'a Codex kit with no runtime extras',
+    new Map([
+      ['claude', claude],
+      ['codex', extrasless],
+    ] as const),
+  ],
   [
     'a Codex kit with no launch line',
     new Map([
@@ -99,7 +107,7 @@ describe.each([
   const rows = Object.fromEntries(result.manifest.accounts.map(row => [row.displayName, row]));
 
   for (const name of CODEX_RUNTIMES) {
-    it(`should refuse ${name} once, by name, whatever its login says`, () => {
+    it(`should refuse ${name} once, by name, whatever its login says (the host home unnameable, the kept login with no sign-in file, or an environment one)`, () => {
       expect(rows[name]?.available).toBe(false);
       expect(rows[name]?.unavailableReason).toBe('codex is not supported here');
       expect(rows[name]?.autoRefusal).toBeUndefined();

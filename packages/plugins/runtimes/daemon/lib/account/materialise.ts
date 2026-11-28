@@ -351,7 +351,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness,
       loginStores,
     );
-    // The typed refusal is the ONE reason a kitless runtime gets, whatever store its login is in (environment, stored or host):
+    // The typed refusal is the ONE reason a runtime gets when ANY kit member it needs is missing, whatever store its login is in (environment, stored or host):
     // its login then has nothing further to say, and the reason is never said twice.
     if (kitMissing !== undefined) reasons.push(kitMissing.message);
     else {
