@@ -3,7 +3,7 @@
 #   path::N         harness LITERALS: a string that is exactly 'claude' or 'codex' (3 files, listed below).
 #   path::tables::N per-harness TABLES: a Record<HarnessKind, ...> (or Record<HarnessScope, ...>), a `satisfies`/`as` of one, or a
 #                   mapped type `[x in HarnessKind]`. Their keys are identifiers, not quoted strings, so no literal row can count them
-#                   (11 files, 16 tables; what each is is named below).
+#                   (10 files, 16 tables; what each is is named below).
 #
 # Enforced by scripts/validate/no-harness-literal.sh. It is a NAMED, SHRINKING list, not an exemption: the part of E-276 named in
 # each comment deletes its row; a new literal, a new table, a higher count or a row left behind for a file that is now clean all
