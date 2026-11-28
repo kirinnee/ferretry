@@ -12,13 +12,8 @@ import {
   BROWSER_STEALTH_ENV,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
-  CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
-  codexNoticeOverride,
-  codexToolsServer,
-  codexTrustOverride,
   FERRET_SECTIONS,
-  FERRETRY_MCP_ENV_VARS,
   type FixedLayer,
   type FixedLayerInput,
   fixedLayerFor,
@@ -40,6 +35,7 @@ import { type ResolvedProfile, resolveProfile } from '../../../daemon/lib/accoun
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { HarnessKind } from '../../../daemon/lib/manifest.ts';
 import { REAL_KITS } from '../../support/real-kits.ts';
+import { FERRETRY_MCP_ENV_VARS } from '../../../contract/index.ts';
 
 /** What every lead agent is told (a lead's notify, board and lessons rules come from the plugins, not the wrapper): the always-on sections, in order, joined as the wrapper joins them. */
 const leadInstruction = (fy: string): string =>
@@ -71,6 +67,20 @@ const CLAUDE_SEEN_ENTRIES = Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value
   key,
   value,
 }));
+/** The notice keys Codex's one-shot prompts are hidden by (read off codex-cli 0.156.1). */
+const CODEX_HIDDEN_NOTICES = [
+  'hide_full_access_warning',
+  'hide_world_writable_warning',
+  'hide_rate_limit_model_nudge',
+  'hide_gpt5_1_migration_prompt',
+  'hide_gpt-5.1-codex-max_migration_prompt',
+];
+/** Codex's `mcp_servers.ferretry` table, as written out. */
+const codexToolsServer = (fy: string) => ({
+  command: fy,
+  args: ['mcp', 'serve'],
+  env_vars: ['FY_HOME', 'FY_URL', 'FY_SESSION_ID', 'FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY'],
+});
 /** The measured `-c notice={…}` table hiding Codex's one-shot notices. */
 const CODEX_NOTICE_ARGS = [
   '-c',
@@ -305,7 +315,6 @@ describe('fixedLayerFor — Codex', () => {
       ...CODEX_TOOL_ARGS,
     ]);
     // One inline table, quoting the one key that is not a bare TOML key: measured to load in codex-cli 0.156.1.
-    should(codexNoticeOverride()).equal(CODEX_NOTICE_ARGS[1]);
     should(actual.claudeJson).be.undefined();
     should(actual.claudeSettingsOverlay).be.undefined();
     should(actual.entries.map(entry => [entry.target, entry.key, entry.value])).deepEqual([
@@ -369,16 +378,11 @@ describe('fixedLayerFor — Codex', () => {
   });
 });
 
-describe('tomlString and codexTrustOverride', () => {
+describe('tomlString', () => {
   it('should escape quotes, backslashes and control characters', () => {
     // Assert
     should(tomlString('a"b\\c\nd\u007f')).equal('"a\\"b\\\\c\\u000ad\\u007f"');
     should(tomlString('/plain/ü')).equal('"/plain/ü"');
-  });
-
-  it('should write the trust override as an inline table, whatever the folder holds', () => {
-    // Assert
-    should(codexTrustOverride('/a "b"')).equal('projects={"/a \\"b\\""={trust_level="trusted"}}');
   });
 });
 
