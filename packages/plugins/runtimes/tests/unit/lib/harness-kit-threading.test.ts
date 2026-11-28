@@ -2,8 +2,8 @@
  * The kit a harness's own plugin hands Runtimes reaches every group a materialisation asks about that harness (E-276 PR 1):
  * each group function is given the kit of the runtime's own harness, and a harness whose plugin gives none is given none —
  * never another harness's. Claude's MCP and document members are read now (E-276 PR 6), so a Claude runtime without its kit is
- * published UNAVAILABLE by name instead of written in another shape, and the rest of the plan still publishes; Codex still
- * branches in Runtimes, so its fake kit is only handed through.
+ * published UNAVAILABLE by name instead of written in another shape, and the rest of the plan still publishes. Codex's launch line
+ * is read now too (E-276 PR 9), so a Codex runtime needs its real kit.
  *
  * It is also the startup order: the settings sources can answer `unavailable` while plugins are still starting, so the
  * kit is read live with each plan and the first plan after a source comes online carries it.
@@ -37,7 +37,7 @@ const accountOf = (accounts: readonly { readonly displayName: string }[], name: 
 };
 
 const CLAUDE_KIT = REAL_KITS.get('claude') as RuntimesHarnessKit;
-const CODEX_KIT: RuntimesHarnessKit = { command: 'codex' };
+const CODEX_KIT = REAL_KITS.get('codex') as RuntimesHarnessKit;
 const GROUPS = ['fixedLayerOf', 'plumbingOf', 'priorServersOf', 'runtimeExtras', 'autonomousPreparation'] as const;
 
 const source = (kit: RuntimesHarnessKit): ProfileComponentSource => ({

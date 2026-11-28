@@ -53,7 +53,7 @@ import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, Materialise
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../foreign.ts';
-import { harnessKeyOfKind, isKind, unsupportedHarnessSentence } from '../harness-kind.ts';
+import { harnessKeyOfKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import {
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
@@ -382,11 +382,11 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
     // A Claude runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    // ...and so is one whose kit gives no launch line (E-276 PR 8), in the same words.
+    // ...and so is a runtime of either harness whose kit gives no launch line (E-276 PR 8, PR 9), in the same words.
     const kitMissing: KitRefusal | undefined =
       missingKitRefusal(harness, kit) ??
-      (isKind(harness, 'claude') && kit?.wrapper === undefined
-        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
+      (kit?.wrapper === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
         : undefined);
     // (A login whose own store already says so is not said twice.)
     if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing.message);

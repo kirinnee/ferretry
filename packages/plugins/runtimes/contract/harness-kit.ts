@@ -276,8 +276,10 @@ export interface KitWrapper {
   questionLines(): readonly string[];
   /** Arguments the wrapper supplies itself (`questionLines`), which the exec line drops from the launch's own. */
   readonly suppliedArguments?: readonly string[];
-  /** What an auto launch prepares first (Claude's first-run seed, Codex's trusted folder). Absent: nothing. */
+  /** What an auto launch prepares first (Claude's first-run seed). Absent: nothing. */
   autonomousPrelude?(input: KitAutonomousPreludeInput): readonly string[];
+  /** What an auto launch writes after the conversation claim, to trust the folder it starts in (Codex). Absent: nothing. */
+  trustFolderLines?(): readonly string[];
   /** Lines that ask the installed harness about a flag, run before the auto launch's `exec`. */
   promptSnapshotLines?(command: string): readonly string[];
 }
