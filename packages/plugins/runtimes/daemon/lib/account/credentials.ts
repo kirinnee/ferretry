@@ -36,7 +36,9 @@
  * is computed by the credential-store adapter, which is where every platform fact is applied.
  */
 import { isAbsolute, join } from 'node:path';
-import { byHarness, UnsupportedHarnessError } from '../harness-kind.ts';
+import type { KitCredentialResolution, RuntimesHarnessKit } from '../../../contract/index.ts';
+import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
+import { byHarness, harnessKeyOfKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import {
@@ -48,16 +50,10 @@ import {
 import { credentialHalf } from './halves.ts';
 import type { Credential } from './schema.ts';
 
-/** The undocumented variable that moves Claude's credential store away from its config dir (§9.5). */
-const CLAUDE_SECURE_STORAGE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
-
-/** The secure-storage value that selects the person's OWN Claude login: empty, never a path. */
-const HOST_CLAUDE_SECURE_STORAGE = '';
-
 /** No stores named: a `ferretry` credential then has none to reach. */
 const NO_STORES: ReadonlyMap<string, LoginLaunchStore> = new Map();
 
-/** The file Claude keeps a credential in, inside its storage directory. */
+/** The file Claude keeps a credential in, inside its storage directory (the kit spells where; this is the name readers match). */
 const CLAUDE_CREDENTIAL_FILE = '.credentials.json';
 
 /** The file Codex keeps a credential in, inside its home. */
@@ -87,11 +83,11 @@ export interface CredentialStorePaths {
   readonly hostCodexHome?: string;
 }
 
-/** A Claude credential kept in a store: the person's own (`host`) or Ferretry's (`ferretry`). */
+/** A Claude credential kept in a store: the person's own (`host`) or Ferretry's (`ferretry`). The Claude plugin's kit says where. */
 interface ClaudeStoreResolution {
   readonly harness: 'claude';
   readonly store: 'host' | 'ferretry';
-  /** The exact value every runtime on this credential exports as {@link CLAUDE_SECURE_STORAGE_VARIABLE}. */
+  /** The exact value every runtime on this credential exports as its secure-storage variable. */
   readonly secureStorage: string;
   /** The directory Claude resolves that value to: the file store, and the `<dir>.lock` refresh lock. */
   readonly storageDirectory: string;
@@ -164,16 +160,6 @@ export function hostCodexHome(codexHomeVariable: string | undefined, userHome: s
 }
 
 /**
- * The directory Claude reads its store from for one secure-storage value.
- *
- * The harness's own rule: the value itself, or `<home>/.claude` when it is empty, in Unicode NFC. The
- * NFC matters because the macOS keychain item name is a hash of this exact string.
- */
-function claudeStorageDirectory(secureStorage: string, userHome: string): string {
-  return (secureStorage.length > 0 ? secureStorage : join(userHome, '.claude')).normalize('NFC');
-}
-
-/**
  * Where a credential is kept, and what every runtime on it is given to reach it. `harness` picks the
  * half of an environment login that drives both CLIs (`./halves.ts`); left out, it is the login's own.
  *
@@ -184,25 +170,20 @@ export function resolveCredentialStore(
   id: string,
   credential: Credential,
   paths: CredentialStorePaths,
+  kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined,
   harness: HarnessKind = credential.harness,
   stores: ReadonlyMap<string, LoginLaunchStore> = NO_STORES,
 ): CredentialStoreResolution {
   if (credential.store === 'environment') return environmentResolution(credential, harness, paths.userHome);
-  if (credential.store === 'ferretry') {
+  const store = credential.store;
+  if (store === 'ferretry') {
     return byHarness<CredentialStoreResolution>(credential.harness, {
-      claude: () => {
-        const secureStorage = stores.get(id)?.variables[CLAUDE_SECURE_STORAGE_VARIABLE];
-        if (secureStorage === undefined || secureStorage.length === 0)
-          return { harness: 'claude', store: 'ferretry', unavailable: 'Logins names no store for it' };
-        const storageDirectory = claudeStorageDirectory(secureStorage, paths.userHome);
-        return {
-          harness: 'claude',
-          store: 'ferretry',
-          secureStorage,
-          storageDirectory,
-          credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
-        };
-      },
+      claude: () =>
+        claudeResolution(kits?.get('claude'), store, {
+          store,
+          userHome: paths.userHome,
+          variables: stores.get(id)?.variables ?? {},
+        }),
       codex: () => {
         const signInFile = stores.get(id)?.signInFile;
         return signInFile === undefined || signInFile.length === 0
@@ -212,16 +193,7 @@ export function resolveCredentialStore(
     });
   }
   return byHarness<CredentialStoreResolution>(credential.harness, {
-    claude: () => {
-      const storageDirectory = claudeStorageDirectory(HOST_CLAUDE_SECURE_STORAGE, paths.userHome);
-      return {
-        harness: 'claude',
-        store: 'host',
-        secureStorage: HOST_CLAUDE_SECURE_STORAGE,
-        storageDirectory,
-        credentialFile: join(storageDirectory, CLAUDE_CREDENTIAL_FILE),
-      };
-    },
+    claude: () => claudeResolution(kits?.get('claude'), 'host', { store: 'host', userHome: paths.userHome }),
     codex: () =>
       paths.hostCodexHome === undefined
         ? {
@@ -234,18 +206,60 @@ export function resolveCredentialStore(
 }
 
 /**
+ * A Claude credential in a store, as Claude's own plugin says where it lives. A plugin that gives Runtimes no answer (it is
+ * off, or its kit has no credential store) leaves the credential unreachable and says why; Claude's paths are never guessed.
+ */
+function claudeResolution(
+  kit: RuntimesHarnessKit | undefined,
+  store: 'host' | 'ferretry',
+  input: Parameters<NonNullable<RuntimesHarnessKit['credentialStore']>>[0],
+): CredentialStoreResolution {
+  if (kit?.credentialStore === undefined)
+    return { harness: 'claude', store, unavailable: unsupportedHarnessSentence(harnessKeyOfKind('claude')) };
+  const found = kit.credentialStore(input);
+  if (found.kind === 'unavailable') return { harness: 'claude', store, unavailable: found.reason };
+  if (
+    found.kind !== 'stored' ||
+    found.directory === undefined ||
+    found.file === undefined ||
+    found.secureStorage === undefined
+  )
+    return { harness: 'claude', store, unavailable: 'its plugin named no store for it' };
+  return {
+    harness: 'claude',
+    store,
+    secureStorage: found.secureStorage,
+    storageDirectory: found.directory,
+    credentialFile: found.file,
+  };
+}
+
+/**
  * The variables a runtime on this credential exports, beyond its own config dir.
  *
  * Claude gets its one secure-storage value — the empty string included, which is a value and not an
  * absence. Codex gets nothing: its credential arrives through the link in its home. An environment
  * credential gets its own `env`. Never `HOME` (see the module note).
  */
-export function credentialLaunchEnvironment(resolution: CredentialStoreResolution): Readonly<Record<string, string>> {
+export function credentialLaunchEnvironment(
+  resolution: CredentialStoreResolution,
+  kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined,
+): Readonly<Record<string, string>> {
   if (resolution.store === 'environment') return resolution.env;
   if ('unavailable' in resolution) return {};
   switch (resolution.harness) {
-    case 'claude':
-      return { [CLAUDE_SECURE_STORAGE_VARIABLE]: resolution.secureStorage };
+    case 'claude': {
+      // A stored Claude resolution came from the kit, so a kit with no way to name its variables is a wiring fault.
+      const environment = kits?.get('claude')?.credentialEnvironment;
+      if (environment === undefined) throw new UnsupportedHarnessError(harnessKeyOfKind('claude'));
+      const stored: KitCredentialResolution = {
+        kind: 'stored',
+        directory: resolution.storageDirectory,
+        file: resolution.credentialFile,
+        secureStorage: resolution.secureStorage,
+      };
+      return environment(stored);
+    }
     case 'codex':
       return {};
     default:

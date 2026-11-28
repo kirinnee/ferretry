@@ -62,7 +62,7 @@ describe('the kit threaded to the groups of a materialisation', () => {
 
   it('should hand no group a kit when nothing supplies kits', async () => {
     spies.calls.length = 0;
-    const { service } = twoHarnessWorld();
+    const { service } = twoHarnessWorld({ kits: undefined });
     await service.publishFromFiles();
     expect(spies.calls.length).toBeGreaterThan(0);
     expect(spies.calls.every(call => call.kit === undefined)).toBe(true);
