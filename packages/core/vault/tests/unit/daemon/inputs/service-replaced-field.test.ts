@@ -244,6 +244,17 @@ describe('a re-found field is typed into only on proof: anything unproved goes b
     should(serialized).containEql('a'.repeat(64));
   });
 
+  it('withholds an unreadable destination rather than exposing raw query or fragment text', async () => {
+    const raw = 'not-an-absolute-url?FAKE_QUERY_SECRET#FAKE_FRAGMENT_SECRET';
+    const facts = page({}, [pageField('code', { ...PROVED }, { ...ATTRS, formAction: raw })]);
+    const w = world({ facts });
+    await w.service.raise(SESSION, RAISE);
+    const serialized = JSON.stringify(InputRequestSchema.parse(await w.pending()));
+    should(serialized).containEql('[unreadable destination]');
+    should(serialized).not.containEql('FAKE_QUERY_SECRET');
+    should(serialized).not.containEql('FAKE_FRAGMENT_SECRET');
+  });
+
   it('should not warn when only the path of the same origin changed, or the card was not redrawn for its action (E-314)', async () => {
     const { w, deliver } = await sent(() =>
       swapped({}, {}, {}, { formAction: 'https://github.com/sessions/other-path', label: 'Code 2' }),
