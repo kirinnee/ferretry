@@ -7,8 +7,8 @@ import { identityKey } from '../../../host/fence-index.ts';
 
 /**
  * A read walks the folders above its file on every call; they are remembered clear for a moment so a hundred ferrets'
- * reads do not each look at the same folders again. The file ITSELF is looked at every time, so a replaced or relinked
- * entry is never answered from the memory.
+ * reads do not each walk the same ancestors again. The file and its parent are identified every time, so a replaced
+ * entry or parent is never answered from another identity's memory.
  */
 
 const parents: string[] = [];
@@ -52,7 +52,7 @@ function counting(): { readonly fs: HostFs; readonly looks: string[] } {
 }
 
 describe('privatelyHeld remembers clear folders for a moment', () => {
-  test('a second read of a sibling looks at the entry only; after the moment it walks again', async () => {
+  test('a second read of a sibling identifies the entry and parent; after the moment it walks again', async () => {
     const l = await layout();
     const { fs, looks } = counting();
     let at = 1_000;
@@ -61,7 +61,7 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     expect(looks).toEqual([l.file, l.folder, `${l.base}/projects`, l.base]);
     looks.length = 0;
     expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
-    expect(looks).toEqual([l.file]);
+    expect(looks).toEqual([l.file, l.folder]);
     looks.length = 0;
     at += CLEAR_FOLDER_MS + 1;
     expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
@@ -70,7 +70,7 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
 
   test('the entry itself is never answered from memory: a file replaced by a link to a private file is held at once', async () => {
     const l = await layout();
-    let at = 1_000;
+    const at = 1_000;
     const clock = (): number => at;
     expect(await privatelyHeld(REAL, l.guard, l.file, l.base, clock)).toBe(false);
     // The transcript's name now reaches the private file (a hard link, a bind mount's identity): same moment, warm memory.
@@ -147,7 +147,7 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     at = 1_000 + CLEAR_FOLDER_MS - 100;
     looks.length = 0;
     expect(await privatelyHeld(fs, l.guard, `${deeper}/c.jsonl`, l.base, clock)).toBe(false);
-    expect(looks).toEqual([`${deeper}/c.jsonl`, deeper, `${l.folder}/a`]);
+    expect(looks).toEqual([`${deeper}/c.jsonl`, deeper, `${l.folder}/a`, l.folder]);
     // After the ancestor's own moment nothing below it is still remembered: the whole chain is walked again.
     at = 1_000 + CLEAR_FOLDER_MS + 1;
     looks.length = 0;

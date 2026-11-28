@@ -296,15 +296,21 @@ function privateCheckOf(fs: HostFs, home: string, real: string, privateFiles: Pr
       return true;
     }
   };
-  // A hit is confirmed against the places as they are NOW: the kept snapshot can be one look interval old, and a private
-  // file removed in that time can free an inode that a new entry (a staged folder, a file just written) then reuses.
+  // File hits are confirmed NOW to reject inode reuse. A kept private FOLDER stays held by identity even after a move;
+  // a changed clear folder forces a look even when the kept snapshot does not yet know its new identity.
   const now = async (): Promise<PrivateGuard> =>
     await privateGuardLookedAtNow(fs, home, real, privateFiles.files, privateFiles.recheckMs, privateFiles.watch);
   return {
     held: async path =>
-      await answer(
-        async kept => (await privatelyHeld(fs, kept, path, real)) && (await privatelyHeld(fs, await now(), path, real)),
-      ),
+      await answer(async kept => {
+        let changed = false,
+          folder = false;
+        const held = await privatelyHeld(fs, kept, path, real, undefined, reason => {
+          changed ||= reason === 'changed-folder';
+          folder ||= reason === 'private-folder';
+        });
+        return folder || ((held || changed) && (await privatelyHeld(fs, await now(), path, real)));
+      }),
     heldIdentity: async identity =>
       await answer(async kept => heldByIdentity(kept, identity) && heldByIdentity(await now(), identity)),
   };
