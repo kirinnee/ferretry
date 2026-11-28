@@ -982,6 +982,31 @@ describe('materialiseFleet', () => {
     });
   });
 
+  // E-276 PR 2 (addendum 12): a Claude runtime whose plugin gives no kit is unavailable as a WHOLE, not only for auto launches.
+  it('should make an environment-backed Claude runtime unavailable, and no Claude wrapper launchable, when only the Codex kit is present', () => {
+    // Arrange — an environment login, not the host's own (a host login can be refused for an unrelated credential-store reason).
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'environment', env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+    });
+    const codexOnly = new Map([...REAL_KITS].filter(([harness]) => harness === 'codex'));
+
+    // Act
+    const result = plan(model, { kits: codexOnly });
+
+    // Assert — Claude is refused by name and never launches; Codex still publishes healthy.
+    const reason = 'claude-code is not supported here';
+    should(result.manifest.accounts[0]).match({ available: false, unavailableReason: reason });
+    should(result.manifest.accounts[0]?.autoRefusal).be.undefined();
+    const wrapper = wrapperOf(result, 'claude-default');
+    should(wrapper).containEql(`ferretry: claude-default cannot start: ${reason}`).and.containEql('exit 1');
+    should(wrapper).not.containEql('exec claude');
+    should(result.manifest.accounts[1]).match({ available: true, unavailableReason: null });
+    should(wrapperOf(result, 'codex-default')).containEql('exec codex');
+  });
+
   // A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, ^A500). Claude Code ranks
   // a folder's `env` above the process environment and a `--settings` file above the folder, so the ONLY way a login's value
   // could beat a repo's is by being written into a `--settings` file. It never is: the login's variables are the process
