@@ -13,6 +13,8 @@ import {
 import type { ActionsRowOffer } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { createMovedStore } from '../../../app/lib/moved-store.ts';
+import type { MovedStore } from '../../../app/lib/moved-store.ts';
+import { MovedDocumentSchema } from '../../../contract/index.ts';
 import { createMoveMachineRowPanel, offersMove } from '../../../app/slots/move-machine-row.tsx';
 import { fakeReachRow } from '@ferretry/app/testing';
 
@@ -26,7 +28,13 @@ afterEach(async () => {
 
 const client = { call: async () => ({ moved: {} }) } as unknown as PluginClient;
 
-async function mountRow(daemons: readonly string[], canControl = true, refused?: string, capability = 'fleet') {
+async function mountRow(
+  daemons: readonly string[],
+  canControl = true,
+  refused?: string,
+  capability = 'fleet',
+  store = createMovedStore(client),
+) {
   noteClientDaemon(client, 'alpha');
   const harness = deviceViewHarness({ plugin: 'relocate', fragments: [] });
   harness.setRows(
@@ -43,7 +51,7 @@ async function mountRow(daemons: readonly string[], canControl = true, refused?:
     })),
   );
   const offers: (readonly [string, ActionsRowOffer | null])[] = [];
-  const Panel = createMoveMachineRowPanel(client, createMovedStore(client)) as unknown as FC<Record<string, unknown>>;
+  const Panel = createMoveMachineRowPanel(client, store) as unknown as FC<Record<string, unknown>>;
   await interact(async () => {
     mounted = await mount(
       <harness.Harness place="daemon">
@@ -60,6 +68,45 @@ async function mountRow(daemons: readonly string[], canControl = true, refused?:
 }
 
 describe('the move-machine row', () => {
+  it('keeps the open move dialog mounted when its ledger becomes a stub, until Close is pressed', async () => {
+    let ledger = MovedDocumentSchema.parse({ moved: {} });
+    const listeners = new Set<() => void>();
+    const store: MovedStore = {
+      snapshot: () => ledger,
+      subscribe: listener => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      refresh: async () => undefined,
+    };
+    const offers = await mountRow(['alpha', 'beta'], true, undefined, 'fleet', store);
+    await interact(async () => {
+      await must(offers.at(-1)?.[1], 'move row').run();
+    });
+    const original = must(document.querySelector('[data-move-machine]'), 'open move dialog');
+    await interact(async () => {
+      ledger = MovedDocumentSchema.parse({
+        moved: {
+          f1: {
+            daemonId: `fy_daemon_${'B'.repeat(43)}`,
+            ferretId: 'g9',
+            machine: 'Laptop',
+            at: '2026-11-27T00:00:00.000Z',
+          },
+        },
+      });
+      for (const listener of listeners) listener();
+    });
+    expect(document.querySelector('[data-move-machine]')).toBe(original);
+    expect(offers.at(-1)).toEqual(['move-machine', null]);
+    await interact(async () => {
+      must(original.querySelector<HTMLButtonElement>('button[aria-label="Close"]'), 'Close').click();
+    });
+    expect(document.querySelector('[data-move-machine]')).toBeNull();
+    expect(document.querySelector('[data-moved-to]')?.textContent).toContain('Moved to Laptop');
+  });
   it('is offered only for a controlling caller with at least two machines', () => {
     expect(offersMove(true, 2)).toBe(true);
     expect(offersMove(true, 1)).toBe(false);

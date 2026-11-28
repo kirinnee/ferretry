@@ -72,8 +72,9 @@ function MoveMachineRow({
     );
     return () => offer(MOVE_MACHINE_ROW_ID, null);
   }, [offer, offered]);
-  if (ledger.moved[ferret] !== undefined) return <MovedMark ferret={ferret} store={store} />;
-  return open && offered && from !== undefined ? (
+  if (ledger.moved[ferret] !== undefined && !open) return <MovedMark ferret={ferret} store={store} />;
+  // Withdrawing the menu row must not dismiss the move's progress or recovery receipt.
+  return open && from !== undefined ? (
     <MoveMachine
       candidates={others}
       ferret={ferret}
