@@ -8,14 +8,21 @@
  * destinations every harness has come from the settings file and instructions file it already names, so `assets` only adds its own);
  * Codex is refused by name when its kit leaves out any of those; and a Codex kit that is absent altogether is refused AND still has
  * its SQLite directory made. A harness's plugin being off or empty never changes what another harness's runtime does with a model
- * set (which model ids are whose is a fact that holds with a plugin off, `harness-kind.ts`).
+ * set (which model ids are whose is a fact that holds with a plugin off, `harness-kind.ts`). A kit that names no settings file or no
+ * instructions file is still planned, to the byte (the base planned both harnesses from a table).
  */
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { RuntimesHarnessKit } from '../../../contract/index.ts';
 import { EMPTY_RUNTIME_IDS } from '../../../daemon/lib/account/ids.ts';
-import { keepsSharedStateOf, neededKitMembers, supportedKinds } from '../../../daemon/lib/harness-kind.ts';
+import {
+  hasComfortOf,
+  keepsSharedStateOf,
+  kitDocumentsOf,
+  neededKitMembers,
+  supportedKinds,
+} from '../../../daemon/lib/harness-kind.ts';
 import { materialiseFleet } from '../../../daemon/lib/account/materialise.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetLayout } from '../../../daemon/lib/provisioning.ts';
@@ -111,11 +118,15 @@ const PROBES: Readonly<Record<string, () => Kits>> = {
   'claude without assets': () => fleet(without(real('claude'), 'assets'), real('codex')),
   'claude without all three': () =>
     fleet(without(real('claude'), 'runtimeExtras', 'ownedSkillEntries', 'fixedLayer'), real('codex')),
+  'claude without settingsFile': () => fleet(without(real('claude'), 'settingsFile'), real('codex')),
+  'claude without importSetup': () => fleet(without(real('claude'), 'importSetup'), real('codex')),
   'claude without its command': () => fleet(without(real('claude'), 'command'), real('codex')),
   'codex without runtimeExtras': () => fleet(real('claude'), without(real('codex'), 'runtimeExtras')),
   'codex without ownedSkillEntries': () => fleet(real('claude'), without(real('codex'), 'ownedSkillEntries')),
   'codex without fixedLayer': () => fleet(real('claude'), without(real('codex'), 'fixedLayer')),
   'codex without assets': () => fleet(real('claude'), without(real('codex'), 'assets')),
+  'codex without settingsFile': () => fleet(real('claude'), without(real('codex'), 'settingsFile')),
+  'codex without importSetup': () => fleet(real('claude'), without(real('codex'), 'importSetup')),
   'codex without its command': () => fleet(real('claude'), without(real('codex'), 'command')),
   'codex without keepsSharedState': () => fleet(real('claude'), without(real('codex'), 'keepsSharedState')),
   'codex an empty kit': () => fleet(real('claude'), {}),
@@ -134,6 +145,12 @@ const FIXTURE = new URL('./fixtures/kit-member-parity.json', import.meta.url);
 const SAME_PLAN_AS: Readonly<Record<string, string>> = {
   'claude without assets': 'both real kits',
   'codex without assets': 'codex without ownedSkillEntries',
+  // Where a profile's settings and instructions land is a fact that holds with the kit silent (`harness-kind.ts`): the base planned
+  // both harnesses from a table, so a kit that names neither is still planned, and the plan is byte for byte the whole kit's.
+  'claude without settingsFile': 'both real kits',
+  'claude without importSetup': 'both real kits',
+  'codex without settingsFile': 'both real kits',
+  'codex without importSetup': 'both real kits',
 };
 
 describe('a mixed fleet whose kits leave members out', () => {
@@ -163,6 +180,9 @@ describe('the facts that hold with a plugin off', () => {
     it(`should agree with the ${kind} kit, so the table of words and the plugin never drift apart`, () => {
       const kit = REAL_KITS.get(kind) as RuntimesHarnessKit;
       expect(kit.keepsSharedState === true).toBe(keepsSharedStateOf(kind));
+      expect(kit.comfortSettings !== undefined).toBe(hasComfortOf(kind));
+      expect(kit.settingsFile).toMatchObject(kitDocumentsOf(kind).settings);
+      expect(kit.importSetup?.instructionsName).toBe(kitDocumentsOf(kind).memory);
       for (const stage of ['planned', 'launched'] as const)
         for (const member of neededKitMembers(kind, stage)) expect(kit[member]).toBeDefined();
     });

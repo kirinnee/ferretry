@@ -141,7 +141,7 @@ function worldModel(
         settings: builtinComponents(REAL_KITS).settings,
         modelSets: { [`ferretry-${harness}`]: starter },
       },
-      profiles: { default: { layers: builtinProfileLayers(harness, { [harness]: models[0] as string }, REAL_KITS) } },
+      profiles: { default: { layers: builtinProfileLayers(harness, { [harness]: models[0] as string }) } },
       runtimes: { [`${harness}-golden`]: { credential: credentialId, profile: 'default' } },
     });
   }

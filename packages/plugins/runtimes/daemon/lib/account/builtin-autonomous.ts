@@ -9,7 +9,8 @@
  * - the instructions, ONE generic text each harness writes as its own file (`CLAUDE.md`, `AGENTS.md`). It says only what
  *   the launch instruction parts (`fixed-layer.ts`: tools, settings, agenda, sub-ferret, pack) do not already say;
  * - a harness's comfort settings (its plugin's `kit.comfortSettings`), only what the fixed layer does not already force. A
- *   harness that gives none has none (Codex: every setting worth changing is already its default).
+ *   harness that has none has none (Codex: every setting worth changing is already its default). Whether it has them is a fact
+ *   that holds with its plugin off (`hasComfortOf`), so a profile saved with them stays readable then.
  *
  * WHAT THEY DO NOT HOLD:
  * - **Permissions (D6).** The permission mode stays the machine's (`harness-<x>.yaml`, default `skip`), so applying a
@@ -23,7 +24,7 @@
  * Pure: values only.
  */
 import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
-import { supportedKinds } from '../harness-kind.ts';
+import { hasComfortOf, supportedKinds } from '../harness-kind.ts';
 import { slugName } from './document.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { StarterModels } from '../models/catalog.ts';
@@ -76,13 +77,19 @@ export const isBuiltinInstructions = (name: string, body: string | undefined): b
 export const builtinProfileLayers = (
   harness: HarnessKind,
   starters: StarterModels,
-  kits: BuiltinKits,
   modelSet: string = builtinProfileName(harness),
 ): readonly string[] => [
   ...(starters[harness] === undefined ? [] : [`modelSets/${modelSet}`]),
   `instructions/${AUTONOMOUS_INSTRUCTIONS_NAME}`,
-  ...(kits?.get(harness)?.comfortSettings === undefined ? [] : [`settings/${comfortName(harness)}`]),
+  ...(hasComfortOf(harness) ? [`settings/${comfortName(harness)}`] : []),
 ];
+
+/**
+ * The comfort component of a harness whose plugin gives none (it is off, or its kit leaves the member out). The harness still has the
+ * name, because a profile saved while its plugin was on layers it (`hasComfortOf`), so the name is known and the runtime on it is refused
+ * by name for want of the kit, never unreadable. It sets nothing.
+ */
+const noComfort = (harness: HarnessKind): SettingsComponent => ({ harness, document: {} }) as SettingsComponent;
 
 /** The built-in components by kind and name; an owner's component of the same name always wins over these. */
 export const builtinComponents = (
@@ -93,10 +100,12 @@ export const builtinComponents = (
 } => ({
   instructions: { [AUTONOMOUS_INSTRUCTIONS_NAME]: { text: AUTONOMOUS_INSTRUCTIONS } as InstructionsComponent },
   settings: Object.fromEntries(
-    supportedKinds().flatMap(harness => {
-      const comfort = kits?.get(harness)?.comfortSettings;
-      return comfort === undefined ? [] : [[comfortName(harness), comfort as unknown as SettingsComponent]];
-    }),
+    supportedKinds()
+      .filter(hasComfortOf)
+      .map(harness => [
+        comfortName(harness),
+        (kits?.get(harness)?.comfortSettings as unknown as SettingsComponent | undefined) ?? noComfort(harness),
+      ]),
   ),
 });
 
@@ -128,10 +137,7 @@ export function builtinDocument(
   const harnesses = supportedKinds();
   return {
     profiles: Object.fromEntries(
-      harnesses.map(harness => [
-        builtinProfileName(harness),
-        { layers: builtinProfileLayers(harness, starters, kits) },
-      ]),
+      harnesses.map(harness => [builtinProfileName(harness), { layers: builtinProfileLayers(harness, starters) }]),
     ),
     components: {
       modelSets: Object.fromEntries(

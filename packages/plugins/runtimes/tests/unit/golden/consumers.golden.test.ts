@@ -246,11 +246,11 @@ describe('data-word consumer goldens', () => {
     const starters = { claude: 'claude-opus-5-5', codex: 'gpt-6' } as const;
     expectGolden('consumers/builtin-profiles', {
       layers: {
-        claudeWithStarter: builtinProfileLayers('claude', starters, REAL_KITS),
-        claudeWithout: builtinProfileLayers('claude', {}, REAL_KITS),
-        codexWithStarter: builtinProfileLayers('codex', starters, REAL_KITS),
-        codexWithout: builtinProfileLayers('codex', {}, REAL_KITS),
-        claudeNamedModelSet: builtinProfileLayers('claude', starters, REAL_KITS, 'pinned'),
+        claudeWithStarter: builtinProfileLayers('claude', starters),
+        claudeWithout: builtinProfileLayers('claude', {}),
+        codexWithStarter: builtinProfileLayers('codex', starters),
+        codexWithout: builtinProfileLayers('codex', {}),
+        claudeNamedModelSet: builtinProfileLayers('claude', starters, 'pinned'),
       },
       starterModelSets: {
         claude: starterModelSet('claude', starters) ?? null,

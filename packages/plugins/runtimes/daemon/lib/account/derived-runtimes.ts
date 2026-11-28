@@ -29,7 +29,7 @@
  */
 import type { EnvironmentLoginTemplate, LoginView } from '@ferretry/plugin-logins/contract';
 import type { ModelSetFile, ProfileFile, RuntimeFile } from '../../../contract/index.ts';
-import { type BuiltinKits, builtinProfileLayers, pinnedProfileName, starterModelSet } from './builtin-autonomous.ts';
+import { builtinProfileLayers, pinnedProfileName, starterModelSet } from './builtin-autonomous.ts';
 import { supportedKindOfKey, supportedKinds } from '../harness-kind.ts';
 import { type HarnessKind, harnessKeyOfKind } from '../manifest.ts';
 import { NO_STARTERS, type StarterModels } from '../models/catalog.ts';
@@ -72,8 +72,6 @@ export interface DerivedFrom {
    * refused (`standInsNamedBy`), so deriving one would block every change to the files while it stood.
    */
   readonly templates?: ReadonlyMap<string, EnvironmentLoginTemplate> | undefined;
-  /** What each harness's plugin gives the built-in profiles (`kit.comfortSettings`). */
-  readonly kits?: BuiltinKits;
 }
 
 /** What is derived, to be added beside the explicit files (an entry already there is never in here). */
@@ -172,7 +170,7 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
     const wanted = defaultProfileName(harness);
     if (!from.profiles.has(wanted))
       profiles.set(wanted, {
-        contents: [...builtinProfileLayers(harness, from.starters ?? NO_STARTERS, from.kits)],
+        contents: [...builtinProfileLayers(harness, from.starters ?? NO_STARTERS)],
       } as ProfileFile);
     const starter = starterModelSet(harness, from.starters ?? NO_STARTERS);
     if (starter !== undefined && !from.modelSets.has(wanted)) modelSets.set(wanted, starter as ModelSetFile);
@@ -214,7 +212,7 @@ export function deriveRuntimes(from: DerivedFrom): Derived {
       model === undefined || model === starter ? defaultProfileName(harness) : pinnedProfileName(harness, model);
     if (profile !== defaultProfileName(harness) && !from.profiles.has(profile) && model !== undefined) {
       profiles.set(profile, {
-        contents: [...builtinProfileLayers(harness, { [harness]: model }, from.kits, profile)],
+        contents: [...builtinProfileLayers(harness, { [harness]: model }, profile)],
       } as ProfileFile);
       modelSets.set(profile, starterModelSet(harness, { [harness]: model }) as ModelSetFile);
     }

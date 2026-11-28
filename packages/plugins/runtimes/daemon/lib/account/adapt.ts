@@ -58,6 +58,7 @@ import {
   displayNameOf,
   harnessKeyOfKind,
   kindOf,
+  kitDocumentsOf,
   neededKitMembers,
   supportedKinds,
   UnsupportedHarnessError,
@@ -240,9 +241,9 @@ const HOOK_SCRIPTS_FALLBACK_DEST = 'hooks';
 /** Where a hooks document lands as its own file. Claude has none: its hooks live in `settings.json`. */
 const hooksFileDest = (kit: AssetsKit | undefined): string | undefined => harnessAsset(kit, 'hooks')?.dest;
 
-/** Where a document lands: a kit that names no settings file or instructions file (`runtimeKitRefusal` refuses it first) is refused by name here too. */
+/** Where a document lands: what the kit says, or (a kit that names no settings file or instructions file) where the harness has always kept it. */
 const destOf = (harness: HarnessKind, kit: AssetsKit | undefined, field: 'memory' | 'skills' | 'settings') =>
-  harnessAsset(kit, field) ?? kitless(harness);
+  harnessAsset(kit, field, kitDocumentsOf(harness)) ?? kitless(harness);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -599,7 +600,7 @@ export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | und
 
 /**
  * The ONE runtime-wide kit decision, for the account plan and the catalog alike: `missingKitRefusal`, and also a kit that gives no launch
- * line, command, home variable, settings file or instructions file (where a profile's documents land), or none of what its harness needs to launch (Codex's list of the skill folders it keeps for itself), in the same words. `undefined` when the
+ * line, command or home variable, or none of what its harness needs to launch (Codex's list of the skill folders it keeps for itself), in the same words. `undefined` when the
  * runtime can be planned and launched.
  */
 export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
@@ -607,8 +608,6 @@ export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit 
   (kit?.wrapper === undefined ||
   kit.command === undefined ||
   kit.homeEnv === undefined ||
-  kit.settingsFile === undefined ||
-  kit.importSetup === undefined ||
   !gives(kit, neededKitMembers(harness, 'launched'))
     ? refusalOf(harness)
     : undefined);

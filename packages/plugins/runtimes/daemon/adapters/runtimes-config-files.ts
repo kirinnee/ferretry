@@ -235,12 +235,7 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
         );
       // A derived runtime that is saved is written whole, onto a real profile holding its pinned model (never onto a generated
       // one), and one that is refused is not saved on its generated profile at all.
-      const realised = realisedEdits(
-        loaded.evaluation.effective.model,
-        next,
-        (loaded.files as RuntimesModel).derived,
-        harnessKits(sources.components),
-      );
+      const realised = realisedEdits(loaded.evaluation.effective.model, next, (loaded.files as RuntimesModel).derived);
       if (realised.refused.length > 0)
         throw new FleetCatalogRefusal('fleet_change_refused', `${realised.refused.join('; ')}; nothing was changed`);
       return realised.edits.map(edit => ({

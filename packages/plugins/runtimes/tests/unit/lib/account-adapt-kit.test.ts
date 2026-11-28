@@ -17,6 +17,8 @@ import {
 import { CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY } from '../../../daemon/lib/account/credentials.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
+import { harnessAsset } from '../../../daemon/lib/assets.ts';
+import { kitDocumentsOf } from '../../../daemon/lib/harness-kind.ts';
 import { REAL_KITS } from '../../support/real-kits.ts';
 
 const SERVERS = { files: { command: 'files-server', args: ['--stdio'] } };
@@ -100,17 +102,18 @@ describe('Claude documents and plumbing through the kit', () => {
 
 describe('where the documents of a runtime land', () => {
   it.each(['claude', 'codex'] as const)(
-    'should refuse a %s runtime whose kit names no settings file or no instructions file, by name',
+    'should still plan a %s runtime whose kit names no settings file or no instructions file, where the harness has always kept them',
     harness => {
       const kit = REAL_KITS.get(harness) as RuntimesHarnessKit;
       expect(runtimeKitRefusal(harness, kit)).toBeUndefined();
       for (const member of ['settingsFile', 'importSetup'] as const) {
         const without: Record<string, unknown> = { ...kit };
         delete without[member];
-        expect(runtimeKitRefusal(harness, without as RuntimesHarnessKit)).toEqual({
-          kind: 'harness-unsupported',
-          message: `${harness === 'claude' ? 'claude-code' : 'codex'} is not supported here`,
-        });
+        expect(runtimeKitRefusal(harness, without as RuntimesHarnessKit)).toBeUndefined();
+        for (const field of ['settings', 'memory'] as const)
+          expect(harnessAsset(without as RuntimesHarnessKit, field, kitDocumentsOf(harness))).toEqual(
+            harnessAsset(kit, field),
+          );
       }
     },
   );

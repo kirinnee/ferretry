@@ -7,9 +7,11 @@ import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import { REAL_KITS } from '../../support/real-kits.ts';
 import { TEST_STARTERS } from '../../support/starters.ts';
 import type { ProfileFile } from '../../../contract/index.ts';
+import type { SettingsComponent } from '../../../daemon/lib/account/schema.ts';
 import {
   AUTONOMOUS_INSTRUCTIONS,
   builtinComponents,
+  type BuiltinKits,
   builtinProfileLayers,
   isBuiltinInstructions,
 } from '../../../daemon/lib/account/builtin-autonomous.ts';
@@ -144,26 +146,27 @@ describe('the built-in autonomous profiles', () => {
 });
 
 describe('the comfort settings a harness plugin gives', () => {
-  const comfort = { harness: 'codex', document: { marker: 1 } };
-
-  it('should hold exactly the comfort components the kits give, each under its own harness', () => {
+  it('should hold the comfort component of each harness that has one, with the words its plugin gives', () => {
     expect(Object.keys(builtinComponents(REAL_KITS).settings)).toEqual(['ferretry-claude-comfort']);
-    expect(Object.keys(builtinComponents(new Map([['codex', { comfortSettings: comfort }]])).settings)).toEqual([
-      'ferretry-codex-comfort',
-    ]);
-    expect(Object.keys(builtinComponents(undefined).settings)).toEqual([]);
+    expect(builtinComponents(REAL_KITS).settings['ferretry-claude-comfort']).toBe(
+      REAL_KITS.get('claude')?.comfortSettings as unknown as SettingsComponent,
+    );
   });
 
-  it('should layer the comfort component of a harness into its built-in profile only when its kit gives one', () => {
-    expect(builtinProfileLayers('claude', TEST_STARTERS, REAL_KITS)).toContain('settings/ferretry-claude-comfort');
-    expect(builtinProfileLayers('codex', TEST_STARTERS, REAL_KITS)).toEqual([
+  it('should layer the comfort component into the built-in profile of a harness that has one, plugin on or off', () => {
+    expect(builtinProfileLayers('claude', TEST_STARTERS)).toContain('settings/ferretry-claude-comfort');
+    expect(builtinProfileLayers('codex', TEST_STARTERS)).toEqual([
       'modelSets/ferretry-codex',
       'instructions/ferretry-work-alone',
     ]);
-    expect(builtinProfileLayers('codex', TEST_STARTERS, new Map([['codex', { comfortSettings: comfort }]]))).toContain(
-      'settings/ferretry-codex-comfort',
-    );
-    expect(builtinProfileLayers('claude', TEST_STARTERS, undefined)).not.toContain('settings/ferretry-claude-comfort');
+  });
+
+  it('should still know the name of a comfort component whose plugin is off, and set nothing by it', () => {
+    for (const kits of [undefined, new Map(), new Map([['claude', {}]])] as BuiltinKits[]) {
+      const comfort = builtinComponents(kits).settings;
+      expect(Object.keys(comfort)).toEqual(['ferretry-claude-comfort']);
+      expect(comfort['ferretry-claude-comfort']).toEqual({ harness: 'claude', document: {} });
+    }
   });
 });
 

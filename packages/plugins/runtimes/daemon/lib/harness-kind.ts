@@ -91,6 +91,10 @@ const CLAUDE_ALIASES: ReadonlySet<string> = new Set(['opus', 'sonnet', 'haiku', 
  * `keepsSharedState` and the members each kit gives against this table.
  *  - `keepsSharedState`: its runtimes keep one state database in the shared history pool, so that directory is made for them.
  *  - `needs`: the kit members a runtime of it is refused without, to plan (`planned`) and then to launch (`launched`).
+ *  - `comfort`: whether its built-in profile layers comfort settings (`kit.comfortSettings`): a saved profile of it names that component
+ *    whether or not its plugin is on, so the name is known (and its runtime refused by name) rather than unreadable.
+ *  - `documents`: where its profile's settings and instructions land (`kit.settingsFile`, `kit.importSetup.instructionsName`), for a kit that
+ *    does not say, so the plan of its runtime is what it always was.
  *  - `ownsModel`: which model ids are its own, given an id in lower case without its context suffix. A harness whose plugin is off
  *    still owns them, so another harness's runtime never takes a model set that is not its own just because that plugin is off:
  *    a Claude id is `claude-…` or one of Claude Code's aliases; a Codex id is `gpt-…`, `codex-…` or an `o<n>…` reasoning model.
@@ -98,11 +102,15 @@ const CLAUDE_ALIASES: ReadonlySet<string> = new Set(['opus', 'sonnet', 'haiku', 
 const KIT_FACTS = {
   claude: {
     keepsSharedState: false,
+    comfort: true,
+    documents: { settings: { file: 'settings.json', format: 'json' }, memory: 'CLAUDE.md' },
     needs: { planned: [], launched: [] },
     ownsModel: (id: string) => id.startsWith('claude-') || CLAUDE_ALIASES.has(id),
   },
   codex: {
     keepsSharedState: true,
+    comfort: false,
+    documents: { settings: { file: 'config.toml', format: 'toml' }, memory: 'AGENTS.md' },
     ownsModel: (id: string) => id.startsWith('gpt-') || id.startsWith('codex-') || /^o\d/.test(id),
     needs: { planned: ['runtimeExtras', 'fixedLayer'], launched: ['ownedSkillEntries', 'assets'] },
   },
@@ -111,6 +119,11 @@ const KIT_FACTS = {
     HarnessKind,
     {
       readonly keepsSharedState: boolean;
+      readonly comfort: boolean;
+      readonly documents: {
+        readonly settings: { readonly file: string; readonly format: 'json' | 'toml' };
+        readonly memory: string;
+      };
       readonly ownsModel: (id: string) => boolean;
       readonly needs: { readonly planned: readonly NeededMember[]; readonly launched: readonly NeededMember[] };
     }
@@ -119,6 +132,13 @@ const KIT_FACTS = {
 
 /** Whether runtimes of `kind` keep their state database in the shared history pool (made for them even when their plugin is off). */
 export const keepsSharedStateOf = (kind: HarnessKind): boolean => KIT_FACTS[kind].keepsSharedState;
+
+/** Whether the built-in profile of `kind` layers comfort settings (its plugin's `kit.comfortSettings`), whether or not its plugin is on. */
+export const hasComfortOf = (kind: HarnessKind): boolean => KIT_FACTS[kind].comfort;
+
+/** Where a profile's settings and instructions land in a home of `kind`, for a kit that does not say (what the plugin's own words repeat). */
+export const kitDocumentsOf = (kind: HarnessKind): (typeof KIT_FACTS)[HarnessKind]['documents'] =>
+  KIT_FACTS[kind].documents;
 
 /** The harness that owns a model id (lower case, no context suffix), or `undefined` when none does: a third-party model. */
 export const modelOwnerOf = (id: string): HarnessKind | undefined =>

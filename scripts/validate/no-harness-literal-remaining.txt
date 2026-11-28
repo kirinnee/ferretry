@@ -19,14 +19,17 @@
 #   17b-2: Claude's comfort settings (the kit's `comfortSettings`, read where the built-in profiles are assembled); the sign-in model catalog of
 #     each harness (the kit's `signInCatalog`, carried to the model assembly in `ModelCatalogSources.signIn`); where a profile's assets land
 #     (HarnessAssetTable and HARNESS_ASSETS: the settings file, the instructions file and the `skills` folder come from what the kit already
-#     says, and the kit's `assets` add only what is its own, so a Claude kit without it still lands every document where it always did); and
+#     says, and the kit's `assets` add only what is its own, so a Claude kit without it still lands every document where it always did; a kit
+#     that names neither the settings file nor the instructions file lands them where KIT_FACTS says the harness always kept them); and
 #     the mixed shape of a profile's scope, now a list of one layer per harness it reaches, in the order Runtimes lists them (no property each).
 #     Which model ids belong to which harness left layering.ts for the table below (KIT_FACTS), because it must hold with a plugin OFF.
 #
 # ── What stays, and why ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # (B) Table rows that are kept on purpose:
 #   lib/harness-kind.ts           KIT_FACTS (1): what must hold with a plugin OFF (a kit cannot say it): whether a harness keeps shared state,
-#                                 which kit members a runtime of it is refused without, and which model ids are its own (a harness's plugin
+#                                 whether its built-in profile layers comfort settings (a profile saved with them stays readable with the
+#                                 plugin off), where its profile's settings and instructions land when its kit says nothing, which kit
+#                                 members a runtime of it is refused without, and which model ids are its own (a harness's plugin
 #                                 being off must never change what another harness's runtime does with a model set; kit-member-parity
 #                                 pins it). Pinned to the kits by a drift test. And the mapped type KindOfKey (1), which with KEY_OF_KIND
 #                                 is a plan exception

@@ -1,8 +1,8 @@
 /**
  * Where each harness expects a profile's assets to land inside the home it owns.
  *
- * Each harness's plugin says so (`kit.settingsFile`, `kit.importSetup.instructionsName` and `kit.assets`): this is consulted once,
- * by the plan builder. Nothing else infers a destination, and nothing reads a generated file back to discover one.
+ * Each harness's plugin says so (`kit.settingsFile`, `kit.importSetup.instructionsName` and `kit.assets`; a kit that leaves the first two
+ * out lands them where `harness-kind.ts` says it always did): this is consulted once, by the plan builder. Nothing else infers a destination, and nothing reads a generated file back to discover one.
  *
  * The tool this replaces silently dropped any asset its per-harness table had no destination for —
  * a Claude profile could declare `hooks:` and get no hooks, with no error. Here a field with no
@@ -72,17 +72,24 @@ export interface HarnessAsset {
   readonly format?: SettingsFormat;
 }
 
+/** Where the settings and instructions of a harness land when its kit says nothing (`kitDocumentsOf`). */
+export interface AssetsFallback {
+  readonly settings: { readonly file: string; readonly format: SettingsFormat };
+  readonly memory: string;
+}
+
 /** What a harness's destinations are read from: its settings file and instructions file (always), and its own assets. */
 export type AssetsKit = Pick<RuntimesHarnessKit, 'settingsFile' | 'importSetup' | 'assets'>;
 
 /**
  * Every destination of a harness. The three every harness has come from what its plugin already says: the settings document
  * (composed and written, since each harness rewrites its own settings at runtime and a stack of layers has no single source to
- * point at), the instructions file (linked) and the `skills` folder (linked); the plugin's `assets` add what is only its own.
+ * point at), the instructions file (linked) and the `skills` folder (linked); the plugin's `assets` add what is only its own. A kit that
+ * names no settings file or instructions file lands them at `fallback` (`kitDocumentsOf`), as before the kit named them.
  */
-export function assetsOf(kit: AssetsKit | undefined): readonly HarnessAsset[] {
-  const settings = kit?.settingsFile;
-  const memory = kit?.importSetup?.instructionsName;
+export function assetsOf(kit: AssetsKit | undefined, fallback?: AssetsFallback): readonly HarnessAsset[] {
+  const settings = kit?.settingsFile ?? fallback?.settings;
+  const memory = kit?.importSetup?.instructionsName ?? fallback?.memory;
   return [
     ...(settings === undefined
       ? []
@@ -94,6 +101,10 @@ export function assetsOf(kit: AssetsKit | undefined): readonly HarnessAsset[] {
 }
 
 /** The asset entry for one field, or `undefined` when this harness has no destination for it. */
-export function harnessAsset(kit: AssetsKit | undefined, field: AssetField): HarnessAsset | undefined {
-  return assetsOf(kit).find(asset => asset.field === field);
+export function harnessAsset(
+  kit: AssetsKit | undefined,
+  field: AssetField,
+  fallback?: AssetsFallback,
+): HarnessAsset | undefined {
+  return assetsOf(kit, fallback).find(asset => asset.field === field);
 }
