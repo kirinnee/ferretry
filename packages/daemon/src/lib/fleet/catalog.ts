@@ -411,19 +411,47 @@ function redactEncoded(text: string, hide: () => void): string {
       /data:image\/[a-z0-9.+-]+;base64,$/iu.test(text.slice(Math.max(0, offset - 100), offset))
     )
       return word;
-    // A path or file suffix cannot exempt a secret-shaped segment. Keep the surrounding reference.
-    if (word.includes('/') || /\.[A-Za-z0-9]{1,8}$/u.test(word)) {
-      const segments = redactPathSegments(word, hide);
-      if (segments !== word || !/^[A-Za-z0-9+/_-]{32,}={1,2}$/u.test(word)) return segments;
-    }
-    return word.replace(ENCODED_RUN, (value, at: number) => {
+    // Keep the old path exemption only for ordinary references, never for complete encoded values.
+    const path =
+      !/^[A-Za-z0-9+/_-]{32,}={1,2}$/u.test(word) &&
+      (/^(?:[a-z][a-z0-9+.-]*:\/\/|\.?\.?\/|~\/|\$[A-Za-z_][A-Za-z0-9_]*\/)/iu.test(word) ||
+        /\.[A-Za-z0-9]{1,8}$/u.test(word));
+    // Scan the whole word before any slash splitting: '/' can be part of the secret itself.
+    const encoded = word.replace(ENCODED_RUN, (value, at: number) => {
+      if ((!path || at === 0) && (VAULT_KEY.test(value) || PADDED_CIPHERTEXT.test(value))) {
+        hide();
+        return HIDDEN_TEXT;
+      }
+      // '_' and '-' can be punctuation as well as base64url. A canonical key must win either way.
+      const keys = value.replace(
+        /(^|[_/-])([A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=)(?=$|[_/-])/gu,
+        (_match, lead: string) => {
+          hide();
+          return `${lead}${HIDDEN_TEXT}`;
+        },
+      );
+      // Removing a key must not revive low-entropy fragments that the whole-word rule hid.
+      const hideWhole = !path && highEntropy(value);
+      const hideEncoded = (run: string): string => {
+        if (!hideWhole && !highEntropy(run)) return run;
+        hide();
+        return HIDDEN_TEXT;
+      };
+      if (keys !== value) return path ? keys : keys.replace(ENCODED_RUN, hideEncoded);
       const before = text.slice(Math.max(0, offset + at - 100), offset + at);
       if (!VAULT_KEY.test(value) && /(?:sha(?:256|512)|integrity|checksum)["']?\s*[:=-]\s*["']?$/iu.test(before))
         return value;
-      if (!highEntropy(value)) return value;
-      hide();
-      return HIDDEN_TEXT;
+      if (path) return value;
+      // A bare unpadded key followed by a folder is still one encoded run; preserve the folder.
+      const key = value.slice(0, 43);
+      if (value[43] === '/' && unpaddedKey(key)) {
+        hide();
+        return `${HIDDEN_TEXT}${value.slice(43).replace(ENCODED_RUN, hideEncoded)}`;
+      }
+      return hideEncoded(value);
     });
+    // Path handling can only add masking; never replace the whole-word result with the original.
+    return path ? redactPathSegments(encoded, hide) : encoded;
   });
 }
 
