@@ -26,7 +26,8 @@
  * A SCOPE NAME CARRIES A NONCE, so a relaunch cannot collide with a previous transient scope that is
  * still deactivating. `--collect` removes a scope once its agent exits. Nothing ever RECONSTRUCTS a
  * scope name to find a running agent — the nonce makes that impossible on purpose, and
- * {@link agentScopeInPlacement} reads the real one out of the pid's own placement instead.
+ * {@link agentScopeInPlacement} reads the real one out of the pid's own placement for attribution instead. Stop keeps
+ * the launch wrapper's unit identity independently: a reused or vanished PID must never choose what stop owns.
  *
  * BOTH NAMES DERIVE FROM THE PRODUCT SCOPE rather than being written out. `scripts/local/rename.sh
  * --product` rewrites package scopes and manifests but not a literal inside a `.ts` file, so a
@@ -100,6 +101,42 @@ export function safeUnitPart(value: string): string {
 /** The transient scope one launch asks for. */
 export function agentScopeName(sessionId: string, nonce: string): string {
   return `${AGENT_SCOPE_PREFIX}${safeUnitPart(sessionId)}-${safeUnitPart(nonce)}.scope`;
+}
+
+/** Only the unit names our launch builder emits, never a path or a systemctl pattern. */
+export function isAgentScope(unit: string): boolean {
+  return unit.startsWith(AGENT_SCOPE_PREFIX) && /^[A-Za-z0-9_-]+\.scope$/u.test(unit);
+}
+
+/** The launch wrapper's unit, recorded BEFORE launch. Never inferred later from a possibly recycled pane PID. */
+export function agentScopeInCommand(command: readonly string[]): string | undefined {
+  const at =
+    command[0] === 'env' ? command.findIndex((word, index) => index > 0 && !/^[A-Za-z_][A-Za-z0-9_]*=/u.test(word)) : 0;
+  if (command[at] !== 'systemd-run') return undefined;
+  const end = command.indexOf('--', at + 1);
+  if (end < 0) return undefined;
+  const options = command.slice(at + 1, end);
+  if (!options.includes('--user') || !options.includes('--scope')) return undefined;
+  const unit = options.find(word => word.startsWith('--unit='))?.slice('--unit='.length);
+  return unit !== undefined && isAgentScope(unit) ? unit : undefined;
+}
+
+/** One exact unified cgroup path; reject traversal and ambiguous spellings rather than normalising them. */
+export function unifiedCgroupPath(placement: string): string | undefined {
+  const path = placement
+    .split('\n')
+    .find(line => line.startsWith('0::/'))
+    ?.slice(3);
+  if (
+    path === undefined ||
+    path === '/' ||
+    path
+      .split('/')
+      .slice(1)
+      .some(part => part === '' || part === '.' || part === '..')
+  )
+    return undefined;
+  return path;
 }
 
 /** Browser scopes are deliberately outside agent-session attribution. */

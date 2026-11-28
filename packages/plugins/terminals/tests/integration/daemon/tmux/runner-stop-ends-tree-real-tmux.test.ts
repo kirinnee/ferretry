@@ -8,6 +8,7 @@ import { bunSpawn } from '@ferretry/kernel/host';
 import should from 'should';
 import { paneProcessHost } from '../../../../daemon/adapters/tmux/pane-process-host.ts';
 import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
+import { agentScopeCommand, agentScopeName, sessionOfSlice } from '../../../../daemon/lib/cgroups/scope.ts';
 import { BunTmuxProcess } from '../support/host-spawn.ts';
 import { waitFor } from '../support/wait-for.ts';
 
@@ -19,6 +20,12 @@ import { waitFor } from '../support/wait-for.ts';
  * server is killed.
  */
 const TMUX = Bun.which('tmux');
+const placement = process.platform === 'linux' ? await readFile('/proc/self/cgroup', 'utf8') : '';
+const ownSlice = placement
+  .trim()
+  .split('/')
+  .findLast(part => part.endsWith('.slice'));
+const owner = ownSlice === undefined ? undefined : sessionOfSlice(ownSlice);
 const cleanups: (() => Promise<void> | void)[] = [];
 
 afterEach(async () => {
@@ -47,10 +54,24 @@ async function world() {
     await rm(root, { recursive: true, force: true });
   });
   const handle = Object.freeze({ names: [] }) as unknown as ChildEnvironment;
+  if (ownSlice === undefined || owner === undefined) throw new Error('this proof needs its inherited ferret slice');
+  const scope = agentScopeName(owner, crypto.randomUUID().replaceAll('-', ''));
   const spawn = bunSpawn(process.env as Record<string, string>, () => ({
-    open: env => (env === handle ? { PATH: process.env['PATH'] ?? '/usr/bin:/bin' } : undefined),
+    open: env =>
+      env === handle
+        ? {
+            PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+            HOME: root,
+            XDG_RUNTIME_DIR: process.env['XDG_RUNTIME_DIR'] ?? '',
+            DBUS_SESSION_BUS_ADDRESS: process.env['DBUS_SESSION_BUS_ADDRESS'] ?? '',
+          }
+        : undefined,
     searchPathOf: () => undefined,
   }));
+  cleanups.push(async () => {
+    await spawn.run('systemctl', ['--user', 'kill', '--signal=SIGKILL', '--kill-whom=all', scope]);
+  });
+  const scopes = new Map<string, string>();
   const runner = new TmuxRunner({
     tmux,
     spawn,
@@ -58,6 +79,26 @@ async function world() {
     instantOf: () => 'then' as never,
     now: () => 'now' as never,
     processes: paneProcessHost(spawn),
+    scopes: {
+      scopeOf: async session => scopes.get(session),
+      recordScope: async (session, unit) => {
+        if (unit === undefined) scopes.delete(session);
+        else scopes.set(session, unit);
+      },
+    },
+    wrap: async (ferret, command) =>
+      ferret === owner
+        ? agentScopeCommand({
+            scope,
+            slice: ownSlice,
+            properties: [],
+            command,
+            environment: {
+              XDG_RUNTIME_DIR: process.env['XDG_RUNTIME_DIR'] ?? '',
+              DBUS_SESSION_BUS_ADDRESS: process.env['DBUS_SESSION_BUS_ADDRESS'] ?? '',
+            },
+          })
+        : command,
     sleep: async ms => await Bun.sleep(ms),
     politeGraceMs: 300,
     treeEnd: { stepMs: 1_500, pollMs: 25 },
@@ -97,17 +138,17 @@ async function world() {
   return { launch, sessions, runner };
 }
 
-describe.skipIf(process.platform !== 'linux')('TmuxRunner stop ends the session AND the whole process tree', () => {
+describe.skipIf(owner === undefined)('TmuxRunner stop ends the session AND the whole process tree', () => {
   for (const how of ['polite', 'now'] as const) {
     it(`should leave no session and no process after a ${how} stop of an agent that ignores every signal`, async () => {
       // Arrange
       const { launch, sessions, runner } = await world();
-      const { handle, agent, helper } = await launch('abc');
+      const { handle, agent, helper } = await launch(owner as string);
       const bystander = await launch('abcxx');
       should(alive(agent) && alive(helper)).equal(true);
 
       // Act
-      await runner.stop(handle, how, ferretId('abc'));
+      await runner.stop(handle, how, ferretId(owner as string));
 
       // Assert — gone by the time the stop answers, and nobody else's pane was touched
       should(await sessions()).eql([`fy-abcxx`]);
@@ -120,11 +161,11 @@ describe.skipIf(process.platform !== 'linux')('TmuxRunner stop ends the session 
   it("should end the ferret through a stale handle (another ferret's pane id) by its exact session name", async () => {
     // Arrange — `abc`'s record carries the handle of ANOTHER ferret's pane
     const { launch, sessions, runner } = await world();
-    const own = await launch('abc');
+    const own = await launch(owner as string);
     const other = await launch('abcxx');
 
     // Act
-    await runner.stop(other.handle, 'polite', ferretId('abc'));
+    await runner.stop(other.handle, 'polite', ferretId(owner as string));
 
     // Assert
     should(await sessions()).eql(['fy-abcxx']);

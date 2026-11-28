@@ -387,6 +387,8 @@ export const SURFACE_EVENTS_KEPT_PER_FERRET = 256;
  * each ferret's registered pane (the processes, console and attach proofs, and limits) and the control history.
  */
 export const TerminalsStateSchema = z.object({
+  /** Launch unit by exact tmux session; survives pane loss and daemon restarts so stop can still end owned helpers. */
+  scopes: z.record(z.string().min(1), z.string().min(1)).optional(),
   panes: z.record(z.string().min(1), RegisteredPaneSchema).default({}),
   events: z
     .record(z.string().min(1), z.array(RecordedSurfaceEventSchema).max(SURFACE_EVENTS_KEPT_PER_FERRET))
