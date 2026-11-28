@@ -248,7 +248,7 @@ describe('the CapSolver adapter', () => {
     ];
     for (const [vendor, reason, deadline] of cases) {
       const { solver, state } = capSolver(vendor, deadline === undefined ? {} : { deadlineMilliseconds: deadline });
-      should(await solver.solve(TURNSTILE)).eql({ refused: 'failed', reason });
+      should(await solver.solve(TURNSTILE)).eql({ refused: 'failed', reason, charged: true });
       should(state.box.value?.micros).equal(SOLVE_COST_MICROS.turnstile);
       should(vendor.seen[0]?.path).equal('/createTask');
     }
@@ -276,19 +276,19 @@ describe('the spend ledger', () => {
     const state = memoryState();
     const clock = { now: '2026-11-24T10:00:00.000Z' };
     const ledger = new SpendLedger(state as never, () => clock.now);
-    should(await ledger.reserve(500, 1_000)).equal('reserved');
+    should(await ledger.reserve(500, 1_000)).eql({ month: '2026-11', micros: 500 });
     clock.now = '2026-10-31T23:00:00.000Z';
     should(await ledger.spent()).equal(0);
-    should(await ledger.reserve(100, 1_000)).equal('reserved');
+    should(await ledger.reserve(100, 1_000)).eql({ month: '2026-10', micros: 100 });
     should(await ledger.spent()).equal(100);
-    await ledger.release(40);
+    await ledger.release({ month: '2026-10', micros: 40 });
     clock.now = '2026-11-24T10:00:01.000Z';
     should(await ledger.spent()).equal(500);
     clock.now = '2026-10-31T23:00:00.000Z';
     should(await ledger.spent()).equal(60);
   });
 
-  it('should still read a file written before months were kept, and keep a year of them', async () => {
+  it('should read the same schema with optional months and keep every month', async () => {
     const state = memoryState({ month: '2026-11', micros: 300 });
     const clock = { now: '2026-11-24T10:00:00.000Z' };
     const ledger = new SpendLedger(state as never, () => clock.now);
@@ -298,23 +298,23 @@ describe('the spend ledger', () => {
       await ledger.reserve(1, 1_000);
     }
     const kept = Object.keys({ ...state.box.value?.earlier, [state.box.value?.month ?? '']: 0 });
-    should(kept).have.length(12);
-    should(kept).not.containEql('2026-11');
+    should(kept).have.length(13);
+    should(kept).containEql('2026-11');
   });
 
   it('should hold a reservation, give it back, and count only the current month', async () => {
     const state = memoryState();
     const ledger = new SpendLedger(state as never, () => NOW);
-    should(await ledger.reserve(900, 1_000)).equal('reserved');
+    should(await ledger.reserve(900, 1_000)).eql({ month: '2026-11', micros: 900 });
     should(await ledger.reserve(200, 1_000)).equal('cap');
     should(await ledger.spent()).equal(900);
-    await ledger.release(400);
+    await ledger.release({ month: '2026-11', micros: 400 });
     should(await ledger.spent()).equal(500);
-    await ledger.release(10_000);
+    await ledger.release({ month: '2026-11', micros: 10_000 });
     should(await ledger.spent()).equal(0);
     state.box.value = { month: '2026-10', micros: 700 };
     should(await ledger.spent()).equal(0);
-    await ledger.release(5);
+    await ledger.release({ month: '2026-11', micros: 5 });
     should(state.box.value).eql({ month: '2026-11', micros: 0, earlier: { '2026-10': 700 } });
   });
 });
