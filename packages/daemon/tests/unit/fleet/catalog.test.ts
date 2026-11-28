@@ -2443,11 +2443,54 @@ describe('unnamed high entropy component values', () => {
     }
   });
 
-  // Measured over these same seeds on a45817b5d3 (r1): 0, 0 and 14 misses. r2 had 63, 235 and 588.
+  it.each([
+    ['$VAR/', '', true],
+    ['$RELAY/', '', true],
+    ['$HOME/x/', '', true],
+    ['$X/models/', '', true],
+    ['$X/', '', false],
+    ['./', '', false],
+    ['~/', '', false],
+    ['/abs/', '', true],
+    ['', '/suffix', true],
+    ['', '/suffix', false],
+    ['', '.v2', false],
+    ['', '-7b.gguf', false],
+    ['./', '.v2', false],
+  ] as const)('should hide all 10,000 seeded vault keys inside %s%s (padded: %s)', (prefix, suffix, padded) => {
+    const missed: number[] = [];
+    for (let sample = 0; sample < 10_000; sample++) {
+      const encoded = seededBytes(sample, 32).toString('base64');
+      const key = padded ? encoded : encoded.replace(/=$/u, '');
+      if (redactText(`${prefix}${key}${suffix}`).text !== `${prefix}‹hidden›${suffix}`) missed.push(sample);
+    }
+    should(missed).deepEqual([]);
+  });
+
+  it.each(['$RELAY/', '$HOME/x/', '/abs/', ''])('should hide canonical key path segments after %s', prefix => {
+    const key = '2tsNcUhfv26rC9AIL6wycpLvgsoQGsRqXVQ1OFbhK8A=';
+    const suffix = prefix === '' ? '/suffix' : '';
+    should(redactText(`${prefix}${key}${suffix}`)).deepEqual({ text: `${prefix}‹hidden›${suffix}`, redacted: true });
+  });
+
+  it('should hide padded ciphertext segments while keeping the surrounding path', () => {
+    const ciphertext = `${'Ab19'.repeat(15)}AA==`;
+    should(redactText(`$HOME/x/${ciphertext}/notes.md`)).deepEqual({
+      text: '$HOME/x/‹hidden›/notes.md',
+      redacted: true,
+    });
+  });
+
+  it('should finish on a long dotted path whose suffix never closes', () => {
+    const text = `./${'.a'.repeat(100_000)}!`;
+    should(redactText(text)).deepEqual({ text, redacted: false });
+  });
+
+  // Measured on a45817b5d3 (r1): 0, 0 and 14 misses. r2 had 63, 235 and 588; path scanning closes the residual too.
   it.each([
     [148, 0],
     [616, 0],
-    [2016, 14],
+    [2016, 0],
   ])('should hide seeded AES-GCM %s-byte values at least as well as r1', (length, baseline) => {
     const missed: number[] = [];
     for (let sample = 0; sample < 1_000; sample++) {
@@ -2467,7 +2510,7 @@ describe('unnamed high entropy component values', () => {
       if (redactText(`${iv}:${ciphertext}`).text.includes(ciphertext)) missedCiphertext++;
       if (redactText(key).text.includes(key)) missedKeys.push(sample);
     }
-    should(missedCiphertext).be.belowOrEqual(14); // r1 baseline; leading-slash path ambiguity remains.
+    should(missedCiphertext).equal(0);
     should(missedKeys).deepEqual([]);
   });
 

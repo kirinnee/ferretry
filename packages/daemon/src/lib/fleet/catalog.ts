@@ -344,6 +344,43 @@ const ENCODED_RUN = /[A-Za-z0-9+/_-]{32,}={0,2}/gu;
 const VAULT_KEY = /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/u;
 /** Padded base64 ciphertext (AES-GCM appends its authentication tag to the encrypted bytes). */
 const PADDED_CIPHERTEXT = /^(?:[A-Za-z0-9+/]{4}){7,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)$/u;
+/** A complete 32-byte key can cross base64 slash characters inside a path, with optional padding. */
+const PATH_VAULT_KEY = /(^|\/)([A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=)(?=\/|$)/gu;
+const PATH_LAST_VAULT_KEY = /(^|\/)([A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=?)$/gu;
+const PATH_UNPADDED_VAULT_KEY = /(^|\/)([A-Za-z0-9+/]{42}[AEIMQUYcgkosw048])(?=\/|$)/gu;
+const PATH_FILE_SUFFIX = /(?:-[0-9]+[A-Za-z]?)?(?:\.[A-Za-z0-9]{1,8}){1,2}$/u;
+// Without padding, require mixed letter classes to distinguish aliases from ordinary lowercase source paths.
+const unpaddedKey = (value: string): boolean =>
+  VAULT_KEY.test(`${value}=`) && /[A-Z]/u.test(value) && /[a-z]/u.test(value);
+
+function redactPathSegments(word: string, hide: () => void): string {
+  const suffix = PATH_FILE_SUFFIX.exec(word)?.[0] ?? '';
+  const stem = word.slice(0, word.length - suffix.length);
+  const hiddenKey = (match: string, separator: string, value: string): string => {
+    if (!value.endsWith('=') && !unpaddedKey(value)) return match;
+    hide();
+    return `${separator}${HIDDEN_TEXT}`;
+  };
+  // End-anchored first: a slash in the key must not turn a preceding folder into a shorter key.
+  const keys = stem
+    .replace(PATH_LAST_VAULT_KEY, hiddenKey)
+    .replace(PATH_VAULT_KEY, hiddenKey)
+    .replace(PATH_UNPADDED_VAULT_KEY, hiddenKey);
+  return (
+    keys
+      .split('/')
+      .map(segment => {
+        const basename = segment.replace(PATH_FILE_SUFFIX, '');
+        const redacted = basename.replace(ENCODED_RUN, value => {
+          if (!unpaddedKey(value) && !highEntropy(value)) return value;
+          hide();
+          return HIDDEN_TEXT;
+        });
+        return `${redacted}${segment.slice(basename.length)}`;
+      })
+      .join('/') + suffix
+  );
+}
 
 function highEntropy(value: string): boolean {
   // A complete on-disk key or padded ciphertext is never a code identifier, whatever its entropy.
@@ -374,13 +411,11 @@ function redactEncoded(text: string, hide: () => void): string {
       /data:image\/[a-z0-9.+-]+;base64,$/iu.test(text.slice(Math.max(0, offset - 100), offset))
     )
       return word;
-    // Ordinary paths and URLs are references, not unnamed encoded values.
-    if (
-      !/^[A-Za-z0-9+/_-]{32,}={1,2}$/u.test(word) &&
-      (/^(?:[a-z][a-z0-9+.-]*:\/\/|\.?\.?\/|~\/|\$[A-Za-z_][A-Za-z0-9_]*\/)/iu.test(word) ||
-        /\/[\w.-]+\.[a-z0-9]{1,8}(?:[?#].*)?$/iu.test(word))
-    )
-      return word;
+    // A path or file suffix cannot exempt a secret-shaped segment. Keep the surrounding reference.
+    if (word.includes('/') || /\.[A-Za-z0-9]{1,8}$/u.test(word)) {
+      const segments = redactPathSegments(word, hide);
+      if (segments !== word || !/^[A-Za-z0-9+/_-]{32,}={1,2}$/u.test(word)) return segments;
+    }
     return word.replace(ENCODED_RUN, (value, at: number) => {
       const before = text.slice(Math.max(0, offset + at - 100), offset + at);
       if (!VAULT_KEY.test(value) && /(?:sha(?:256|512)|integrity|checksum)["']?\s*[:=-]\s*["']?$/iu.test(before))
