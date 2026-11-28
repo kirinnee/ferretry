@@ -10,7 +10,7 @@ import {
   scopeBelongsTo,
   scopeMembersOf,
 } from '../../../../daemon/adapters/tmux/pane-process-host.ts';
-import { agentScopeCommand, agentScopeInCommand } from '../../../../daemon/lib/cgroups/scope.ts';
+import { agentScopeCommand, agentScopeInCommand, ferretSliceName } from '../../../../daemon/lib/cgroups/scope.ts';
 
 /** A fake procfs: `/proc/<pid>/stat` with only the fields the parent walk reads (`pid (comm) S ppid …`). */
 const roots: string[] = [];
@@ -172,4 +172,74 @@ test('a scope name must name the exact ferret, including when another id extends
   expect(scopeBelongsTo('ferretry-agent-own-1.scope', 'own')).toBe(true);
   expect(scopeBelongsTo('ferretry-agent-own-other-1.scope', 'own')).toBe(false);
   expect(scopeBelongsTo('ferretry-agent-other-1.scope', 'own')).toBe(false);
+});
+
+describe.skipIf(process.platform !== 'linux')('R3-1: individual pane descendant ownership', () => {
+  const unit = 'ferretry-agent-own-1.scope';
+  const slice = ferretSliceName('own');
+  const path = `/fleet/${slice}/${unit}`;
+  const metadata = `Id=${unit}\nSlice=${slice}\nControlGroup=${path}\n`;
+
+  async function world() {
+    const proc = await procfs({ 77: 10 });
+    await writeFile(join(proc, '77', 'stat'), `77 (helper) S 10 ${Array(17).fill('0').join(' ')} 770\n`);
+    await writeFile(join(proc, '77', 'cgroup'), `0::${path}\n`);
+    const calls: (readonly string[])[] = [];
+    let manager = metadata;
+    const host = paneProcessHost(
+      {
+        run: async (_command: string, args: readonly string[]) => {
+          calls.push(args);
+          return { exitCode: 0, stdout: manager, stderr: '' };
+        },
+      } as unknown as SpawnPort,
+      'linux',
+      proc,
+    );
+    return {
+      host,
+      proc,
+      calls,
+      manager: (value: string) => {
+        manager = value;
+      },
+    };
+  }
+
+  test('proves pid, start and exact cgroup against the own launch derivation and manager, with no record', async () => {
+    const w = await world();
+    expect(await w.host.ownedProcess?.(77, 'own')).toEqual({ pid: 77, start: 770, ppid: 10, scope: path });
+    expect(w.calls).toEqual([['--user', 'show', unit, '--property=Id', '--property=Slice', '--property=ControlGroup']]);
+  });
+
+  test('refuses every mismatched Id, Slice or ControlGroup and missing metadata', async () => {
+    const w = await world();
+    for (const bad of [
+      metadata.replace(`Id=${unit}`, 'Id=ferretry-agent-other-1.scope'),
+      metadata.replace(`Slice=${slice}`, 'Slice=ferretry_fleet-other.slice'),
+      metadata.replace(`ControlGroup=${path}`, `ControlGroup=${path}/nested`),
+      metadata.replace(`ControlGroup=${path}`, `ControlGroup=/another/${slice}/${unit}`),
+      '',
+    ]) {
+      w.manager(bad);
+      expect(await w.host.ownedProcess?.(77, 'own')).toBeUndefined();
+    }
+  });
+
+  test('refuses foreign ids, nested paths and a different exact slice before asking the manager', async () => {
+    const w = await world();
+    expect(await w.host.ownedProcess?.(77, 'other')).toBeUndefined();
+    for (const bad of [path + '/nested', path.replace(slice, ferretSliceName('other'))]) {
+      await writeFile(join(w.proc, '77', 'cgroup'), `0::${bad}\n`);
+      expect(await w.host.ownedProcess?.(77, 'own')).toBeUndefined();
+    }
+    expect(w.calls).toEqual([]);
+  });
+
+  test('the exact slice uses the original ferret id even when unit sanitisation collides', async () => {
+    const w = await world();
+    await writeFile(join(w.proc, '77', 'cgroup'), `0::/fleet/${ferretSliceName('a.b')}/ferretry-agent-a-b-1.scope\n`);
+    expect(await w.host.ownedProcess?.(77, 'a-b')).toBeUndefined();
+    expect(w.calls).toEqual([]);
+  });
 });

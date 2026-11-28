@@ -14,6 +14,10 @@ function world(rows: Row[], children: number[] = []) {
   const host = {
     startOf: async (pid: number) => live.get(pid)?.start,
     processOf: async (pid: number) => live.get(pid),
+    ownedProcess: async (pid: number, ferret: string) => {
+      const current = live.get(pid);
+      return ferret === 'own' && current?.scope === path(owned) ? { ...current } : undefined;
+    },
     tree: async (root: number) => ({ kind: 'read', rows: root === 10 ? children.map(pid => live.get(pid)) : [] }),
     protectedPids: async () => protectedPids,
     // The number branch reproduces the old host's unsafe inference from a live pane PID.
@@ -124,4 +128,48 @@ test('MUST 3: reading a later target cannot stale an earlier target before its s
   };
   await w.end(named);
   expect(w.signals).toEqual(['SIGTERM:77']);
+});
+
+test('R3-1: descendant proof alone never sweeps an orphan or includes a foreign child or protected subtree', async () => {
+  const w = world([row(10, 1), row(11, 10, other), row(77, 1), row(99), row(100, 99)], [11, 99, 100]);
+  await w.end(await nameDoomed(w.host, [10], undefined, 'own'));
+  expect(w.signals).toEqual(['SIGTERM:10']);
+  expect([...w.live.keys()]).toEqual([11, 77, 99, 100]);
+});
+
+test('R3-1: a descendant recycled between the tree read and its ownership read is never adopted', async () => {
+  const w = world([row(10, 1), row(11)], [11]);
+  const tree = w.host.tree.bind(w.host);
+  w.host.tree = async root => {
+    const captured = await tree(root);
+    w.live.set(11, { ...row(11), start: 999 });
+    return captured;
+  };
+  await w.end(await nameDoomed(w.host, [10], undefined, 'own'));
+  expect(w.signals).toEqual(['SIGTERM:10']);
+});
+
+test('R3-1: moving to a foreign scope or replacing a named descendant prevents its signal', async () => {
+  for (const replacement of [row(11, 1, other), { ...row(11, 1), start: 999 }]) {
+    const w = world([row(10, 1), row(11)], [11]);
+    const named = await nameDoomed(w.host, [10], undefined, 'own');
+    w.live.set(11, replacement);
+    await w.end(named);
+    expect(w.signals).toEqual(['SIGTERM:10']);
+  }
+});
+
+test('R3-1: losing manager ownership prevents escalation and refuses to report a live process stopped', async () => {
+  const w = world([row(10, 1), row(11)], [11]);
+  const named = await nameDoomed(w.host, [10], undefined, 'own');
+  w.host.signal = (pid, signal) => {
+    w.signals.push(`${signal}:${pid}`);
+    if (pid === 10) {
+      w.live.delete(pid);
+      w.live.set(11, row(11, 1));
+    }
+    if (pid === 11) w.host.ownedProcess = async () => undefined;
+  };
+  await expect(w.end(named)).rejects.toThrow('not stopped');
+  expect(w.signals).toEqual(['SIGTERM:10', 'SIGTERM:11']);
 });

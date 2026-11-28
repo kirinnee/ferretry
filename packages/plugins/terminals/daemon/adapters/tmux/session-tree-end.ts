@@ -16,6 +16,8 @@ export interface DoomedProcess {
   readonly scope?: string;
   /** The pane tree this process belonged to; ancestor checks stop at that boundary. */
   readonly root?: number;
+  /** Descendant ownership is proved afresh from this ferret's id, without authorising any scope sweep. */
+  readonly ferret?: string;
 }
 
 export interface ProcessSnapshot extends DoomedProcess {
@@ -32,17 +34,15 @@ export interface TreeEndTimes {
 export const DEFAULT_TREE_END_TIMES: TreeEndTimes = Object.freeze({ stepMs: 2_000, pollMs: 50 });
 
 /**
- * The recorded launch scope's identities, restricted to that exact membership, minus every pruned subtree. Trees only
- * provide pruning/provenance when a scope was recorded. Linux needs that ownership proof; macOS uses the tree.
- * An orphan can be found without any roots at all. A live root PID never selects the scope.
+ * Pane descendants need individual ownership proof on Linux; only a verified launch record authorises a scope sweep.
+ * Pruned subtrees win over both sources. A live root PID never selects the scope to sweep.
  */
 export async function nameDoomed(
   host: PaneProcessHost,
   roots: readonly number[],
   scope?: string,
+  ferret?: string,
 ): Promise<readonly DoomedProcess[]> {
-  // processOf is the Linux cgroup/identity reader. No recorded owner means no provably owned Linux targets.
-  if (host.processOf !== undefined && scope === undefined) return [];
   const protectedPids = new Set(await host.protectedPids());
   const pruned = new Set(protectedPids);
   const named = new Map<number, DoomedProcess>();
@@ -60,20 +60,32 @@ export async function nameDoomed(
       }
     }
   }
-  if (scope === undefined) return [...named.values()].filter(row => !pruned.has(row.pid));
+  const descendants: DoomedProcess[] = [];
+  for (const row of named.values()) {
+    if (pruned.has(row.pid)) continue;
+    if (host.processOf === undefined && scope === undefined) descendants.push(row);
+    else if (ferret !== undefined) {
+      const owned = await host.ownedProcess?.(row.pid, ferret);
+      if (owned?.start === row.start) descendants.push({ ...row, scope: owned.scope, ferret });
+    }
+  }
+  if (scope === undefined) return descendants;
   // Scope ownership is an independent launch fact. Never infer it from a root, even when that PID still exists.
   const members = (await host.scopeMembers?.(scope)) ?? [];
   if (members.some(row => protectedPids.has(row.pid))) return [];
-  return members
+  const swept = members
     .filter(row => !pruned.has(row.pid))
     .map(row => {
       const tree = named.get(row.pid);
       return tree?.start === row.start ? { ...row, root: tree.root } : row;
     });
+  const targets = new Map(swept.map(row => [row.pid, row]));
+  for (const row of descendants) targets.set(row.pid, row);
+  return [...targets.values()];
 }
 
 /** Fresh protection and ancestor proof, followed by ONE last identity/membership read immediately before use. */
-async function eligible(host: PaneProcessHost, target: DoomedProcess): Promise<boolean> {
+async function eligible(host: PaneProcessHost, target: DoomedProcess, forSignal = false): Promise<boolean> {
   if (!Number.isSafeInteger(target.pid) || target.pid <= 1) return false;
   if (host.processOf !== undefined && target.scope === undefined) return false;
   const protectedChain = await host.protectedPids();
@@ -96,6 +108,10 @@ async function eligible(host: PaneProcessHost, target: DoomedProcess): Promise<b
       if (protectedPids.has(current.ppid)) break;
       current = await host.processOf(current.ppid);
       if (current === undefined) return false;
+    }
+    if (forSignal && target.ferret !== undefined) {
+      const owned = await host.ownedProcess?.(target.pid, target.ferret);
+      if (owned?.start !== target.start || owned.scope !== target.scope) return false;
     }
     const fresh = await host.processOf(target.pid);
     return fresh?.start === target.start && (target.scope === undefined || fresh.scope === target.scope);
@@ -134,7 +150,7 @@ async function send(
   signal: 'SIGTERM' | 'SIGKILL',
 ): Promise<void> {
   for (const target of targets) {
-    if (!(await eligible(host, target))) continue;
+    if (!(await eligible(host, target, true))) continue;
     try {
       host.signal(target.pid, signal);
     } catch (error) {

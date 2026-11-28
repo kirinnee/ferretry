@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import type { SpawnPort } from '@ferretry/kernel/contract';
 import {
+  ferretSliceName,
   isAgentScope,
   safeUnitPart,
   sessionOfScope,
@@ -106,9 +107,29 @@ export async function scopeMembersOf(
 }
 
 /** The machine reads and the one signal behind `TmuxRunner.identify` and `signalDescendant`. */
-export function paneProcessHost(spawn: SpawnPort, platform: string = hostPlatform): PaneProcessHost {
+export function paneProcessHost(
+  spawn: SpawnPort,
+  platform: string = hostPlatform,
+  procRoot = '/proc',
+): PaneProcessHost {
   const incarnation = processIncarnationFor(platform, spawn);
   const tree = processTreeFor(spawn, platform);
+  const scopePath = async (unit: string) => {
+    if (!isAgentScope(unit)) return undefined;
+    const read = await spawn.run('systemctl', [
+      '--user',
+      'show',
+      unit,
+      '--property=Id',
+      '--property=Slice',
+      '--property=ControlGroup',
+    ]);
+    if (read.exitCode !== 0) {
+      if (/could not be found|not loaded/iu.test(read.stderr)) return undefined;
+      throw new Error(`could not read the recorded scope ${unit}, so its processes were not proved stopped`);
+    }
+    return ownedScopePath(unit, read.stdout);
+  };
   return {
     startOf: async pid => await incarnation.startOf(pid),
     tree: async root => await tree.tree(root),
@@ -116,22 +137,17 @@ export function paneProcessHost(spawn: SpawnPort, platform: string = hostPlatfor
     protectedPids: async () => await protectedPidsOf(),
     ...(platform === 'linux'
       ? {
-          processOf: async (pid: number) => await processSnapshotOf(pid),
+          processOf: async (pid: number) => await processSnapshotOf(pid, procRoot),
+          ownedProcess: async (pid: number, ferret: string) => {
+            const row = await processSnapshotOf(pid, procRoot);
+            if (row === undefined) return undefined;
+            const unit = row.scope.split('/').at(-1) ?? '';
+            if (!scopeBelongsTo(unit, ferret) || row.scope.split('/').at(-2) !== ferretSliceName(ferret))
+              return undefined;
+            return (await scopePath(unit)) === row.scope ? row : undefined;
+          },
           scopeMembers: async (unit: string) => {
-            if (!isAgentScope(unit)) return [];
-            const read = await spawn.run('systemctl', [
-              '--user',
-              'show',
-              unit,
-              '--property=Id',
-              '--property=Slice',
-              '--property=ControlGroup',
-            ]);
-            if (read.exitCode !== 0) {
-              if (/could not be found|not loaded/iu.test(read.stderr)) return [];
-              throw new Error(`could not read the recorded scope ${unit}, so its processes were not proved stopped`);
-            }
-            const path = ownedScopePath(unit, read.stdout);
+            const path = await scopePath(unit);
             return path === undefined ? [] : await scopeMembersOf(path);
           },
         }

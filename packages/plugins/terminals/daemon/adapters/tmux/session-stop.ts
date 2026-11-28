@@ -169,7 +169,7 @@ export class SessionStop {
     ];
     const recorded = this.#scopes.get(session) ?? (await this.options.scopes?.scopeOf(session));
     const scope = recorded !== undefined && scopeBelongsTo(recorded, session.slice(3)) ? recorded : undefined;
-    return await nameDoomed(host, [...new Set(roots)], scope);
+    return await nameDoomed(host, [...new Set(roots)], scope, session.slice(3));
   }
 
   /**

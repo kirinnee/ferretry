@@ -284,11 +284,10 @@ export interface PaneProcessHost {
   signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
   /** This daemon FIRST, then every parent: never signal any of them. Read fresh per call. */
   protectedPids(): Promise<readonly number[]>;
-  /**
-   * Identities in the recorded launch unit, with start and exact membership captured together. Never follows a pane PID.
-   * Absent where there are no scopes (macOS).
-   */
+  /** Identities in the recorded launch unit; start and exact membership captured together, never inferred from a PID. */
   scopeMembers?(scope: string): Promise<readonly DoomedProcess[]>;
+  /** A pane descendant's pinned identity and exact manager-verified ownership, independently of any stored record. */
+  ownedProcess?(pid: number, ferret: string): Promise<ProcessSnapshot | undefined>;
   /** Linux: start, parent and exact cgroup from one pinned proc directory. */
   processOf?(pid: number): Promise<ProcessSnapshot | undefined>;
 }
