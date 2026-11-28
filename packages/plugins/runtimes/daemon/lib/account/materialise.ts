@@ -337,12 +337,13 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
     // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    // ...and so is one whose kit gives no launch line or no command or home variable (E-276 PRs 8 and 13), in the same words.
+    // ...and so is one of either harness whose kit gives no launch line (E-276 PR 8, PR 9), or a Claude kit with no command or home
+    // variable (PR 13), in the same words: ONE decision, made before the credential store.
     const kitMissing: KitRefusal | undefined =
       missingKitRefusal(harness, kit) ??
-      (isKind(harness, 'claude') &&
-      (kit?.wrapper === undefined || kit.command === undefined || kit.homeEnv === undefined)
-        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
+      (kit?.wrapper === undefined ||
+      (isKind(harness, 'claude') && (kit.command === undefined || kit.homeEnv === undefined))
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
         : undefined);
     const store = resolveCredentialStore(
       runtime.credential,
@@ -352,7 +353,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness,
       loginStores,
     );
-    // The typed refusal is the ONE reason a kitless runtime gets, whatever store its login is in (environment, stored or host):
+    // The typed refusal is the ONE reason a runtime gets when ANY kit member it needs is missing, whatever store its login is in (environment, stored or host):
     // its login then has nothing further to say, and the reason is never said twice.
     if (kitMissing !== undefined) reasons.push(kitMissing.message);
     else {

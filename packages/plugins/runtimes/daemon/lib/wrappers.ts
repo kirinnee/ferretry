@@ -23,7 +23,6 @@ import { type SecretName, secretReferencesIn } from '@ferretry/core-vault/contra
 import {
   binaryName,
   CLAUDE_NO_QUESTIONS_FLAG,
-  CODEX_QUESTIONS_OFF_OVERRIDE,
   BROWSER_INSTRUCTION,
   BROWSER_STEALTH_ENV,
   FERRET_SECTIONS,
@@ -32,10 +31,9 @@ import {
   PACK_ENV,
   PACK_ROUTING_ENV,
   SESSION_MODE_ENV,
-  tomlString,
 } from './account/fixed-layer.ts';
 import type { KitWrapper, RuntimesHarnessKit } from '../../contract/harness-kit.ts';
-import { byHarness, isKind, UnsupportedHarnessError } from './harness-kind.ts';
+import { byHarness, UnsupportedHarnessError } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 import { shellQuote } from './shell-quote.ts';
 
@@ -291,10 +289,7 @@ function wrapperOf(harness: string, kit: RuntimesHarnessKit | undefined): KitWra
  * this only keeps an ordinary launch from running it.
  */
 const conversationArgumentPatterns = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): string =>
-  byHarness(harness, {
-    claude: () => wrapperOf(harness, kit).conversationArgs,
-    codex: () => 'resume',
-  });
+  wrapperOf(harness, kit).conversationArgs;
 
 /**
  * One live writer per conversation (§9.3): claim the conversation before `exec` hands this pid to the
@@ -345,46 +340,12 @@ const historyClaimLines = (
   ];
 };
 
-/**
- * Codex's trust for the folder it is launched in, built at launch because only then is the folder
- * known — the measured TOML inline table `codexTrustOverride` (`./account/fixed-layer.ts`) produces, in shell.
- *
- * The folder is the PHYSICAL one (`pwd -P`), which is what Codex itself reads. Backslash and double
- * quote are the two characters a TOML basic string must escape; a folder holding a control character
- * would need `\uXXXX` escapes the shell cannot produce reliably, so it gets no override and says so —
- * a trust prompt, never a malformed `-c` that stops Codex starting.
- */
-const codexTrustLines = (): readonly string[] => [
-  '',
-  '# Trust the launch folder (the measured -c projects={"<folder>"={trust_level="trusted"}} form).',
-  '_fy_cwd="$(pwd -P 2>/dev/null)" || _fy_cwd="$PWD"',
-  'case "$_fy_cwd" in',
-  '  *[[:cntrl:]]*)',
-  '    echo "ferretry: this folder\'s name holds a control character, so Codex may ask whether to trust it" >&2',
-  '    ;;',
-  '  *)',
-  `    _fy_cwd="$(printf '%s' "$_fy_cwd" | sed 's/[\\\\"]/\\\\&/g')"`,
-  '    set -- -c "projects={\\"$_fy_cwd\\"={trust_level=\\"trusted\\"}}" "$@"',
-  '    ;;',
-  'esac',
-];
-
-/** The launch arguments that start a runtime on its model set's default (§8.3). */
+/** The launch arguments that start a runtime on its model set's default (§8.3), as its harness's plugin spells them. */
 const defaultModelArgs = (
   harness: HarnessKind,
   model: string | undefined,
   kit: RuntimesHarnessKit | undefined,
-): readonly string[] => {
-  if (model === undefined) return [];
-  // Codex: a config override rather than `-m`, so a `-m` the caller passes still decides.
-  return byHarness<readonly string[]>(harness, {
-    claude: () => wrapperOf(harness, kit).modelArgs(model),
-    codex: () => ['-c', `model=${tomlBasicString(model)}`],
-  });
-};
-
-/** A TOML basic string, for a value a Codex `-c` override carries. */
-const tomlBasicString = (value: string): string => `"${value.replace(/[\\"]/gu, character => `\\${character}`)}"`;
+): readonly string[] => (model === undefined ? [] : wrapperOf(harness, kit).modelArgs(model));
 
 /** The shell test that is true only for a ferret Ferretry starts in `auto` mode (the pane's `FY_SESSION_MODE`). */
 const AUTO_LAUNCH_TEST = `[ "\${${SESSION_MODE_ENV}:-}" = auto ]`;
@@ -420,11 +381,8 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
   const harness = input.harnessCommand === undefined ? binaryOf(input.harness, kit) : shellPath(input.harnessCommand);
   const defaults = defaultModelArgs(input.harness, input.defaultModel, kit);
   // What the wrapper supplies itself (the question tool's flag), so the exec line does not repeat the fixed layer's copy.
-  // Claude's plugin names its own; every other harness drops the same flag as before, since a Codex settings component may carry it.
-  const supplied = byHarness<readonly string[]>(input.harness, {
-    claude: () => wrapperOf(input.harness, kit).suppliedArguments ?? [],
-    codex: () => [CLAUDE_NO_QUESTIONS_FLAG],
-  });
+  // A harness's plugin names its own; one that names none drops the question tool's flag, since a Codex settings component may carry it.
+  const supplied = wrapperOf(input.harness, kit).suppliedArguments ?? [CLAUDE_NO_QUESTIONS_FLAG];
   const execLine = (launchArguments: readonly string[], withSections: boolean): string => {
     const args = [...defaults, ...launchArguments]
       .filter(arg => !supplied.includes(arg))
@@ -452,7 +410,7 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
             ...[
               ...(autonomous.seedFirstRun ? autonomousPreludeLines(input.harness, kit) : []),
               ...historyClaimLines(input.harness, input.fyCommand, kit),
-              ...(autonomous.trustLaunchFolder ? codexTrustLines() : []),
+              ...(autonomous.trustLaunchFolder ? (wrapperOf(input.harness, kit).trustFolderLines?.() ?? []) : []),
               ...questionLines(input.harness, kit),
               ...ferretSectionLines(input.harness, input.fyCommand, kit),
               ...promptSnapshotLines(input.harness, harness, kit),
@@ -512,13 +470,7 @@ const SECTIONS_VARIABLE = '_fy_sections';
  */
 function ferretSectionLines(harness: HarnessKind, fyCommand: string, kit: RuntimesHarnessKit | undefined): string[] {
   const fy = binaryName(fyCommand);
-  const quoted = (text: string): string =>
-    shellQuote(
-      byHarness(harness, {
-        claude: () => wrapperOf(harness, kit).quoteSection(text),
-        codex: () => tomlString(text).slice(1, -1),
-      }),
-    );
+  const quoted = (text: string): string => shellQuote(wrapperOf(harness, kit).quoteSection(text));
   return [
     '',
     "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
@@ -554,18 +506,10 @@ function instructionArgument(
   arg: string,
   kit: RuntimesHarnessKit | undefined,
 ): string | undefined {
-  return byHarness<string | undefined>(harness, {
-    claude: () => {
-      const split = wrapperOf(harness, kit).instructionArgument(arg);
-      return split === undefined
-        ? undefined
-        : `${shellQuote(split.before)}"$${SECTIONS_VARIABLE}"${split.after === '' ? '' : shellQuote(split.after)}`;
-    },
-    codex: () =>
-      !arg.startsWith('developer_instructions="') || !arg.endsWith('"')
-        ? undefined
-        : `${shellQuote(arg.slice(0, -1))}"$${SECTIONS_VARIABLE}"${shellQuote('"')}`,
-  });
+  const split = wrapperOf(harness, kit).instructionArgument(arg);
+  return split === undefined
+    ? undefined
+    : `${shellQuote(split.before)}"$${SECTIONS_VARIABLE}"${split.after === '' ? '' : shellQuote(split.after)}`;
 }
 
 /**
@@ -578,18 +522,12 @@ function promptSnapshotLines(
   command: string,
   kit: RuntimesHarnessKit | undefined,
 ): readonly string[] {
-  return byHarness<readonly string[]>(harness, {
-    claude: () => wrapperOf(harness, kit).promptSnapshotLines?.(command) ?? [],
-    codex: () => [],
-  });
+  return wrapperOf(harness, kit).promptSnapshotLines?.(command) ?? [];
 }
 
-/** What an auto launch prepares first for Claude, as the lines its plugin writes; Codex's trusted folder is `codexTrustLines`. */
+/** What an auto launch prepares first, as the lines its harness's plugin writes (Claude's first-run seed; Codex gives none). */
 function autonomousPreludeLines(harness: HarnessKind, kit: RuntimesHarnessKit | undefined): readonly string[] {
-  return byHarness<readonly string[]>(harness, {
-    claude: () => wrapperOf(harness, kit).autonomousPrelude?.({ homeEnv: homeEnvOf(harness, kit) }) ?? [],
-    codex: () => [],
-  });
+  return wrapperOf(harness, kit).autonomousPrelude?.({ homeEnv: homeEnvOf(harness, kit) }) ?? [];
 }
 
 /**
@@ -600,10 +538,7 @@ function autonomousPreludeLines(harness: HarnessKind, kit: RuntimesHarnessKit | 
  * have switched the feature on (the same spelling as the Codex harness's launch, `CODEX_QUESTIONS_OFF`).
  */
 function questionLines(harness: HarnessKind, kit: RuntimesHarnessKit | undefined): readonly string[] {
-  return byHarness<readonly string[]>(harness, {
-    claude: () => wrapperOf(harness, kit).questionLines(),
-    codex: () => [`set -- -c ${CODEX_QUESTIONS_OFF_OVERRIDE} "$@"`],
-  });
+  return wrapperOf(harness, kit).questionLines();
 }
 
 /** What {@link renderCommandScript} needs: the command plus its target's declared wrapper name. */
@@ -643,7 +578,7 @@ export function autonomousPreparation(
   readonly trustLaunchFolder: boolean;
 } {
   return {
-    seedFirstRun: isKind(harness, 'claude') && wrapperOf(harness, kit).autonomousPrelude !== undefined,
-    trustLaunchFolder: isKind(harness, 'codex'),
+    seedFirstRun: wrapperOf(harness, kit).autonomousPrelude !== undefined,
+    trustLaunchFolder: wrapperOf(harness, kit).trustFolderLines !== undefined,
   };
 }

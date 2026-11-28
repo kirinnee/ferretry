@@ -1,7 +1,7 @@
 /**
  * Claude's launch line comes from Claude's kit (E-276 PR 8): Runtimes writes the frame of the script and calls the kit's
  * members where it used to branch, and a Claude runtime whose plugin gives no launch line is REFUSED by name, never written
- * with Codex's lines or lines Runtimes still remembers. Codex still branches here, so its launch never asks the Claude kit.
+ * with Codex's lines or lines Runtimes still remembers. Codex's own launch line is `wrappers-codex-kit.test.ts`.
  */
 import { describe, expect, it } from 'bun:test';
 import type { RuntimesHarnessKit } from '../../../contract/index.ts';
@@ -89,20 +89,6 @@ describe('Claude launch line through the kit', () => {
     const refused = renderRuntimeWrapperScript(input({ kit: undefined, refusal: 'it is off' }));
     expect(refused).toContain('claude-kit cannot start: it is off');
   });
-
-  it('should never ask the Claude kit for a Codex launch', () => {
-    const codex = renderRuntimeWrapperScript(
-      input({
-        harness: 'codex',
-        kit: MARKED,
-        args: [],
-        autonomous: { args: [], seedFirstRun: false, trustLaunchFolder: true },
-      }),
-    );
-    expect(codex).not.toContain('marked-');
-    expect(codex).toContain('case "$_fy_arg" in resume) _fy_claim=1 ;; esac');
-    expect(codex).toContain(`'-c' 'model="a-model"'`);
-  });
 });
 
 describe('autonomousPreparation through the kit', () => {
@@ -116,9 +102,5 @@ describe('autonomousPreparation through the kit', () => {
   it('should refuse a Claude preparation when the plugin gives no launch line', () => {
     expect(() => autonomousPreparation('claude', undefined)).toThrow(REFUSAL);
     expect(() => autonomousPreparation('claude', {})).toThrow(REFUSAL);
-  });
-
-  it('should not ask the kit about Codex', () => {
-    expect(autonomousPreparation('codex', undefined)).toEqual({ seedFirstRun: false, trustLaunchFolder: true });
   });
 });
