@@ -28,6 +28,8 @@ const RuntimeRowSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   harness: z.string().min(1),
+  /** Set when the owner typed the name (`runtimeDisplayName`). */
+  namedByOwner: z.literal(true).optional(),
   /** The login the runtime is made from: the page matches the login the step just handled on this. */
   credential: z.object({ id: z.string().min(1), store: CredentialStoreSchema, label: z.string().min(1).optional() }),
   /** The profile and the login's provider, which tell two runtimes on one login apart in words. */

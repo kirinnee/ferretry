@@ -47,6 +47,23 @@ describe('the model Runtimes assembles from its own files', () => {
     expect(assembled.sources).toBe(4);
   });
 
+  it('keeps who named a runtime from its file, through the model and back to its file (E-296)', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        runtimes: new Map([
+          ['claude-default', runtime({})],
+          ['claude-work', runtime({ namedByOwner: true })],
+        ]),
+      }),
+    );
+
+    expect(assembled.model.runtimes['claude-work']?.namedByOwner).toBe(true);
+    expect(assembled.model.runtimes['claude-default']?.namedByOwner).toBeUndefined();
+    const written = ownedFileBodies(assembled.model);
+    expect(written.get('runtimes/claude-work.yaml')).toMatchObject({ namedByOwner: true });
+    expect(written.get('runtimes/claude-default.yaml')).not.toHaveProperty('namedByOwner');
+  });
+
   it('reports the agent permissions ferrets really run on a fresh machine: skip, never auto', () => {
     const assembled = assembleRuntimesModel(files());
 

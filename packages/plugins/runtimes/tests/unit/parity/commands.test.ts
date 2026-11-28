@@ -119,6 +119,7 @@ describe('commands parity: runtimes', () => {
         credential: 'claude-you',
         profile: 'default',
         create: true,
+        namedByOwner: true,
         addAnother: true,
       },
     ]);

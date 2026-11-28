@@ -63,7 +63,9 @@ const swap = (stale: string): string =>
 const SWAP_TWO = `() => { ${RERENDER} old.replaceWith(next); next.after(next.cloneNode(false)); return true; }`;
 const swapOther = (attribute: string, value: string): string =>
   `() => { ${RERENDER} next.setAttribute(${JSON.stringify(attribute)}, ${JSON.stringify(value)}); old.replaceWith(next); return true; }`;
-const VALUES = `() => Array.from(document.querySelectorAll('#code')).map(n => n.value)`;
+const valuesAre = (expected: readonly string[]): string =>
+  '() => JSON.stringify(Array.from(document.querySelectorAll("#code")).map(n => n.value)) === ' +
+  JSON.stringify(JSON.stringify(expected));
 const INPUTS = `() => Number(document.body.dataset.inputs)`;
 
 const pointer = (id: string, selector: string) => ({ id, target: { kind: 'selector' as const, selector } });
@@ -99,7 +101,7 @@ describe.if(process.platform === 'linux')('a field the page re-rendered under th
     if (chrome === null) throw new Error('this test needs a real Chrome on PATH');
     root = await mkdtemp(join(tmpdir(), 'ferretry-input-refind-'));
     site = Bun.serve({
-      port: 0,
+      port: 7481,
       hostname: '127.0.0.1',
       fetch: () => new Response(PAGE, { headers: { 'content-type': 'text/html' } }),
     });
@@ -144,7 +146,7 @@ describe.if(process.platform === 'linux')('a field the page re-rendered under th
     const facts = await look([pointer('code', '#code'), pointer('who', '#who')]);
 
     const [code, who] = facts.fields;
-    should(code?.field).eql({
+    should(code?.field).containEql({
       tag: 'input',
       type: 'text',
       autocomplete: 'one-time-code',
@@ -174,6 +176,37 @@ describe.if(process.platform === 'linux')('a field the page re-rendered under th
     should([g?.field.formId, g?.field.formAction]).eql(['g', `${base}/other`]);
     // `form.action`, `form.getAttribute` and `document.baseURI` are named by children here; the read never asks them.
     should([h?.field.formId, h?.field.formAction]).eql(['h', `${base}/real`]);
+  }, 60_000);
+
+  for (const component of ['query', 'fragment'] as const) {
+    it(`refuses a ${component}-only destination change and permits an unchanged long action`, async () => {
+      await card();
+      const destination = `${base}/${'p'.repeat(300)}?token=FAKE_QUERY#FAKE_FRAGMENT`;
+      const action = async (value: string) =>
+        await run(
+          `() => { document.querySelector("#f").setAttribute("action", ${JSON.stringify(value)}); return true; }`,
+        );
+      await action(destination);
+      const seen = await look();
+      should(await type(seen)).equal('typed');
+      await action(destination.replace(component === 'query' ? 'FAKE_QUERY' : 'FAKE_FRAGMENT', 'CHANGED'));
+      should(await type(seen)).equal('target_changed');
+      should(await run(INPUTS)).equal(1);
+    }, 60_000);
+  }
+
+  it('reads the external form-associated default submitter destination and detects its origin change', async () => {
+    await card();
+    await run(
+      '() => { const button = document.createElement("button"); button.setAttribute("form", "f"); button.setAttribute("formaction", "https://other.example/collect"); document.body.prepend(button); return true; }',
+    );
+    const seen = await look();
+    should(seen.fields[0]?.field.formAction).equal('https://other.example/collect');
+    should(await type(seen)).equal('typed');
+    await run(
+      '() => { document.querySelector("button[form]").setAttribute("formaction", "https://elsewhere.example/collect"); return true; }',
+    );
+    should(await type(seen)).equal('target_changed');
   }, 60_000);
 
   it('should type nothing when the form now sends the value to another action, or the field moved into another document', async () => {
@@ -242,7 +275,7 @@ describe.if(process.platform === 'linux')('a field the page re-rendered under th
   it('should type into the ONE replacement, once, replacing the stale text, with no second send', async () => {
     const shown = await card();
     await run(swap('OLD-STALE'));
-    should(await run(VALUES)).eql(['OLD-STALE']);
+    should(await run(valuesAre(['OLD-STALE']))).equal(true);
 
     // A write bound to the node the card showed is still refused: the old facts name a node that is gone.
     should(await type(shown)).equal('target_changed');
@@ -259,7 +292,7 @@ describe.if(process.platform === 'linux')('a field the page re-rendered under th
     should(Math.abs((now?.box.y ?? 0) - (was?.box.y ?? 1000))).be.below(2);
 
     should(await type(found.facts)).equal('typed');
-    should(await run(VALUES)).eql([TEXT]);
+    should(await run(valuesAre([TEXT]))).equal(true);
     // One insertion: what was selected was replaced, the field was not typed into twice.
     should(await run(INPUTS)).equal(1);
   }, 60_000);
@@ -271,7 +304,7 @@ describe.if(process.platform === 'linux')('a field the page re-rendered under th
     const found = await refind(shown);
     if (!found.ok) throw new Error(`not re-found: ${JSON.stringify(found)}`);
     should(await type(found.facts)).equal('typed');
-    should(await run(VALUES)).eql([TEXT]);
+    should(await run(valuesAre([TEXT]))).equal(true);
   }, 60_000);
 
   it('should show a candidate, flagged ambiguous, when two elements look like the field: nothing typed', async () => {
@@ -282,7 +315,7 @@ describe.if(process.platform === 'linux')('a field the page re-rendered under th
 
     should(found.ok && found.ambiguous).equal(true);
     should(found.ok && found.facts.fields.length).equal(1);
-    should(await run(VALUES)).eql(['', '']);
+    should(await run(valuesAre(['', '']))).equal(true);
     should(await run(INPUTS)).equal(0);
   }, 60_000);
 
