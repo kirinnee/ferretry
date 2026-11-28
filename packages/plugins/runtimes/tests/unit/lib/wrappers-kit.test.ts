@@ -15,6 +15,8 @@ const REFUSAL = 'claude is not supported here';
 
 /** A kit that answers with marker words, so the test can see which bytes came from it. */
 const MARKED: RuntimesHarnessKit = {
+  command: 'claude',
+  homeEnv: 'CLAUDE_CONFIG_DIR',
   wrapper: {
     conversationArgs: 'marked-resume|marked-resume=*',
     modelArgs: model => ['--marked-model', model],
