@@ -69,6 +69,21 @@ function unpacking(order: string[]): FakeHarness & Unpacks {
 }
 
 describe('starting on a conversation that was moved here', () => {
+  test('only a person may stage a stopped import; agents and daemon recovery write and launch nothing', async () => {
+    const harness = unpacking([]);
+    const { service, saved } = fixture(harness);
+    for (const kind of ['agent', 'daemon'] as const) {
+      const result = await service.start(
+        { folder: '/work', harness: 'claude-code', by: 'owner', relocated: { ...PACKED, pending: true } },
+        { kind },
+      );
+      expect(result).toMatchObject({ ok: false, error: { code: 'refused' } });
+    }
+    expect(saved).toEqual([]);
+    expect(harness.launched).toEqual([]);
+    expect(harness.resumed).toEqual([]);
+  });
+
   test('a pending relocation restores its conversation but opens no process, and resumes only explicitly', async () => {
     const harness = unpacking([]);
     const { service, saved } = fixture(harness);
