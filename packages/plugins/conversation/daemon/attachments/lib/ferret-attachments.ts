@@ -299,6 +299,11 @@ export class AttachmentStore {
     return this.view(stored, ferretId);
   }
 
+  /** Manifest metadata only, for proving a delivered path before reading its original. */
+  async lookup(ferretId: string, attachmentId: string): Promise<AttachmentView> {
+    return this.durableView(await this.stored(ferretId, attachmentId));
+  }
+
   async download(
     ferretId: string,
     attachmentId: string,
@@ -401,6 +406,10 @@ export function ferretScopedAttachments(store: AttachmentStore, exists: (ferretI
     throw new AttachmentError('not_found', 'ferret was not found');
   };
   return {
+    lookup: async (ferretId: string, attachmentId: string): Promise<AttachmentView> => {
+      await require(ferretId);
+      return await store.lookup(ferretId, attachmentId);
+    },
     upload: async (
       ferretId: string,
       request: { readonly filename: string; readonly mime: string; readonly bytes: Uint8Array },

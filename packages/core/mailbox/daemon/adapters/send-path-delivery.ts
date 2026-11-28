@@ -15,6 +15,8 @@ import { SessionSendError } from '../lib/delivery/mounts/session-send.ts';
  * `queued` says the queue's own entry under `sendId` is the thing being delivered, not an earlier send of that id.
  */
 export interface QueuedSend {
+  /** Already delivered files, retained as trusted metadata for the send ledger; never copied again here. */
+  readonly attachmentIds?: readonly string[];
   readonly sendId: string;
   readonly message: string;
   readonly origin: LaunchOrigin;
@@ -123,7 +125,7 @@ function originOf(delivery: QueueDelivery): LaunchOrigin {
 
 /** The typing send's request for one delivery: the send path's request, plus who it is for and what the daemon is. */
 export function typedRequestOf(delivery: QueueDelivery): QueuedSend {
-  const { senderReference, origin: _daemon, attachmentIds: _carried, ...rest } = requestOf(delivery);
+  const { senderReference, origin: _daemon, ...rest } = requestOf(delivery);
   const [first] = delivery.members;
   const feature = first?.sender === 'daemon' ? first.by?.feature : undefined;
   return {
@@ -154,6 +156,7 @@ export function requestOf(delivery: QueueDelivery): Omit<SendMessageRequest, 'id
     return {
       sendId,
       message: first.text,
+      ...(first.attachmentIds.length === 0 ? {} : { attachmentIds: first.attachmentIds }),
       ...(first.replyExpected === true ? { replyExpected: true } : {}),
       // An interrupt is the send path's own stop-then-type, done when this message's turn has come.
       ...(first.interrupt === true ? { now: true } : {}),

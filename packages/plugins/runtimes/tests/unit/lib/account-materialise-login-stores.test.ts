@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { EMPTY_RUNTIME_IDS } from '../../../daemon/lib/account/ids.ts';
 import { type MaterialiseInput, materialiseFleet } from '../../../daemon/lib/account/materialise.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetLayout, FleetModelApplyPlan } from '../../../daemon/lib/provisioning.ts';
 
@@ -61,6 +62,7 @@ const plan = (overrides: Partial<MaterialiseInput> = {}): FleetModelApplyPlan =>
     fyCommand: '/opt/ferretry/bin/fy',
     hostCodexHome: '/home/person/.codex',
     acceptsAutoPermissionMode: true,
+    kits: REAL_KITS,
     ...overrides,
   });
 };

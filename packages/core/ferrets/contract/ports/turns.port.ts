@@ -40,6 +40,18 @@ export interface FerretTurns {
    * send's row names the file.
    */
   writeQueued?(sendId: string, payload: string): Promise<string>;
+  /**
+   * Additive: reads back the message `writeQueued` filed under this send id (`channel/queued-<send id>.md`, bounded), for the
+   * chat's hand-off view. `undefined` when there is none, the id is outside the queued-message grammar or it cannot be read.
+   */
+  readQueued?(sendId: string): Promise<string | undefined>;
+  /**
+   * Additive: the absolute path of THIS ferret's own `attachments/` folder, the one root whose files a hand-off may show as
+   * stored attachments. Any file named outside it is not this ferret's, whatever the document says.
+   */
+  attachmentsFolder?(): Promise<string>;
+  /** A delivered copy proved through the no-link attachment scope, or none. Only bare, unencoded components. */
+  attachmentFile?(attachmentId: string, filename: string): Promise<string | undefined>;
   /** Additive (#45 BG-051, today's `clearMarkers`): clears the completion markers a previous turn left. */
   clearMarkers?(): Promise<void>;
 }
