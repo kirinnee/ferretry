@@ -38,6 +38,8 @@ const NOT_SERVED = [
   'provedConversation',
   'runtime',
   'startFailure',
+  'stagesRelaunch',
+  'subscriptionRefusal',
 ] as const satisfies readonly (keyof Harness)[];
 
 const core = { deps: {} as never, delivered: new Set<string>() } satisfies ClaudeCore;
@@ -92,7 +94,9 @@ describe('the Claude harness parts', () => {
       runtimeSwitch: true,
       start: true,
       startFailure: true,
+      stagesRelaunch: true,
       stop: true,
+      subscriptionRefusal: true,
       transcript: true,
       transcriptBytes: true,
       transcriptStamp: true,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { err, ok } from '@ferretry/std';
-import { type LaunchPart, PERSON_ORIGIN } from '../../../../contract/index.ts';
+import { type Harness, type LaunchPart, PERSON_ORIGIN } from '../../../../contract/index.ts';
 import {
   emptyChildEnvironment,
   FakeHarness,
@@ -21,6 +21,9 @@ import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 
 type Env = Readonly<Record<string, string>>;
 
+const SUBSCRIPTION_SENTENCE =
+  'OpenCode refuses Anthropic subscription credentials; choose an API key or endpoint login';
+
 function fixture(options: {
   readonly loginEnv?: FerretsPorts['loginEnv'];
   readonly loginLaunchEnv?: FerretsPorts['loginLaunchEnv'];
@@ -31,7 +34,12 @@ function fixture(options: {
 }) {
   const registry = new FerretRegistry([]);
   const tokens = new FerretTokenDirectory();
-  const harness = new FakeHarness(options.harness ?? 'claude-code');
+  const key = options.harness ?? 'claude-code';
+  // OpenCode's two launch rules are what its harness declares; no other harness declares them.
+  const harness: FakeHarness =
+    key === 'opencode'
+      ? Object.assign(new FakeHarness(key), { stagesRelaunch: true, subscriptionRefusal: SUBSCRIPTION_SENTENCE })
+      : new FakeHarness(key);
   const runner = new FakeRunner();
   const asked: Env[] = [];
   let next = 0;
@@ -58,8 +66,9 @@ function fixture(options: {
     ...(options.loginEnv === undefined ? {} : { loginEnv: options.loginEnv }),
     ...(options.loginLaunchEnv === undefined ? {} : { loginLaunchEnv: options.loginLaunchEnv }),
     vault: {
-      childEnvironment: async (_ferret, env, destination) => {
-        expect(destination).toBe(harness.key);
+      childEnvironment: async (_ferret, env, refuseSubscription) => {
+        // Told to refuse a subscription exactly when the harness declares its refusal sentence.
+        expect(refuseSubscription).toBe((harness as Harness).subscriptionRefusal !== undefined);
         asked.push({ ...env });
         if (options.subscriptionRefused) return err({ unknown: [], code: 'subscription_login' });
         const unknown = options.unknownSecrets ?? [];
@@ -149,12 +158,41 @@ describe('a ferret launch carries its login’s environment', () => {
     expect(after).not.toBe(before);
     expect(await f.runner.alive(after!)).toBe(true);
   });
+  test('a harness that declares neither rule releases the old pane first and tells the Vault to refuse nothing', async () => {
+    const f = fixture({ harness: 'fake-third', subscriptionRefused: false });
+    const started = await f.service.start({ folder: '/work', harness: 'fake-third', by: 'owner' }, PERSON_ORIGIN);
+    if (!started.ok) throw new Error('fixture must start');
+    const before = await f.service.handle(started.value);
+    const alive: boolean[] = [];
+    const prepareHome = f.harness.prepareHome.bind(f.harness);
+    f.harness.prepareHome = async spec => {
+      alive.push(await f.runner.alive(before as NonNullable<typeof before>));
+      return await prepareHome(spec);
+    };
+    const replaced = await f.service.resume(started.value, undefined, {
+      origin: PERSON_ORIGIN,
+      replaceLiveTerminal: true,
+    });
+    expect(replaced).toMatchObject({ ok: true });
+    // Not staged: the old pane was already released when the new launch was prepared; the fixture's Vault stub
+    // asserts it was told to refuse nothing on both asks.
+    expect(alive).toEqual([false]);
+    expect(f.asked).toHaveLength(2);
+  });
+  test('a Vault refusal for a harness that declared no sentence is not worded as OpenCode', async () => {
+    const f = fixture({ harness: 'fake-third', subscriptionRefused: true });
+    const started = await f.service.start({ folder: '/work', harness: 'fake-third', by: 'owner' }, PERSON_ORIGIN);
+    expect(started).toMatchObject({ ok: false, error: { code: 'login_unavailable' } });
+    if (started.ok) throw new Error('the stand-in Vault refuses');
+    expect(started.error.reason).not.toContain('OpenCode');
+    expect(f.harness.launched).toHaveLength(0);
+  });
   test('the sealed subscription policy returns a typed start refusal without launching a harness', async () => {
     const f = fixture({ harness: 'opencode', subscriptionRefused: true });
     const started = await f.service.start({ folder: '/work', harness: 'opencode', by: 'owner' }, PERSON_ORIGIN);
     expect(started).toMatchObject({ ok: false, error: { code: 'refused' } });
     if (started.ok) throw new Error('subscription must refuse');
-    expect(started.error.reason).toContain('subscription credentials');
+    expect(started.error.reason).toBe(SUBSCRIPTION_SENTENCE);
     expect(f.asked).toHaveLength(1);
   });
   test('a literal and a ${secret:X} login value both reach the Vault by name, as written', async () => {

@@ -137,8 +137,8 @@ export interface VaultApi {
   childEnvironment(
     ferret: FerretId,
     env: Readonly<Record<string, string>>,
-    /** Destination policy, enforced INSIDE the sealed use path on all resolved variable values. */
-    harness?: string,
+    /** Refuse an Anthropic subscription credential for this launch; enforced INSIDE the sealed use path on all resolved variable values. */
+    refuseSubscriptionLogin?: boolean,
   ): Promise<
     Result<ChildEnvironment, { readonly unknown: readonly SecretName[]; readonly code?: 'subscription_login' }>
   >;

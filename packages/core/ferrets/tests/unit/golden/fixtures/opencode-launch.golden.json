@@ -1,0 +1,96 @@
+{
+  "claude-code": {
+    "permitted": {
+      "events": "prepareHome oldPaneAlive=false > vault told=false",
+      "launched": 2,
+      "replaced": {
+        "ok": true
+      },
+      "started": {
+        "ok": true
+      }
+    },
+    "refusedReplace": {
+      "events": "vault told=false",
+      "launched": 2,
+      "oldPaneAlive": false,
+      "replaced": {
+        "ok": true
+      },
+      "started": {
+        "ok": true
+      }
+    },
+    "start": {
+      "events": "vault told=false",
+      "launched": 1,
+      "outcome": {
+        "ok": true
+      }
+    }
+  },
+  "fake-third": {
+    "permitted": {
+      "events": "prepareHome oldPaneAlive=false > vault told=false",
+      "launched": 2,
+      "replaced": {
+        "ok": true
+      },
+      "started": {
+        "ok": true
+      }
+    },
+    "refusedReplace": {
+      "events": "vault told=false",
+      "launched": 2,
+      "oldPaneAlive": false,
+      "replaced": {
+        "ok": true
+      },
+      "started": {
+        "ok": true
+      }
+    },
+    "start": {
+      "events": "vault told=false",
+      "launched": 1,
+      "outcome": {
+        "ok": true
+      }
+    }
+  },
+  "opencode": {
+    "permitted": {
+      "events": "vault told=true > prepareHome oldPaneAlive=false",
+      "launched": 2,
+      "replaced": {
+        "ok": true
+      },
+      "started": {
+        "ok": true
+      }
+    },
+    "refusedReplace": {
+      "events": "vault told=true",
+      "launched": 1,
+      "oldPaneAlive": true,
+      "replaced": {
+        "code": "refused",
+        "ok": false,
+        "reason": "OpenCode refuses Anthropic subscription credentials; choose an API key or endpoint login"
+      },
+      "started": {
+        "ok": true
+      }
+    },
+    "start": {
+      "events": "vault told=true",
+      "launched": 0,
+      "outcome": {
+        "code": "refused",
+        "ok": false,
+        "reason": "OpenCode refuses Anthropic subscription credentials; choose an API key or endpoint login"
+      }
+    }
+  }
+}

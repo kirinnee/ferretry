@@ -340,6 +340,16 @@ export interface Harness {
   readonly key: HarnessKey;
   /** What this harness says about itself as data (`FerretsApi.harnessFacts`); see {@link HarnessFacts}. */
   readonly facts: HarnessFacts;
+  /**
+   * Whether a replacing resume PREPARES the whole launch (its Vault check included) before it releases the live pane, so a
+   * refusal leaves that pane untouched. Absent: the pane is released first.
+   */
+  readonly stagesRelaunch?: boolean;
+  /**
+   * The one sentence that refuses a launch on an Anthropic subscription credential, for a harness that cannot spend one.
+   * Its presence is also what tells the Vault to refuse such a credential for this launch. Absent: nothing is refused.
+   */
+  readonly subscriptionRefusal?: string;
   readonly runtime?: HarnessRuntimeDescriptor;
   /** Binary and version; never reads its sign-in files. */
   discover(): Promise<HarnessInstall | HarnessMissing>;
