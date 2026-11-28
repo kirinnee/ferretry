@@ -305,11 +305,26 @@ function privateCheckOf(fs: HostFs, home: string, real: string, privateFiles: Pr
       await answer(async kept => {
         let changed = false,
           folder = false;
-        const held = await privatelyHeld(fs, kept, path, real, undefined, reason => {
-          changed ||= reason === 'changed-folder';
-          folder ||= reason === 'private-folder';
-        });
-        return folder || ((held || changed) && (await privatelyHeld(fs, await now(), path, real)));
+        let commit: (() => void) | undefined;
+        const held = await privatelyHeld(
+          fs,
+          kept,
+          path,
+          real,
+          undefined,
+          reason => {
+            changed ||= reason === 'changed-folder';
+            folder ||= reason === 'private-folder';
+          },
+          pending => {
+            commit = pending;
+          },
+        );
+        if (folder) return true;
+        if (!held && !changed) return false;
+        if (await privatelyHeld(fs, await now(), path, real)) return true;
+        commit?.();
+        return false;
       }),
     heldIdentity: async identity =>
       await answer(async kept => heldByIdentity(kept, identity) && heldByIdentity(await now(), identity)),

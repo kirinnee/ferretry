@@ -24,9 +24,9 @@ async function layout() {
   const base = `${parent}/base`;
   const folder = `${base}/projects/-work`;
   const secret = `${parent}/secret.json`;
-  await mkdir(folder, { recursive: true });
-  await writeFile(`${folder}/conv.jsonl`, 'transcript');
-  await writeFile(secret, 'private');
+  await mkdir(folder, { recursive: true, mode: 0o700 });
+  await writeFile(`${folder}/conv.jsonl`, 'FAKE-transcript');
+  await writeFile(secret, 'FAKE-private');
   const identity = await REAL.identity(secret);
   if (identity === undefined) throw new Error('the secret is there');
   const guard: PrivateGuard = {
@@ -79,7 +79,7 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     expect(await privatelyHeld(REAL, l.guard, l.file, l.base, clock)).toBe(true);
     // And one replaced by another plain file is still clear.
     await rm(l.file);
-    await writeFile(l.file, 'again');
+    await writeFile(l.file, 'FAKE-again');
     expect(await privatelyHeld(REAL, l.guard, l.file, l.base, clock)).toBe(false);
   });
 
@@ -99,8 +99,8 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     // The folder above the file is replaced by the private folder's identity: the guard that names it is built afresh.
     const swapped = `${l.base}/projects/-work`;
     await rename(swapped, `${swapped}.old`);
-    await mkdir(swapped);
-    await writeFile(`${swapped}/conv.jsonl`, 'x');
+    await mkdir(swapped, { mode: 0o700 });
+    await writeFile(`${swapped}/conv.jsonl`, 'FAKE-x');
     const identity = await REAL.identity(swapped);
     if (identity === undefined) throw new Error('the folder is there');
     const fresh: PrivateGuard = { keys: { has: key => key === identityKey(identity), size: 1 }, closed: new Set() };
@@ -135,9 +135,9 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
   test('deeper walks never extend an ancestor past its own moment', async () => {
     const l = await layout();
     const deeper = `${l.folder}/a/b`;
-    await mkdir(deeper, { recursive: true });
-    await writeFile(`${deeper}/c.jsonl`, 'x');
-    await writeFile(`${l.folder}/a/d.jsonl`, 'x');
+    await mkdir(deeper, { recursive: true, mode: 0o700 });
+    await writeFile(`${deeper}/c.jsonl`, 'FAKE-x');
+    await writeFile(`${l.folder}/a/d.jsonl`, 'FAKE-x');
     const { fs, looks } = counting();
     let at = 1_000;
     const clock = (): number => at;
@@ -153,5 +153,29 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     looks.length = 0;
     expect(await privatelyHeld(fs, l.guard, `${l.folder}/a/d.jsonl`, l.base, clock)).toBe(false);
     expect(looks).toEqual([`${l.folder}/a/d.jsonl`, `${l.folder}/a`, l.folder, `${l.base}/projects`, l.base]);
+  });
+
+  test('another alias of a folder cannot extend the first alias walk expiry', async () => {
+    const l = await layout();
+    const alias = `${l.base}/other/-work`;
+    await mkdir(`${l.base}/other`, { mode: 0o700 });
+    const looks: string[] = [];
+    const fs: HostFs = {
+      ...REAL,
+      identity: async path => {
+        looks.push(path);
+        const source = path === alias || path.startsWith(`${alias}/`) ? `${l.folder}${path.slice(alias.length)}` : path;
+        return await REAL.identity(source);
+      },
+    };
+    let at = 1_000;
+    const clock = (): number => at;
+    expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
+    // The other alias walks different ancestors after the original walk's expiry.
+    at += CLEAR_FOLDER_MS + 1;
+    expect(await privatelyHeld(fs, l.guard, `${alias}/conv.jsonl`, l.base, clock)).toBe(false);
+    looks.length = 0;
+    expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
+    expect(looks).toEqual([l.file, l.folder, `${l.base}/projects`, l.base]);
   });
 });

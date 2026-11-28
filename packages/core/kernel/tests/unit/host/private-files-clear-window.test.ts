@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { RootHandle } from '../../../contract/ports.ts';
 import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
-import { privateGuardOf } from '../../../host/fence-guard.ts';
+import { privateGuardOf, privatelyHeld } from '../../../host/fence-guard.ts';
 import { identityKey } from '../../../host/fence-index.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
 
@@ -35,9 +36,9 @@ async function layout() {
   const base = `${home}/state/codex/agent-homes/F1`;
   const session = `${home}/state/ferrets/sessions/S1`;
   const alias = `${base}/alias`;
-  for (const folder of [alias, session]) await mkdir(folder, { recursive: true });
-  await writeFile(`${alias}/environment.json`, 'public control');
-  await writeFile(`${base}/own.txt`, 'mine');
+  for (const folder of [alias, session]) await mkdir(folder, { recursive: true, mode: 0o700 });
+  await writeFile(`${alias}/environment.json`, 'FAKE-public-control');
+  await writeFile(`${base}/own.txt`, 'FAKE-own');
   return { home, base, session, alias };
 }
 
@@ -102,7 +103,7 @@ for (const way of ['rename with source bind', 'bind over clear path', 'rename ou
     // The session folder rests empty. Its folder is pinned; this credential has never been in a snapshot.
     const guard = await privateGuardOf(fs, l.home, l.base, PRIVATE, RECHECK_MS);
     expect(guard.keys.has(await keyAt(l.session))).toBe(true);
-    expect(await readOf(root, 'alias/environment.json')).toBe('served:public control');
+    expect(await readOf(root, 'alias/environment.json')).toBe('served:FAKE-public-control');
     await writeFile(`${l.session}/environment.json`, 'FAKE-new-session-credential', { mode: 0o600 });
     expect(guard.keys.has(await keyAt(`${l.session}/environment.json`))).toBe(false);
     if (way === 'bind over clear path') mount = { alias: l.alias, source: l.session };
@@ -114,7 +115,7 @@ for (const way of ['rename with source bind', 'bind over clear path', 'rename ou
     }
     const result = await readOf(root, 'alias/environment.json');
     expect(result).toBe('refused:fenced');
-    expect(await readOf(root, 'own.txt')).toBe('served:mine');
+    expect(await readOf(root, 'own.txt')).toBe('served:FAKE-own');
   });
 
 test('SEC-PF1 a changed clear folder forces a look even when the kept guard does not know its identity', async () => {
@@ -128,9 +129,9 @@ test('SEC-PF1 a changed clear folder forces a look even when the kept guard does
     () => undefined,
     { privateFiles: PRIVATE, privateRecheckMs: RECHECK_MS },
   ).root('agent-homes', { subfolder: 'F1' });
-  expect(await readOf(root, 'alias/environment.json')).toBe('served:public control');
+  expect(await readOf(root, 'alias/environment.json')).toBe('served:FAKE-public-control');
   const added = `${l.session}-new`;
-  await mkdir(added);
+  await mkdir(added, { mode: 0o700 });
   await writeFile(`${added}/environment.json`, 'FAKE-new-private-folder', { mode: 0o600 });
   mount = { alias: l.alias, source: added };
   const result = await readOf(root, 'alias/environment.json');
@@ -146,9 +147,119 @@ test('SEC-PF1 replacing a clear folder with another public folder still permits 
     () => undefined,
     { privateFiles: PRIVATE, privateRecheckMs: RECHECK_MS },
   ).root('agent-homes', { subfolder: 'F1' });
-  expect(await readOf(root, 'alias/environment.json')).toBe('served:public control');
+  expect(await readOf(root, 'alias/environment.json')).toBe('served:FAKE-public-control');
   await rename(l.alias, `${l.alias}.old`);
-  await mkdir(l.alias);
-  await writeFile(`${l.alias}/environment.json`, 'public replacement');
-  expect(await readOf(root, 'alias/environment.json')).toBe('served:public replacement');
+  await mkdir(l.alias, { mode: 0o700 });
+  await writeFile(`${l.alias}/environment.json`, 'FAKE-public-replacement');
+  expect(await readOf(root, 'alias/environment.json')).toBe('served:FAKE-public-replacement');
+});
+
+test('SEC-PF1 two concurrent reads both refresh a changed folder before either can reuse its memory', async () => {
+  const l = await layout();
+  const operation = new AsyncLocalStorage<'first' | 'second'>();
+  const homeLooks = { first: 0, second: 0 };
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let mount: { alias: string; source: string } | undefined;
+  const fs = bind(
+    {
+      ...REAL,
+      realpath: async path => {
+        const name = operation.getStore();
+        // Home resolutions: anchor, kept guard, then mandatory fresh look. Pause after the kept walk finishes.
+        if (path === l.home && name !== undefined && ++homeLooks[name] === 3 && name === 'first') {
+          entered.resolve();
+          await release.promise;
+        }
+        return await REAL.realpath(path);
+      },
+    },
+    () => mount,
+  );
+  const root = rootsPortFor(
+    fs,
+    { home: l.home, plugin: 'codex', worktrees: `${l.home}-worktrees` },
+    ['agent-homes'],
+    () => undefined,
+    { privateFiles: PRIVATE, privateRecheckMs: RECHECK_MS },
+  ).root('agent-homes', { subfolder: 'F1' });
+  expect(await readOf(root, 'alias/environment.json')).toBe('served:FAKE-public-control');
+  const added = `${l.session}-new`;
+  await mkdir(added, { mode: 0o700 });
+  await writeFile(`${added}/environment.json`, 'FAKE-concurrent-private', { mode: 0o600 });
+  mount = { alias: l.alias, source: added };
+  const first = operation.run('first', async () => await readOf(root, 'alias/environment.json'));
+  try {
+    await entered.promise;
+    expect(await operation.run('second', async () => await readOf(root, 'alias/environment.json'))).toBe(
+      'refused:fenced',
+    );
+    expect(homeLooks.second).toBeGreaterThanOrEqual(3);
+  } finally {
+    release.resolve();
+    expect(await first).toBe('refused:fenced');
+  }
+});
+
+for (const failure of ['throw', 'held'] as const)
+  test(`SEC-PF1 a ${failure} fresh check leaves replacement memory provisional and the next read refreshes`, async () => {
+    const l = await layout();
+    const operation = new AsyncLocalStorage<{ homeLooks: number; fresh: boolean }>();
+    let fail = true;
+    let refreshes = 0;
+    const fs: HostFs = {
+      ...REAL,
+      realpath: async path => {
+        const current = operation.getStore();
+        if (path === l.home && current !== undefined && ++current.homeLooks === 3) {
+          refreshes += 1;
+          if (fail && failure === 'throw') throw new Error('FAKE-refresh-failure');
+          current.fresh = true;
+        }
+        return await REAL.realpath(path);
+      },
+      identity: async path =>
+        fail && failure === 'held' && operation.getStore()?.fresh && path === l.alias
+          ? undefined
+          : await REAL.identity(path),
+    };
+    const root = rootsPortFor(
+      fs,
+      { home: l.home, plugin: 'codex', worktrees: `${l.home}-worktrees` },
+      ['agent-homes'],
+      () => undefined,
+      { privateFiles: PRIVATE, privateRecheckMs: RECHECK_MS },
+    ).root('agent-homes', { subfolder: 'F1' });
+    expect(await readOf(root, 'alias/environment.json')).toBe('served:FAKE-public-control');
+    await rename(l.alias, `${l.alias}.old`);
+    await mkdir(l.alias, { mode: 0o700 });
+    await writeFile(`${l.alias}/environment.json`, 'FAKE-public-replacement');
+    const read = async () =>
+      await operation.run({ homeLooks: 0, fresh: false }, async () => await readOf(root, 'alias/environment.json'));
+    expect(await read()).toBe('refused:fenced');
+    expect(refreshes).toBe(1);
+    fail = false;
+    expect(await read()).toBe('served:FAKE-public-replacement');
+    expect(refreshes).toBe(2);
+    // Success commits the provisional memory: a subsequent unchanged read needs no forced look.
+    expect(await read()).toBe('served:FAKE-public-replacement');
+    expect(refreshes).toBe(2);
+  });
+
+test('SEC-PF1 public-folder probe: an unconfirmed second walk still reports changed-folder', async () => {
+  const l = await layout();
+  const guard = await privateGuardOf(REAL, l.home, l.base, PRIVATE, RECHECK_MS);
+  expect(await privatelyHeld(REAL, guard, `${l.alias}/environment.json`, l.base)).toBe(false);
+  await rename(l.alias, `${l.alias}.old`);
+  await mkdir(l.alias, { mode: 0o700 });
+  await writeFile(`${l.alias}/environment.json`, 'FAKE-public-replacement');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const notices: string[] = [];
+    expect(
+      await privatelyHeld(REAL, guard, `${l.alias}/environment.json`, l.base, undefined, reason =>
+        notices.push(reason),
+      ),
+    ).toBe(false);
+    expect(notices).toContain('changed-folder');
+  }
 });

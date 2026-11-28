@@ -519,17 +519,18 @@ export async function privateGuardLookedAtNow(
 }
 
 /**
- * How long a folder's identity is remembered clear of the private places. Each use re-reads its device and inode:
- * a rename or mount at the same path cannot reuse the memory. A warm read costs the entry and its parent, without
- * walking the remaining ancestors or refreshing the private index. The memory belongs to one guard and disk; a new
- * snapshot or another disk starts from nothing. A deeper walk never extends an ancestor's expiry.
+ * How long a folder's ancestor walk is remembered clear of the private places, for its device:inode AND alias path.
+ * Each use re-identifies the entry and folders up to the first remembered folder: replacing one of those cannot reuse
+ * its memory. Ancestors ABOVE that folder are not re-identified within the window; replacing one of them can escape
+ * this check until expiry. A warm read usually costs the entry and parent. The memory belongs to one guard and disk;
+ * a new snapshot or another disk starts from nothing. Deeper walks and other aliases never extend a walk's expiry.
  */
 export const CLEAR_FOLDER_MS = 1_000;
 
 /** The folders found clear of the guard, and until when, for one disk. */
 interface ClearFolders {
   readonly fs: HostFs;
-  /** Expiry by device:inode, never by path. */
+  /** Expiry by [device:inode, alias path]: different aliases can have different ancestor walks. */
   readonly until: Map<string, number>;
   /** The last identity at a path, so a changed folder also triggers a fresh private-index look. */
   readonly paths: Map<string, string>;
@@ -537,14 +538,17 @@ interface ClearFolders {
 const CLEAR = new WeakMap<PrivateGuard, ClearFolders>();
 /** The most folders remembered per guard; a walk past it starts the memory again. */
 const MAX_CLEAR_FOLDERS = 4_096;
+const clearWalkKey = (key: string, path: string): string => JSON.stringify([key, path]);
 
 /**
- * Whether `real` is a private place or inside one, by identity: the entry itself first, then every folder up to and
- * including the root's `base`, as {@link fencedReal} walks. A path that cannot be looked at is refused.
+ * Whether `real` is a private place or inside one, by identity: the entry itself first, then folders toward the root's
+ * `base`, stopping at an unexpired remembered walk (see {@link CLEAR_FOLDER_MS}). An unreadable path is refused.
  *
  * The ENTRY ITSELF is looked at on every call (a file replaced, relinked or aliased to a private place is caught at once);
  * the folders above it are remembered clear by identity for {@link CLEAR_FOLDER_MS} (see there). `notice` tells the
- * caller when a folder changed or matched a kept private identity. `now` is an injected monotonic clock in milliseconds.
+ * caller when a folder changed or matched a kept private identity. On a changed folder, `provisional` receives this
+ * operation's memory commit: call it only after a fresh guard accepts the path; dropping it discards the memory. Without
+ * that confirmation a replacement is never remembered clear. `now` is an injected monotonic clock in milliseconds.
  */
 export async function privatelyHeld(
   fs: HostFs,
@@ -553,6 +557,7 @@ export async function privatelyHeld(
   base: string,
   now: () => number = () => performance.now(),
   notice?: (reason: 'changed-folder' | 'private-folder') => void,
+  provisional?: (commit: () => void) => void,
 ): Promise<boolean> {
   if (guard.keys.size === 0 && guard.closed.size === 0) return false;
   const known = CLEAR.get(guard);
@@ -560,6 +565,7 @@ export async function privatelyHeld(
   if (clear !== known) CLEAR.set(guard, clear);
   const at = now();
   const walked: { readonly path: string; readonly key: string }[] = [];
+  let changed = false;
   /** Until when the remembered folder this walk stopped at is clear; a folder walked below it is never remembered past it. */
   let ceiling = Number.POSITIVE_INFINITY;
   const start = absolute(real, 'the path');
@@ -568,9 +574,12 @@ export async function privatelyHeld(
     if (entry === undefined) return true;
     const key = identityKey(entry);
     const previous = clear.paths.get(current);
-    if (previous !== undefined && previous !== key) notice?.('changed-folder');
-    // Reuse the ancestor walk only for the SAME folder at the SAME path, identified again at the time of use.
-    const remembered = current === start || previous !== key ? 0 : (clear.until.get(key) ?? 0);
+    if (previous !== undefined && previous !== key) {
+      changed = true;
+      notice?.('changed-folder');
+    }
+    // Re-identify the remembered folder at this alias; ancestors above it are not looked at until its expiry.
+    const remembered = current === start || previous !== key ? 0 : (clear.until.get(clearWalkKey(key, current)) ?? 0);
     if (remembered > at) {
       ceiling = remembered;
       break;
@@ -584,15 +593,22 @@ export async function privatelyHeld(
     if (current !== start) walked.push({ path: current, key });
     if (current === base || dirname(current) === current || !within(base, dirname(current))) break;
   }
-  if (Math.max(clear.paths.size, clear.until.size) + walked.length > MAX_CLEAR_FOLDERS) {
-    clear.until.clear();
-    clear.paths.clear();
-  }
   const until = Math.min(at + CLEAR_FOLDER_MS, ceiling);
-  for (const folder of walked) {
-    clear.until.set(folder.key, until);
-    clear.paths.set(folder.path, folder.key);
-  }
+  const commit = (): void => {
+    if (Math.max(clear.paths.size, clear.until.size) + walked.length > MAX_CLEAR_FOLDERS) {
+      clear.until.clear();
+      clear.paths.clear();
+    }
+    for (const folder of walked) {
+      const previous = clear.paths.get(folder.path);
+      if (previous !== undefined) clear.until.delete(clearWalkKey(previous, folder.path));
+      clear.until.set(clearWalkKey(folder.key, folder.path), until);
+      clear.paths.set(folder.path, folder.key);
+    }
+  };
+  // A kept false is provisional when a folder changed: other operations must still see the old identity and refresh.
+  if (changed) provisional?.(commit);
+  else commit();
   return false;
 }
 
