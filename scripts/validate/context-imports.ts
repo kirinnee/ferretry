@@ -232,6 +232,27 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // EIGHTH EXEMPTION: E-276 PR 12 moved three Codex-only modules into the Codex plugin, and the two frozen Runtimes goldens
+  // that exercise them still do. Only these two named golden tests may import only these named modules, by path; no glob.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/plugin-runtimes' &&
+    to === 'daemon' &&
+    toPkg.name === '@ferretry/plugin-codex' &&
+    (
+      {
+        'tests/unit/golden/supervision.golden.test.ts': [
+          'daemon/lib/runtimes-kit/codex-runtime.ts',
+          'daemon/lib/runtimes-kit/runtime-end-supervision.ts',
+        ],
+        'tests/unit/golden/mcp.golden.test.ts': ['daemon/lib/runtimes-kit/model-catalog.ts'],
+      } as Readonly<Record<string, readonly string[]>>
+    )[edge.from.slice(edge.fromPkg.dir.length + 1)]?.some(
+      module => resolve(dirname(edge.from), edge.specifier) === resolve(toPkg.dir, module),
+    ) === true
+  )
+    return undefined;
+
   // Another package.
   switch (to) {
     case 'kernel-contract':

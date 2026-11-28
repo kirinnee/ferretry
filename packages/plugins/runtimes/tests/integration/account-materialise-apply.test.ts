@@ -409,6 +409,7 @@ describe('a runtime wrapper, run', () => {
         configDirectory: path.join(root, 'home'),
         env: {},
         args: [],
+        kit: REAL_KITS.get(input.harness ?? 'claude'),
         fyCommand: fy,
         ...input,
       }),

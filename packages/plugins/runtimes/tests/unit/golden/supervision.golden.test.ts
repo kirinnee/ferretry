@@ -17,8 +17,11 @@ import {
   codexRuntimeHome,
   parseCodexPidFile,
   runtimeHomeId,
-} from '../../../daemon/lib/service/codex-runtime.ts';
-import { type FerretChange, RuntimeEndSupervision } from '../../../daemon/lib/service/runtime-end-supervision.ts';
+} from '../../../../codex/daemon/lib/runtimes-kit/codex-runtime.ts';
+import {
+  type FerretChange,
+  RuntimeEndSupervision,
+} from '../../../../codex/daemon/lib/runtimes-kit/runtime-end-supervision.ts';
 import { expectGolden } from './support/golden.ts';
 
 const HOMES = '/fleet/homes';

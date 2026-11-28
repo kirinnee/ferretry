@@ -14,7 +14,7 @@
  * every other field here repeats what Codex itself uses for a model it has no entry for (measured on
  * 0.145 and 0.156: the request sent is byte-identical to the fallback's, apart from the reasoning
  * effort now being sent and the sub-agent tool naming the right models), and the prompt is the one
- * Codex ships for that case (`codex/default-instructions.txt`, refreshed by
+ * Codex ships for that case (`./codex-default-instructions.txt`, refreshed by
  * `scripts/local/refresh-codex-default-instructions.ts`). Borrowing a bundled OpenAI entry instead
  * would hand a DeepSeek model GPT's persona and code-mode-only tools.
  *
@@ -30,12 +30,15 @@
  * Pure.
  */
 import defaultInstructions from './codex-default-instructions.txt' with { type: 'text' };
-import type { RuntimeModelEntry, RuntimeModels } from './runtime.ts';
+import type { KitExtrasInput, KitRuntimeModel } from '@ferretry/plugin-runtimes/contract';
+
+type RuntimeModelEntry = KitRuntimeModel;
+type RuntimeModels = KitExtrasInput['models'];
 
 /**
  * The format of the file below. Bump it whenever `renderCodexModelCatalog` would write different text
  * for the same models: the manifest publishes it, which is how an already-running machine rewrites its
- * files (`tests/unit/codex-catalog.test.ts` pins the text and fails until this is bumped).
+ * files (`tests/unit/runtimes-kit-model-catalog.test.ts` pins the text and fails until this is bumped).
  */
 export const CODEX_CATALOG_FORMAT = 1;
 
@@ -126,7 +129,7 @@ function codexEntry(model: RuntimeModelEntry, priority: number): Readonly<Record
  */
 export function codexCatalogModels(derived: RuntimeModels): readonly RuntimeModelEntry[] | undefined {
   if (derived.catalog === undefined || CODEX_NATIVE_MODEL_CATALOGS.has(derived.catalog.id)) return undefined;
-  const usable = derived.models.filter(model => model.available);
+  const usable = derived.entries.filter(model => model.available);
   return usable.length === 0 ? undefined : usable;
 }
 

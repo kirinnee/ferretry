@@ -1,7 +1,7 @@
 /**
  * The host-built pieces of Runtimes' daemon (`daemon/host-assembly.ts`) over the testing host: the published fleet is
- * read through the `fleet` root, a runtime's wrapper is found by its name, and an ended Codex runtime's app-server pair
- * is stopped through `kernel.processes` — nothing read around the kernel.
+ * read through the `fleet` root, a runtime's wrapper is found by its name, and what an ended ferret's follow-up stands on
+ * (the fleet root and `kernel.processes`) comes from the kernel — nothing read around it.
  */
 import { afterEach, describe, it } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
@@ -91,7 +91,7 @@ async function world(published: boolean) {
   if (published) await fleet.writeText(at('manifest.json'), JSON.stringify(manifest));
   await fleet.writeText(at(`homes/${ID}/packages/app-server-daemon/releases/1/codex`), '#!/bin/sh');
   await fleet.writeText(at(`homes/${ID}/app-server-daemon/daemon.pid`), '{"pid":100}');
-  return { seams: endedSeams(kernel), signals: table.signals };
+  return { seams: endedSeams(kernel), signals: table.signals, kernel };
 }
 
 describe('endedSeams', () => {
@@ -102,21 +102,21 @@ describe('endedSeams', () => {
     should(await seams.wrapperOf('unpublished')).be.undefined();
   });
 
-  it('should stop the app-server pair of an ended Codex runtime through the kernel', async () => {
-    const { seams, signals } = await world(true);
+  it('should hand the follow-up the published accounts, the fleet homes and the kernel’s own processes', async () => {
+    const { seams, kernel } = await world(true);
 
-    const outcome = await seams.supervisor.afterSessionEnded(WRAPPER);
-
-    should(outcome).deepEqual({ kind: 'stopped', home: HOME, pids: [100] });
-    should(signals).deepEqual([{ pid: 100, signal: 'SIGTERM' }]);
+    should((await seams.inventory.accounts()).map(account => [account.kind, account.wrapper, account.home])).deepEqual([
+      ['codex', WRAPPER, HOME],
+    ]);
+    should(seams.homesDirectory()).equal('/fleet/homes');
+    should(seams.processes).equal(kernel.processes);
   });
 
-  it('should leave everything running, and say so, when no fleet was ever published', async () => {
-    const { seams, signals } = await world(false);
+  it('should publish no accounts, and no wrapper, when no fleet was ever published', async () => {
+    const { seams } = await world(false);
 
     should(await seams.wrapperOf('codex-work')).be.undefined();
-    should(await seams.supervisor.afterSessionEnded(WRAPPER)).deepEqual({ kind: 'not-a-codex-runtime' });
-    should(signals).deepEqual([]);
+    should(await seams.inventory.accounts()).deepEqual([]);
   });
 });
 

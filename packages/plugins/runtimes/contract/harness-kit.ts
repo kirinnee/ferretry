@@ -10,6 +10,9 @@
  * (documents are `SettingsObject`s), so a plugin never imports Runtimes' daemon.
  */
 
+import type { FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { ProcessesPort, RootHandle } from '@ferretry/kernel/contract';
+
 /** A settings or config document as a plain object (a parsed `settings.json` / `config.toml`). */
 export type KitSettingsObject = Readonly<Record<string, unknown>>;
 
@@ -232,19 +235,121 @@ export interface KitHarvestParts {
   readonly mcpSource: string;
 }
 
+/** One model a runtime offers, as the catalog of its login lists it. */
+export interface KitRuntimeModel {
+  readonly id: string;
+  readonly label: string;
+  readonly tier?: 'best' | 'balanced' | 'fast';
+  readonly context?: number;
+  readonly efforts: readonly string[];
+  readonly defaultEffort?: string;
+  readonly note?: string;
+  readonly available: boolean;
+}
+
 /** What a plugin is asked for to name a runtime's extra environment and files. */
 export interface KitExtrasInput {
-  readonly home: string;
+  /** The directory every runtime of the harness shares its state database in. */
   readonly sqliteHome: string;
-  /** The models the runtime's catalog lists, when it names a provider's own. */
-  readonly models?: readonly { readonly id: string }[];
+  /** The runtime's own state directory under its home. */
+  readonly statePath: string;
+  /** What the runtime offers: the login's catalog (when it has one), its models, and the one it launches with. */
+  readonly models: {
+    readonly catalog?: { readonly id: string };
+    readonly entries: readonly KitRuntimeModel[];
+    readonly default: string | undefined;
+  };
+  /** The runtime's generated settings. A person's own setting is theirs and stands. */
+  readonly settings: KitSettingsObject;
 }
 
 /** What a harness adds to a runtime beyond the common launch. */
 export interface KitExtras {
   readonly env: Readonly<Record<string, string>>;
-  /** A model catalog file the runtime reads, by its path under the home, with its text. */
-  readonly catalog?: { readonly path: string; readonly text: string; readonly args: readonly string[] };
+  /** A model catalog file the runtime reads, with its text, the launch arguments that name it and how it is recorded. */
+  readonly catalog?: {
+    /** The file's name inside the runtime's state directory. */
+    readonly file: string;
+    /** The absolute path the launch arguments name. */
+    readonly path: string;
+    readonly text: string;
+    readonly args: readonly string[];
+    /** The format of the text, published so a machine that updated rewrites the file. */
+    readonly format: number;
+  };
+}
+
+/** What `ferrets.changed` says of one ferret. */
+export interface KitFerretChange {
+  readonly ferret: string;
+  readonly state?: string;
+  readonly gone?: true;
+}
+
+/** What an ended ferret's follow-up stands on, from the kernel's roots, processes and clock and the published fleet. */
+export interface KitEndHost {
+  /** The published accounts of the fleet. */
+  readonly inventory: {
+    accounts(): Promise<readonly { readonly kind: string; readonly wrapper: string; readonly home: string }[]>;
+  };
+  /** `kernel.roots.root('fleet')`, unscoped. */
+  readonly fleet: RootHandle;
+  readonly processes: Pick<ProcessesPort, 'runsFrom' | 'usersOf' | 'terminate'>;
+  /** `<FY_HOME>/fleet/homes`: the only place a runtime's config directory may be. */
+  readonly homesDirectory: () => string;
+  readonly sleep: (milliseconds: number) => Promise<void>;
+  /** The published wrapper of a runtime by its name, or `undefined` when none is published under it. */
+  wrapperOf(runtime: string): Promise<string | undefined>;
+}
+
+/** What a harness plugin is asked for when a ferret stops. */
+export interface KitEndInput {
+  readonly ferrets: Pick<FerretsApi, 'get'>;
+  /** `undefined` while the host offers none: the follow-up then does nothing. */
+  readonly host: KitEndHost | undefined;
+  /** A line for the daemon log when a follow-up could not run. Names no value. */
+  readonly warn?: (message: string) => void;
+  /** The owner is to be told why a ferret never started. */
+  readonly launchFailed: (failure: {
+    readonly ferret: string;
+    readonly runtime: string;
+    readonly message: string;
+  }) => void;
+}
+
+/** What a launch's autonomous prelude is asked for. */
+export interface KitAutonomousPreludeInput {
+  /** The variable that points the harness at its home, as Runtimes' wrapper exports it. */
+  readonly homeEnv: string;
+}
+
+/**
+ * The instruction argument of a launch, split around the place the ferret's sections go: the wrapper writes the shell
+ * word `before`, then the sections, then `after` (an empty `after` writes nothing). Both parts are quoted by Runtimes.
+ */
+export interface KitInstructionArgument {
+  readonly before: string;
+  readonly after: string;
+}
+
+/** What a harness adds to the launch line of a runtime's wrapper script. */
+export interface KitWrapper {
+  /** The shell `case` patterns of the arguments that may name a conversation to resume. */
+  readonly conversationArgs: string;
+  /** The arguments that start a runtime on a model. */
+  modelArgs(model: string): readonly string[];
+  /** A per-ferret section as this harness's own argument carries it, before Runtimes quotes it for the shell. */
+  quoteSection(text: string): string;
+  /** The instruction argument with a place for the sections, or `undefined` for any other argument. */
+  instructionArgument(arg: string): KitInstructionArgument | undefined;
+  /** The lines that withhold the question tool from an agent. */
+  questionLines(): readonly string[];
+  /** Arguments the wrapper supplies itself (`questionLines`), which the exec line drops from the launch's own. */
+  readonly suppliedArguments?: readonly string[];
+  /** What an auto launch prepares first (Claude's first-run seed, Codex's trusted folder). Absent: nothing. */
+  autonomousPrelude?(input: KitAutonomousPreludeInput): readonly string[];
+  /** Lines that ask the installed harness about a flag, run before the auto launch's `exec`. */
+  promptSnapshotLines?(command: string): readonly string[];
 }
 
 /** What a harness plugin hands Runtimes for the harness it owns. Every member is optional; see the file comment. */
@@ -295,17 +400,11 @@ export interface RuntimesHarnessKit {
   harvest?(input: KitHarvestInput): KitHarvestParts;
 
   // The launch line.
-  readonly wrapper?: {
-    readonly conversationArgs: string;
-    modelArgs(model: string): readonly string[];
-    quoteSection(text: string): string;
-    instructionArgument(arg: string): string | undefined;
-    questionLines(): readonly string[];
-    /** What an auto launch prepares first (Claude's first-run seed, Codex's trusted folder). */
-    autonomousPrelude?(): readonly string[];
-    promptSnapshotLines?(command: string): readonly string[];
-  };
+  readonly wrapper?: KitWrapper;
 
   // What one harness adds to a runtime beyond the common launch.
   runtimeExtras?(input: KitExtrasInput): KitExtras;
+
+  // What a harness leaves behind that a ended ferret has to answer for. Never throws: housekeeping never fails an ending.
+  onFerretChanged?(input: KitEndInput, change: KitFerretChange): Promise<void>;
 }

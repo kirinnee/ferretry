@@ -27,8 +27,7 @@
  *   stop or a reap.
  */
 import type { FencedPath, OwnFolder, ProcessesPort, RootHandle } from '@ferretry/kernel/contract';
-import type { HarnessKind } from '../harness-kind.ts';
-import { wrapperNameOf } from '../manifest.ts';
+import { basename } from 'node:path';
 
 /** Where Codex records its app-server daemon processes, relative to ONE `CODEX_HOME`. */
 const CODEX_PID_FILES = ['app-server-daemon/daemon.pid', 'app-server-daemon/daemon-updater.pid'] as const;
@@ -54,7 +53,7 @@ export function parseCodexPidFile(text: string): number | undefined {
 
 /** One published account, as much of it as this decision reads. */
 export interface CodexRuntimeAccount {
-  readonly kind: HarnessKind;
+  readonly kind: string;
   readonly wrapper: string;
   readonly home: string;
 }
@@ -68,8 +67,8 @@ export function codexRuntimeHome(
   published: readonly CodexRuntimeAccount[],
   homesDirectory: string,
 ): string | undefined {
-  const name = wrapperNameOf(wrapper);
-  const account = published.find(row => row.wrapper === wrapper || wrapperNameOf(row.wrapper) === name);
+  const name = basename(wrapper);
+  const account = published.find(row => row.wrapper === wrapper || basename(row.wrapper) === name);
   if (account?.kind !== 'codex') return undefined;
   const homes = `${trimSlash(homesDirectory)}/`;
   const home = trimSlash(account.home);

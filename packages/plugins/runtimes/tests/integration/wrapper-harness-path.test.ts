@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { type RuntimeWrapperInput, renderRuntimeWrapperScript } from '../../daemon/lib/wrappers.ts';
+import { REAL_KITS } from '../support/real-kits.ts';
 
 /**
  * A session runs the harness its wrapper execs, and that must be the one the daemon resolved
@@ -15,6 +16,7 @@ const account = (home: string, harnessCommand: string | undefined): RuntimeWrapp
   name: 'claude-auto-work',
   id: '00000000-0000-4000-8000-000000000001',
   harness: 'claude',
+  kit: REAL_KITS.get('claude'),
   configDirectory: home,
   env: {},
   args: [],

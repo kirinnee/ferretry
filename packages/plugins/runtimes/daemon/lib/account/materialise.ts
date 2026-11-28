@@ -46,13 +46,13 @@ import {
   type HarnessKind,
 } from '../manifest.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
-import { CODEX_CATALOG_FORMAT, CODEX_MODEL_CATALOG_FILE } from '../models/codex-catalog.ts';
 import { type RuntimeModels, runtimeModels } from '../models/runtime.ts';
 import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../foreign.ts';
+import { harnessKeyOfKind, isKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import {
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
@@ -67,6 +67,7 @@ import {
   CLAUDE_JSON_FILE,
   type ClaudeStatuslineCommand,
   componentPartialSupport,
+  type KitRefusal,
   kitlessAdaptation,
   missingKitRefusal,
   plumbingOf,
@@ -336,7 +337,12 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
     // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    const kitMissing = missingKitRefusal(harness, kit);
+    // ...and so is one whose kit gives no launch line (E-276 PR 8), in the same words.
+    const kitMissing: KitRefusal | undefined =
+      missingKitRefusal(harness, kit) ??
+      (isKind(harness, 'claude') && kit?.wrapper === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
+        : undefined);
     const store = resolveCredentialStore(
       runtime.credential,
       credential,
@@ -345,7 +351,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness,
       loginStores,
     );
-    // The typed refusal is the WHOLE runtime's, whatever store its login is in (environment, stored or host): its login then adds nothing.
+    // The typed refusal is the ONE reason a kitless runtime gets, whatever store its login is in (environment, stored or host):
+    // its login then has nothing further to say, and the reason is never said twice.
     if (kitMissing !== undefined) reasons.push(kitMissing.message);
     else {
       if ('unavailable' in store)
@@ -467,7 +474,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       kit,
     );
     Object.assign(env, extras.env);
-    const codexCatalog = extras.catalog?.text;
+    const codexCatalog = extras.catalog;
 
     // An unavailable runtime for want of its kit writes nothing into its home.
     if (kitMissing === undefined)
@@ -524,7 +531,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         defaultModel: defaultModel ?? undefined,
         // What a ferret started in auto mode gets instead (the wrapper runs it only for FY_SESSION_MODE=auto).
         autonomous:
-          launch === undefined
+          launch === undefined || kitMissing !== undefined
             ? { refusal: result.ok ? '' : result.refusal.message }
             : {
                 args: [...launchPrefix, ...launch.args, ...fixedSettingsArgs],
@@ -533,6 +540,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
         harnessCommand: input.harnessCommands?.[harness],
+        kit,
         signInLink: codexWrapperLink(home, store),
         refusal: wrapperBlocked,
       }),
@@ -549,7 +557,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       wrapper,
       models,
       ...(modelCatalog === undefined ? {} : { modelCatalog }),
-      ...(codexCatalog === undefined ? {} : { codexCatalog: CODEX_CATALOG_FORMAT }),
+      ...(codexCatalog === undefined ? {} : { codexCatalog: codexCatalog.format }),
       defaultModel,
       ...(compactAt === undefined ? {} : { compactAt }),
       secretEnv: sorted(
@@ -639,8 +647,8 @@ interface ConfigDirectoryInput {
   readonly overlay: SettingsObject | undefined;
   /** The text of the rules file a Codex agent runtime's home holds (`rules/ferretry.rules`: the commands it forbids). */
   readonly codexRules: string | undefined;
-  /** The text of the model catalog file a Codex runtime on a third-party provider reads. */
-  readonly codexCatalog: string | undefined;
+  /** The model catalog file a Codex runtime on a third-party provider reads: its name and text. */
+  readonly codexCatalog: { readonly file: string; readonly text: string } | undefined;
   readonly credentialLink: ReturnType<typeof codexCredentialLink>;
   readonly layout: FleetLayout;
 }
@@ -670,7 +678,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       keep: [
         MATERIALISED_RECORD_FILE,
         ...(input.overlay === undefined ? [] : [FIXED_SETTINGS_FILE]),
-        ...(input.codexCatalog === undefined ? [] : [CODEX_MODEL_CATALOG_FILE]),
+        ...(input.codexCatalog === undefined ? [] : [input.codexCatalog.file]),
       ],
       record,
       recordedAs: RUNTIME_STATE_DIRECTORY,
@@ -753,10 +761,10 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
   if (input.codexCatalog !== undefined) {
     operations.push({
       kind: 'file',
-      path: joinPath(state, CODEX_MODEL_CATALOG_FILE),
-      content: input.codexCatalog,
+      path: joinPath(state, input.codexCatalog.file),
+      content: input.codexCatalog.text,
       mode: PRIVATE_FILE_MODE,
-      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`, byName: true },
+      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${input.codexCatalog.file}`, byName: true },
     });
   }
   if (input.credentialLink !== undefined) {
@@ -779,7 +787,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       ...new Set([
         ...[...ownEntries, ...skillEntries].map(entry => entry.dest),
         ...(input.overlay === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`]),
-        ...(input.codexCatalog === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`]),
+        ...(input.codexCatalog === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${input.codexCatalog.file}`]),
         ...(input.codexRules === undefined ? [] : [CODEX_KILL_RULES_FILE]),
         ...(input.credentialLink === undefined ? [] : [CODEX_CREDENTIAL_FILE]),
       ]),
