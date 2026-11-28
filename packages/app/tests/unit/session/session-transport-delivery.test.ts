@@ -68,7 +68,7 @@ async function scripted(script: readonly ('answer' | 'dead' | 'dies' | 'fenced' 
             return;
           }
           if (mode === 'fenced') {
-            events.onClose(1000, PAIRING_CLEARED_REASON);
+            events.onClose(1000, PAIRING_CLEARED_REASON, undefined, true);
             return;
           }
           if (mode === 'dies') {

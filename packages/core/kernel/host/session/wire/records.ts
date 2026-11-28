@@ -273,6 +273,13 @@ export type ClientMemberRecord = Extract<ClientRecord, { t: 'member' }>;
 export type ClientDataRecord = Extract<ClientRecord, { t: 'data' }>;
 
 export type DaemonRecord =
+  /** The daemon's terminal verdict, authenticated and sequenced like every other record. */
+  | {
+      readonly t: 'session-end';
+      readonly protocol: typeof SESSION_PROTOCOL_ID;
+      readonly code: number;
+      readonly reason: string;
+    }
   /**
    * A member join's outcome, already padded to its fixed size (`padJoinOutcome`), sealed as the plaintext it is.
    * Carried as text rather than a shape so nobody can send an unpadded one by building the object.

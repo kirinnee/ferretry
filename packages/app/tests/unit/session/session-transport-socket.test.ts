@@ -27,8 +27,10 @@ async function streamDaemon() {
   let deliver: ((frame: Uint8Array) => Promise<void>) | undefined;
   let accept: (() => Promise<void>) | undefined;
   let carrierClosed = false;
+  let closeCarrier: ((code: number, reason: string) => void) | undefined;
   const sent: string[] = [];
   const dial = (events: CarrierSocketEvents) => {
+    closeCarrier = (code, reason) => events.onClose(code, reason);
     const scripted = new ScriptedDaemon(identity, testSessionId(1));
     daemon = scripted;
     deliver = async frame => events.onBinary(frame);
@@ -100,10 +102,51 @@ async function streamDaemon() {
       );
       await settle();
     },
+    end: async (code: number, reason: string, sealed: boolean) => {
+      if (sealed)
+        await deliver?.(
+          await (daemon as ScriptedDaemon).record({ t: 'session-end', protocol: SESSION_PROTOCOL_ID, code, reason }),
+        );
+      // Land the outer close before the delivered terminal record finishes decrypting.
+      closeCarrier?.(sealed ? 4440 : code, sealed ? 'the session concluded' : reason);
+      await settle();
+    },
   };
 }
 
 describe('a stream socket over a sealed session', () => {
+  for (const sealed of [true, false]) {
+    for (const code of [4403, 4405, 4441, 4500]) {
+      test(`R4-2 an open stream preserves ${sealed ? 'sealed' : 'raw carrier'} ${code} as ${sealed ? code : 1006}`, async () => {
+        const daemon = await streamDaemon();
+        const transport = new SessionTransport({
+          crypto: relayCrypto,
+          daemonId: daemon.identity.daemonId,
+          device: device.claim,
+          dial: daemon.dial,
+        });
+        const closes: [string, number | undefined][] = [];
+        let opened = false;
+        transport.socket('/v1/browsers/stream', {
+          onOpen: () => {
+            opened = true;
+          },
+          onFrame: () => {},
+          onClose: (reason, code) => closes.push([reason, code]),
+        });
+        try {
+          await daemon.accept();
+          expect(opened).toBe(true);
+          await daemon.end(code, 'authenticated terminal verdict', sealed);
+          expect(closes).toEqual([
+            [sealed ? 'authenticated terminal verdict' : 'the connection was lost', sealed ? code : 1006],
+          ]);
+        } finally {
+          transport.close();
+        }
+      });
+    }
+  }
   test('D-87 preserves a sealed refusal status and parsed body for the shell, without interpreting the sentence', async () => {
     const daemon = await streamDaemon();
     const transport = new SessionTransport({

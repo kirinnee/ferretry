@@ -27,6 +27,7 @@ import {
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetCatalogServiceDeps } from '../../../daemon/lib/service/catalog-service.ts';
 import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const MODEL = parseAccountModel({
   version: 1,
@@ -119,6 +120,7 @@ function world(
     layout: LAYOUT,
     claudeStatusline: own => (own === undefined ? "'fy' statusline" : `'fy' statusline --then '${own}'`),
     fyCommand: '/opt/ferretry/bin/fy',
+    kits: () => REAL_KITS,
     provisioner: {
       preview: async plan => ({ ...plan, sharedHistory: [] }),
       apply: async (plan, documents = []) => {

@@ -24,13 +24,15 @@
  */
 
 import { type ApiRequest, type ApiResponse, jsonResponse } from '../../contract/http.ts';
+import { SessionEnding } from './ending.ts';
+import { askHolder, instant, transcriptKey } from './credentials.ts';
+export { transcriptKey } from './credentials.ts';
 import type { CarrierKey, SessionId } from '../../contract/ids.ts';
 import type { Clock, Log } from '../../contract/ports.ts';
 import type {
   CarrierLink,
   CarrierPeer,
   HolderWatch,
-  ModeHolder,
   ModeProof,
   ModeRedeemed,
   SealedFrame,
@@ -46,7 +48,7 @@ import {
   type SocketHandler,
   type SocketUpgradeDecision,
 } from '../../contract/socket.ts';
-import { instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { milliseconds } from '@ferretry/std';
 import {
   answerClientHandshake,
   answerRecords,
@@ -198,8 +200,8 @@ export interface SessionLayerHost extends SessionLayer {
   report(): SessionLayerReport;
   /** A mode went away (turned off, failed): every session it verified ends with the one refusal (§4.13). */
   endMode(mode: 'device' | 'pair' | 'member'): void;
-  /** Release every session, saying nothing (the daemon is going away). */
-  close(): void;
+  /** Release every session, sealing the shutdown verdict before carrier teardown. */
+  close(): Promise<void>;
 }
 
 interface ConnectionState {
@@ -274,9 +276,11 @@ class LayerState {
     for (const session of [...this.sessions]) session.endIfVerifiedBy(mode);
   }
 
-  close(): void {
-    for (const session of [...this.sessions]) session.closed('the daemon is going away');
+  async close(): Promise<void> {
+    const sessions = [...this.sessions];
+    for (const session of sessions) session.shutdown();
     this.sessions.clear();
+    await Promise.allSettled(sessions.map(session => session.connection.outbox));
   }
 }
 
@@ -376,7 +380,7 @@ class SealedSession implements CarrierLink {
   #credentialDeadline: (() => void) | undefined;
   /** The session has an outcome and ends once that outcome has actually been handed over. */
   #owesConclusion = false;
-  #end: SessionEnd | undefined;
+  #end: SessionEnding | undefined;
   /** The peer went away: nothing more is pulled or delivered. */
   #gone = false;
   /** Serialises inbound frames: frame `n+1` is never opened before frame `n` is handled. */
@@ -411,7 +415,7 @@ class SealedSession implements CarrierLink {
     refusal.atOpen(this.deps.log, this.carrier, code, reason);
     this.layer.lastRefusal = `session ${code}: ${reason}`;
     this.#phase = 'concluding';
-    this.#end = { code, reason };
+    this.#end = new SessionEnding({ code, reason }, undefined, this.deps.crypto);
   }
 
   /**
@@ -446,8 +450,16 @@ class SealedSession implements CarrierLink {
     if (this.#gone) return;
     this.#gone = true;
     this.#forget();
-    this.#end ??= { code: SESSION_CLOSE_CODES.protocolError, reason: 'the peer went away' };
+    this.#end ??= new SessionEnding(
+      { code: SESSION_CLOSE_CODES.protocolError, reason: 'the peer went away' },
+      undefined,
+      this.deps.crypto,
+    );
     this.layer.sessions.delete(this);
+  }
+
+  shutdown(): void {
+    this.#endSession(SESSION_CLOSE_CODES.relayInternal, 'the daemon is going away');
   }
 
   /**
@@ -456,8 +468,8 @@ class SealedSession implements CarrierLink {
    * never spent (the channel's send counter advances only here), and the session ends.
    */
   #next(): SealedFrame | SessionEnd | undefined {
-    if (this.#gone) return this.#end;
-    if (this.#end !== undefined) return this.#end;
+    if (this.#gone) return this.#end?.carrier;
+    if (this.#end !== undefined) return this.#end.next();
     const plain = this.#plain.shift();
     if (plain !== undefined) return plain;
     const sealed = this.#sealed;
@@ -469,9 +481,11 @@ class SealedSession implements CarrierLink {
     } catch {
       permitted = false;
     }
+    // A final check can revoke the holder synchronously. Its old ciphertext must never leave after that end.
+    if (!this.#live()) return this.#next();
     if (!permitted) {
       this.#endSession(SESSION_CLOSE_CODES.protocolError, 'what it was about to send changed before it left');
-      return this.#end;
+      return this.#next();
     }
     if (this.#waiting[0] === sealed.pending) this.#waiting.shift();
     this.#channel =
@@ -1351,9 +1365,16 @@ class SealedSession implements CarrierLink {
   }
 
   #finish(end: SessionEnd): void {
+    const channel = this.#channel;
     this.#forget();
-    this.#end = end;
+    this.#end = new SessionEnding(end, channel, this.deps.crypto);
     this.layer.sessions.delete(this);
+    this.connection.outbox = this.#end.sealAfter(
+      this.connection.outbox,
+      maySend(this.#send),
+      () => this.#gone,
+      () => this.#ready(),
+    );
     this.#ready();
   }
 
@@ -1476,25 +1497,4 @@ class SealedSession implements CarrierLink {
       this.#settle();
     });
   }
-}
-
-async function askHolder(mode: SessionMode | undefined, proof: ModeProof): Promise<ModeHolder | undefined> {
-  if (mode?.holder === undefined) return undefined;
-  try {
-    return await mode.holder(proof);
-  } catch {
-    return undefined;
-  }
-}
-
-function instant(ms: number): SessionPrincipal['leaseUntil'] {
-  return instantFromEpochMs(ms);
-}
-
-/**
- * A session's name: its transcript hash, hex. Unique per session and public to both ends, so it names one
- * without being a secret. It is the {@link SessionId} a principal carries.
- */
-export function transcriptKey(transcript: Uint8Array): string {
-  return [...transcript].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }

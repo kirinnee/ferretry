@@ -15,7 +15,7 @@ import {
   RELAY_CLOSE_CODES,
   SESSION_PROTOCOL_ID,
 } from '../session/wire/index.ts';
-import { controlFrame, LEASE_ENDS, readyFrame, ScriptedDaemon, testSessionId } from './relay.ts';
+import { LEASE_ENDS, readyFrame, ScriptedDaemon, testSessionId } from './relay.ts';
 
 export interface RotatingRequest {
   readonly method: string;
@@ -98,8 +98,9 @@ export function rotatingDial(identity: DaemonIdentity, options: RotatingDaemonOp
           credentials.push({ t: message.t, accepted: ok });
           if (!ok) {
             deliver(
-              controlFrame(sessionId, {
-                t: 'closed',
+              await daemon.record({
+                t: 'session-end',
+                protocol: SESSION_PROTOCOL_ID,
                 code: RELAY_CLOSE_CODES.authRejected,
                 reason: 'unknown device credential',
               }),

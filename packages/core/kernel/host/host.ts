@@ -1725,7 +1725,6 @@ async function bootLocked(
   phase = 'started';
   serving = true;
   events.publish(PluginsChanged, { generation: 1 });
-
   // 9. Stop in reverse.
   let stopping: Promise<void> | undefined;
   stopHost = (): Promise<void> => {
@@ -1733,9 +1732,10 @@ async function bootLocked(
       try {
         trace.push('stop:listen');
         listenerAt = undefined;
+        if (sessionLayer.report().sessions > 0)
+          await sessionLayer.close().catch(() => log.warn('session shutdown failed'));
         stopCarriers();
         for (const listener of [...listening].reverse()) await listener.stop().catch(() => undefined);
-        sessionLayer.close();
         for (const cancel of unwatchState) cancel();
         stopWatching?.();
         watched?.cancel();
