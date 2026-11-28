@@ -6,7 +6,7 @@ import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import type { FerretId } from '../../../contract/ids.ts';
 import type { RootHandle, RootName } from '../../../contract/ports.ts';
 import { type FileIdentity, type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
-import { fenceOf } from '../../../host/fence-guard.ts';
+import { fenceOf, type PrivateGuard, privateGuardOf } from '../../../host/fence-guard.ts';
 import { DEFAULT_RECHECK_MS, identityKey } from '../../../host/fence-index.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
 import { composePrivateFiles } from '../../../manifest/privacy.ts';
@@ -202,18 +202,94 @@ const restedFolders = (l: Layout): Set<string> =>
 
 const LOOKS = ['right after the rotation', 'one look later', 'two looks later'];
 
+/** One identity the read asked the disk for on its way down the alias, and whether the scoped guard holds that key. */
+interface Walked {
+  readonly path: string;
+  readonly key: string | undefined;
+}
+
 /**
- * What a serve says, so a recurrence names its mechanism: which look served, and whether the index (asked only once
- * something was served, so a passing run looks no more than before) held the session folder's identity. Not held: the
- * folder pin was missing. Held: the read got past a pinned folder.
+ * What the SCOPED guard (the one the root's own read asks, for the root's own base) decided AT one read of the alias:
+ * the guard as it stood just before the read, the guard as it stood just after (the same object unless a look renewed
+ * the index during the read), and every identity the read walked under the alias with whether each key is in each. A
+ * failure prints this next to the assertion, so it names the mechanism the read itself met and not a later global fence.
  */
-async function servedLooks(fs: HostFs, l: Layout, answers: readonly string[]): Promise<readonly string[]> {
-  const served = LOOKS.filter((_, at) => answers[at]?.startsWith('served:'));
+interface Decision {
+  readonly answer: string;
+  readonly folderKey: string | undefined;
+  readonly heldBefore: boolean;
+  readonly heldAfter: boolean;
+  readonly sameGuard: boolean;
+  readonly walked: readonly (Walked & { readonly heldBefore: boolean; readonly heldAfter: boolean })[];
+}
+
+/** A disk that notes every identity asked for a path at or under `alias` while `on` is set (the walk of one read). */
+function recording(base: HostFs, alias: string, log: Walked[], on: () => boolean): HostFs {
+  return {
+    ...base,
+    identity: async path => {
+      const found = await base.identity(path);
+      if (on() && (path === alias || path.startsWith(`${alias}/`)))
+        log.push({ path, key: found === undefined ? undefined : identityKey(found) });
+      return found;
+    },
+  };
+}
+
+/** The scoped guard of the root of `door`, as the root's own read would ask for it (no forced look). */
+const scopedGuard = async (fs: HostFs, l: Layout, door: Door): Promise<PrivateGuard> =>
+  await privateGuardOf(fs, l.home, door.folder(l), LIST, DEFAULT_RECHECK_MS);
+
+/** One read of the alias with the scoped guard captured on both sides of it and the read's own walk recorded. */
+async function decided(
+  root: RootHandle,
+  fs: HostFs,
+  l: Layout,
+  door: Door,
+  log: Walked[],
+  gate: { on: boolean },
+): Promise<Decision> {
+  const target = await REAL.identity(l.target);
+  const folderKey = target === undefined ? undefined : identityKey(target);
+  const before = await scopedGuard(fs, l, door);
+  log.length = 0;
+  gate.on = true;
+  const answer = await readOf(root, `alias/${ENV}`);
+  gate.on = false;
+  const after = await scopedGuard(fs, l, door);
+  const holds = (guard: PrivateGuard, key: string | undefined): boolean => key !== undefined && guard.keys.has(key);
+  return {
+    answer,
+    folderKey,
+    heldBefore: holds(before, folderKey),
+    heldAfter: holds(after, folderKey),
+    sameGuard: before === after,
+    walked: log.map(step => ({ ...step, heldBefore: holds(before, step.key), heldAfter: holds(after, step.key) })),
+  };
+}
+
+/**
+ * What a serve says, so a recurrence names its mechanism: for each look that served, the scoped guard's decision AT that
+ * read (see {@link Decision}), then the global fence read afterwards (asked only once something was served, so a passing
+ * run looks no more than before; it is LATER than the read, so it is labelled so and never taken for the read's state).
+ */
+async function servedLooks(fs: HostFs, l: Layout, decisions: readonly Decision[]): Promise<readonly string[]> {
+  const served = decisions.flatMap((decision, at) => (decision.answer.startsWith('served:') ? [{ decision, at }] : []));
   if (served.length === 0) return [];
   const folder = await REAL.identity(l.target);
   const fence = await fenceOf(fs, l.home, LIST, DEFAULT_RECHECK_MS).catch(() => undefined);
-  const held = folder !== undefined && fence?.keys.has(identityKey(folder)) === true;
-  return served.map(look => `served ${look}; the index then ${held ? 'HELD' : 'did NOT hold'} the folder's key`);
+  const laterGlobal = folder !== undefined && fence?.keys.has(identityKey(folder)) === true;
+  return served.map(({ decision, at }) => {
+    const walk = decision.walked
+      .map(step => `${step.path} key=${step.key ?? 'none'} scoped(before=${step.heldBefore} after=${step.heldAfter})`)
+      .join('; ');
+    return [
+      `served ${LOOKS[at]}:`,
+      `scoped guard AT the read held the folder key: before=${decision.heldBefore} after=${decision.heldAfter}`,
+      `(same guard object: ${decision.sameGuard}); walked: [${walk}];`,
+      `global fence read LATER held it: ${laterGlobal}`,
+    ].join(' ');
+  });
 }
 
 const wait = async (ms: number): Promise<void> => {
@@ -244,7 +320,9 @@ describe('PF-flat a credential published into a RESTING session folder is never 
         await mkdir(alias, { recursive: true });
         // A folder that rests with no file at all: the session never had an environment, or it ended before this boot.
         if (way === 'empty') await rm(`${l.target}/${ENV}`);
-        const fs = bind(resting(REAL, l.sessions, rested), alias, l.target);
+        const log: Walked[] = [];
+        const gate = { on: false };
+        const fs = recording(bind(resting(REAL, l.sessions, rested), alias, l.target), alias, log, () => gate.on);
         const root = door.make(l, fs);
         // The first look builds the index; every session folder rests.
         expect(await readOf(root, 'own.txt')).toBe('served:mine');
@@ -258,14 +336,18 @@ describe('PF-flat a credential published into a RESTING session folder is never 
         // A relaunch (or a resume) publishes a new credential into the resting session.
         await rotate(l.target);
         rested.delete(l.target);
-        const answers = [await readOf(root, `alias/${ENV}`)];
+        const decisions = [await decided(root, fs, l, door, log, gate)];
         // The next look visits 512–699 and 0–323: not folder 400. Then the one after reaches it.
         for (let look = 0; look < 2; look += 1) {
           await wait(LOOK_MS);
-          answers.push(await readOf(root, `alias/${ENV}`));
+          decisions.push(await decided(root, fs, l, door, log, gate));
         }
-        expect(await servedLooks(fs, l, answers)).toEqual([]);
-        expect(answers).toEqual(['refused:fenced', 'refused:fenced', 'refused:fenced']);
+        expect(await servedLooks(fs, l, decisions)).toEqual([]);
+        expect(decisions.map(decision => decision.answer)).toEqual([
+          'refused:fenced',
+          'refused:fenced',
+          'refused:fenced',
+        ]);
         // The control: nothing else on the disk is refused by it.
         expect(await readOf(root, 'own.txt')).toBe('served:mine');
       }, 60_000);
