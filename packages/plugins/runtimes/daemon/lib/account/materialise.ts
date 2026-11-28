@@ -38,7 +38,7 @@ import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { looksSecret, namesCredential } from '@ferretry/std/credential-words';
 import type { z } from 'zod';
 import type { CompactAtSchema, RuntimesHarnessKit } from '../../../contract/index.ts';
-import { HARNESS_ASSETS, harnessAsset, ownedSkillEntriesOf } from '../assets.ts';
+import { harnessAsset, ownedSkillEntriesOf } from '../assets.ts';
 import {
   buildFleetManifest,
   type FleetManifestModel,
@@ -484,7 +484,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       operations.push(
         ...configDirectoryOperations({
           home,
-          harness,
           codexCatalog,
           entries: adapted.entries,
           absent: adapted.absent,
@@ -641,7 +640,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
 interface ConfigDirectoryInput {
   readonly home: string;
-  readonly harness: HarnessKind;
   readonly entries: readonly AdaptedEntry[];
   readonly absent: readonly string[];
   readonly settings: ReturnType<typeof adaptProfile>['settings'];
@@ -665,10 +663,10 @@ interface ConfigDirectoryInput {
  * record the next apply reads.
  */
 function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetWriteOperation[] {
-  const { home, harness, layout } = input;
+  const { home, layout } = input;
   const state = joinPath(home, RUNTIME_STATE_DIRECTORY);
   const record = joinPath(state, MATERIALISED_RECORD_FILE);
-  const skillsDest = (harnessAsset(HARNESS_ASSETS, harness, 'skills') as { readonly dest: string }).dest;
+  const skillsDest = (harnessAsset(input.kit, 'skills') as { readonly dest: string }).dest;
   const skillEntries = input.entries.filter(entry => entry.dest.startsWith(`${skillsDest}/`));
   const ownEntries = input.entries.filter(entry => !entry.dest.startsWith(`${skillsDest}/`));
   const skillsContainer = joinPath(home, skillsDest);

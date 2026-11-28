@@ -3,10 +3,12 @@
  * Runtimes daemon makes is BYTE-IDENTICAL to what the base (before the harness-kit close-out) made. The expected plans are
  * `fixtures/kit-member-parity.json`, captured from the base commit by running this file there with `FY_PARITY_WRITE=<path>`.
  *
- * What it pins: Claude stays available whichever of `runtimeExtras`, `ownedSkillEntries` or `fixedLayer` its kit leaves out
- * (its refusal is a missing kit, a launch line, a command or a home variable, and nothing else); Codex is refused by name when
- * its kit leaves out any of those three; and a Codex kit that is absent altogether is refused AND still has its SQLite
- * directory made.
+ * What it pins: Claude stays available whichever of `runtimeExtras`, `ownedSkillEntries`, `fixedLayer` or `assets` its kit leaves out
+ * (its refusal is a missing kit, a launch line, a command, a home variable or where its documents land, and nothing else; the three
+ * destinations every harness has come from the settings file and instructions file it already names, so `assets` only adds its own);
+ * Codex is refused by name when its kit leaves out any of those; and a Codex kit that is absent altogether is refused AND still has
+ * its SQLite directory made. A harness's plugin being off or empty never changes what another harness's runtime does with a model
+ * set (which model ids are whose is a fact that holds with a plugin off, `harness-kind.ts`).
  */
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
@@ -106,12 +108,14 @@ const PROBES: Readonly<Record<string, () => Kits>> = {
   'claude without runtimeExtras': () => fleet(without(real('claude'), 'runtimeExtras'), real('codex')),
   'claude without ownedSkillEntries': () => fleet(without(real('claude'), 'ownedSkillEntries'), real('codex')),
   'claude without fixedLayer': () => fleet(without(real('claude'), 'fixedLayer'), real('codex')),
+  'claude without assets': () => fleet(without(real('claude'), 'assets'), real('codex')),
   'claude without all three': () =>
     fleet(without(real('claude'), 'runtimeExtras', 'ownedSkillEntries', 'fixedLayer'), real('codex')),
   'claude without its command': () => fleet(without(real('claude'), 'command'), real('codex')),
   'codex without runtimeExtras': () => fleet(real('claude'), without(real('codex'), 'runtimeExtras')),
   'codex without ownedSkillEntries': () => fleet(real('claude'), without(real('codex'), 'ownedSkillEntries')),
   'codex without fixedLayer': () => fleet(real('claude'), without(real('codex'), 'fixedLayer')),
+  'codex without assets': () => fleet(real('claude'), without(real('codex'), 'assets')),
   'codex without its command': () => fleet(real('claude'), without(real('codex'), 'command')),
   'codex without keepsSharedState': () => fleet(real('claude'), without(real('codex'), 'keepsSharedState')),
   'codex an empty kit': () => fleet(real('claude'), {}),
@@ -121,6 +125,16 @@ const PROBES: Readonly<Record<string, () => Kits>> = {
 };
 
 const FIXTURE = new URL('./fixtures/kit-member-parity.json', import.meta.url);
+
+/**
+ * A probe that has no plan of its own in the fixture because the base made, for it, exactly the plan of another: `assets` is read
+ * by no base code (Claude's destinations are derived from the settings file and instructions file its kit already names, and Codex
+ * without it is refused by name, as without `ownedSkillEntries`).
+ */
+const SAME_PLAN_AS: Readonly<Record<string, string>> = {
+  'claude without assets': 'both real kits',
+  'codex without assets': 'codex without ownedSkillEntries',
+};
 
 describe('a mixed fleet whose kits leave members out', () => {
   const written = process.env.FY_PARITY_WRITE;
@@ -133,11 +147,13 @@ describe('a mixed fleet whose kits leave members out', () => {
   else {
     const expected = JSON.parse(readFileSync(FIXTURE, 'utf8')) as Record<string, unknown>;
     it('should hold one expected plan per probe', () => {
-      expect(Object.keys(expected).toSorted()).toEqual(Object.keys(PROBES).toSorted());
+      expect([...Object.keys(expected), ...Object.keys(SAME_PLAN_AS)].toSorted()).toEqual(
+        Object.keys(PROBES).toSorted(),
+      );
     });
     for (const name of Object.keys(PROBES))
       it(`should make the plan the base made: ${name}`, () => {
-        expect(JSON.parse(JSON.stringify(actual[name]))).toEqual(expected[name]);
+        expect(JSON.parse(JSON.stringify(actual[name]))).toEqual(expected[SAME_PLAN_AS[name] ?? name]);
       });
   }
 });

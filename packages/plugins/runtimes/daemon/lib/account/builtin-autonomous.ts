@@ -8,13 +8,12 @@
  *   whoever holds Logins' catalogs; absent when none is held, and then the profile holds no model set);
  * - the instructions, ONE generic text each harness writes as its own file (`CLAUDE.md`, `AGENTS.md`). It says only what
  *   the launch instruction parts (`fixed-layer.ts`: tools, settings, agenda, sub-ferret, pack) do not already say;
- * - Claude's comfort settings, only what the fixed layer does not already force. Codex has none: every setting worth
- *   changing is already its default (`shell_environment_policy.inherit` is `all`, and its default excludes of KEY, SECRET
- *   and TOKEN variables must stay), so adding one would only hide that.
+ * - a harness's comfort settings (its plugin's `kit.comfortSettings`), only what the fixed layer does not already force. A
+ *   harness that gives none has none (Codex: every setting worth changing is already its default).
  *
  * WHAT THEY DO NOT HOLD:
  * - **Permissions (D6).** The permission mode stays the machine's (`harness-<x>.yaml`, default `skip`), so applying a
- *   profile is never a loosening. {@link COMFORT_SETTINGS} is checked for permission keys by its test.
+ *   profile is never a loosening. Each kit's comfort settings are checked for permission keys by a test.
  * - **The Ferretry MCP server and tools.** They already reach every autonomous ferret as a launch part of the fixed layer
  *   (`--mcp-config` / `mcp_servers.ferretry`), so naming them here would add them twice.
  * - **Skills.** None; the owner's catalogs add their own.
@@ -23,11 +22,15 @@
  *
  * Pure: values only.
  */
-import { kindOrUndefined, supportedKinds } from '../harness-kind.ts';
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
+import { supportedKinds } from '../harness-kind.ts';
 import { slugName } from './document.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { StarterModels } from '../models/catalog.ts';
 import type { InstructionsComponent, SettingsComponent } from './schema.ts';
+
+/** What the built-in profiles read of each harness's plugin: its comfort settings (`kit.comfortSettings`). */
+export type BuiltinKits = ReadonlyMap<HarnessKind, Pick<RuntimesHarnessKit, 'comfortSettings'>> | undefined;
 
 /** The built-in profile of a harness (the names O8-9 introduced): derived runtimes run on it. */
 export const builtinProfileName = (harness: HarnessKind): string => `ferretry-${harness}`;
@@ -42,8 +45,8 @@ export const pinnedProfileName = (harness: HarnessKind, model: string): string =
 /** The generic instructions component every built-in profile names. */
 const AUTONOMOUS_INSTRUCTIONS_NAME = 'ferretry-work-alone';
 
-/** The comfort settings component of Claude Code (a component is named once across harnesses, so it says which). */
-const CLAUDE_COMFORT_NAME = 'ferretry-claude-comfort';
+/** The comfort settings component of a harness (a component is named once across harnesses, so it says which). */
+const comfortName = (harness: HarnessKind): string => `ferretry-${harness}-comfort`;
 
 /**
  * The one generic text: how to work well on your own. The home file is the same for an autonomous and an interactive
@@ -63,16 +66,6 @@ export const AUTONOMOUS_INSTRUCTIONS = [
 ].join('\n');
 
 /**
- * Claude's comfort settings. NONE is a permission: they keep a long unattended run from being cut short (history kept long
- * enough to resume, long shell and MCP waits), and go in the launch environment.
- */
-export const COMFORT_SETTINGS = {
-  harness: 'claude',
-  document: { cleanupPeriodDays: 90 },
-  env: { BASH_DEFAULT_TIMEOUT_MS: '600000', MCP_TIMEOUT: '60000' },
-} as const;
-
-/**
  * Whether an instructions layer is the built-in text itself: the built-in name AND its own words. A component of the same
  * name the owner wrote is theirs (an explicit choice), so it is never taken for this one.
  */
@@ -83,21 +76,29 @@ export const isBuiltinInstructions = (name: string, body: string | undefined): b
 export const builtinProfileLayers = (
   harness: HarnessKind,
   starters: StarterModels,
+  kits: BuiltinKits,
   modelSet: string = builtinProfileName(harness),
 ): readonly string[] => [
   ...(starters[harness] === undefined ? [] : [`modelSets/${modelSet}`]),
   `instructions/${AUTONOMOUS_INSTRUCTIONS_NAME}`,
-  ...(kindOrUndefined(harness) === 'claude' ? [`settings/${CLAUDE_COMFORT_NAME}`] : []),
+  ...(kits?.get(harness)?.comfortSettings === undefined ? [] : [`settings/${comfortName(harness)}`]),
 ];
 
 /** The built-in components by kind and name; an owner's component of the same name always wins over these. */
-export const BUILTIN_COMPONENTS: {
+export const builtinComponents = (
+  kits: BuiltinKits,
+): {
   readonly instructions: Readonly<Record<string, InstructionsComponent>>;
   readonly settings: Readonly<Record<string, SettingsComponent>>;
-} = {
+} => ({
   instructions: { [AUTONOMOUS_INSTRUCTIONS_NAME]: { text: AUTONOMOUS_INSTRUCTIONS } as InstructionsComponent },
-  settings: { [CLAUDE_COMFORT_NAME]: COMFORT_SETTINGS as unknown as SettingsComponent },
-};
+  settings: Object.fromEntries(
+    supportedKinds().flatMap(harness => {
+      const comfort = kits?.get(harness)?.comfortSettings;
+      return comfort === undefined ? [] : [[comfortName(harness), comfort as unknown as SettingsComponent]];
+    }),
+  ),
+});
 
 /** The starter model set of a harness, or `undefined` when no starter model is known for it. */
 export function starterModelSet(
@@ -113,7 +114,10 @@ export function starterModelSet(
  * machine with no files, whose profiles name `profile/ferretry-<harness>` as their oldest layer. Equal to what
  * `deriveRuntimes` and the component built-ins give, so a change that starts from it writes none of it.
  */
-export function builtinDocument(starters: StarterModels): {
+export function builtinDocument(
+  starters: StarterModels,
+  kits: BuiltinKits,
+): {
   readonly profiles: Readonly<Record<string, { readonly layers: readonly string[] }>>;
   readonly components: {
     readonly modelSets: Readonly<Record<string, unknown>>;
@@ -124,7 +128,10 @@ export function builtinDocument(starters: StarterModels): {
   const harnesses = supportedKinds();
   return {
     profiles: Object.fromEntries(
-      harnesses.map(harness => [builtinProfileName(harness), { layers: builtinProfileLayers(harness, starters) }]),
+      harnesses.map(harness => [
+        builtinProfileName(harness),
+        { layers: builtinProfileLayers(harness, starters, kits) },
+      ]),
     ),
     components: {
       modelSets: Object.fromEntries(
@@ -133,7 +140,7 @@ export function builtinDocument(starters: StarterModels): {
           return set === undefined ? [] : [[builtinProfileName(harness), set]];
         }),
       ),
-      ...BUILTIN_COMPONENTS,
+      ...builtinComponents(kits),
     },
   };
 }

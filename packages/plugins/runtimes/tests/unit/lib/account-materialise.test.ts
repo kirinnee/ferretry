@@ -14,7 +14,7 @@ import { type AccountModel, type AccountModelDocument, parseAccountModel } from 
 import { builtInModelCatalogs, builtInPresets } from './fixtures/built-ins.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../../daemon/lib/provisioning.ts';
 import { MANAGED_MARKER, shellQuote } from '../../../daemon/lib/wrappers.ts';
-import { REAL_KITS } from '../../support/real-kits.ts';
+import { REAL_KITS, REAL_SIGN_IN } from '../../support/real-kits.ts';
 
 const LAYOUT: FleetLayout = {
   stateHome: '/fy',
@@ -1344,7 +1344,7 @@ describe('materialiseFleet', () => {
   });
 
   describe('with model catalogs (docs/model-catalog.md)', () => {
-    const sources = { catalogs: builtInModelCatalogs(), presets: builtInPresets() };
+    const sources = { catalogs: builtInModelCatalogs(), presets: builtInPresets(), signIn: REAL_SIGN_IN };
     const glmModel = (env: Record<string, string>) =>
       modelOf({
         credentials: {

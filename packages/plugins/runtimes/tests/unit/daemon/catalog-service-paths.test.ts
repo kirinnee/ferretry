@@ -23,7 +23,7 @@ import {
 } from '../../../daemon/lib/service/catalog-service.ts';
 import { FleetApplyFailureError, type FleetApplyCommittedState } from '../../../daemon/lib/provisioning.ts';
 import type { RuntimeSessionRecord } from '../../../daemon/lib/service/runtime-sessions.ts';
-import { REAL_KITS } from '../../support/real-kits.ts';
+import { REAL_KITS, REAL_SIGN_IN } from '../../support/real-kits.ts';
 
 const NOW = 1_794_052_800_000;
 
@@ -256,7 +256,7 @@ describe('the reads, over a machine whose components are real files', () => {
 });
 
 describe('republishing the configuration as it already is', () => {
-  const sources = async () => ({ catalogs: {}, presets: [] });
+  const sources = async () => ({ catalogs: {}, presets: [], signIn: REAL_SIGN_IN });
   const fixed = () => {
     let count = 0;
     return () => {
@@ -895,7 +895,7 @@ describe('a change to one login', () => {
           if (afterApply) throw new Error('nothing was changed: no id could be minted');
           return 'an-id';
         },
-        modelCatalogs: async () => ({ catalogs: {}, presets: [] }),
+        modelCatalogs: async () => ({ catalogs: {}, presets: [], signIn: REAL_SIGN_IN }),
       },
     });
     const staged = await service.propose(relabel);
@@ -932,7 +932,7 @@ describe('a change to one login', () => {
             documents: () => [],
           };
         },
-        modelCatalogs: async () => ({ catalogs: {}, presets: [] }),
+        modelCatalogs: async () => ({ catalogs: {}, presets: [], signIn: REAL_SIGN_IN }),
       },
     });
     const staged = await service.propose(relabel);
@@ -963,7 +963,7 @@ describe('a change to one login', () => {
             if (afterApply) throw new Error(said);
             return 'an-id';
           },
-          modelCatalogs: async () => ({ catalogs: {}, presets: [] }),
+          modelCatalogs: async () => ({ catalogs: {}, presets: [], signIn: REAL_SIGN_IN }),
         },
       });
       const staged = await service.propose(relabel);

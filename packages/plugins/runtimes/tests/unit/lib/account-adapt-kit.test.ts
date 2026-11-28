@@ -12,6 +12,7 @@ import {
   missingKitRefusal,
   priorServersOf,
   renderMcpComponents,
+  runtimeKitRefusal,
 } from '../../../daemon/lib/account/adapt.ts';
 import { CODEX_CREDENTIAL_STORE_FILE, CODEX_CREDENTIAL_STORE_KEY } from '../../../daemon/lib/account/credentials.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
@@ -34,11 +35,18 @@ const claudeProfile = () => {
   return result.resolved;
 };
 
+/** Where each harness's documents land, as its plugin says it: what a kit needs besides the members these tests mark. */
+const destinationsOf = (harness: 'claude' | 'codex') => ({
+  settingsFile: REAL_KITS.get(harness)?.settingsFile,
+  importSetup: REAL_KITS.get(harness)?.importSetup,
+});
+
 const adapt = (kit: RuntimesHarnessKit | undefined) =>
   adaptProfile({ resolved: claudeProfile(), plumbing: CLAUDE_PLUMBING, kit });
 
 /** A kit that answers with marker words, so the test can see which bytes came from it. */
 const MARKED: RuntimesHarnessKit = {
+  ...destinationsOf('claude'),
   keepsPriorServers: true,
   renderMcpServer: () => ({ marker: 'server' }),
   configDocuments: ({ servers }) => ({ settings: { marker: 'settings' }, claudeJson: { servers } }),
@@ -90,6 +98,24 @@ describe('Claude documents and plumbing through the kit', () => {
   });
 });
 
+describe('where the documents of a runtime land', () => {
+  it.each(['claude', 'codex'] as const)(
+    'should refuse a %s runtime whose kit names no settings file or no instructions file, by name',
+    harness => {
+      const kit = REAL_KITS.get(harness) as RuntimesHarnessKit;
+      expect(runtimeKitRefusal(harness, kit)).toBeUndefined();
+      for (const member of ['settingsFile', 'importSetup'] as const) {
+        const without: Record<string, unknown> = { ...kit };
+        delete without[member];
+        expect(runtimeKitRefusal(harness, without as RuntimesHarnessKit)).toEqual({
+          kind: 'harness-unsupported',
+          message: `${harness === 'claude' ? 'claude-code' : 'codex'} is not supported here`,
+        });
+      }
+    },
+  );
+});
+
 describe('a Claude runtime without its plugin kit, as data', () => {
   it('should be a typed refusal, never a throw, and only for the harness whose kit is missing', () => {
     expect(missingKitRefusal('claude', undefined)).toEqual({
@@ -133,6 +159,8 @@ describe('Codex through its kit', () => {
     return result.resolved;
   };
   const MARKED_CODEX: RuntimesHarnessKit = {
+    ...destinationsOf('codex'),
+    assets: REAL_KITS.get('codex')?.assets,
     renderMcpServer: () => ({ marker: 'server' }),
     configDocuments: ({ servers }) => ({ settings: { written: servers }, serversAt: ['written'] }),
     plumbing: input => [

@@ -14,7 +14,7 @@
  * Pure.
  */
 import { type HarnessKind, harnessKeyOfKind } from '../manifest.ts';
-import { builtinProfileLayers, pinnedProfileName } from './builtin-autonomous.ts';
+import { type BuiltinKits, builtinProfileLayers, pinnedProfileName } from './builtin-autonomous.ts';
 import type { AccountModel } from './schema.ts';
 import { runtimeHarness } from './scope.ts';
 
@@ -202,6 +202,7 @@ export function realisedEdits(
   before: AccountModel,
   next: AccountModel,
   derived: DerivedAtSave,
+  kits: BuiltinKits,
 ): { readonly edits: readonly OwnedFileEdit[]; readonly refused: readonly string[] } {
   const edits = new Map(ownedFileEdits(before, next).map(edit => [edit.path, edit]));
   const bodies = ownedFileBodies(next);
@@ -235,7 +236,7 @@ export function realisedEdits(
       const setPath = `model-sets/${real}.yaml`;
       edits.set(profilePath, {
         path: profilePath,
-        patch: { contents: [...builtinProfileLayers(harness, { [harness]: model }, real)] },
+        patch: { contents: [...builtinProfileLayers(harness, { [harness]: model }, kits, real)] },
       });
       edits.set(setPath, { path: setPath, patch: { models: [model], default: model } });
     }

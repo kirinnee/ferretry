@@ -16,7 +16,13 @@ describe('R2 the scope fold answers a 20-deep diamond at once', () => {
     const actual = layersScope(catalogueOf(diamond(20)), ['profile/a0', 'mcp/cx'], 'b20');
     const took = performance.now() - started;
 
-    should(actual).deepEqual({ kind: 'mixed', claude: 'profile/a0', codex: 'mcp/cx' });
+    should(actual).deepEqual({
+      kind: 'mixed',
+      layers: [
+        { harness: 'claude', layer: 'profile/a0' },
+        { harness: 'codex', layer: 'mcp/cx' },
+      ],
+    });
     should(took).be.below(1000);
   });
 

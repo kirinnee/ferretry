@@ -22,12 +22,14 @@ import {
   NO_COMPONENTS,
   type RuntimesFiles,
 } from '../../../daemon/lib/account/runtimes-model.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const none = {
   starters: TEST_STARTERS,
   runtimes: new Map<string, RuntimeFile>(),
   profiles: new Map<string, ProfileFile>(),
   modelSets: new Map<string, ModelSetFile>(),
+  kits: REAL_KITS,
 };
 
 /** Logins' clean variable templates for the given environment logins (what a derived runtime on one needs). */

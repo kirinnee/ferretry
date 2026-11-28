@@ -30,6 +30,7 @@ import {
   NO_COMPONENTS,
   type RuntimesFiles,
 } from '../../../daemon/lib/account/runtimes-model.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const homes: string[] = [];
 afterEach(async () => {
@@ -88,7 +89,7 @@ describe('QA F1: a runtime on the built-in Codex profile', () => {
     );
     expect(next.model.runtimes.qacodex4).toBeDefined();
 
-    const { edits, refused } = realisedEdits(before.model, next.model, next.derived);
+    const { edits, refused } = realisedEdits(before.model, next.model, next.derived, REAL_KITS);
     expect(refused).toEqual([]);
     const { port, configDirectory } = await world();
     const writer = writeAllConfigWriter(port, configDirectory);

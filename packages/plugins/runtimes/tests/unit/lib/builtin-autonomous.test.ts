@@ -4,12 +4,13 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import { TEST_STARTERS } from '../../support/starters.ts';
 import type { ProfileFile } from '../../../contract/index.ts';
 import {
   AUTONOMOUS_INSTRUCTIONS,
-  BUILTIN_COMPONENTS,
-  COMFORT_SETTINGS,
+  builtinComponents,
+  builtinProfileLayers,
   isBuiltinInstructions,
 } from '../../../daemon/lib/account/builtin-autonomous.ts';
 import { mergeImport, planImport } from '../../../daemon/lib/account/import-plan.ts';
@@ -29,8 +30,12 @@ const files = (overrides: Partial<RuntimesFiles> = {}): RuntimesFiles => ({
   templates: new Map(),
   components: NO_COMPONENTS,
   starters: TEST_STARTERS,
+  kits: REAL_KITS,
   ...overrides,
 });
+
+/** Claude's comfort settings, as its plugin gives them. */
+const COMFORT_SETTINGS = REAL_KITS.get('claude')?.comfortSettings as { readonly document: Record<string, unknown> };
 
 describe('the built-in autonomous profiles', () => {
   it('should resolve Claude’s to its model set, the instructions and the comfort settings, with no permission', () => {
@@ -75,7 +80,7 @@ describe('the built-in autonomous profiles', () => {
     const words = /permission|approval|sandbox|bypass|dangerously|skip/iu;
 
     expect(JSON.stringify(COMFORT_SETTINGS)).not.toMatch(words);
-    expect(Object.keys(BUILTIN_COMPONENTS.settings)).toEqual(['ferretry-claude-comfort']);
+    expect(Object.keys(builtinComponents(REAL_KITS).settings)).toEqual(['ferretry-claude-comfort']);
     expect(AUTONOMOUS_INSTRUCTIONS).not.toMatch(/bypass|dangerously|--sandbox/iu);
   });
 
@@ -135,6 +140,30 @@ describe('the built-in autonomous profiles', () => {
     const { resolved: profile } = resolved;
     expect(profile.applied.at(-1)?.name).toBe('claude-models');
     expect(profile.instructions.map(each => each.component.text)).toEqual([AUTONOMOUS_INSTRUCTIONS]);
+  });
+});
+
+describe('the comfort settings a harness plugin gives', () => {
+  const comfort = { harness: 'codex', document: { marker: 1 } };
+
+  it('should hold exactly the comfort components the kits give, each under its own harness', () => {
+    expect(Object.keys(builtinComponents(REAL_KITS).settings)).toEqual(['ferretry-claude-comfort']);
+    expect(Object.keys(builtinComponents(new Map([['codex', { comfortSettings: comfort }]])).settings)).toEqual([
+      'ferretry-codex-comfort',
+    ]);
+    expect(Object.keys(builtinComponents(undefined).settings)).toEqual([]);
+  });
+
+  it('should layer the comfort component of a harness into its built-in profile only when its kit gives one', () => {
+    expect(builtinProfileLayers('claude', TEST_STARTERS, REAL_KITS)).toContain('settings/ferretry-claude-comfort');
+    expect(builtinProfileLayers('codex', TEST_STARTERS, REAL_KITS)).toEqual([
+      'modelSets/ferretry-codex',
+      'instructions/ferretry-work-alone',
+    ]);
+    expect(builtinProfileLayers('codex', TEST_STARTERS, new Map([['codex', { comfortSettings: comfort }]]))).toContain(
+      'settings/ferretry-codex-comfort',
+    );
+    expect(builtinProfileLayers('claude', TEST_STARTERS, undefined)).not.toContain('settings/ferretry-claude-comfort');
   });
 });
 

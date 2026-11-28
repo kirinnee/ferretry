@@ -1,28 +1,32 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ASSET_FIELDS, HARNESS_ASSETS, harnessAsset, isUsableSkillItemName } from '../../../daemon/lib/assets.ts';
+import { ASSET_FIELDS, assetsOf, harnessAsset, isUsableSkillItemName } from '../../../daemon/lib/assets.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
-describe('HARNESS_ASSETS', () => {
-  it.each(['claude', 'codex'] as const)('should give %s harness assets distinct destinations', kind => {
+const KINDS = ['claude', 'codex'] as const;
+const kitOf = (kind: (typeof KINDS)[number]) => REAL_KITS.get(kind);
+
+describe('the assets of a harness', () => {
+  it.each(KINDS)('should give %s harness assets distinct destinations', kind => {
     // Act
-    const destinations = HARNESS_ASSETS[kind].map(asset => asset.dest);
+    const destinations = assetsOf(kitOf(kind)).map(asset => asset.dest);
 
     // Assert — two fields landing on the same file would make the later one silently win.
     should(new Set(destinations).size).equal(destinations.length);
   });
 
-  it.each(['claude', 'codex'] as const)('should declare only known asset fields for %s', kind => {
+  it.each(KINDS)('should declare only known asset fields for %s', kind => {
     // Act
-    const fields = HARNESS_ASSETS[kind].map(asset => asset.field);
+    const fields = assetsOf(kitOf(kind)).map(asset => asset.field);
 
     // Assert
     should(fields.every(field => ASSET_FIELDS.includes(field))).be.true();
   });
 
-  it.each(['claude', 'codex'] as const)('should link every %s asset except its generated settings', kind => {
+  it.each(KINDS)('should link every %s asset except its generated settings', kind => {
     // Act
-    const settings = harnessAsset(HARNESS_ASSETS, kind, 'settings');
-    const linked = HARNESS_ASSETS[kind].filter(asset => asset.field !== 'settings');
+    const settings = harnessAsset(kitOf(kind), 'settings');
+    const linked = assetsOf(kitOf(kind)).filter(asset => asset.field !== 'settings');
 
     // Assert — a shared document has to BE the file in the home, or "shared" is only a description of
     // two files that started out equal. Settings is the one exception in both directions: a merge of
@@ -35,10 +39,31 @@ describe('HARNESS_ASSETS', () => {
 
   it('should give only the settings asset a format', () => {
     // Act
-    const formatted = [...HARNESS_ASSETS.claude, ...HARNESS_ASSETS.codex].filter(asset => asset.format !== undefined);
+    const formatted = KINDS.flatMap(kind => assetsOf(kitOf(kind))).filter(asset => asset.format !== undefined);
 
     // Assert
     should(formatted.map(asset => asset.field)).deepEqual(['settings', 'settings']);
+  });
+
+  it('should derive the settings, instructions and skills destinations from what the plugin already says, so a kit that gives none of its own assets still lands them', () => {
+    // Arrange
+    const kit = { ...kitOf('claude'), assets: undefined };
+
+    // Act
+    const actual = assetsOf(kit).map(asset => [asset.field, asset.dest]);
+
+    // Assert
+    should(actual).deepEqual([
+      ['settings', 'settings.json'],
+      ['memory', 'CLAUDE.md'],
+      ['skills', 'skills'],
+    ]);
+  });
+
+  it('should give a harness no destination when its plugin gave none', () => {
+    // Act / Assert
+    should(harnessAsset(undefined, 'skills')?.dest).equal('skills');
+    should(harnessAsset(undefined, 'settings')).be.undefined();
   });
 });
 
@@ -46,11 +71,9 @@ describe('the asset fields a harness has no destination for', () => {
   it.each([
     ['claude', ['hooks', 'hooksDir']],
     ['codex', ['mcp']],
-  ])('should find no asset for those %s accepts nowhere', (kind, expected) => {
+  ] as const)('should find no asset for those %s accepts nowhere', (kind, expected) => {
     // Act
-    const actual = ASSET_FIELDS.filter(
-      field => harnessAsset(HARNESS_ASSETS, kind as 'claude' | 'codex', field) === undefined,
-    );
+    const actual = ASSET_FIELDS.filter(field => harnessAsset(kitOf(kind), field) === undefined);
 
     // Assert
     should([...actual]).deepEqual(expected);
@@ -60,7 +83,7 @@ describe('the asset fields a harness has no destination for', () => {
 describe('harnessAsset', () => {
   it('should find a declared asset by field', () => {
     // Act
-    const actual = harnessAsset(HARNESS_ASSETS, 'codex', 'memory');
+    const actual = harnessAsset(kitOf('codex'), 'memory');
 
     // Assert
     should(actual).deepEqual({ field: 'memory', dest: 'AGENTS.md', materialization: 'link' });
@@ -68,21 +91,21 @@ describe('harnessAsset', () => {
 
   it('should return undefined for a field the harness does not accept', () => {
     // Act
-    const actual = harnessAsset(HARNESS_ASSETS, 'claude', 'hooksDir');
+    const actual = harnessAsset(kitOf('claude'), 'hooksDir');
 
     // Assert
     should(actual).be.undefined();
   });
 
-  it('should read the supplied table rather than the built-in one', () => {
+  it('should read the kit it is given', () => {
     // Arrange
-    const table = { claude: [{ field: 'memory', dest: 'NOTES.md', materialization: 'copy' }], codex: [] } as const;
+    const kit = { assets: [{ field: 'hooks', dest: 'NOTES.json', materialization: 'copy' }] } as const;
 
     // Act
-    const actual = harnessAsset(table, 'claude', 'memory');
+    const actual = harnessAsset(kit, 'hooks');
 
     // Assert
-    should(actual?.dest).equal('NOTES.md');
+    should(actual?.dest).equal('NOTES.json');
   });
 });
 

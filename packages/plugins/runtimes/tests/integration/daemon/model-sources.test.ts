@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
 import { loginsLaunchStores, loginsModelCatalogs } from '../../../daemon/adapters/model-sources.ts';
+import { REAL_KITS, REAL_SIGN_IN } from '../../support/real-kits.ts';
 
 type Sources = Awaited<ReturnType<LoginsApi['modelSources']>>;
 
@@ -20,12 +21,14 @@ describe('the model catalogs Runtimes reads from Logins (the real adapter)', () 
             ],
           }),
       },
+      () => REAL_KITS,
       sentence => void said.push(sentence),
     );
 
     const sources = await read();
 
     expect(Object.keys(sources.catalogs)).toEqual(['zai']);
+    expect(sources.signIn).toEqual(REAL_SIGN_IN);
     expect(sources.presets).toEqual([
       {
         id: 'zai-glm',
@@ -40,7 +43,11 @@ describe('the model catalogs Runtimes reads from Logins (the real adapter)', () 
 
   test('carries what the last read of a local server found', async () => {
     const local = { ollama: { models: [] } } as unknown as NonNullable<Sources['local']>;
-    const read = loginsModelCatalogs({ modelSources: async () => view({ local }) }, () => {});
+    const read = loginsModelCatalogs(
+      { modelSources: async () => view({ local }) },
+      () => REAL_KITS,
+      () => {},
+    );
 
     expect((await read()).local).toBe(local);
   });
@@ -53,11 +60,12 @@ describe('the model catalogs Runtimes reads from Logins (the real adapter)', () 
           throw new Error('logins is not answering');
         },
       },
+      () => REAL_KITS,
       sentence => void said.push(sentence),
     );
 
-    expect(await read()).toEqual({ catalogs: {}, presets: [] });
-    expect(await read()).toEqual({ catalogs: {}, presets: [] });
+    expect(await read()).toEqual({ catalogs: {}, presets: [], signIn: REAL_SIGN_IN });
+    expect(await read()).toEqual({ catalogs: {}, presets: [], signIn: REAL_SIGN_IN });
     expect(said).toEqual([
       'Runtimes could not read the model catalogs from Logins, so runtimes show their model set only.',
       'Runtimes could not read the model catalogs from Logins, so runtimes show their model set only.',

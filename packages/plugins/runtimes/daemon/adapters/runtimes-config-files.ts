@@ -34,6 +34,7 @@ import type { AccountModel } from '../lib/account/schema.ts';
 import { type ModelCatalogSources, starterModelsOf } from '../lib/models/catalog.ts';
 import { modelCatalogSourcesOf } from './model-sources.ts';
 import { loginOfPinKey } from '../lib/account/derived-runtimes.ts';
+import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import {
   FleetCatalogRefusal,
@@ -41,7 +42,7 @@ import {
   unreadableSentence,
 } from '../lib/service/catalog-service.ts';
 import { ownInstructionsSource } from './own-instructions-source.ts';
-import { type ComponentSourceLookup, readProfileComponents, type Within } from './profile-components.ts';
+import { type ComponentSourceLookup, harnessKits, readProfileComponents, type Within } from './profile-components.ts';
 import type { ConfigFilesPort } from './ports.ts';
 
 // The contract widens its config defs so `manifest.data.config` accepts them (`contract/config-def.ts`); these put the shapes back.
@@ -119,9 +120,12 @@ async function loginTemplates(
  * The catalogs Logins holds, asked on every evaluation: each harness's starter and each login's own default read through
  * them. `undefined` when Logins cannot say (the built-in profiles then hold no model set, and a pin still holds).
  */
-async function loginCatalogs(logins: Pick<LoginsApi, 'modelSources'>): Promise<ModelCatalogSources | undefined> {
+async function loginCatalogs(
+  logins: Pick<LoginsApi, 'modelSources'>,
+  kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit>,
+): Promise<ModelCatalogSources | undefined> {
   try {
-    return modelCatalogSourcesOf(await logins.modelSources());
+    return modelCatalogSourcesOf(await logins.modelSources(), kits);
   } catch {
     return undefined;
   }
@@ -139,10 +143,12 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
     // The harness commands are looked up before the model is derived from them (a login that drives both CLIs runs the
     // first that is installed), so the very first read already agrees with every later one.
     if (sources.installed !== undefined) await sources.prime?.(undefined);
+    // What each harness's plugin gives, read with every evaluation like the components themselves.
+    const kits = harnessKits(sources.components);
     const [components, templates, catalogs, pinned] = await Promise.all([
       readProfileComponents(sources.components, ownInstructionsSource(sources.config), sources.within),
       loginTemplates(sources.logins),
-      loginCatalogs(sources.logins),
+      loginCatalogs(sources.logins, kits),
       sources.pins.read(),
     ]);
     const starters = catalogs === undefined ? undefined : starterModelsOf(catalogs);
@@ -159,6 +165,7 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
         ...(catalogs === undefined ? {} : { catalogs }),
         ...(pinned.state === 'read' ? { pins: pinned.pins } : { pinsUnreadable: pinned.file }),
         installed: sources.installed?.(),
+        kits,
       });
     } catch (error) {
       throw inconsistent(error);
@@ -228,7 +235,12 @@ export function runtimesConfigFiles(sources: RuntimesConfigSources): RuntimesCon
         );
       // A derived runtime that is saved is written whole, onto a real profile holding its pinned model (never onto a generated
       // one), and one that is refused is not saved on its generated profile at all.
-      const realised = realisedEdits(loaded.evaluation.effective.model, next, (loaded.files as RuntimesModel).derived);
+      const realised = realisedEdits(
+        loaded.evaluation.effective.model,
+        next,
+        (loaded.files as RuntimesModel).derived,
+        harnessKits(sources.components),
+      );
       if (realised.refused.length > 0)
         throw new FleetCatalogRefusal('fleet_change_refused', `${realised.refused.join('; ')}; nothing was changed`);
       return realised.edits.map(edit => ({

@@ -79,27 +79,39 @@ export const kindOf = (harness: string): HarnessKind => {
 };
 
 /** The kit members a harness cannot be planned or launched without, by what each needs. */
-type NeededMember = 'runtimeExtras' | 'fixedLayer' | 'ownedSkillEntries';
+type NeededMember = 'runtimeExtras' | 'fixedLayer' | 'ownedSkillEntries' | 'assets';
+
+/** Claude Code's own model aliases, accepted by `--model` in place of a full id. */
+const CLAUDE_ALIASES: ReadonlySet<string> = new Set(['opus', 'sonnet', 'haiku', 'fable', 'opusplan']);
 
 /**
- * Two facts about a harness that hold WHETHER OR NOT its plugin is on, so a kit cannot be where they are read from: a runtime
+ * Three facts about a harness that hold WHETHER OR NOT its plugin is on, so a kit cannot be where they are read from: a runtime
  * whose plugin is off is still planned and refused by name, and the plan it makes is byte for byte what it always was. They are
  * rows of this table of words (not behaviour), and the plugins' own kits say the same: a drift test per kit pins
  * `keepsSharedState` and the members each kit gives against this table.
  *  - `keepsSharedState`: its runtimes keep one state database in the shared history pool, so that directory is made for them.
  *  - `needs`: the kit members a runtime of it is refused without, to plan (`planned`) and then to launch (`launched`).
+ *  - `ownsModel`: which model ids are its own, given an id in lower case without its context suffix. A harness whose plugin is off
+ *    still owns them, so another harness's runtime never takes a model set that is not its own just because that plugin is off:
+ *    a Claude id is `claude-…` or one of Claude Code's aliases; a Codex id is `gpt-…`, `codex-…` or an `o<n>…` reasoning model.
  */
 const KIT_FACTS = {
-  claude: { keepsSharedState: false, needs: { planned: [], launched: [] } },
+  claude: {
+    keepsSharedState: false,
+    needs: { planned: [], launched: [] },
+    ownsModel: (id: string) => id.startsWith('claude-') || CLAUDE_ALIASES.has(id),
+  },
   codex: {
     keepsSharedState: true,
-    needs: { planned: ['runtimeExtras', 'fixedLayer'], launched: ['ownedSkillEntries'] },
+    ownsModel: (id: string) => id.startsWith('gpt-') || id.startsWith('codex-') || /^o\d/.test(id),
+    needs: { planned: ['runtimeExtras', 'fixedLayer'], launched: ['ownedSkillEntries', 'assets'] },
   },
 } as const satisfies Readonly<
   Record<
     HarnessKind,
     {
       readonly keepsSharedState: boolean;
+      readonly ownsModel: (id: string) => boolean;
       readonly needs: { readonly planned: readonly NeededMember[]; readonly launched: readonly NeededMember[] };
     }
   >
@@ -107,6 +119,10 @@ const KIT_FACTS = {
 
 /** Whether runtimes of `kind` keep their state database in the shared history pool (made for them even when their plugin is off). */
 export const keepsSharedStateOf = (kind: HarnessKind): boolean => KIT_FACTS[kind].keepsSharedState;
+
+/** The harness that owns a model id (lower case, no context suffix), or `undefined` when none does: a third-party model. */
+export const modelOwnerOf = (id: string): HarnessKind | undefined =>
+  supportedKinds().find(kind => KIT_FACTS[kind].ownsModel(id));
 
 /** The kit members a runtime of `kind` needs: to be planned, and then (`launched`) to be started. */
 export const neededKitMembers = (kind: HarnessKind, stage: 'planned' | 'launched'): readonly NeededMember[] =>

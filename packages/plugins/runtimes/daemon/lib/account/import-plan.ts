@@ -41,7 +41,7 @@ import {
   SecretNames,
   skillsCandidates,
 } from './import.ts';
-import { builtinDocument, builtinProfileName } from './builtin-autonomous.ts';
+import { type BuiltinKits, builtinDocument, builtinProfileName } from './builtin-autonomous.ts';
 import { componentScope, scopeFits } from './scope.ts';
 import {
   type AccountModel,
@@ -495,9 +495,11 @@ export function mergeImport(
   existing: AccountModel | undefined,
   plan: ImportPlan,
   acceptedUpdates: readonly LayerReferenceText[] = [],
+  kits?: BuiltinKits,
 ): AccountModel {
   // A machine with no files has no model to read the built-in profiles from, and an imported profile names one as its base.
-  const base = (existing ?? parseAccountModel({ ...EMPTY_MODEL, ...builtinDocument(plan.starters) })) as AccountModel;
+  const base = (existing ??
+    parseAccountModel({ ...EMPTY_MODEL, ...builtinDocument(plan.starters, kits) })) as AccountModel;
   const components = Object.fromEntries(
     Object.entries(base.components).map(([kind, entries]) => [kind, { ...entries }]),
   ) as Record<ComponentKind, Record<string, unknown>>;

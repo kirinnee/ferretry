@@ -41,7 +41,14 @@ function naiveLayersScope(catalogue: Catalogue, draftLayers: readonly string[], 
       if ((scope === 'claude' || scope === 'mixed') && claude === undefined) claude = reference;
       if ((scope === 'codex' || scope === 'mixed') && codex === undefined) codex = reference;
     }
-    if (claude !== undefined && codex !== undefined) return { kind: 'mixed', claude, codex };
+    if (claude !== undefined && codex !== undefined)
+      return {
+        kind: 'mixed',
+        layers: [
+          { harness: 'claude', layer: claude },
+          { harness: 'codex', layer: codex },
+        ],
+      };
     if (claude !== undefined) return { kind: 'scoped', scope: 'claude' };
     if (codex !== undefined) return { kind: 'scoped', scope: 'codex' };
     return { kind: 'scoped', scope: 'generic' };
@@ -165,7 +172,13 @@ describe('R2 profileScope — the memoised fold says what the per-path fold said
     const actual = layersScope(catalogueOf(diamond(4)), ['profile/a0', 'mcp/cx'], 'b4');
 
     // Assert — a0 reaches the Claude leaf, the draft's own Codex component joins it: mixed, naming the first of each.
-    should(actual).deepEqual({ kind: 'mixed', claude: 'profile/a0', codex: 'mcp/cx' });
+    should(actual).deepEqual({
+      kind: 'mixed',
+      layers: [
+        { harness: 'claude', layer: 'profile/a0' },
+        { harness: 'codex', layer: 'mcp/cx' },
+      ],
+    });
   });
 
   it('R2 should fold a 4-deep diamond, keeping a Claude leaf at the bottom', () => {

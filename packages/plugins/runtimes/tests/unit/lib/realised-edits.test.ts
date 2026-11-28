@@ -12,6 +12,7 @@ import {
   NO_COMPONENTS,
   type RuntimesFiles,
 } from '../../../daemon/lib/account/runtimes-model.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const files = (overrides: Partial<RuntimesFiles> = {}): RuntimesFiles => ({
   runtimes: new Map([['claude-default', { login: 'claude-you', profile: 'default' } as RuntimeFile]]),
@@ -59,6 +60,7 @@ describe('saving a derived runtime whose model is not known', () => {
       before,
       next,
       derived(() => undefined),
+      REAL_KITS,
     );
 
     expect(refused).toEqual([]);
@@ -72,6 +74,7 @@ describe('saving a derived runtime whose model is not known', () => {
       before,
       next,
       derived(() => 'its model is gone'),
+      REAL_KITS,
     );
 
     expect(refused).toEqual(['claude-default: its model is gone']);
