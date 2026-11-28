@@ -6,7 +6,7 @@ import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import type { FerretId } from '../../../contract/ids.ts';
 import type { RootHandle, RootName } from '../../../contract/ports.ts';
 import { type FileIdentity, type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
-import type { Fence, PrivateGuard } from '../../../host/fence-guard.ts';
+import type { Fence } from '../../../host/fence-guard.ts';
 import { DEFAULT_RECHECK_MS, identityKey } from '../../../host/fence-index.ts';
 import { composePrivateFiles } from '../../../manifest/privacy.ts';
 
@@ -243,8 +243,9 @@ const tap: { on: boolean; consults: Consult[] } = { on: false, consults: [] };
 const original = { ...(await import('../../../host/fence-guard.ts')) };
 mock.module('../../../host/fence-guard.ts', () => ({
   ...original,
-  privatelyHeld: async (fs: HostFs, guard: PrivateGuard, real: string, base: string, now?: () => number) => {
-    const verdict = await original.privatelyHeld(fs, guard, real, base, now);
+  privatelyHeld: async (...args: Parameters<typeof original.privatelyHeld>) => {
+    const [, guard, real, base] = args;
+    const verdict = await original.privatelyHeld(...args);
     if (tap.on) tap.consults.push({ asked: 'scoped guard', real, base, has: key => guard.keys.has(key), verdict });
     return verdict;
   },

@@ -519,36 +519,36 @@ export async function privateGuardLookedAtNow(
 }
 
 /**
- * How long a folder that was found clear of the private places is not looked at again. A read of one transcript walks the
- * same few folders above it every time (and a hundred ferrets' reads share most of them), so each walk past the entry
- * itself used to cost one `lstat` per folder per read. A folder is taken as clear for this long ONLY for the guard (the
- * snapshot of the private places) and the disk it was found clear against: a new snapshot, another disk or a folder that
- * was ever held starts from nothing. It is no longer than the places' own look interval (a kept snapshot may be that old).
- *
- * It is LOOSER than the guard was before, within that 1 s window: a PRIVATE folder renamed or bind-mounted onto a path
- * already remembered clear is not caught until the memory runs out (the old walk caught it by identity at once). That
- * needs write access to the host's folders as the same uid, and lasts at most this long. A folder walked below a
- * remembered one never outlives it: its memory ends no later than that ancestor's, so a deeper walk never stretches the
- * window of a folder above it.
+ * How long a folder's ancestor walk is remembered clear of the private places, for its device:inode AND alias path.
+ * Each use re-identifies the entry and folders up to the first remembered folder: replacing one of those cannot reuse
+ * its memory. Ancestors ABOVE that folder are not re-identified within the window; replacing one of them can escape
+ * this check until expiry. A warm read usually costs the entry and parent. The memory belongs to one guard and disk;
+ * a new snapshot or another disk starts from nothing. Deeper walks and other aliases never extend a walk's expiry.
  */
 export const CLEAR_FOLDER_MS = 1_000;
 
 /** The folders found clear of the guard, and until when, for one disk. */
 interface ClearFolders {
   readonly fs: HostFs;
+  /** Expiry by [device:inode, alias path]: different aliases can have different ancestor walks. */
   readonly until: Map<string, number>;
+  /** The last identity at a path, so a changed folder also triggers a fresh private-index look. */
+  readonly paths: Map<string, string>;
 }
 const CLEAR = new WeakMap<PrivateGuard, ClearFolders>();
 /** The most folders remembered per guard; a walk past it starts the memory again. */
 const MAX_CLEAR_FOLDERS = 4_096;
+const clearWalkKey = (key: string, path: string): string => JSON.stringify([key, path]);
 
 /**
- * Whether `real` is a private place or inside one, by identity: the entry itself first, then every folder up to and
- * including the root's `base`, as {@link fencedReal} walks. A path that cannot be looked at is refused.
+ * Whether `real` is a private place or inside one, by identity: the entry itself first, then folders toward the root's
+ * `base`, stopping at an unexpired remembered walk (see {@link CLEAR_FOLDER_MS}). An unreadable path is refused.
  *
  * The ENTRY ITSELF is looked at on every call (a file replaced, relinked or aliased to a private place is caught at once);
- * the folders above it are remembered clear for {@link CLEAR_FOLDER_MS} (see there). `now` is a monotonic clock in
- * milliseconds, injected so a test can move it.
+ * the folders above it are remembered clear by identity for {@link CLEAR_FOLDER_MS} (see there). `notice` tells the
+ * caller when a folder changed or matched a kept private identity. On a changed folder, `provisional` receives this
+ * operation's memory commit: call it only after a fresh guard accepts the path; dropping it discards the memory. Without
+ * that confirmation a replacement is never remembered clear. `now` is an injected monotonic clock in milliseconds.
  */
 export async function privatelyHeld(
   fs: HostFs,
@@ -556,34 +556,59 @@ export async function privatelyHeld(
   real: string,
   base: string,
   now: () => number = () => performance.now(),
+  notice?: (reason: 'changed-folder' | 'private-folder') => void,
+  provisional?: (commit: () => void) => void,
 ): Promise<boolean> {
   if (guard.keys.size === 0 && guard.closed.size === 0) return false;
   const known = CLEAR.get(guard);
-  const clear: ClearFolders = known?.fs === fs ? known : { fs, until: new Map<string, number>() };
+  const clear: ClearFolders = known?.fs === fs ? known : { fs, until: new Map(), paths: new Map() };
   if (clear !== known) CLEAR.set(guard, clear);
   const at = now();
-  const walked: string[] = [];
+  const walked: { readonly path: string; readonly key: string }[] = [];
+  let changed = false;
   /** Until when the remembered folder this walk stopped at is clear; a folder walked below it is never remembered past it. */
   let ceiling = Number.POSITIVE_INFINITY;
   const start = absolute(real, 'the path');
   for (let current = start; ; current = dirname(current)) {
-    // A folder remembered clear was found clear together with every folder above it: nothing above it is walked.
-    const remembered = current === start ? 0 : (clear.until.get(current) ?? 0);
+    const entry = await fs.identity(current).catch(() => undefined);
+    if (entry === undefined) return true;
+    const key = identityKey(entry);
+    const previous = clear.paths.get(current);
+    if (previous !== undefined && previous !== key) {
+      changed = true;
+      notice?.('changed-folder');
+    }
+    // Re-identify the remembered folder at this alias; ancestors above it are not looked at until its expiry.
+    const remembered = current === start || previous !== key ? 0 : (clear.until.get(clearWalkKey(key, current)) ?? 0);
     if (remembered > at) {
       ceiling = remembered;
       break;
     }
-    const entry = await fs.identity(current).catch(() => undefined);
-    if (entry === undefined) return true;
-    if (guard.keys.has(identityKey(entry))) return true;
+    if (guard.keys.has(key)) {
+      if (entry.kind === 'directory') notice?.('private-folder');
+      return true;
+    }
     // The base is the root's own folder, not an alias; everything below it on a closed tree's device is unproven.
     if (current !== base && guard.closed.has(entry.device)) return true;
-    if (current !== start) walked.push(current);
+    if (current !== start) walked.push({ path: current, key });
     if (current === base || dirname(current) === current || !within(base, dirname(current))) break;
   }
-  if (clear.until.size + walked.length > MAX_CLEAR_FOLDERS) clear.until.clear();
   const until = Math.min(at + CLEAR_FOLDER_MS, ceiling);
-  for (const folder of walked) clear.until.set(folder, until);
+  const commit = (): void => {
+    if (Math.max(clear.paths.size, clear.until.size) + walked.length > MAX_CLEAR_FOLDERS) {
+      clear.until.clear();
+      clear.paths.clear();
+    }
+    for (const folder of walked) {
+      const previous = clear.paths.get(folder.path);
+      if (previous !== undefined) clear.until.delete(clearWalkKey(previous, folder.path));
+      clear.until.set(clearWalkKey(folder.key, folder.path), until);
+      clear.paths.set(folder.path, folder.key);
+    }
+  };
+  // A kept false is provisional when a folder changed: other operations must still see the old identity and refresh.
+  if (changed) provisional?.(commit);
+  else commit();
   return false;
 }
 
