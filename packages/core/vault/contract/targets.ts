@@ -95,10 +95,12 @@ const PageFieldSchema = z.strictObject({
   /** The id and name of the form that owns the field (the form it submits with), as the browser read them. */
   formId: boundedLine(128).optional(),
   formName: boundedLine(128).optional(),
-  /** Where that form sends what is typed: its action (or the default submit button's `formaction`) as origin + path. */
+  /** Where that form sends what is typed: its action (or the default submit button's `formaction`) as origin + path, with query and fragment redacted. */
   formAction: boundedLine(256).optional(),
-  /** SHA-256 of the whole action when it was longer than `formAction` could hold (which is then only its readable start). */
+  /** SHA-256 of the full canonical destination, including query and fragment; raw bytes stay daemon-side. */
   formActionDigest: Digest.optional(),
+  /** Fingerprint of the full parsed origin, independent of the bounded display. */
+  formActionOriginDigest: Digest.optional(),
 });
 
 export const PageFieldFactsSchema = z.strictObject({

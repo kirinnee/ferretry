@@ -1,18 +1,24 @@
 import { createHash } from 'node:crypto';
 
-/** What the card keeps of a form's action: a readable value cut to the protocol's bound, and a fingerprint when it was cut. */
+/** A display safe for the card and fingerprints of the full canonical destination and its parsed origin. */
 export interface BoundedAction {
   readonly display: string;
-  /** SHA-256 (hex) of the WHOLE action, present only when `display` is shorter than it: so two long actions that share a prefix still differ. */
-  readonly digest?: string;
+  readonly digest: string;
+  readonly originDigest: string;
 }
 
-/**
- * A form's action (origin + path) held to `limit` characters without losing what it is compared by: the first `limit`
- * characters are the readable display, and a longer one also carries a fingerprint of the whole, so the write's proof
- * compares the full destination while the facts stay bounded.
- */
+const digest = (value: string): string => createHash('sha256').update(value).digest('hex');
+
+/** Raw query/fragment bytes stay local to the browser read. A bounded display never substitutes for proof. */
 export function boundedAction(action: string, limit: number): BoundedAction {
-  if (action.length <= limit) return { display: action };
-  return { display: action.slice(0, limit), digest: createHash('sha256').update(action).digest('hex') };
+  const url = new URL(action);
+  const canonical = url.href;
+  const hash = canonical.indexOf('#');
+  const query = canonical.indexOf('?');
+  const suffix = (query >= 0 && (hash < 0 || query < hash) ? '?[redacted]' : '') + (hash >= 0 ? '#[redacted]' : '');
+  return {
+    display: (url.origin + url.pathname).slice(0, Math.max(0, limit - suffix.length)) + suffix,
+    digest: digest(canonical),
+    originDigest: digest(url.origin),
+  };
 }

@@ -59,13 +59,17 @@ type FieldAttributes = Extract<InputTargetFacts, { readonly kind: 'page' }>['fie
  */
 function withoutProofFacts(
   field: FieldAttributes,
-): Omit<FieldAttributes, 'label' | 'formId' | 'formName' | 'formAction' | 'formActionDigest'> {
+): Omit<
+  FieldAttributes,
+  'label' | 'formId' | 'formName' | 'formAction' | 'formActionDigest' | 'formActionOriginDigest'
+> {
   const {
     label: _label,
     formId: _id,
     formName: _name,
     formAction: _action,
     formActionDigest: _digest,
+    formActionOriginDigest: _originDigest,
     ...named
   } = field;
   return named;
@@ -76,6 +80,7 @@ export function actionOriginsOf(facts: InputTargetFacts): string {
   if (facts.kind !== 'page') return '';
   return facts.fields
     .map(({ field }) => {
+      if (field.formActionOriginDigest !== undefined) return field.formActionOriginDigest;
       try {
         return field.formAction === undefined ? '' : new URL(field.formAction).origin;
       } catch {

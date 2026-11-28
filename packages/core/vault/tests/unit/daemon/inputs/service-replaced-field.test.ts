@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { InputRequestSchema } from '../../../../contract/index.ts';
 import type { InputRaise, InputTargetFacts } from '../../../../contract/index.ts';
 import { REPLACED_FIELD_TOLERANCE_PX, replacedAsShown, bindingOf } from '../../../../daemon/lib/inputs/rebind.ts';
 import { padInputValue } from '../../../../daemon/lib/inputs/wire.ts';
@@ -187,6 +188,60 @@ describe('a re-found field is typed into only on proof: anything unproved goes b
     const card = await w.pending();
     should(card.risk?.level).equal('amber');
     should(card.risk?.reason).containEql('another site than when you were asked');
+  });
+
+  for (const mixed of ['plain', 'new-document'] as const) {
+    it(`keeps the origin warning alongside ${mixed} risk`, async () => {
+      const attrs = {
+        ...ATTRS,
+        label: 'Value',
+        name: 'value',
+        autocomplete: 'off',
+        inputmode: 'text',
+        maxlength: '100',
+      };
+      let now = mixed === 'plain' ? page({}, [pageField('code', { ...PROVED }, attrs)]) : shown();
+      const w = world({ facts: () => now, withLogins: false });
+      await w.service.raise(
+        SESSION,
+        mixed === 'plain'
+          ? {
+              ...RAISE,
+              prompt: 'Enter a value',
+              fields: [
+                { id: 'code', label: 'Value', sensitivity: 'plain', element: { kind: 'selector', selector: '#field' } },
+              ],
+            }
+          : RAISE,
+      );
+      const request = await w.pending();
+      now =
+        mixed === 'plain'
+          ? page({}, [pageField('code', { ...PROVED }, { ...attrs, formAction: 'https://evil.example/collect' })])
+          : swapped({}, {}, { navigationId: 'n2' }, { formAction: 'https://evil.example/collect' });
+      await redrawn(w, () =>
+        w.service.deliver(SESSION, request.id, { ...w.send(request), padded: padInputValue(VALUE) }, OWNER),
+      );
+      const card = InputRequestSchema.parse(await w.pending());
+      should(JSON.stringify(card)).containEql('another site than when you were asked');
+      should(card.risks?.some(risk => risk.reason.includes('another site'))).equal(true);
+      if (mixed === 'plain') should(card.risk?.level).equal('red');
+      else should(JSON.stringify(card)).containEql('new document');
+    });
+  }
+
+  it('redacts destination query and fragment in the serialized owner response', async () => {
+    const raw = 'https://github.com/session?token=FAKE_QUERY_SECRET#FAKE_FRAGMENT_SECRET';
+    const facts = page({}, [
+      pageField('code', { ...PROVED }, { ...ATTRS, formAction: raw, formActionDigest: 'a'.repeat(64) }),
+    ]);
+    const w = world({ facts });
+    await w.service.raise(SESSION, RAISE);
+    const serialized = JSON.stringify(InputRequestSchema.parse(await w.pending()));
+    should(serialized).not.containEql('FAKE_QUERY_SECRET');
+    should(serialized).not.containEql('FAKE_FRAGMENT_SECRET');
+    should(serialized).containEql('https://github.com/session?[redacted]#[redacted]');
+    should(serialized).containEql('a'.repeat(64));
   });
 
   it('should not warn when only the path of the same origin changed, or the card was not redrawn for its action (E-314)', async () => {

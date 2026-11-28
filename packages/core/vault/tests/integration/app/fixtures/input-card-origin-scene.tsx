@@ -17,7 +17,15 @@ const MOVED =
   'The form this field belongs to now sends what you type to another site than when you were asked: do not send unless you meant that.';
 const NOW = Date.parse('2026-11-10T00:00:00.000Z');
 const request = pageRequest({
-  risk: { level: 'amber', reason: MOVED },
+  risk: { level: 'red', reason: 'This is a plain value: the ferret can see it as soon as you send it.' },
+  risks: [
+    { level: 'amber', reason: MOVED },
+    {
+      level: 'amber',
+      reason:
+        'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
+    },
+  ],
   fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }],
   expiresAt: new Date(NOW + 10 * 60_000).toISOString(),
 });

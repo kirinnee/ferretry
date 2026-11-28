@@ -25,6 +25,25 @@ const page = (visible: boolean): InputTargetFacts => ({
   ],
 });
 
+describe('the complete origin is compared independently of the clipped action display', () => {
+  it('detects different long origins sharing the whole display prefix', () => {
+    const facts = page(true);
+    if (facts.kind !== 'page') throw new Error('page');
+    const field = facts.fields[0]!;
+    const withOrigin = (digest: string): InputTargetFacts => ({
+      ...facts,
+      fields: [
+        {
+          ...field,
+          field: { ...field.field, formAction: `https://${'a'.repeat(248)}`, formActionOriginDigest: digest },
+        },
+      ],
+    });
+    should(actionOriginsOf(withOrigin('a'.repeat(64)))).not.equal(actionOriginsOf(withOrigin('b'.repeat(64))));
+    should(bindingOf(withOrigin('a'.repeat(64)))).equal(bindingOf(withOrigin('b'.repeat(64))));
+  });
+});
+
 describe('when a changed target is still the same target', () => {
   it('should bind the secret store by its name alone: whether it already holds a value may change', () => {
     should(bindingOf(secret(false))).equal(bindingOf(secret(true)));

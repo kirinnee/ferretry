@@ -210,7 +210,7 @@ const TITLE_WAIT_MS = 750;
  * What the page says about a field, read in the trusted world (an isolated world: nothing the page defines is called, and
  * every method is taken from the prototype so a form's named children cannot shadow it): its label (`aria-label`, else the
  * text of what its `aria-labelledby` names, else its `<label>`s) and the form that owns it (the form it submits with, `form=`
- * included): its id, its name and where it sends what is typed, as origin + path: the form's action, or the `formaction` of
+ * included): its id, its name and its full canonical destination: the form's action, or the `formaction` of
  * its default submit button. A field with no form answers `form: null`. Only read, never trusted: every fact is compared
  * with itself across looks and, in the card's classifier, can only raise a field's care.
  */
@@ -228,13 +228,16 @@ const FIELD_READ = `function () {
   let form = null;
   if (owner) {
     let raw = attr(owner, "action");
-    const button = Element.prototype.querySelector.call(owner, 'button:not([type]), button[type="submit" i], input[type="submit" i], input[type="image" i]');
+    const root = Node.prototype.getRootNode.call(owner);
+    const query = root instanceof Document ? Document.prototype.querySelectorAll : DocumentFragment.prototype.querySelectorAll;
+    const buttons = query.call(root, 'button, input[type="submit" i], input[type="image" i]');
+    const button = Array.from(buttons).find((button) => button.form === owner && (button instanceof HTMLButtonElement ? button.type === 'submit' : true));
     const own = button ? attr(button, "formaction") : null;
     if (own !== null && own.trim() !== "") raw = own;
     let action = "";
     try {
       const url = raw === null || raw.trim() === "" ? new URL(get(Document.prototype, "URL").call(doc)) : new URL(raw, get(Node.prototype, "baseURI").call(doc));
-      action = url.origin + url.pathname;
+      action = url.href;
     } catch (error) { action = ""; }
     form = { id: clean(attr(owner, "id")), name: clean(attr(owner, "name")), action };
   }
@@ -332,6 +335,7 @@ export function inputFieldAttributes(node: unknown, label?: string, form?: FormR
           ...(form.name === '' ? {} : { formName: form.name }),
           formAction: form.action,
           ...(form.digest === undefined ? {} : { formActionDigest: form.digest }),
+          ...(form.originDigest === undefined ? {} : { formActionOriginDigest: form.originDigest }),
         }),
   };
 }
@@ -340,9 +344,10 @@ export function inputFieldAttributes(node: unknown, label?: string, form?: FormR
 interface FormRead {
   readonly id: string;
   readonly name: string;
-  /** The action cut to the protocol's bound; when it was cut, `digest` fingerprints the whole. */
+  /** The safe display cut to the protocol's bound; the fingerprints always cover the whole action and origin. */
   readonly action: string;
   readonly digest?: string;
+  readonly originDigest?: string;
 }
 
 const sameAttributes = (left: FieldAttributes, right: FieldAttributes): boolean =>
@@ -766,7 +771,8 @@ async function pageReadOf(trusted: TrustedField, session: InputCdpSession): Prom
           id: form.id as string,
           name: form.name as string,
           action: bounded.display,
-          ...(bounded.digest === undefined ? {} : { digest: bounded.digest }),
+          digest: bounded.digest,
+          originDigest: bounded.originDigest,
         };
   if (owner !== null && !formFits(owner)) throw new Refusal();
   return { label: read.label, form: owner };

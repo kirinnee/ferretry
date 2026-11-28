@@ -45,7 +45,7 @@ beforeAll(async () => {
   const page = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
   server = Bun.serve({
     hostname: '127.0.0.1',
-    port: 0,
+    port: 7482,
     fetch: request =>
       new URL(request.url).pathname === '/app.js'
         ? new Response(js, { headers: { 'content-type': 'text/javascript' } })
@@ -88,7 +88,9 @@ for (const style of LOOKS)
             await tab.goto(`${origin}/?theme=studio-${scheme}&style=${style}`);
             await tab.waitForSelector('[data-scene-ready] [data-input-warning]', { timeout: 15_000 });
             await tab.evaluate(async () => await document.fonts.ready);
-            const words = (await tab.locator('[data-input-warning]').textContent()) ?? '';
+            const words = (await tab.locator('[data-input-warning]').allTextContents()).join(' ');
+            expect(words).toContain('new document');
+            expect(await tab.locator('[data-input-risk=red]').textContent()).toContain('ferret can see');
             expect(words).toContain('now sends what you type to another site than when you were asked');
             expect(
               await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),

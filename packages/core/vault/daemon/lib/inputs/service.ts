@@ -1214,6 +1214,17 @@ export class InputRequestService {
     facts: InputTargetFacts,
     names: readonly string[],
   ): Promise<InputTargetFacts> {
+    if (facts.kind === 'page')
+      return {
+        ...facts,
+        fields: facts.fields.map(field => ({
+          ...field,
+          field: {
+            ...field.field,
+            ...(field.field.formAction === undefined ? {} : { formAction: displayAction(field.field.formAction) }),
+          },
+        })),
+      };
     if (facts.kind !== 'terminal') return facts;
     if (this.quarantined(sessionId, names)) return maskedFacts(facts);
     const clip = async (text: string, limit: number): Promise<string> =>
@@ -2656,9 +2667,7 @@ export class InputRequestService {
         ? [ACTION_MOVED_FLAG]
         : []),
     ];
-    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true).map(
-      field => (flags.length === 0 ? field : { ...field, risk: worstRisk([...flags, field.risk]) as InputRisk }),
-    );
+    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
     // The new picture is taken before the owner is asked again, exactly as at raise.
     const shot =
       seen.facts.kind === 'page'
@@ -2675,7 +2684,8 @@ export class InputRequestService {
       fields,
       sensitivity: strongestSensitivity(fields),
       observed: await this.project(request.sessionId, seen.facts, held.names),
-      risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
+      risk: pasteRisk(worstRisk([...flags, ...fields.map(field => field.risk)]), copy),
+      risks: [...flags, ...fields.flatMap(field => (field.risk === undefined ? [] : [field.risk]))],
       observedDigest: digestFacts(seen.facts),
       ...(shot === undefined ? {} : { pictured: true as const }),
     };
@@ -3371,6 +3381,19 @@ function hidesTyping(facts: InputTargetFacts): boolean {
   return facts.kind === 'terminal'
     ? facts.echo === 'off'
     : facts.fields.every(field => field.field.type === 'password');
+}
+
+/** The owner sees origin/path only; even synthetic adapter facts cannot expose query or fragment material. */
+function displayAction(action: string): string {
+  try {
+    const url = new URL(action);
+    const hash = action.indexOf('#');
+    const query = action.indexOf('?');
+    const suffix = (query >= 0 && (hash < 0 || query < hash) ? '?[redacted]' : '') + (hash >= 0 ? '#[redacted]' : '');
+    return (url.origin + url.pathname).slice(0, 256 - suffix.length) + suffix;
+  } catch {
+    return '[unreadable destination]';
+  }
 }
 
 /** What a terminal's facts read as while it is quarantined: what a secret may have left on the screen is gone. */
