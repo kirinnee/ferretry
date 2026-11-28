@@ -4,3 +4,4 @@ oversize	daemon/lib/account/import.ts	1200	2026-12-31	r10 O8 model-set choice; t
 oversize	daemon/lib/service/catalog.ts	1520	2026-12-16	one catalog service; split by concern when next touched
 oversize	daemon/lib/service/setup-service.ts	1600	2026-12-16	one setup service; split by step when next touched
 oversize	manifest.ts	600	2026-12-31	r10 onboarding lines: the plugin manifest is edited by every onboarding unit; split the onboarding block into a fragment when next touched
+oversize	contract/harness-kit.ts	320	2026-12-31	E-276 move PRs 2-16 each add one kit member here; hot until the lane ends, then split by group
