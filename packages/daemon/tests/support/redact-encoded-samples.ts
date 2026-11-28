@@ -30,6 +30,17 @@ export const ENCODED_WRAPPERS = [
   ['unnamed JSON', (value: string) => JSON.stringify([value])],
 ] as const;
 
+export const IMAGE_PREFIXES = ['/9j/', 'iVBORw0KGgo', 'R0lGOD', 'UklGR'] as const;
+export const IMAGE_KEY_WRAPPERS = [
+  ['trailing dot', (value: string) => `${value}.`],
+  ['colon pair', (value: string) => `${value}:${value}`],
+  ['padded directory', (value: string) => `${value}/suffix`],
+  ['unpadded directory', (value: string) => `${value.replace(/=$/u, '')}/suffix`],
+  ['versioned filename', (value: string) => `${value.replace(/=$/u, '')}-7b.gguf`],
+  ['data URI trailing dot', (value: string) => `data:image/png;base64,${value}.`],
+  ['data URI colon pair', (value: string) => `data:image/png;base64,${value}:${value}`],
+] as const;
+
 /** Count surviving encoded fragments too: a slash-splitting regression can hide only part of a value. */
 export function exposedEncoded(text: string, value: string): number {
   return [...text.matchAll(/[A-Za-z0-9+/]{32,}={0,2}/gu)].reduce(

@@ -353,7 +353,7 @@ const PATH_FILE_SUFFIX = /(?:-[0-9]+[A-Za-z]?)?(?:\.[A-Za-z0-9]{1,8}){1,2}$/u;
 const unpaddedKey = (value: string): boolean =>
   VAULT_KEY.test(`${value}=`) && /[A-Z]/u.test(value) && /[a-z]/u.test(value);
 
-function redactPathSegments(word: string, hide: () => void): string {
+function redactPathKeys(word: string, hide: () => void): string {
   const suffix = PATH_FILE_SUFFIX.exec(word)?.[0] ?? '';
   const stem = word.slice(0, word.length - suffix.length);
   const hiddenKey = (match: string, separator: string, value: string): string => {
@@ -366,20 +366,23 @@ function redactPathSegments(word: string, hide: () => void): string {
     .replace(PATH_LAST_VAULT_KEY, hiddenKey)
     .replace(PATH_VAULT_KEY, hiddenKey)
     .replace(PATH_UNPADDED_VAULT_KEY, hiddenKey);
-  return (
-    keys
-      .split('/')
-      .map(segment => {
-        const basename = segment.replace(PATH_FILE_SUFFIX, '');
-        const redacted = basename.replace(ENCODED_RUN, value => {
-          if (!unpaddedKey(value) && !highEntropy(value)) return value;
-          hide();
-          return HIDDEN_TEXT;
-        });
-        return `${redacted}${segment.slice(basename.length)}`;
-      })
-      .join('/') + suffix
-  );
+  return `${keys}${suffix}`;
+}
+
+function redactPathSegments(word: string, hide: () => void): string {
+  const keys = redactPathKeys(word, hide);
+  return keys
+    .split('/')
+    .map(segment => {
+      const basename = segment.replace(PATH_FILE_SUFFIX, '');
+      const redacted = basename.replace(ENCODED_RUN, value => {
+        if (!unpaddedKey(value) && !highEntropy(value)) return value;
+        hide();
+        return HIDDEN_TEXT;
+      });
+      return `${redacted}${segment.slice(basename.length)}`;
+    })
+    .join('/');
 }
 
 function highEntropy(value: string): boolean {
@@ -403,45 +406,103 @@ function highEntropy(value: string): boolean {
     : entropy >= 4 && /[A-Z]/u.test(value) && /[a-z]/u.test(value) && /[0-9]/u.test(value) && !identifier;
 }
 
+/** Only a complete image container may bypass encoded-value masking, never just its base64 prefix. */
+function imagePayload(word: string, before: string): boolean {
+  if (word.length <= 44 || !/^(?:iVBORw0KGgo|\/9j\/|R0lGOD|UklGR)/u.test(word)) return false;
+  if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(word)) return false;
+  const declared = /data:image\/([a-z0-9.+-]+);base64,$/iu.exec(before)?.[1]?.toLowerCase();
+  const bytes = Buffer.from(word, 'base64');
+  if (bytes.toString('base64').replace(/=+$/u, '') !== word.replace(/=+$/u, '')) return false;
+  if ((!declared || declared === 'png') && word.startsWith('iVBORw0KGgo'))
+    return (
+      bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+      bytes.toString('ascii', 12, 16) === 'IHDR' &&
+      bytes.subarray(-12).equals(Buffer.from([0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130]))
+    );
+  if ((!declared || declared === 'jpg' || declared === 'jpeg') && word.startsWith('/9j/'))
+    return bytes.at(-2) === 255 && bytes.at(-1) === 217;
+  if ((!declared || declared === 'gif') && word.startsWith('R0lGOD'))
+    return /^(?:GIF87a|GIF89a)$/u.test(bytes.toString('ascii', 0, 6)) && bytes.at(-1) === 59;
+  if ((!declared || declared === 'webp') && word.startsWith('UklGR'))
+    return (
+      bytes.toString('ascii', 0, 4) === 'RIFF' &&
+      bytes.toString('ascii', 8, 12) === 'WEBP' &&
+      bytes.readUInt32LE(4) === bytes.length - 8
+    );
+  return false;
+}
+
+/** A path is public only when each segment is wordlike; a root or extension alone proves nothing. */
+const wordlikePath = (value: string): boolean =>
+  value
+    .split('/')
+    .every(segment =>
+      segment
+        .split(/[-_.]/u)
+        .every(
+          part =>
+            /^(?:[a-z0-9]*|[A-Z][A-Z0-9]*)$/u.test(part) ||
+            (part.replace(/[A-Z][a-z]{2,}|Id|[a-z]{3,}|[0-9]{1,4}/gu, '') === '' &&
+              /[a-z]{3}[A-Z][a-z]{2}/u.test(part)),
+        ),
+    );
+
 function redactEncoded(text: string, hide: () => void): string {
   return text.replace(WORD, (word, offset: number) => {
-    // An embedded image is usable component content, even when the PNG bytes stand alone.
-    if (
-      (!VAULT_KEY.test(word) && /^(?:iVBORw0KGgo|\/9j\/|R0lGOD)/u.test(word)) ||
-      /data:image\/[a-z0-9.+-]+;base64,$/iu.test(text.slice(Math.max(0, offset - 100), offset))
-    )
-      return word;
+    const image = imagePayload(word, text.slice(Math.max(0, offset - 100), offset));
     // Keep the old path exemption only for ordinary references, never for complete encoded values.
     const path =
       !/^[A-Za-z0-9+/_-]{32,}={1,2}$/u.test(word) &&
       (/^(?:[a-z][a-z0-9+.-]*:\/\/|\.?\.?\/|~\/|\$[A-Za-z_][A-Za-z0-9_]*\/)/iu.test(word) ||
         /\.[A-Za-z0-9]{1,8}$/u.test(word));
+    // Keep filename punctuation outside the key scan, before ENCODED_RUN can consume '-7b'.
+    const keyed = path && !image ? redactPathKeys(word, hide) : word;
+    const force = keyed !== word && [...word.matchAll(ENCODED_RUN)].some(([value]) => highEntropy(value));
     // Scan the whole word before any slash splitting: '/' can be part of the secret itself.
-    const encoded = word.replace(ENCODED_RUN, (value, at: number) => {
+    const encoded = keyed.replace(ENCODED_RUN, (value, at: number) => {
       if ((!path || at === 0) && (VAULT_KEY.test(value) || PADDED_CIPHERTEXT.test(value))) {
+        // A complete validated image is public content; a key or ciphertext with its prefix is not.
+        if (image && value === word) return value;
         hide();
         return HIDDEN_TEXT;
       }
-      // '_' and '-' can be punctuation as well as base64url. A canonical key must win either way.
-      const keys = value.replace(
-        /(^|[_/-])([A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=)(?=$|[_/-])/gu,
-        (_match, lead: string) => {
-          hide();
-          return `${lead}${HIDDEN_TEXT}`;
-        },
-      );
+      // A key can follow arbitrary base64 letters or punctuation, not only a path separator.
+      let keys = value.replace(/[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=(?!=)/gu, () => {
+        hide();
+        return HIDDEN_TEXT;
+      });
+      if (path && !image) {
+        keys = redactPathKeys(keys, hide)
+          .split('/')
+          .map(segment => {
+            if (!PADDED_CIPHERTEXT.test(segment)) return segment;
+            hide();
+            return HIDDEN_TEXT;
+          })
+          .join('/');
+      }
+      // A base64 prefix can shift a padded ciphertext off a four-character boundary.
+      // Scan each maximal run once, then align its suffix; never retry from every offset.
+      keys = keys.replace(/[A-Za-z0-9+/]+={0,2}/gu, run => {
+        if (!run.endsWith('=')) return run;
+        const start = run.length % 4;
+        if (!PADDED_CIPHERTEXT.test(run.slice(start))) return run;
+        hide();
+        return `${run.slice(0, start)}${HIDDEN_TEXT}`;
+      });
       // Removing a key must not revive low-entropy fragments that the whole-word rule hid.
-      const hideWhole = !path && highEntropy(value);
+      const hideWhole = force || highEntropy(value);
       const hideEncoded = (run: string): string => {
         if (!hideWhole && !highEntropy(run)) return run;
         hide();
         return HIDDEN_TEXT;
       };
-      if (keys !== value) return path ? keys : keys.replace(ENCODED_RUN, hideEncoded);
+      if (keys !== value) return keys.replace(ENCODED_RUN, hideEncoded);
+      if (image && value === word) return value;
       const before = text.slice(Math.max(0, offset + at - 100), offset + at);
       if (!VAULT_KEY.test(value) && /(?:sha(?:256|512)|integrity|checksum)["']?\s*[:=-]\s*["']?$/iu.test(before))
         return value;
-      if (path) return value;
+      if (path && !force && wordlikePath(value)) return value;
       // A bare unpadded key followed by a folder is still one encoded run; preserve the folder.
       const key = value.slice(0, 43);
       if (value[43] === '/' && unpaddedKey(key)) {
@@ -451,7 +512,7 @@ function redactEncoded(text: string, hide: () => void): string {
       return hideEncoded(value);
     });
     // Path handling can only add masking; never replace the whole-word result with the original.
-    return path ? redactPathSegments(encoded, hide) : encoded;
+    return path && !image ? redactPathSegments(encoded, hide) : encoded;
   });
 }
 

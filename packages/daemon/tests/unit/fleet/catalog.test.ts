@@ -2600,7 +2600,6 @@ describe('unnamed high entropy component values', () => {
     'buildId: buildId20261128InteractiveToolbarController',
     'sessionId: Session2026InteractiveToolbarController',
     '![dot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)',
-    'data:image/png;base64,aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     '# Markdown\n\n**Read the guide**, then run `bun test`.',
     '/home/person/projects/ordinary-component/instructions.md',

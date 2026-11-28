@@ -3,6 +3,11 @@
 import { execFileSync } from 'node:child_process';
 import { redactText } from '../../packages/daemon/src/lib/fleet/catalog.ts';
 import {
+  MATRIX_SHAPES,
+  MATRIX_WRAPPERS,
+  matrixExposure,
+} from '../../packages/daemon/tests/support/redact-encoded-matrix.ts';
+import {
   ENCODED_SHAPES,
   ENCODED_WRAPPERS,
   encodedSample,
@@ -83,4 +88,28 @@ for (const [shape, length] of ENCODED_SHAPES) {
     console.log(`| ${shape} | ${wrapper} | ${cells.join(' | ')} | ${worse} |`);
   }
 }
+if (regressions > 0) process.exitCode = 1;
+
+console.log('\nR5 full cross-product. Seed: SHA-256(rv4-opus:tag:sample:offset).');
+console.log(`${count} samples per cell; counts are samples with a surviving >=32-character fragment.`);
+console.log('| Shape | Wrapper | 5e4f | head | Worse |');
+console.log('| --- | --- | ---: | ---: | ---: |');
+for (const [shape, generate] of MATRIX_SHAPES) {
+  for (const [wrapper, wrap] of MATRIX_WRAPPERS) {
+    let baseline = 0;
+    let head = 0;
+    let worse = 0;
+    for (let sample = 0; sample < count; sample++) {
+      const input = wrap(generate(sample));
+      const reference = matrixExposure(scanners[1]!(input), input);
+      const current = matrixExposure(redactText(input).text, input);
+      if (reference > 0) baseline++;
+      if (current > 0) head++;
+      if (current > reference || (shape === 'vault' && current > 0)) worse++;
+    }
+    console.log(`| ${shape} | ${wrapper} | ${baseline} | ${head} | ${worse} |`);
+    regressions += worse;
+  }
+}
+console.log(`\nPer-sample regressions: ${regressions}.`);
 if (regressions > 0) process.exitCode = 1;
