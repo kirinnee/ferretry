@@ -61,6 +61,17 @@ describe('a Claude credential store through its kit', () => {
     }
   });
 
+  it('should leave a login unreachable when the kit’s answer names no store to read', () => {
+    for (const answer of [{ kind: 'stored' }, { kind: 'environment', env: {} }] as const) {
+      const kits = new Map([['claude', { credentialStore: () => answer }]] as const);
+      expect(resolveCredentialStore('work', HOST, PATHS, kits)).toEqual({
+        harness: 'claude',
+        store: 'host',
+        unavailable: 'its plugin named no store for it',
+      });
+    }
+  });
+
   it('should not borrow Claude’s answer for an environment login', () => {
     const credential: Credential = {
       harness: 'claude',
