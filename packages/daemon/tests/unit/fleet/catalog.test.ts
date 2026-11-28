@@ -1983,7 +1983,7 @@ describe('redactText: a well-known token anywhere', () => {
     'should judge %s after a letter or digit (%s), including unnamed high entropy tails',
     (token, before) => {
       const text = `a ${before}${token} z`;
-      if (token.endsWith('abcdefghijklmnopqrstuvwxyz0123456789') || token.startsWith('AIza')) {
+      if (token.startsWith('AIza')) {
         should(redactText(text).text).not.containEql(token);
         should(redactText(text).redacted).equal(true);
       } else {
@@ -2378,7 +2378,7 @@ describe('redactText: a pointer is only a name, and a default is a value', () =>
 
 describe('unnamed high entropy component values', () => {
   it.each([
-    '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb',
+    '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb62714c0a8e39b5d62f1c0479',
     'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
     '/Z9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
     'FAKEopaque0123456789abcdefXYZ123456789',
@@ -2390,6 +2390,12 @@ describe('unnamed high entropy component values', () => {
 
   it.each([
     'Ordinary prose describes how to write useful instructions.',
+    '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb',
+    'uses: some/action@1234567890abcdef1234567890abcdef12345678',
+    'sha256:7b3c91af0826d54e10f9ab7d62483c5e91ad02fb62714c0a8e39b5d62f1c0479',
+    'isUserVerifyingPlatformAuthenticatorAvailable()',
+    'data:image/png;base64,aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     '# Markdown\n\n**Read the guide**, then run `bun test`.',
     '/home/person/projects/ordinary-component/instructions.md',
     '/home/person/docs/7b3c91af0826d54e10f9ab7d62483c5e91ad02fb/guide.md',

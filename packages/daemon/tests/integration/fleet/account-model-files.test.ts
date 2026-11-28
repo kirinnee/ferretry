@@ -44,6 +44,10 @@ import {
 import { ManifestAccountInventory } from '../../../src/adapters/core/manifest-account-inventory.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../../../src/adapters/fleet/runtime-ids-file.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
+import { FileSecretDocumentStore } from '../../../src/adapters/secrets/file-secret-document-store.ts';
+import { LOGIN_SECRETS_DOCUMENT } from '../../../src/adapters/secrets/file-login-index-store.ts';
+import { FileSecretKey, WebCryptoSecretCipher } from '../../../src/adapters/secrets/webcrypto-secret-cipher.ts';
+import { SecretNameSchema } from '@ferretry/protocol';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication, PublishedFleetInventory } from '../../../src/lib/fleet/publication.ts';
@@ -126,7 +130,7 @@ async function machine(
     acknowledged,
     states: [],
   };
-  const deps = await fileFleetCatalogDeps({
+  const deps = fileFleetCatalogDeps({
     paths: home.paths,
     userHome,
     hostCodexHome: path.join(userHome, '.codex'),
@@ -153,6 +157,7 @@ async function machine(
     ...(sessionRecords === undefined ? {} : { sessionRecords }),
     publication: handle.publication,
   });
+  await deps.sourceFenceReady;
   return Object.assign(handle, { catalog: new FleetCatalogService(deps), deps });
 }
 
@@ -652,6 +657,8 @@ describe('remote component credential boundary', () => {
   for (const operation of ['mv', 'cp'] as const) {
     it(`should hide every fake credential after ${operation} into a declared component directory`, async () => {
       // Arrange — files exist before boot; no catalogue read precedes the move.
+      const generatedBodies = [...bodies];
+      let generatedValues: readonly string[] = [];
       const model = parseAccountModel({
         version: 2,
         components: {
@@ -664,10 +671,30 @@ describe('remote component credential boundary', () => {
         },
       });
       const host = await machine(model, undefined, async home => {
+        const files = new StateFileSystem(home.paths);
+        const document = new FileSecretDocumentStore(home.paths, files, LOGIN_SECRETS_DOCUMENT);
+        const key = new FileSecretKey(document.keyFile, files, () =>
+          Uint8Array.from({ length: 32 }, (_, i) => (i * 31 + 17) % 256),
+        );
+        const cipher = new WebCryptoSecretCipher(key, () =>
+          Uint8Array.from({ length: 12 }, (_, i) => (i * 13 + 19) % 256),
+        );
+        const sealed = await cipher.seal(SecretNameSchema.parse('SYNTHETIC_LOGIN'), 'synthetic login password');
+        await document.write({
+          v: 1,
+          cipher: cipher.algorithm,
+          entries: {
+            SYNTHETIC_LOGIN: { ...sealed, createdAt: '2026-11-28T00:00:00Z', updatedAt: '2026-11-28T00:00:00Z' },
+          },
+        });
+        generatedBodies[1] = await readFile(document.keyFile, 'utf8');
+        generatedBodies[2] = await readFile(path.join(home.paths.state, LOGIN_SECRETS_DOCUMENT), 'utf8');
+        generatedValues = [values[0] as string, generatedBodies[1].trim(), sealed.iv, sealed.ciphertext];
+        should(generatedValues[1]).have.length(44);
         for (const [i, source] of sources.entries()) {
           const file = path.join(home.paths.home, source);
           await mkdir(path.dirname(file), { recursive: true });
-          await writeFile(file, bodies[i] as string);
+          await writeFile(file, generatedBodies[i] as string);
         }
       });
       const destination = path.join(host.paths.fleet, 'assets/components');
@@ -684,10 +711,10 @@ describe('remote component credential boundary', () => {
       const local = await answer(host, true);
 
       // Assert — copies have fresh identities; each unnamed value must still be hidden.
-      for (const value of values) should(remote).not.containEql(value);
+      for (const value of generatedValues) should(remote).not.containEql(value);
       for (const [i] of sources.entries()) {
         should(await host.deps.readAsset(path.join(destination, `fake${i}.md`))).equal(
-          operation === 'mv' ? undefined : bodies[i],
+          operation === 'mv' ? undefined : generatedBodies[i],
         );
       }
       if (operation === 'cp') should(local).containEql('‹hidden›');

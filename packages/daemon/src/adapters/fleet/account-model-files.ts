@@ -276,7 +276,9 @@ async function wrappersCurrent(binDirectory: string, operations: FleetModelApply
  * Its own provisioner, over this daemon's state home and the user's home: the apply claim is a file
  * beside the manifest, so two provisioners in one daemon still apply one at a time.
  */
-export async function fileFleetCatalogDeps(options: FileFleetCatalogOptions): Promise<FleetCatalogServiceDeps> {
+export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCatalogServiceDeps & {
+  readonly sourceFenceReady: Promise<void>;
+} {
   const { paths, userHome, sessionRecords: records } = options;
   const allowedRoots = [paths.home, userHome];
   const sourceFence = {
@@ -284,7 +286,7 @@ export async function fileFleetCatalogDeps(options: FileFleetCatalogOptions): Pr
     ...(options.pinned === undefined ? {} : { pinned: options.pinned }),
   };
   // Pin before boot publishes any route, before any file can be moved out of its old name.
-  await resolveSourceFence(sourceFence);
+  const sourceFenceReady = resolveSourceFence(sourceFence).then(() => undefined);
   const layout: FleetLayout = {
     stateHome: paths.home,
     userHome,
@@ -311,14 +313,21 @@ export async function fileFleetCatalogDeps(options: FileFleetCatalogOptions): Pr
       return parseRuntimeIds(JSON.parse(text));
     });
   return {
+    sourceFenceReady,
     document: async fresh =>
       await readConfigAccountDocument(
         options.config,
         { configDirectory: options.configDirectory, fleetDirectory: paths.fleet },
         fresh,
       ),
-    readAsset: async path => await readComponentText(path, sourceFence),
-    readRemoteAsset: async path => await readComponentText(path, sourceFence, true),
+    readAsset: async path => {
+      await sourceFenceReady;
+      return await readComponentText(path, sourceFence);
+    },
+    readRemoteAsset: async path => {
+      await sourceFenceReady;
+      return await readComponentText(path, sourceFence, true);
+    },
     documentRevision,
     ids,
     locate: options.locate,

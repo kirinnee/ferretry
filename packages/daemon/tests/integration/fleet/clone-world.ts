@@ -95,7 +95,7 @@ export async function machine(
       throw new Error('not exercised');
     },
   };
-  const catalogDeps = await fileFleetCatalogDeps({
+  const catalogDeps = fileFleetCatalogDeps({
     paths: home.paths,
     userHome,
     config: home.service,
@@ -107,6 +107,7 @@ export async function machine(
     clientName: 'fy',
     publication: new FleetPublication(),
   });
+  await catalogDeps.sourceFenceReady;
   const setup = createFleetSetupSubsystem(
     fileFleetSetupDeps({
       catalog: catalogDeps,

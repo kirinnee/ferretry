@@ -340,19 +340,29 @@ function highEntropy(value: string): boolean {
     const probability = count / value.length;
     entropy -= probability * Math.log2(probability);
   }
-  // Hex has a four-bit ceiling; base64 has six.
-  return entropy >= (/^[a-fA-F0-9]+$/u.test(value) ? 3 : 4);
+  // Short hex IDs and 40-character Git SHAs are public references. Base64 needs mixed classes.
+  return /^[a-fA-F0-9]+$/u.test(value)
+    ? value.length >= 64 && entropy >= 3
+    : entropy >= 4 && /[A-Z]/u.test(value) && /[a-z]/u.test(value) && /[0-9]/u.test(value);
 }
 
 function redactEncoded(text: string, hide: () => void): string {
-  return text.replace(WORD, word => {
+  return text.replace(WORD, (word, offset: number) => {
+    // An embedded image is usable component content, even when the PNG bytes stand alone.
+    if (
+      /^(?:iVBORw0KGgo|\/9j\/|R0lGOD)/u.test(word) ||
+      /data:image\/[a-z0-9.+-]+;base64,$/iu.test(text.slice(Math.max(0, offset - 100), offset))
+    )
+      return word;
     // Ordinary paths and URLs are references, not unnamed encoded values.
     if (
       !/^[A-Za-z0-9+/]{32,}={1,2}$/u.test(word) &&
       (/^(?:[a-z][a-z0-9+.-]*:\/\/|\.?\.?\/|~\/)/iu.test(word) || /\/[\w.-]+\.[a-z]{1,8}(?:[?#].*)?$/iu.test(word))
     )
       return word;
-    return word.replace(ENCODED_RUN, value => {
+    return word.replace(ENCODED_RUN, (value, at: number) => {
+      const before = text.slice(Math.max(0, offset + at - 100), offset + at);
+      if (/(?:sha(?:256|512)|integrity|checksum)["']?\s*[:=-]\s*["']?$/iu.test(before)) return value;
       if (!highEntropy(value)) return value;
       hide();
       return HIDDEN_TEXT;
@@ -524,13 +534,18 @@ function redactExpansions(
   return { text: out + text.slice(from), redacted };
 }
 
+/** Sealed login fields include a 16-character AES-GCM IV, shorter than an unnamed key. */
+const componentSecret = (name: string, value: string): boolean =>
+  looksSecret(name, value) ||
+  (/(?:^|[._-])(?:iv|ciphertext)$/iu.test(name) && /^[A-Za-z0-9+/]{16,}={0,2}$/u.test(value));
+
 /**
  * A component's text with every secret-looking value replaced by {@link HIDDEN_TEXT}. `isSecret` is the rule for
  * a value beside its name (the fleet's `looksSecret` unless a caller needs a stricter one).
  */
 export function redactText(
   text: string,
-  isSecret: (name: string, value: string) => boolean = looksSecret,
+  isSecret: (name: string, value: string) => boolean = componentSecret,
 ): { readonly text: string; readonly redacted: boolean } {
   let redacted = false;
   let named = '';
@@ -604,7 +619,9 @@ export const settingsValueText = (value: unknown): string =>
 function settingsEntries(settings: SettingsObject): FleetSettingsEntry[] {
   return flattenSettings(settings).map(([key, value]) => {
     const text = settingsValueText(value);
-    return looksSecret(key, text) || redactText(text).redacted ? { key, hidden: true as const } : { key, value: text };
+    return componentSecret(key, text) || redactText(text).redacted
+      ? { key, hidden: true as const }
+      : { key, value: text };
   });
 }
 
