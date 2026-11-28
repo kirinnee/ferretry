@@ -109,6 +109,7 @@ import {
   movedSentence,
   REFUSAL_CODES,
 } from './login-changes.ts';
+import { supportedKinds } from '../harness-kind.ts';
 import type { RuntimeConfigWriter } from './ports.ts';
 import {
   type AccountChangeFacts,
@@ -895,7 +896,7 @@ export class FleetCatalogService {
     return {
       format: reading.format,
       machineName: this.deps.machineName(),
-      tools: { claude: this.deps.locate('claude'), codex: this.deps.locate('codex') },
+      tools: Object.fromEntries(supportedKinds().map(kind => [kind, this.deps.locate(kind)])) as CatalogFacts['tools'],
       runningSessions: await this.#runningSessions(),
       runtimeIds: await this.#runtimeIds(),
       skipped: this.#skipped,

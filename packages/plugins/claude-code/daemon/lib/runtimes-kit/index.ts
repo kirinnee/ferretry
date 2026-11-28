@@ -5,6 +5,7 @@
  */
 import type { RuntimesHarnessKit } from '@ferretry/plugin-runtimes/contract';
 import { claudeCredentialsKit } from './credentials.ts';
+import { claudeExtrasKit } from './extras.ts';
 import { claudeFixedLayerKit } from './fixed-layer.ts';
 import { claudeImportKit } from './import.ts';
 import { claudeMcpKit } from './mcp.ts';
@@ -17,5 +18,6 @@ export const claudeRuntimesKit: RuntimesHarnessKit = {
   ...claudeMcpKit,
   ...claudeWrapperKit,
   ...claudeImportKit,
+  ...claudeExtrasKit,
   ...claudeWordsKit,
 };

@@ -56,6 +56,7 @@ describe('a Claude fixed layer through its kit', () => {
               { purpose: 'no-questions', target: 'launch', path: ['--flag'], value: true },
             ],
             args: ['--a'],
+            supersededFlags: {},
           },
         };
       },
@@ -118,6 +119,7 @@ describe('a Codex fixed layer through its kit', () => {
               { purpose: 'no-alt-screen', target: 'launch', path: ['--flag'], value: true },
             ],
             args: ['--a'],
+            supersededFlags: {},
             rules: 'its rules\n',
           },
         };

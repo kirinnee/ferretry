@@ -13,7 +13,7 @@ import type { z } from 'zod';
 import type { HarnessKind } from '../manifest.ts';
 
 export type ModelTier = z.infer<typeof ModelTierSchema>;
-export type CatalogHalf = NonNullable<ModelCatalogFile['claude']>;
+export type CatalogHalf = NonNullable<ModelCatalogFile[HarnessKind]>;
 export type CatalogModel = CatalogHalf['models'][number];
 export type { ModelCatalogFile };
 

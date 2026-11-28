@@ -337,11 +337,7 @@ function componentDetail(kind: ComponentKind, component: Record<string, unknown>
 
 /** The partial-support table for this machine's components, from the bodies the caller read. */
 const partialSupportOf = (model: AccountModel, facts: CatalogFacts): readonly PartialSupport[] =>
-  componentPartialSupport({
-    components: model.components,
-    ...(facts.instructionBodies === undefined ? {} : { instructionBodies: facts.instructionBodies }),
-    ...(facts.skillFrontmatter === undefined ? {} : { skillFrontmatter: facts.skillFrontmatter }),
-  });
+  componentPartialSupport({ components: model.components, ...facts });
 
 // ── Component content ────────────────────────────────────────────────────────────────────────────
 //

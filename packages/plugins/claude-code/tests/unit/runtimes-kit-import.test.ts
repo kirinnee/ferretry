@@ -183,3 +183,44 @@ describe('Claude host login notes', () => {
     });
   }
 });
+
+describe('Claude project folders and MCP document', () => {
+  const text = (body: string): KitHostDocumentRead => ({
+    kind: 'text',
+    text: body,
+    bytes: body.length,
+    source: '/fixture/home/.claude.json',
+  });
+
+  it('names its MCP document: mcpServers in .claude.json', () => {
+    expect(claudeImportKit.mcpImport).toEqual({
+      document: 'mcp',
+      format: 'json',
+      file: '.claude.json',
+      table: 'mcpServers',
+      knownKeys: ['type', 'command', 'args', 'env', 'url'],
+      skipDisabled: false,
+    });
+  });
+
+  it("lists the absolute project keys in the host's order and nothing under them", () => {
+    const document = {
+      projects: { '/work/a': { secret: 'never read' }, 'relative/b': {}, '/work/c': {}, '/bad\u0007name': {} },
+    };
+    expect(claudeImportKit.projectFolders!(text(JSON.stringify(document)))).toEqual(['/work/a', '/work/c']);
+  });
+
+  it('stops at 200 folders', () => {
+    const projects = Object.fromEntries(Array.from({ length: 250 }, (_, index) => [`/p/${index}`, {}]));
+    expect(claudeImportKit.projectFolders!(text(JSON.stringify({ projects })))).toHaveLength(200);
+  });
+
+  it('lists nothing for a document that is absent, empty, unreadable, not an object, or has no projects table', () => {
+    expect(claudeImportKit.projectFolders!(undefined)).toEqual([]);
+    expect(claudeImportKit.projectFolders!({ kind: 'absent', source: '/x' })).toEqual([]);
+    expect(claudeImportKit.projectFolders!(text('  '))).toEqual([]);
+    expect(claudeImportKit.projectFolders!(text('{ not json'))).toEqual([]);
+    expect(claudeImportKit.projectFolders!(text('[1]'))).toEqual([]);
+    expect(claudeImportKit.projectFolders!(text(JSON.stringify({ projects: ['/a'] })))).toEqual([]);
+  });
+});

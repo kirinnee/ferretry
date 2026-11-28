@@ -20,6 +20,8 @@ import {
   withEffective,
 } from '../account/owner-components.ts';
 import type { FleetDocumentWrite } from '../provisioning.ts';
+import { harnessWords } from '../../../contract/harness-words.ts';
+import { harnessKeyOfKind, supportedKinds } from '../harness-kind.ts';
 import { FleetCatalogRefusal } from './catalog-service.ts';
 import { configurationLanded } from './failed-apply.ts';
 
@@ -112,8 +114,8 @@ const KIND_WORDS: Readonly<Record<OwnerComponentWrite['kind'], string>> = {
 
 /** Whose a component is, in the tool's own word: its settings' harness, else the word its import-made name starts with. */
 const toolOf = (write: OwnerComponentWrite): string | undefined => {
-  const word = write.harness ?? /^(claude|codex)(?:-|$)/u.exec(write.name)?.[1];
-  return word === undefined ? undefined : word === 'codex' ? 'Codex' : 'Claude';
+  const kind = write.harness ?? supportedKinds().find(word => write.name === word || write.name.startsWith(`${word}-`));
+  return kind === undefined ? undefined : harnessWords(harnessKeyOfKind(kind))?.short;
 };
 
 /** What owner files are, in words and never as paths: "your Claude skills and settings, your Codex MCP servers". */

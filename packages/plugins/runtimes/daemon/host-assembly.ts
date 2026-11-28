@@ -286,7 +286,7 @@ function fleetTexts(disk: FleetDisk): AdapterHost['texts'] {
 const INSTALLABLE: readonly HarnessKind[] = supportedKinds();
 
 /** The harness commands every read asks about, looked up ahead (`./adapters/command-cache.ts`). */
-const HARNESS_COMMANDS = ['claude', 'codex', 'npm', 'brew', 'apt-get'] as const;
+const HARNESS_COMMANDS: readonly string[] = [...supportedKinds(), 'npm', 'brew', 'apt-get'];
 
 /** A Claude account file is a few KiB; a larger one is not read. */
 const MAX_ACCOUNT_FILE_BYTES = 1024 * 1024;

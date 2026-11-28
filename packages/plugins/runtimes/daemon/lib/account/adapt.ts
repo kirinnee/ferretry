@@ -54,7 +54,13 @@ import {
   type RuntimesHarnessKit,
 } from '../../../contract/harness-kit.ts';
 import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
-import { byHarness, harnessKeyOfKind, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import {
+  harnessKeyOfKind,
+  kindOf,
+  neededKitMembers,
+  supportedKinds,
+  UnsupportedHarnessError,
+} from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
 import { deepMergeSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
@@ -80,14 +86,16 @@ import type { Components, LayerReferenceText, McpComponent } from './schema.ts';
  */
 export type ClaudeStatuslineCommand = (ownCommand?: string) => string;
 
-/** The plumbing facts only the caller knows, per harness. */
-export type AdaptPlumbing =
-  | { readonly harness: 'claude'; readonly statusLine: ClaudeStatuslineCommand }
-  | {
-      readonly harness: 'codex';
-      /** The shared history pool's SQLite directory (`CODEX_SQLITE_HOME`), so every runtime shares it. */
-      readonly sqliteHome: string;
-    };
+/**
+ * The plumbing facts only the caller knows: a harness's plugin reads the one it is given (a status line for one, a history
+ * directory for another) and ignores the rest.
+ */
+export interface AdaptPlumbing {
+  readonly harness: HarnessKind;
+  readonly statusLine?: ClaudeStatuslineCommand;
+  /** The shared history pool's SQLite directory, so every runtime that keeps one shares it. */
+  readonly sqliteHome?: string;
+}
 
 /** Component bodies the caller read, by component name. */
 export interface ComponentBodies {
@@ -319,7 +327,7 @@ function kitMember<M extends 'renderMcpServer' | 'configDocuments' | 'plumbing'>
   kit: RuntimesHarnessKit | undefined,
   member: M,
 ): NonNullable<RuntimesHarnessKit[M]> {
-  byHarness(harness, { claude: () => undefined, codex: () => undefined });
+  kindOf(harness);
   const given = kit?.[member];
   if (given === undefined) throw new UnsupportedHarnessError(harness);
   return given;
@@ -532,20 +540,17 @@ const plumbingFor = (
   plumbing: AdaptPlumbing,
   settings: SettingsObject,
   kit: RuntimesHarnessKit | undefined,
-): readonly KitPlumbingEntry[] => {
-  // Each harness's plugin reads the fact it is given: a status line for Claude, a history directory for Codex.
-  return kitMember(
+): readonly KitPlumbingEntry[] =>
+  // Each harness's plugin reads the fact it needs from what it is given.
+  kitMember(
     plumbing.harness,
     kit,
     'plumbing',
   )({
     settings,
-    ...byHarness<{ statusLine: ClaudeStatuslineCommand } | { sqliteHome: string }>(plumbing.harness, {
-      claude: () => ({ statusLine: (plumbing as Extract<AdaptPlumbing, { harness: 'claude' }>).statusLine }),
-      codex: () => ({ sqliteHome: (plumbing as Extract<AdaptPlumbing, { harness: 'codex' }>).sqliteHome }),
-    }),
+    ...(plumbing.statusLine === undefined ? {} : { statusLine: plumbing.statusLine }),
+    ...(plumbing.sqliteHome === undefined ? {} : { sqliteHome: plumbing.sqliteHome }),
   });
-};
 
 /** What `value`, written at `path`, holds at the deeper `at`; `undefined` when nothing. */
 const valueBelow = (value: unknown, path: readonly string[], at: readonly string[]): unknown =>
@@ -574,6 +579,15 @@ export interface KitRefusal {
   readonly message: string;
 }
 
+const refusalOf = (harness: string): KitRefusal => ({
+  kind: 'harness-unsupported',
+  message: unsupportedHarnessSentence(harnessKeyOfKind(kindOf(harness))),
+});
+
+/** Whether `kit` gives every member of `names`. */
+const gives = (kit: RuntimesHarnessKit, names: readonly (keyof RuntimesHarnessKit)[]): boolean =>
+  names.every(name => kit[name] !== undefined);
+
 /**
  * The typed refusal for a runtime of `harness` that cannot be planned without its plugin's kit, or `undefined` when it can. Claude's MCP
  * servers and config documents are the Claude kit's (E-276 PR 6) and Codex's variables and files and fixed layer are the Codex kit's (PRs 3 and 12), so a
@@ -581,20 +595,11 @@ export interface KitRefusal {
  * credential store. Only that runtime is affected: the rest of the plan is made as usual.
  */
 export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
-  byHarness<KitRefusal | undefined>(harness, {
-    claude: () =>
-      kit === undefined
-        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
-        : undefined,
-    codex: () =>
-      kit?.runtimeExtras === undefined || kit.fixedLayer === undefined
-        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('codex')) }
-        : undefined,
-  });
+  kit === undefined || !gives(kit, neededKitMembers(kindOf(harness), 'planned')) ? refusalOf(harness) : undefined;
 
 /**
  * The ONE runtime-wide kit decision, for the account plan and the catalog alike: `missingKitRefusal`, and also a kit that gives no launch
- * line, command or home variable, or (Codex) no list of the skill folders it keeps for itself, in the same words. `undefined` when the
+ * line, command or home variable, or none of what its harness needs to launch (Codex's list of the skill folders it keeps for itself), in the same words. `undefined` when the
  * runtime can be planned and launched.
  */
 export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
@@ -602,8 +607,8 @@ export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit 
   (kit?.wrapper === undefined ||
   kit.command === undefined ||
   kit.homeEnv === undefined ||
-  (isKind(harness, 'codex') && kit.ownedSkillEntries === undefined)
-    ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
+  !gives(kit, neededKitMembers(harness, 'launched'))
+    ? refusalOf(harness)
     : undefined);
 
 /** What a runtime that cannot be planned for want of its kit writes: nothing. Never reaches a file. */
@@ -731,16 +736,6 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
 // ── Partial support (K5, E22) ────────────────────────────────────────────────────────────────────
 
 /**
- * Claude skill frontmatter keys Codex does not honour, and what that means, in the product's words.
- * INFERRED from Codex's skill loader, which reads a skill's name, description and metadata only.
- */
-export const CODEX_IGNORED_SKILL_KEYS: Readonly<Record<string, (item: string) => string>> = {
-  'allowed-tools': item => `${item} limits which tools it may use. Codex ignores that limit and loads the rest.`,
-  model: item => `${item} picks its own model. Codex ignores that and uses the runtime's model.`,
-  hooks: item => `${item} carries its own hooks. Codex ignores them and loads the rest.`,
-};
-
-/**
  * The top-level keys of a skill's `SKILL.md` frontmatter, in order. Text with no frontmatter has
  * none. Keys only, never values, so nothing a skill says is carried further than its shape.
  */
@@ -757,12 +752,6 @@ export function skillFrontmatterKeys(text: string): readonly string[] {
   return [];
 }
 
-/** A line of a Claude instructions file that pulls in another file: `@path/to/file.md`. */
-const CLAUDE_IMPORT_LINE = /^\s*@[^\s@]+\s*$/m;
-
-/** Whether an instructions body pulls in other files the way Claude's `@path` imports do. */
-export const usesClaudeImports = (body: string): boolean => CLAUDE_IMPORT_LINE.test(body);
-
 /** The facts partial support is decided from, read by the caller. */
 export interface PartialSupportFacts {
   readonly components: Pick<Components, 'instructions' | 'mcp' | 'skills'>;
@@ -770,6 +759,8 @@ export interface PartialSupportFacts {
   readonly skillFrontmatter?: Readonly<Record<string, readonly string[]>>;
   /** Instructions text, by component name. */
   readonly instructionBodies?: Readonly<Record<string, string>>;
+  /** What each harness's own plugin hands Runtimes: a harness reads only in part what its kit says it does. */
+  readonly kits?: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined;
 }
 
 /**
@@ -779,37 +770,28 @@ export interface PartialSupportFacts {
  * entry today is about Codex.
  */
 export function componentPartialSupport(facts: PartialSupportFacts): readonly PartialSupport[] {
+  const { kits } = facts;
   const entries: PartialSupport[] = [];
-  const reachesCodex = (component: { readonly harness?: HarnessKind }) =>
-    component.harness === undefined || isKind(component.harness, 'codex');
-
-  for (const [name, component] of Object.entries(facts.components.instructions)) {
-    const body = facts.instructionBodies?.[name];
-    if (!reachesCodex(component) || body === undefined || !usesClaudeImports(body)) continue;
-    entries.push({
-      reference: `instructions/${name}`,
-      harness: 'codex',
-      reason: `${name} pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files.`,
+  for (const kind of supportedKinds()) {
+    const partialSupport = kits?.get(kind)?.partialSupport;
+    if (partialSupport === undefined) continue;
+    const reaches = (component: { readonly harness?: HarnessKind }) =>
+      component.harness === undefined || kindOf(component.harness) === kind;
+    const notes = partialSupport({
+      instructions: Object.entries(facts.components.instructions).flatMap(([name, component]) => {
+        const body = facts.instructionBodies?.[name];
+        return reaches(component) && body !== undefined ? [{ name, body }] : [];
+      }),
+      mcp: Object.entries(facts.components.mcp).flatMap(([name, component]) =>
+        reaches(component) && component.url !== undefined ? [{ name, url: component.url }] : [],
+      ),
+      skills: Object.entries(facts.components.skills).flatMap(([name, component]) =>
+        reaches(component) ? [{ name, items: component.items }] : [],
+      ),
+      skillFrontmatter: facts.skillFrontmatter ?? {},
     });
-  }
-
-  for (const [name, component] of Object.entries(facts.components.mcp)) {
-    if (!reachesCodex(component) || component.url === undefined || !isSseUrl(component.url)) continue;
-    entries.push({
-      reference: `mcp/${name}`,
-      harness: 'codex',
-      reason: `${name} is reached over SSE. Codex connects to servers over streamable HTTP, so it may not reach this one.`,
-    });
-  }
-
-  for (const [name, component] of Object.entries(facts.components.skills)) {
-    if (!reachesCodex(component)) continue;
-    for (const item of component.items) {
-      for (const key of facts.skillFrontmatter?.[item] ?? []) {
-        const reason = CODEX_IGNORED_SKILL_KEYS[key];
-        if (reason !== undefined) entries.push({ reference: `skills/${name}`, harness: 'codex', reason: reason(item) });
-      }
-    }
+    for (const note of notes)
+      entries.push({ reference: `${note.kind}/${note.name}`, harness: kind, reason: note.reason });
   }
   return entries;
 }
@@ -824,10 +806,7 @@ export function plumbingOf(
   facts: { readonly claudeStatusline: ClaudeStatuslineCommand; readonly codexSqliteHome: string },
   _kit?: RuntimesHarnessKit,
 ): AdaptPlumbing {
-  return byHarness<AdaptPlumbing>(harness, {
-    claude: () => ({ harness: 'claude', statusLine: facts.claudeStatusline }),
-    codex: () => ({ harness: 'codex', sqliteHome: facts.codexSqliteHome }),
-  });
+  return { harness: kindOf(harness), statusLine: facts.claudeStatusline, sqliteHome: facts.codexSqliteHome };
 }
 
 /**
@@ -839,8 +818,6 @@ export function priorServersOf(
   servers: () => Readonly<Record<string, McpComponent>>,
   kit?: RuntimesHarnessKit,
 ): Readonly<Record<string, SettingsObject>> {
-  return byHarness<Readonly<Record<string, SettingsObject>>>(harness, {
-    claude: () => renderMcpComponents('claude', servers(), kit),
-    codex: () => ({}),
-  });
+  const kind = kindOf(harness);
+  return kit?.keepsPriorServers === true ? renderMcpComponents(kind, servers(), kit) : {};
 }

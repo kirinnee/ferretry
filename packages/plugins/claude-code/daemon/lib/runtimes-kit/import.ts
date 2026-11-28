@@ -2,6 +2,7 @@ import { isAbsolute, join } from 'node:path';
 import type {
   KitHarvestInput,
   KitHarvestParts,
+  KitHostDocumentRead,
   KitHostLogin,
   KitHostScanInput,
   KitHostSetup,
@@ -12,6 +13,38 @@ const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const importSetup = { settingsFormat: 'json', settingsFile: 'settings.json', instructionsName: 'CLAUDE.md' } as const;
+
+/** The most project folders a scan lists; a person with more sees the first of them. */
+const PROJECT_FOLDERS_LIMIT = 200;
+
+/**
+ * The project folders Claude keeps state for: the keys of `projects` in `~/.claude.json`. Names only — the values under each
+ * key are never looked at. Absolute paths with no control character, in the host's order, bounded.
+ */
+function projectFolders(mcp: KitHostDocumentRead | undefined): readonly string[] {
+  if (mcp?.kind !== 'text') return [];
+  let projects: unknown;
+  try {
+    const document: unknown = mcp.text.trim() === '' ? {} : JSON.parse(mcp.text);
+    projects = isRecord(document) ? document.projects : undefined;
+  } catch {
+    return [];
+  }
+  if (!isRecord(projects)) return [];
+  return Object.keys(projects)
+    .filter(path => path.startsWith('/') && [...path].every(character => (character.codePointAt(0) ?? 0) >= 0x20))
+    .slice(0, PROJECT_FOLDERS_LIMIT);
+}
+
+/** Where Claude keeps its user-scope MCP servers: `mcpServers` in `.claude.json`. */
+const mcpImport = {
+  document: 'mcp',
+  format: 'json',
+  file: '.claude.json',
+  table: 'mcpServers',
+  knownKeys: ['type', 'command', 'args', 'env', 'url'],
+  skipDisabled: false,
+} as const;
 
 async function scanHost(input: KitHostScanInput): Promise<KitHostSetup> {
   const named = input.configuredHome?.trim() ?? '';
@@ -81,4 +114,11 @@ function loginNote(login: KitHostLogin): string {
 }
 
 /** Claude's host scan, import decisions and login notes; host reads and secret handling remain guarded by Runtimes. */
-export const claudeImportKit: RuntimesHarnessKit = { scanHost, importSetup, harvest, loginNote };
+export const claudeImportKit: RuntimesHarnessKit = {
+  scanHost,
+  importSetup,
+  mcpImport,
+  projectFolders,
+  harvest,
+  loginNote,
+};

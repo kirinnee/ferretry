@@ -334,6 +334,17 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # What a harness does inside Runtimes is its plugin's kit, never a 'claude' or 'codex' string in Runtimes' daemon (E-276). A named,
+    # shrinking list holds what is not moved yet. See scripts/validate/no-harness-literal.sh.
+    a-no-harness-literal = {
+      enable = true;
+      name = "No harness literal in the Runtimes daemon";
+      entry = validator "scripts/validate/no-harness-literal.sh";
+      files = "^(packages/plugins/runtimes/daemon/.*\\.tsx?|scripts/validate/no-harness-literal[^/]*)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # A busy mark is the shared `Spinner`: themed per style and, for a wait, held back by the one 300 ms loader threshold.
     # A lucide icon with `animate-spin` is neither. See scripts/validate/no-stray-spinner.sh.
     a-no-stray-spinner = {

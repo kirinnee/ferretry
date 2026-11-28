@@ -11,11 +11,12 @@
 import type { z } from 'zod';
 import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import {
-  byHarness,
   type HarnessKeyOfKind,
+  type KindOfKey,
   harnessKeyOfKind,
   harnessKindOfKey,
   isSupportedKind,
+  kindOf,
   supportedKindOfKey,
   UnsupportedHarnessError,
   unsupportedHarnessSentence,
@@ -55,10 +56,8 @@ export function fastSupportOf(
   model: string,
   kit?: Pick<RuntimesHarnessKit, 'fastSupport'>,
 ): { readonly fast?: boolean } {
-  return byHarness<{ readonly fast?: boolean }>(harness, {
-    claude: () => (kit?.fastSupport === undefined ? {} : { fast: kit.fastSupport(model) }),
-    codex: () => ({}),
-  });
+  kindOf(harness);
+  return kit?.fastSupport === undefined ? {} : { fast: kit.fastSupport(model) };
 }
 
 /**
@@ -70,6 +69,9 @@ export const HARNESS_PACKAGES: Readonly<
   claude: { npm: '@anthropic-ai/claude-code', cask: 'claude-code', nixpkgs: 'claude-code' },
   codex: { npm: '@openai/codex', cask: 'codex', nixpkgs: 'codex' },
 };
+
+/** Each harness's product name, for sentences. Spelled beside {@link HARNESS_PACKAGES}: both are the harness's install facts (E-276 PR 17b: its kit's `install`). */
+export const HARNESS_LABELS: Readonly<Record<HarnessKind, string>> = { claude: 'Claude Code', codex: 'Codex' };
 
 // ── sessions ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -168,8 +170,8 @@ export const scopeKey = (scope: HarnessKind | 'generic'): HarnessKeyOfKind | 'ge
   scope === 'generic' ? scope : harnessKeyOfKind(scope);
 
 /** `T` with every `claude-code` value spelled `claude`: the change as the library reads it. */
-export type LoweredHarness<T> = T extends 'claude-code'
-  ? 'claude'
+export type LoweredHarness<T> = T extends HarnessKeyOfKind
+  ? KindOfKey<T>
   : T extends string
     ? T
     : T extends readonly (infer Item)[]

@@ -10,11 +10,12 @@ import type { Clock, SpawnPort } from '@ferretry/kernel/contract';
 import type { CommandCache } from './command-cache.ts';
 import type { HostPlatform } from './host-platform.ts';
 import { packageRunner } from './package-run.ts';
+import { supportedKinds } from '../lib/harness-kind.ts';
 import type { HarnessLocation } from '../lib/service/foreign.ts';
 import { ToolInstallService } from '../lib/service/tool-install.ts';
 
 /** The commands an install looks up afresh: the harnesses, and the managers it chooses among. */
-const INSTALL_LOOKUPS: readonly string[] = ['claude', 'codex', 'npm', 'brew', 'apt-get'];
+const INSTALL_LOOKUPS: readonly string[] = [...supportedKinds(), 'npm', 'brew', 'apt-get'];
 
 export function toolInstaller(deps: {
   readonly commands: Pick<CommandCache, 'which' | 'refresh'>;

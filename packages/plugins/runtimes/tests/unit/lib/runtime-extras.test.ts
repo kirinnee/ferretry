@@ -18,9 +18,9 @@ const derived: RuntimeModels = {
 const input = { sqliteHome: '/fy/sqlite', statePath: '/fy/homes/a/.fy', derived, settings: { model: 'a' } };
 
 describe('runtimeExtras', () => {
-  it('should add nothing for Claude, with or without a kit', () => {
+  it('should add nothing for Claude: its kit says so, and no kit is guessed at', () => {
     expect(runtimeExtras('claude', input)).toEqual({ env: {} });
-    expect(runtimeExtras('claude', input, { runtimeExtras: () => ({ env: { X: '1' } }) })).toEqual({ env: {} });
+    expect(runtimeExtras('claude', input, { runtimeExtras: () => ({ env: {} }) })).toEqual({ env: {} });
   });
 
   it('should hand Codex’s kit the runtime’s state, models and settings, and return what it says', () => {
@@ -69,7 +69,7 @@ describe('runtimeExtras', () => {
     expect(
       missingKitRefusal('codex', {
         runtimeExtras: () => ({ env: {} }),
-        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [] } }),
+        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [], supersededFlags: {} } }),
       }),
     ).toBeUndefined();
   });

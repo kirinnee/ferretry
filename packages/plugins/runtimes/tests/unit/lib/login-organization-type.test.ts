@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import { loginOrganizationType } from '../../../daemon/lib/login-organization-type.ts';
 
 const logins = (
@@ -21,6 +22,7 @@ describe('the organisation type of the login a launch spends', () => {
         throw new Error('the host file must not be read for a Ferretry-kept login');
       },
       'work',
+      REAL_KITS,
     );
 
     should(found).equal('claude_enterprise');
@@ -31,6 +33,7 @@ describe('the organisation type of the login a launch spends', () => {
       logins([{ id: 'host', variables: {} }], { host: { store: 'host', harness: 'claude-code' } }),
       async () => 'claude_max',
       'host',
+      REAL_KITS,
     );
 
     should(found).equal('claude_max');
@@ -45,9 +48,9 @@ describe('the organisation type of the login a launch spends', () => {
       codex: { store: 'host', harness: 'codex' },
     });
 
-    should(await loginOrganizationType(world, readHost, 'env')).be.undefined();
-    should(await loginOrganizationType(world, readHost, 'codex')).be.undefined();
-    should(await loginOrganizationType(world, readHost, 'ghost')).be.undefined();
+    should(await loginOrganizationType(world, readHost, 'env', REAL_KITS)).be.undefined();
+    should(await loginOrganizationType(world, readHost, 'codex', REAL_KITS)).be.undefined();
+    should(await loginOrganizationType(world, readHost, 'ghost', REAL_KITS)).be.undefined();
   });
 
   it('should answer nothing for a host-kept login whose file names no type', async () => {
@@ -55,6 +58,7 @@ describe('the organisation type of the login a launch spends', () => {
       logins([], { host: { store: 'host', harness: 'claude-code' } }),
       async () => undefined,
       'host',
+      REAL_KITS,
     );
 
     should(found).be.undefined();

@@ -5,13 +5,12 @@
  * Why this file exists (runtimes plan U4b). The stored word is the harness's catalog half (`harnessFacts(key).catalogHalf`:
  * `claude` for the plugin `claude-code`, `codex` for `codex`), and it stays exactly what it was on disk: no value of any
  * file changes. A plugin key reaches Runtimes OPEN (`HarnessKey`); this file is the door, and a key it has no row for is
- * REFUSED by name ({@link unsupportedHarnessSentence}) and never quietly handed Claude's paths, flags or parser. Runtimes'
- * own behaviour is written per harness (Claude's MCP shape, Codex's config.toml, each one's launch flags), so inside
- * Runtimes a stored word is the closed type {@link HarnessKind} DERIVED from the one table below: the compiler then lists
- * every place a third harness still needs a case, and every old `x === 'claude' ? <Claude> : <Codex>` is a
- * {@link byHarness} call that names both behaviours and refuses any other.
+ * REFUSED by name ({@link unsupportedHarnessSentence}) and never quietly handed Claude's paths, flags or parser. What a
+ * harness DOES inside Runtimes is its plugin's kit (`../../contract/harness-kit.ts`), looked up by {@link HarnessKind}; this
+ * file only names which harnesses there are. Inside Runtimes a stored word is the closed type {@link HarnessKind} DERIVED from
+ * the one table below, so the compiler lists every place a third harness still needs a row.
  *
- * A third harness arrives by adding its row to {@link KEY_OF_KIND} and its case to each {@link byHarness} call, and not before.
+ * A third harness arrives by adding its row to {@link KEY_OF_KIND}, and its plugin's kit.
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
@@ -65,32 +64,50 @@ export type HarnessKeyOfKind = (typeof KEY_OF_KIND)[HarnessKind];
 
 export const harnessKeyOfKind = (kind: HarnessKind): HarnessKeyOfKind => KEY_OF_KIND[kind];
 
-/** The behaviour of each harness Runtimes runs: both are written out, and any other harness is refused. */
-export interface ByHarness<T> {
-  readonly claude: () => T;
-  readonly codex: () => T;
-}
+/** The stored word a plugin key `K` names. */
+export type KindOfKey<K> = { [Kind in HarnessKind]: (typeof KEY_OF_KIND)[Kind] extends K ? Kind : never }[HarnessKind];
+
+/** The stored word of `harness` (a stored word or a plugin key), or `undefined` when Runtimes has no behaviour for it. */
+export const kindOrUndefined = (harness: string): HarnessKind | undefined =>
+  isSupportedKind(harness) ? harness : supportedKindOfKey(harness);
+
+/** The stored word of `harness` (a stored word or a plugin key). Refuses a harness Runtimes has no behaviour for, by name. */
+export const kindOf = (harness: string): HarnessKind => {
+  const kind = kindOrUndefined(harness);
+  if (kind === undefined) throw new UnsupportedHarnessError(harness);
+  return kind;
+};
+
+/** The kit members a harness cannot be planned or launched without, by what each needs. */
+type NeededMember = 'runtimeExtras' | 'fixedLayer' | 'ownedSkillEntries';
 
 /**
- * Runs the case for `harness` (a stored word or a plugin key). A harness with no case THROWS
- * {@link UnsupportedHarnessError}: this replaces every `x === 'claude' ? <Claude> : <Codex>` and every `x !== 'claude'`
- * guard, which would have treated a third harness as one of the two.
+ * Two facts about a harness that hold WHETHER OR NOT its plugin is on, so a kit cannot be where they are read from: a runtime
+ * whose plugin is off is still planned and refused by name, and the plan it makes is byte for byte what it always was. They are
+ * rows of this table of words (not behaviour), and the plugins' own kits say the same: a drift test per kit pins
+ * `keepsSharedState` and the members each kit gives against this table.
+ *  - `keepsSharedState`: its runtimes keep one state database in the shared history pool, so that directory is made for them.
+ *  - `needs`: the kit members a runtime of it is refused without, to plan (`planned`) and then to launch (`launched`).
  */
-export function byHarness<T>(harness: string, cases: ByHarness<T>): T {
-  const kind = isSupportedKind(harness) ? harness : supportedKindOfKey(harness);
-  switch (kind) {
-    case 'claude':
-      return cases.claude();
-    case 'codex':
-      return cases.codex();
-    default:
-      throw new UnsupportedHarnessError(harness);
-  }
-}
+const KIT_FACTS = {
+  claude: { keepsSharedState: false, needs: { planned: [], launched: [] } },
+  codex: {
+    keepsSharedState: true,
+    needs: { planned: ['runtimeExtras', 'fixedLayer'], launched: ['ownedSkillEntries'] },
+  },
+} as const satisfies Readonly<
+  Record<
+    HarnessKind,
+    {
+      readonly keepsSharedState: boolean;
+      readonly needs: { readonly planned: readonly NeededMember[]; readonly launched: readonly NeededMember[] };
+    }
+  >
+>;
 
-/**
- * Whether `harness` (a stored word or a plugin key) is exactly the harness `kind`. For a check that names ONE harness and
- * does nothing for the rest (a filter, an early return); a choice between harnesses is {@link byHarness}, never this.
- */
-export const isKind = (harness: string, kind: HarnessKind): boolean =>
-  harness === kind || supportedKindOfKey(harness) === kind;
+/** Whether runtimes of `kind` keep their state database in the shared history pool (made for them even when their plugin is off). */
+export const keepsSharedStateOf = (kind: HarnessKind): boolean => KIT_FACTS[kind].keepsSharedState;
+
+/** The kit members a runtime of `kind` needs: to be planned, and then (`launched`) to be started. */
+export const neededKitMembers = (kind: HarnessKind, stage: 'planned' | 'launched'): readonly NeededMember[] =>
+  KIT_FACTS[kind].needs[stage];

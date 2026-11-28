@@ -6,7 +6,6 @@ import {
   type AdaptInput,
   type AdaptPlumbing,
   adaptProfile,
-  CODEX_IGNORED_SKILL_KEYS,
   type ComponentBodies,
   componentPartialSupport,
   concatenateInstructions,
@@ -15,7 +14,6 @@ import {
   SKILLS_STORE_DIRECTORY,
   skillFrontmatterKeys,
   skillSourceReference,
-  usesClaudeImports,
 } from '../../../daemon/lib/account/adapt.ts';
 import { type ResolvedProfile, resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
@@ -698,6 +696,7 @@ describe('componentPartialSupport', () => {
     const actual = componentPartialSupport({
       components: { instructions: {}, mcp: {}, skills: { mine: { items: ['release-notes', 'plain'] } } },
       skillFrontmatter: { 'release-notes': ['name', 'allowed-tools', 'model', 'hooks'], plain: ['name'] },
+      kits: REAL_KITS,
     });
 
     // Assert
@@ -743,6 +742,7 @@ describe('componentPartialSupport', () => {
       },
       skillFrontmatter: { 'release-notes': ['allowed-tools'] },
       instructionBodies: { main: 'Read this.\n@docs/style.md\n', plain: 'Mail me@example.com.', claudeOnly: '@x.md' },
+      kits: REAL_KITS,
     });
 
     // Assert
@@ -766,6 +766,7 @@ describe('componentPartialSupport', () => {
     // Act
     const actual = componentPartialSupport({
       components: { instructions: {}, mcp: {}, skills: { mine: { items: ['release-notes'] } } },
+      kits: REAL_KITS,
     });
 
     // Assert
@@ -782,6 +783,7 @@ describe('componentPartialSupport', () => {
     const partialSupport = componentPartialSupport({
       components: model.components,
       skillFrontmatter: { 'release-notes': ['allowed-tools'] },
+      kits: REAL_KITS,
     });
 
     // Act
@@ -792,11 +794,6 @@ describe('componentPartialSupport', () => {
     if (!codex.ok || !claude.ok) throw new Error('unexpected');
     codex.resolved.partial.should.deepEqual(partialSupport);
     claude.resolved.partial.should.deepEqual([]);
-  });
-
-  it('should declare only keys it can explain', () => {
-    // Assert
-    Object.keys(CODEX_IGNORED_SKILL_KEYS).should.deepEqual(['allowed-tools', 'model', 'hooks']);
   });
 });
 
@@ -825,13 +822,6 @@ describe('adaptation helpers', () => {
     isSseUrl('https://mcp.linear.app/SSE//').should.be.true();
     isSseUrl('https://mcp.example.com/sse/messages').should.be.false();
     isSseUrl('https://mcp.example.com').should.be.false();
-  });
-
-  it('should spot a Claude @path import line and nothing else', () => {
-    // Assert
-    usesClaudeImports('Intro\n  @docs/a.md  \nmore').should.be.true();
-    usesClaudeImports('write to me@example.com').should.be.false();
-    usesClaudeImports('@ alone').should.be.false();
   });
 
   it('should concatenate instructions under a header naming each source', () => {
