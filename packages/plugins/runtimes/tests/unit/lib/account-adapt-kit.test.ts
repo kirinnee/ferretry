@@ -99,7 +99,16 @@ describe('a Claude runtime without its plugin kit, as data', () => {
       message: 'codex is not supported here',
     });
     expect(missingKitRefusal('claude', {} as RuntimesHarnessKit)).toBeUndefined();
-    expect(missingKitRefusal('codex', { runtimeExtras: () => ({ env: {} }) })).toBeUndefined();
+    expect(
+      missingKitRefusal('codex', {
+        runtimeExtras: () => ({ env: {} }),
+        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [] } }),
+      }),
+    ).toBeUndefined();
+    expect(missingKitRefusal('codex', { runtimeExtras: () => ({ env: {} }) })).toEqual({
+      kind: 'harness-unsupported',
+      message: 'codex is not supported here',
+    });
   });
 });
 

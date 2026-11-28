@@ -47,8 +47,12 @@ export const ALLOWED: ReadonlyMap<string, string> = new Map([
     'the v4 verb word a person types, named only to point at its 5.0 replacement (fy ferret move); it runs nothing',
   ],
   [
-    'packages/plugins/runtimes/daemon/lib/account/fixed-layer.ts#CODEX_HIDDEN_NOTICES',
-    "Codex's own [notice] config key names, which spell 'migration'; the harness defines them, not Ferretry",
+    'packages/plugins/codex/daemon/lib/runtimes-kit/fixed-layer.ts#CODEX_HIDDEN_NOTICES#hide_gpt5_1_migration_prompt',
+    "Codex's own [notice] config key, which spells 'migration'; the harness defines it, not Ferretry",
+  ],
+  [
+    'packages/plugins/codex/daemon/lib/runtimes-kit/fixed-layer.ts#CODEX_HIDDEN_NOTICES#hide_gpt-5.1-codex-max_migration_prompt',
+    "Codex's own [notice] config key, which spells 'migration'; the harness defines it, not Ferretry",
   ],
 ]);
 
