@@ -11,9 +11,7 @@ import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure, type KitEndHost } from 
 import should from 'should';
 import type { CodexAppServerOutcome } from '../../daemon/lib/runtimes-kit/codex-runtime.ts';
 import { codexRuntimesKit } from '../../daemon/lib/runtimes-kit/index.ts';
-import { RuntimeEndSupervision } from '../../daemon/lib/runtimes-kit/runtime-end-supervision.ts';
-
-type RuntimeEndSeams = ConstructorParameters<typeof RuntimeEndSupervision>[0]['seams'] & object;
+import { RuntimeEndSupervision, type RuntimeEndSeams } from '../../daemon/lib/runtimes-kit/runtime-end-supervision.ts';
 
 // The sentence the Codex harness hands Ferrets for a pane showing this, which Ferrets records on the stopped ferret.
 const EXPLAINED = codexLaunchFailure(
