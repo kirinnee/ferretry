@@ -1463,12 +1463,15 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
       const theirRuntime = source.runtimes[entry.name] as Runtime;
       // Switched off here is this machine's own say, never the source's: a take keeps it, an add never copies it.
       const disabled = choice === 'take' ? target.runtimes[name]?.disabled : undefined;
+      // Who typed the name is this machine's own say too: a take keeps what the local record says (the source's
+      // provenance must not unflag an owner-typed name), an add carries the source's.
+      const namedByOwner = choice === 'take' ? target.runtimes[name]?.namedByOwner : theirRuntime.namedByOwner;
       runtimes[name] = {
         credential,
         profile: profile.slice('profile/'.length),
         ...(theirRuntime.harness === undefined ? {} : { harness: theirRuntime.harness }),
         ...(theirRuntime.compactAt === undefined ? {} : { compactAt: theirRuntime.compactAt }),
-        ...(theirRuntime.namedByOwner === undefined ? {} : { namedByOwner: true }),
+        ...(namedByOwner === undefined ? {} : { namedByOwner: true }),
         ...(disabled === undefined ? {} : { disabled }),
         ...keyed(entry.ref),
       };
