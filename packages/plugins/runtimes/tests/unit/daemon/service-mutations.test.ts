@@ -3,6 +3,7 @@
  * and the sentences the person approving it reads. Every refusal is a sentence that names what to do instead.
  */
 import { describe, it } from 'bun:test';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import should from 'should';
 import {
   type AccountChangeFacts,
@@ -13,7 +14,7 @@ import {
 } from '../../../daemon/lib/service/mutations.ts';
 import { type AccountModel, type AccountModelDocument, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 
-const FACTS: AccountChangeFacts = { machineName: 'box', runningSessions: 0 };
+const FACTS: AccountChangeFacts = { machineName: 'box', runningSessions: 0, kits: REAL_KITS };
 
 /** A base document; `patch` overrides whole top-level keys. */
 const documentOf = (patch: Partial<AccountModelDocument> = {}): AccountModelDocument => ({

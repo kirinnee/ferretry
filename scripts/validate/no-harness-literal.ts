@@ -44,7 +44,6 @@ const TABLE_PINS: readonly (readonly [string, number])[] = [
   ['lib/service/catalog.ts', 1],
   ['lib/service/harness-facts.ts', 1],
   ['lib/service/setup-service.ts', 1],
-  ['lib/settings.ts', 1],
 ];
 
 /**

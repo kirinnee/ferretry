@@ -8,6 +8,7 @@
  * Every secret here is an obviously fake one.
  */
 import { describe, it } from 'bun:test';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import should from 'should';
 import { HIDDEN_VALUE_TEXT } from '@ferretry/std/secret-reference';
 import { HIDDEN_WORD_TEXT, type ComponentView, WITHHELD_WORDS_TEXT } from '../../../contract/index.ts';
@@ -57,6 +58,7 @@ const derive = (model: AccountModel, change: object) =>
   deriveAccountChange(model, change as Parameters<typeof deriveAccountChange>[1], {
     machineName: 'box',
     runningSessions: 0,
+    kits: REAL_KITS,
   });
 
 const put = (kind: 'settings' | 'mcp', words: readonly unknown[], etag?: string) =>

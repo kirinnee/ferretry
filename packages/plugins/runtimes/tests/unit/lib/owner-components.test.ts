@@ -3,6 +3,7 @@
  * handed as, the model with them left out, and the guard that keeps a hook out of an import.
  */
 import { describe, it } from 'bun:test';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import should from 'should';
 import {
   handedText,
@@ -57,8 +58,15 @@ describe('ownerReferences', () => {
 describe('ownerWrites', () => {
   it("should hand a settings component's file to its owner as the document itself, parsed", () => {
     // Act
-    const writes = ownerWrites(BEFORE, NEXT, file =>
-      file === 'components/settings/claude-settings.json' ? '{"theme":"dark"}' : undefined,
+    const writes = ownerWrites(
+      BEFORE,
+      NEXT,
+      file => (file === 'components/settings/claude-settings.json' ? '{"theme":"dark"}' : undefined),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      REAL_KITS,
     );
 
     // Assert
@@ -72,7 +80,16 @@ describe('ownerWrites', () => {
   it('should say why a settings document could not be made instead of handing over a half one', () => {
     // Act
     const missing = ownerWrites(BEFORE, NEXT, () => undefined).find(write => write.kind === 'settings');
-    const broken = ownerWrites(BEFORE, NEXT, () => '{ not json').find(write => write.kind === 'settings');
+    const broken = ownerWrites(
+      BEFORE,
+      NEXT,
+      () => '{ not json',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      REAL_KITS,
+    ).find(write => write.kind === 'settings');
 
     // Assert
     should(missing?.text).be.undefined();

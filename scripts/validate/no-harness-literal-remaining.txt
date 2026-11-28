@@ -77,4 +77,3 @@ packages/plugins/runtimes/daemon/lib/models/catalog.ts::tables::4
 packages/plugins/runtimes/daemon/lib/service/catalog.ts::tables::1
 packages/plugins/runtimes/daemon/lib/service/harness-facts.ts::tables::1
 packages/plugins/runtimes/daemon/lib/service/setup-service.ts::tables::1
-packages/plugins/runtimes/daemon/lib/settings.ts::tables::1

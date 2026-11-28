@@ -224,7 +224,6 @@ describe('the harness-literal gate', () => {
       'lib/service/catalog.ts::tables::1',
       'lib/service/harness-facts.ts::tables::1',
       'lib/service/setup-service.ts::tables::1',
-      'lib/settings.ts::tables::1',
     ]);
   });
 

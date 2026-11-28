@@ -8,6 +8,7 @@
  */
 import { type ImportPlan } from '../account/import.ts';
 import { mergeImportRecord } from '../account/import-plan.ts';
+import type { SettingsKits } from '../settings.ts';
 import type { AccountModel, LayerReferenceText } from '../account/schema.ts';
 import {
   type ComponentWriter,
@@ -67,6 +68,8 @@ export async function composeOwned(input: {
   readonly ownedOf?: (reference: string) => readonly string[];
   /** The etag an earlier import left on each of the owner's files through a component, by reference (the record's). */
   readonly etagsOf?: (reference: string) => Readonly<Record<string, string>>;
+  /** What each harness's plugin gives Runtimes (its settings format), to read a settings component handed over by file. */
+  readonly kits?: SettingsKits;
 }): Promise<{ readonly documents: readonly FleetDocumentWrite[]; readonly owners?: OwnedComponents }> {
   const { before, model } = input;
   const owned = input.enabled ? ownerReferences(before, model, input.touched) : [];
@@ -82,6 +85,7 @@ export async function composeOwned(input: {
         input.touched,
         input.ownedOf,
         input.etagsOf,
+        input.kits,
       ),
       rebuild: async outcome => {
         const left = owned.filter(({ kind, name }) => outcome.refused.has(`${kind}/${name}`));
