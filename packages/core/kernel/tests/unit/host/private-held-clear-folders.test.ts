@@ -7,8 +7,8 @@ import { identityKey } from '../../../host/fence-index.ts';
 
 /**
  * A read walks the folders above its file on every call; they are remembered clear for a moment so a hundred ferrets'
- * reads do not each look at the same folders again. The file ITSELF is looked at every time, so a replaced or relinked
- * entry is never answered from the memory.
+ * reads do not each walk the same ancestors again. The file and its parent are identified every time, so a replaced
+ * entry or parent is never answered from another identity's memory.
  */
 
 const parents: string[] = [];
@@ -24,9 +24,9 @@ async function layout() {
   const base = `${parent}/base`;
   const folder = `${base}/projects/-work`;
   const secret = `${parent}/secret.json`;
-  await mkdir(folder, { recursive: true });
-  await writeFile(`${folder}/conv.jsonl`, 'transcript');
-  await writeFile(secret, 'private');
+  await mkdir(folder, { recursive: true, mode: 0o700 });
+  await writeFile(`${folder}/conv.jsonl`, 'FAKE-transcript');
+  await writeFile(secret, 'FAKE-private');
   const identity = await REAL.identity(secret);
   if (identity === undefined) throw new Error('the secret is there');
   const guard: PrivateGuard = {
@@ -52,7 +52,7 @@ function counting(): { readonly fs: HostFs; readonly looks: string[] } {
 }
 
 describe('privatelyHeld remembers clear folders for a moment', () => {
-  test('a second read of a sibling looks at the entry only; after the moment it walks again', async () => {
+  test('a second read of a sibling identifies the entry and parent; after the moment it walks again', async () => {
     const l = await layout();
     const { fs, looks } = counting();
     let at = 1_000;
@@ -61,7 +61,7 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     expect(looks).toEqual([l.file, l.folder, `${l.base}/projects`, l.base]);
     looks.length = 0;
     expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
-    expect(looks).toEqual([l.file]);
+    expect(looks).toEqual([l.file, l.folder]);
     looks.length = 0;
     at += CLEAR_FOLDER_MS + 1;
     expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
@@ -70,7 +70,7 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
 
   test('the entry itself is never answered from memory: a file replaced by a link to a private file is held at once', async () => {
     const l = await layout();
-    let at = 1_000;
+    const at = 1_000;
     const clock = (): number => at;
     expect(await privatelyHeld(REAL, l.guard, l.file, l.base, clock)).toBe(false);
     // The transcript's name now reaches the private file (a hard link, a bind mount's identity): same moment, warm memory.
@@ -79,7 +79,7 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     expect(await privatelyHeld(REAL, l.guard, l.file, l.base, clock)).toBe(true);
     // And one replaced by another plain file is still clear.
     await rm(l.file);
-    await writeFile(l.file, 'again');
+    await writeFile(l.file, 'FAKE-again');
     expect(await privatelyHeld(REAL, l.guard, l.file, l.base, clock)).toBe(false);
   });
 
@@ -99,8 +99,8 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     // The folder above the file is replaced by the private folder's identity: the guard that names it is built afresh.
     const swapped = `${l.base}/projects/-work`;
     await rename(swapped, `${swapped}.old`);
-    await mkdir(swapped);
-    await writeFile(`${swapped}/conv.jsonl`, 'x');
+    await mkdir(swapped, { mode: 0o700 });
+    await writeFile(`${swapped}/conv.jsonl`, 'FAKE-x');
     const identity = await REAL.identity(swapped);
     if (identity === undefined) throw new Error('the folder is there');
     const fresh: PrivateGuard = { keys: { has: key => key === identityKey(identity), size: 1 }, closed: new Set() };
@@ -135,9 +135,9 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
   test('deeper walks never extend an ancestor past its own moment', async () => {
     const l = await layout();
     const deeper = `${l.folder}/a/b`;
-    await mkdir(deeper, { recursive: true });
-    await writeFile(`${deeper}/c.jsonl`, 'x');
-    await writeFile(`${l.folder}/a/d.jsonl`, 'x');
+    await mkdir(deeper, { recursive: true, mode: 0o700 });
+    await writeFile(`${deeper}/c.jsonl`, 'FAKE-x');
+    await writeFile(`${l.folder}/a/d.jsonl`, 'FAKE-x');
     const { fs, looks } = counting();
     let at = 1_000;
     const clock = (): number => at;
@@ -147,11 +147,35 @@ describe('privatelyHeld remembers clear folders for a moment', () => {
     at = 1_000 + CLEAR_FOLDER_MS - 100;
     looks.length = 0;
     expect(await privatelyHeld(fs, l.guard, `${deeper}/c.jsonl`, l.base, clock)).toBe(false);
-    expect(looks).toEqual([`${deeper}/c.jsonl`, deeper, `${l.folder}/a`]);
+    expect(looks).toEqual([`${deeper}/c.jsonl`, deeper, `${l.folder}/a`, l.folder]);
     // After the ancestor's own moment nothing below it is still remembered: the whole chain is walked again.
     at = 1_000 + CLEAR_FOLDER_MS + 1;
     looks.length = 0;
     expect(await privatelyHeld(fs, l.guard, `${l.folder}/a/d.jsonl`, l.base, clock)).toBe(false);
     expect(looks).toEqual([`${l.folder}/a/d.jsonl`, `${l.folder}/a`, l.folder, `${l.base}/projects`, l.base]);
+  });
+
+  test('another alias of a folder cannot extend the first alias walk expiry', async () => {
+    const l = await layout();
+    const alias = `${l.base}/other/-work`;
+    await mkdir(`${l.base}/other`, { mode: 0o700 });
+    const looks: string[] = [];
+    const fs: HostFs = {
+      ...REAL,
+      identity: async path => {
+        looks.push(path);
+        const source = path === alias || path.startsWith(`${alias}/`) ? `${l.folder}${path.slice(alias.length)}` : path;
+        return await REAL.identity(source);
+      },
+    };
+    let at = 1_000;
+    const clock = (): number => at;
+    expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
+    // The other alias walks different ancestors after the original walk's expiry.
+    at += CLEAR_FOLDER_MS + 1;
+    expect(await privatelyHeld(fs, l.guard, `${alias}/conv.jsonl`, l.base, clock)).toBe(false);
+    looks.length = 0;
+    expect(await privatelyHeld(fs, l.guard, l.file, l.base, clock)).toBe(false);
+    expect(looks).toEqual([l.file, l.folder, `${l.base}/projects`, l.base]);
   });
 });
