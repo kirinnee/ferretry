@@ -5,6 +5,8 @@ import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
 import type { FerretId } from './ids.ts';
 import type { Cancel } from './ports.ts';
 import type { CallStanding, MemberRouteDescriptor, MemberStanding, ScopedRoute } from './route.ts';
+import type { RootWriteJudgement } from './root-write.ts';
+export type { RootWriteJudgement, WritePinPermission } from './root-write.ts';
 
 /**
  * The kernel-bound ports (§7.4): provided only by the named core piece, bound by the kernel after build and before it
@@ -42,6 +44,8 @@ export type AdmissionDecision<Standing extends object = CallStanding> =
  * without a remedy is refused.
  */
 export interface Admission<Standing extends object = CallStanding, Member extends object = MemberStanding> {
+  /** Current caller's configure authority for an explicitly requested root write pin; absent/unknown refuses. */
+  judgeRootWrite?(input: RootWriteJudgement): boolean;
   /** Kernel-only delegated egress: masks the host's credential literals without exporting them. Absent refuses output. */
   maskHostCredentials?(text: string): string | undefined;
   admit(input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }): AdmissionDecision<Standing>;

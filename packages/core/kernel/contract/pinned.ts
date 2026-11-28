@@ -335,6 +335,8 @@ export interface SessionRootPinner {
 
 /** What the CALLER's policy adds at the pin's one chokepoint (today: the session viewer's denied roots). */
 export interface PinOptions {
+  /** Ask for a write pin: requires BOTH permissions.writePins and Gate's current caller configure authority. */
+  readonly write?: true;
   /** Refuse this root (`FsError` `denied`) before anything beneath it is reached: listings, content, Git alike. */
   readonly refuseRoot?: (rootReal: string) => boolean;
   /**
@@ -353,6 +355,8 @@ export interface PinOptions {
  * stays inside the kernel), and the only cwd `kernel.spawn` accepts as a pin, from the plugin whose root minted it.
  */
 export interface HeldRoot extends PinnedRoot {
+  /** Explicit scoped write request on this SAME held descriptor. Requires writePins and current caller authority; token is revoked on return. */
+  readonly withWritePin?: <T>(use: (cwd: PinnedWorkingDirectory) => Promise<T>) => Promise<T>;
   readonly policyCwd: PinnedWorkingDirectory;
   /**
    * The NAME verdict (S47, today's `fenceRefusal`), for output that never passes through {@link PinnedRoot.open} — Git's

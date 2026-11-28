@@ -70,6 +70,7 @@
         "packages/plugins/connector/",
         "packages/plugins/mcp/",
         "packages/plugins/projects/",
+        "packages/plugins/relocate/",
         "packages/plugins/runtimes/",
         "packages/plugins/search/"
       ]

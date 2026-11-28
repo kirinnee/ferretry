@@ -8,8 +8,9 @@ import { serveWorkerGrants, type WorkerGrantSources } from './worker-grants/serv
 import { WORKER_GRANTS_KEY } from './worker-grants/wire.ts';
 import type { ItemKind, Manifest, PermissionEntry } from '../manifest/types.ts';
 import { DAEMON_PROGRAM, hostAllowed, programAmong, programName, WILDCARD } from '../manifest/reach.ts';
+import { readOnlySpawnAllows, type ReadOnlySpawnEntry } from '../manifest/read-only-spawn.ts';
 import type { PinRegistry } from './pins.ts';
-import { type DetachedCall, detachedAsked, detachedNotOffered, detachedRefusal } from './detached.ts';
+import { type DetachedCall, detachedAsked, detachedNotOffered, detachedRefusal, plainEnvironment } from './detached.ts';
 import { PLUGIN_CHILD_FLAG } from './plugin-child.ts';
 
 export { hostAllowed, WILDCARD };
@@ -89,10 +90,43 @@ function resolverAnswers(declared: readonly PermissionEntry[], resolve: Resolver
 import { resolveEnv } from './adapters/process.ts';
 
 export class PermissionError extends Error {
-  constructor(sentence: string) {
+  constructor(
+    sentence: string,
+    readonly code?: 'pin_write_required',
+  ) {
     super(sentence);
     this.name = 'PermissionError';
   }
+}
+
+/** Snapshot and authorize a pinned cwd before forwarding it; shared by the real and in-memory hosts. */
+export function pinnedSpawnOptions<O extends SpawnOptions | undefined>(
+  plugin: string,
+  program: string,
+  args: readonly string[],
+  options: O,
+  pins?: Pick<PinRegistry, 'lookup'>,
+  readOnlySpawn?: readonly ReadOnlySpawnEntry[],
+): O {
+  const owned = options === undefined ? options : { ...options };
+  const cwd = owned?.cwd;
+  if (cwd === undefined || typeof cwd === 'string') return owned as O;
+  const minted = pins?.lookup(plugin, cwd);
+  if (minted === undefined)
+    throw new PermissionError(`${plugin} may start a child only in a folder one of its own roots holds open.`);
+  // The environment used for a conditional read-only declaration must be exactly what the child receives.
+  const env =
+    minted.authority === 'read' && plainEnvironment(owned?.env)
+      ? (Object.freeze({ ...owned?.env }) as Readonly<Record<string, string>>)
+      : undefined;
+  const forwarded = env === undefined ? owned : { ...owned, env };
+  const readOnly = minted.authority === 'read' && readOnlySpawnAllows(readOnlySpawn, program, args, env);
+  if (minted.authority !== 'write' && !(minted.authority === 'read' && readOnly))
+    throw new PermissionError(
+      `${plugin} needs write authority on the pinned root to run ${programName(program)}.`,
+      'pin_write_required',
+    );
+  return (minted.alias === undefined ? forwarded : { ...forwarded, cwd: minted.alias as FencedPath }) as O;
 }
 
 /**
@@ -169,6 +203,7 @@ export function restrictSpawn(
   items: ItemReachOf = NO_ITEMS,
   pins?: Pick<PinRegistry, 'lookup'>,
   resolve: ResolverOf = NO_RESOLVERS,
+  readOnlySpawn?: readonly ReadOnlySpawnEntry[],
 ): SpawnPort {
   /** Refuses an undeclared program, and a pinned cwd this plugin's roots did not mint; a Linux pin's alias is used. */
   const check = <O extends SpawnOptions | undefined>(program: string, args: readonly string[], options: O): O => {
@@ -176,12 +211,7 @@ export function restrictSpawn(
     if (detachedAsked(options)) throw new PermissionError(detachedNotOffered(plugin, program));
     if (!spawnPermitted(declared, items, program, resolve, args))
       throw new PermissionError(`${plugin} may not run ${programName(program)}: its manifest does not declare it.`);
-    const cwd = options?.cwd;
-    if (cwd === undefined || typeof cwd === 'string') return options;
-    const minted = pins?.lookup(plugin, cwd);
-    if (minted === undefined)
-      throw new PermissionError(`${plugin} may start a child only in a folder one of its own roots holds open.`);
-    return (minted.alias === undefined ? options : { ...options, cwd: minted.alias as FencedPath }) as O;
+    return pinnedSpawnOptions(plugin, program, args, options, pins, readOnlySpawn);
   };
   return {
     run: async (program, args, options) => {

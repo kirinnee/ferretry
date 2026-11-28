@@ -7,6 +7,9 @@ import type { MemberRouteDescriptor, RouteDescriptor, ScopedRoute } from '../con
 import type { SocketDescriptor } from '../contract/socket.ts';
 import type { InstructionWhen, Word } from '../contract/snapshot.ts';
 import type { SettingsGroupId } from './settings-groups.ts';
+import type { ReadOnlySpawnEntry } from './read-only-spawn.ts';
+export type { ReadOnlySpawnEntry } from './read-only-spawn.ts';
+import type { WritePinPermission } from '../contract/root-write.ts';
 
 /** What a plugin can add (§4). Each kind brings its contract and conformance suite. */
 export type PluginKind =
@@ -266,14 +269,9 @@ export interface OnboardingDecl {
 export type PermissionEntry = string | { readonly items: ItemKind } | ResolverEntry;
 
 /**
- * A `permissions.network` or `permissions.spawn` entry whose answers the plugin's OWN daemon half gives at each call
- * (Connections' relay endpoint, from its configured or advertised value): the half implements `resolvers: { [name]:
- * () => readonly string[] }`, called with no request data. In `network` the host is allowed only when it equals one
- * answer exactly (`host` or `host:port`, no wildcard). In `spawn` the program is allowed only when an answer names it
- * exactly: an absolute answer allows only that path, a bare name allows that basename, and an answer with `*` in it
- * allows nothing. A throwing or missing resolver refuses. A resolver name serves ONE of the two fields (its answers are
- * programs in `spawn` and hosts in `network`); a name in both is refused. The resolver is the plugin's own code: the
- * kernel does not prove what it answers from.
+ * The plugin's own `resolvers[name]()` answers at each call, with no request data. `network` matches exact hosts
+ * or host:port; `spawn` matches exact absolute paths or bare basenames. Wildcards and missing/throwing resolvers
+ * grant nothing. A name serves only one field. The kernel trusts the plugin's resolver, not its source of answers.
  */
 export interface ResolverEntry {
   readonly resolver: string;
@@ -315,6 +313,13 @@ export interface Permissions extends PublicDoorPermission {
   readonly roots?: readonly RootName[];
   readonly network?: readonly PermissionEntry[];
   readonly spawn?: readonly SpawnEntry[];
+  /**
+   * Programs read-only for EVERY invocation (spawn name/path matching; no wildcard or $daemon). Only classifies
+   * programs already in spawn; other pinned programs need write authority. An author's contract, not an OS sandbox.
+   */
+  readonly readOnlySpawn?: readonly ReadOnlySpawnEntry[];
+  /** Allows asking for a write pin under the named capability; Gate still checks the caller's own authority. */
+  readonly writePins?: readonly WritePinPermission[];
   /** Vault secret names it may use by name (never read). */
   readonly secrets?: readonly string[];
   /** Whole-name patterns (no anchors) for secrets this plugin mints, e.g. OAuth tokens.
