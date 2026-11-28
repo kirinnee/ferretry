@@ -12,6 +12,14 @@ import {
 } from '../../support/redact-encoded-samples.ts';
 
 describe('whole-word encoded scanning before additional path masking', () => {
+  it('masks an encoded path segment when public folders dilute the whole-word entropy', () => {
+    const folder = 'a'.repeat(128);
+    const value = 'aB3dE5gH7jK9mN2pQ4sT6vW8yZ0cF1hL5';
+    expect(redactText(`/${folder}/${value}/docs/file.txt`)).toEqual({
+      text: `/${folder}/‹hidden›/docs/file.txt`,
+      redacted: true,
+    });
+  });
   it.each(ENCODED_WRAPPERS)('preserves adjacent punctuation in %s for 10,000 keys', (_name, wrap) => {
     const failures: number[] = [];
     for (let sample = 0; sample < 10_000; sample++)
