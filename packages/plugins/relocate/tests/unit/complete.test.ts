@@ -128,6 +128,7 @@ test('release retains the reservation when A cannot confirm stop, and rejects co
   };
   const releasing = w.relocation.release(FERRET);
   await entered;
+  await expect(w.relocation.release(FERRET)).rejects.toMatchObject({ code: 'export_busy' });
   await expect(
     w.relocation.complete(first.exportId, { to: { daemonId: w.targetIdentity.daemonId, ferretId: 'held' } }),
   ).rejects.toMatchObject({ code: 'export_busy' });

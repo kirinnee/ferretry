@@ -1,7 +1,15 @@
 /** U16: the app's move flow, against two scripted machines: the order of the calls, what each is told, and where it stops. */
 import { describe, expect, it } from 'bun:test';
 import { toBase64Url } from '@ferretry/std/sealing';
-import { carry, type Machine, MoveStopped, type Progress, review, sizeWords } from '../../../app/lib/move.ts';
+import {
+  carry,
+  type Machine,
+  MoveStopped,
+  type Progress,
+  releaseMove,
+  review,
+  sizeWords,
+} from '../../../app/lib/move.ts';
 import { newIdentity, openOffer } from '../../support/identity.ts';
 
 const FERRET = 'f1';
@@ -266,4 +274,25 @@ describe('what the review says', () => {
       bytes: 2048,
     });
   });
+});
+
+it('release runs only behind the source passkey and names that source ferret, never resuming either machine', async () => {
+  const source = scripted('source', 'Desk', () => ({ state: 'stopped' }));
+  await releaseMove(FERRET, source.machine);
+  expect(source.pressed.count).toBe(1);
+  expect(source.calls).toEqual([
+    { route: 'POST /v1/relocate/exports/release', params: undefined, body: { ferretId: FERRET } },
+  ]);
+  const dismissed = scripted(
+    'source',
+    'Desk',
+    () => {
+      throw new Error('must not be called');
+    },
+    { dismiss: true },
+  );
+  await expect(releaseMove(FERRET, dismissed.machine)).rejects.toThrow('not unlocked');
+  expect(dismissed.calls).toEqual([]);
+  const refused = scripted('source', 'Desk', () => new Error('source has not confirmed stop'));
+  await expect(releaseMove(FERRET, refused.machine)).rejects.toThrow('Desk: source has not confirmed stop');
 });
