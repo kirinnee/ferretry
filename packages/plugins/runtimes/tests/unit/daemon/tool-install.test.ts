@@ -5,6 +5,7 @@
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
 import type { HarnessKind } from '../../../daemon/lib/manifest.ts';
 import type { ExecutableResolverPort, HarnessLocation } from '../../../daemon/lib/service/foreign.ts';
@@ -48,6 +49,7 @@ function world(options: WorldOptions = {}) {
       : { kind: harness, outcome: 'absent', searched: [] };
   };
   const service = new ToolInstallService({
+    kits: () => REAL_KITS,
     platform: options.platform ?? 'darwin',
     executables,
     locate,

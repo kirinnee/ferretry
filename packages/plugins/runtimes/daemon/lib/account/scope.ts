@@ -23,7 +23,7 @@
  * Pure and total: an unknown layer or a loop (which the schema refuses anyway) reads as generic
  * rather than throwing, so a caller holding a draft it built itself always gets an answer.
  */
-import { isSupportedKind } from '../harness-kind.ts';
+import { isSupportedKind, shortNameOf } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { credentialHarnesses } from './halves.ts';
 import { modelHarness } from './layering.ts';
@@ -49,12 +49,9 @@ export type ProfileScope =
 
 type Catalogue = Pick<AccountModel, 'profiles' | 'components'>;
 
-/** The product's words for each scope: what a badge says. */
-export const HARNESS_SCOPE_WORDS: Readonly<Record<HarnessScope, string>> = {
-  generic: 'Generic',
-  claude: 'Claude only',
-  codex: 'Codex only',
-};
+/** The product's word for a scope: what a badge says ("Generic", "Claude only"). The harness's short name is the contract's one table of words. */
+export const scopeWord = (scope: HarnessScope): string =>
+  scope === 'generic' ? 'Generic' : `${shortNameOf(scope)} only`;
 
 /** The product's word for each kind, singular, as a sentence uses it ("settings claude-settings"). */
 export const COMPONENT_KIND_WORDS: Readonly<Record<ComponentKind, string>> = {

@@ -486,6 +486,7 @@ export function fileAssembly(
   // The tool installer: the plans say what is installed and the command a person would run; an explicit install runs that
   // command through the kernel's spawn (declared `brew` and `npm` only, an argv, never a shell or sudo).
   const installer = toolInstaller({
+    kits: () => harnessKits(hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY)),
     commands,
     platform,
     spawn: () => ctx.kernel.spawn,

@@ -14,7 +14,7 @@
  */
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
 import { z } from 'zod';
-import { unsupportedHarnessSentence } from '../../contract/harness-words.ts';
+import { harnessName, harnessWords, unsupportedHarnessSentence } from '../../contract/harness-words.ts';
 
 /** What a harness is called when something refuses it: one sentence, written once. */
 export { unsupportedHarnessSentence };
@@ -111,3 +111,9 @@ export const keepsSharedStateOf = (kind: HarnessKind): boolean => KIT_FACTS[kind
 /** The kit members a runtime of `kind` needs: to be planned, and then (`launched`) to be started. */
 export const neededKitMembers = (kind: HarnessKind, stage: 'planned' | 'launched'): readonly NeededMember[] =>
   KIT_FACTS[kind].needs[stage];
+
+/** What the product calls a harness ("Claude Code"): the contract's one table of words, so a daemon sentence and a surface say the same. */
+export const displayNameOf = (kind: HarnessKind): string => harnessName(KEY_OF_KIND[kind]);
+
+/** The short name of a harness for mid-sentence use ("Claude"), from the same table of words. */
+export const shortNameOf = (kind: HarnessKind): string => harnessWords(KEY_OF_KIND[kind])?.short ?? KEY_OF_KIND[kind];

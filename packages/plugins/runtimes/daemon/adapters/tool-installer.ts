@@ -13,11 +13,17 @@ import { packageRunner } from './package-run.ts';
 import { supportedKinds } from '../lib/harness-kind.ts';
 import type { HarnessLocation } from '../lib/service/foreign.ts';
 import { ToolInstallService } from '../lib/service/tool-install.ts';
+import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
+import type { HarnessKind } from '../lib/manifest.ts';
+
+/** What each harness's plugin gives Runtimes, read live (the installer asks for each plan). */
+type ToolInstallServiceKits = () => ReadonlyMap<HarnessKind, Pick<RuntimesHarnessKit, 'install'>>;
 
 /** The commands an install looks up afresh: the harnesses, and the managers it chooses among. */
 const INSTALL_LOOKUPS: readonly string[] = [...supportedKinds(), 'npm', 'brew', 'apt-get'];
 
 export function toolInstaller(deps: {
+  readonly kits: ToolInstallServiceKits;
   readonly commands: Pick<CommandCache, 'which' | 'refresh'>;
   readonly platform: Pick<HostPlatform, 'name' | 'prime'>;
   readonly spawn: () => SpawnPort | undefined;
@@ -26,6 +32,7 @@ export function toolInstaller(deps: {
 }): ToolInstallService {
   const { commands, platform } = deps;
   return new ToolInstallService({
+    kits: deps.kits,
     // Runtimes declares no `hostFacts`: the system is asked once with `uname -s`, primed with the command lookups.
     platform: () => platform.name(),
     executables: { resolve: name => commands.which(name), runnable: () => false },

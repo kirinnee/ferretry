@@ -13,9 +13,9 @@ import {
   harnessAsset,
   isHarnessOwnedSkillEntry,
 } from '../../../daemon/lib/assets.ts';
-import { HARNESS_DISPLAY_NAMES } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import {
+  displayNameOf,
   harnessKeyOfKind,
   harnessKindOfKey,
   HarnessKindSchema,
@@ -24,7 +24,7 @@ import {
   supportedKinds,
   unsupportedHarnessSentence,
 } from '../../../daemon/lib/harness-kind.ts';
-import { claudeFastSupport, HARNESS_PACKAGES } from '../../../daemon/lib/service/foreign.ts';
+import { claudeFastSupport } from '../../../daemon/lib/service/foreign.ts';
 import {
   harnessName,
   harnessWords,
@@ -47,11 +47,16 @@ describe('harness word goldens', () => {
     expectGolden('words/tables', {
       supportedKinds: supportedKinds(),
       keyOfKind: Object.fromEntries(supportedKinds().map(kind => [kind, harnessKeyOfKind(kind)])),
-      displayNames: HARNESS_DISPLAY_NAMES,
+      displayNames: Object.fromEntries(supportedKinds().map(kind => [kind, displayNameOf(kind)])),
       instructionsNames: Object.fromEntries(
         [...REAL_KITS].map(([kind, kit]) => [kind, kit.importSetup?.instructionsName]),
       ),
-      packages: HARNESS_PACKAGES,
+      packages: Object.fromEntries(
+        [...REAL_KITS].map(([kind, kit]) => [
+          kind,
+          { npm: kit.install?.npm, cask: kit.install?.cask, nixpkgs: kit.install?.nixpkgs },
+        ]),
+      ),
       ownedSkillEntries: HARNESS_OWNED_SKILL_ENTRIES,
       assets: Object.fromEntries(
         supportedKinds().map(kind => [

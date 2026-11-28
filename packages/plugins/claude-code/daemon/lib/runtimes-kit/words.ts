@@ -7,6 +7,7 @@ import { claudeFastSupport } from '../harness/fast-mode.ts';
  */
 export const claudeWordsKit: RuntimesHarnessKit = {
   command: 'claude',
+  install: { npm: '@anthropic-ai/claude-code', cask: 'claude-code', nixpkgs: 'claude-code', label: 'Claude Code' },
   homeEnv: 'CLAUDE_CONFIG_DIR',
   hostOrganization: true,
   ownedSkillEntries: [],

@@ -323,6 +323,11 @@ describe('data-word consumer goldens', () => {
       let primed = 0;
       const installer = toolInstaller({
         commands: cache,
+        kits: () =>
+          new Map([
+            ['claude', claudeRuntimesKit],
+            ['codex', codexRuntimesKit],
+          ] as const),
         platform: { name: () => scenario.platform, prime: async () => void primed++ },
         spawn: () =>
           ({

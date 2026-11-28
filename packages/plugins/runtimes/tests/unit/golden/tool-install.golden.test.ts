@@ -5,6 +5,7 @@
  */
 import { describe, it } from 'bun:test';
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import type { HarnessKind } from '../../../daemon/lib/manifest.ts';
 import { ToolInstallService } from '../../../daemon/lib/service/tool-install.ts';
 import { expectGolden } from './support/golden.ts';
@@ -29,6 +30,7 @@ function service(world: World) {
   const runs: Run[] = [];
   const ran = new Set<string>();
   const built = new ToolInstallService({
+    kits: () => REAL_KITS,
     platform: world.platform,
     executables: { resolve: name => world.onPath?.[name], runnable: path => world.runnable?.includes(path) ?? false },
     locate: harness =>

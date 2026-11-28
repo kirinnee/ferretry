@@ -97,11 +97,10 @@ import {
   type ImportRecord,
 } from '../account/import.ts';
 import { mergeImport, planImportRefusing, scansRefusing } from '../account/import-plan.ts';
-import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
 import { type ComponentWriter, handedText, withoutHookChanges } from '../account/owner-components.ts';
 import { parseImportRecord } from '../account/import-record.ts';
 import { composeOwned, handOver, type OwnedComponents, recordText, withoutHandedBodies } from './owner-hand-over.ts';
-import { supportedKinds } from '../harness-kind.ts';
+import { displayNameOf, supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { parseSettings, SETTINGS_FORMAT, type SettingsObject } from '../settings.ts';
@@ -414,7 +413,7 @@ export class FleetSetupService {
 
   #tools(): SetupTool[] {
     return this.deps.tools.plans(HARNESSES).map(preview => {
-      const label = HARNESS_DISPLAY_NAMES[preview.harness];
+      const label = displayNameOf(preview.harness);
       if (preview.installed) return { harness: harnessKey(preview.harness), label, installed: true };
       const plan = preview.plan;
       return {
@@ -788,7 +787,7 @@ export class FleetSetupService {
       ...Object.entries(plan.credentials).map(([id, credential]) =>
         credential.store === 'host'
           ? `Login ${id}: shared with ${credential.harness} in your terminal — signing out in one signs out both.`
-          : `Login ${id}: a new ${HARNESS_DISPLAY_NAMES[credential.harness]} login that needs sign-in.`,
+          : `Login ${id}: a new ${displayNameOf(credential.harness)} login that needs sign-in.`,
       ),
       ...(plan.components.length > 0 ? [`Adds ${plural(plan.components.length, 'part')} of your setup.`] : []),
       ...(handed.length === 0

@@ -55,6 +55,7 @@ import {
 } from '../../../contract/harness-kit.ts';
 import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
 import {
+  displayNameOf,
   harnessKeyOfKind,
   kindOf,
   neededKitMembers,
@@ -68,7 +69,6 @@ import { isBuiltinInstructions } from './builtin-autonomous.ts';
 import {
   type Contribution,
   type FlatLayer,
-  HARNESS_DISPLAY_NAMES,
   type PartialSupport,
   pathsOverlap,
   type ResolvedProfile,
@@ -641,7 +641,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   if (plumbing.harness !== harness) {
     problems.push({
       kind: 'harness-mismatch',
-      message: `a ${HARNESS_DISPLAY_NAMES[harness]} runtime was given ${HARNESS_DISPLAY_NAMES[plumbing.harness]}'s plumbing`,
+      message: `a ${displayNameOf(harness)} runtime was given ${displayNameOf(plumbing.harness)}'s plumbing`,
     });
   }
 
@@ -667,7 +667,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
         kind: 'reserved-skill-item',
         item,
         reference: layer.reference,
-        message: `skill "${item}" has the name of the folder ${HARNESS_DISPLAY_NAMES[harness]} keeps its own skills in, so it cannot be added: rename it`,
+        message: `skill "${item}" has the name of the folder ${displayNameOf(harness)} keeps its own skills in, so it cannot be added: rename it`,
       });
       continue;
     }
@@ -798,7 +798,7 @@ export function componentPartialSupport(facts: PartialSupportFacts): readonly Pa
 
 /** A partial-support entry in the product's words (E22): "Partly supported on Codex: …". */
 export const describePartialSupport = (entry: PartialSupport): string =>
-  `Partly supported on ${HARNESS_DISPLAY_NAMES[entry.harness]}: ${entry.reason}`;
+  `Partly supported on ${displayNameOf(entry.harness)}: ${entry.reason}`;
 
 /** The plumbing facts the caller knows, as `harness` takes them. */
 export function plumbingOf(

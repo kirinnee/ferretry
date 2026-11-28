@@ -84,10 +84,10 @@ import {
 import { type BudgetHolds, binaryNameOf, runtimeDisable } from './disabled-runtime.ts';
 import { applyFixedLayer, CODEX_KILL_RULES_FILE, type FixedLayer, fixedLayerOf } from './fixed-layer.ts';
 import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds } from './ids.ts';
-import { HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
+import { resolveProfile } from './layering.ts';
 import type { AccountModel } from './schema.ts';
 import { runtimeHarness } from './scope.ts';
-import { kindOrUndefined } from '../harness-kind.ts';
+import { displayNameOf, kindOrUndefined } from '../harness-kind.ts';
 import { runtimeExtras, sqliteHomeOf, usesSqliteHome } from './runtime-extras.ts';
 
 const DIRECTORY_MODE = 0o700;
@@ -382,7 +382,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       reasons.push(
         resolved.availability.reason === 'empty'
           ? `profile "${runtime.profile}" has no layers`
-          : `nothing in profile "${runtime.profile}" applies to ${HARNESS_DISPLAY_NAMES[harness]}`,
+          : `nothing in profile "${runtime.profile}" applies to ${displayNameOf(harness)}`,
       );
     }
     for (const unread of resolved.settings.unread) {

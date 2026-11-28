@@ -4,7 +4,7 @@
  * login the apply selected or created (through Logins' env-import port). Names and words only: never a value.
  */
 import type { LoginEnvImportApi, LoginEnvImportOutcome } from '@ferretry/plugin-logins/contract';
-import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
+import { displayNameOf } from '../harness-kind.ts';
 import type { ImportedLoginEnv } from '../account/import.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { FleetCatalogRefusal, type ExecutorCaller, type FleetCatalogServiceDeps } from './catalog-service.ts';
@@ -120,7 +120,7 @@ export async function importLoginEnvs(
   for (const env of envs) {
     // The one throw: a request that has ended stops before the next login's variables are written (what landed stays).
     caller?.live?.();
-    const label = HARNESS_DISPLAY_NAMES[env.harness];
+    const label = displayNameOf(env.harness);
     let outcome: LoginEnvImportOutcome;
     try {
       outcome = await port.import({
