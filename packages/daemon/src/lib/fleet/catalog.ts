@@ -371,7 +371,8 @@ function redactEncoded(text: string, hide: () => void): string {
     // Ordinary paths and URLs are references, not unnamed encoded values.
     if (
       !/^[A-Za-z0-9+/_-]{32,}={1,2}$/u.test(word) &&
-      (/^(?:[a-z][a-z0-9+.-]*:\/\/|\.?\.?\/|~\/)/iu.test(word) || /\/[\w.-]+\.[a-z]{1,8}(?:[?#].*)?$/iu.test(word))
+      (/^(?:[a-z][a-z0-9+.-]*:\/\/|\.?\.?\/|~\/|\$[A-Za-z_][A-Za-z0-9_]*\/)/iu.test(word) ||
+        /\/[\w.-]+\.[a-z0-9]{1,8}(?:[?#].*)?$/iu.test(word))
     )
       return word;
     return word.replace(ENCODED_RUN, (value, at: number) => {
