@@ -149,6 +149,36 @@ describe('what is refused before anything is written', () => {
     expect(b.refusals.join(' ')).toContain('no login is signed in');
   });
 
+  test('presence is asked for the resolved target runtime, never Relocate’s own secret scope', async () => {
+    const w = await world();
+    const needs = {
+      ...(await w.relocation.preflight(FERRET, 'x')).needs,
+      runtime: 'source-only',
+      secrets: ['API_TOKEN'],
+    };
+    const asked: string[][] = [];
+    const t = await targetWorld(
+      {
+        vault: () => ({
+          has: async () => {
+            throw new Error('consumer-scoped has cannot answer runtime presence');
+          },
+          hasForRuntime: async (runtime, name) => {
+            asked.push([runtime, name]);
+            return true;
+          },
+        }),
+      },
+      w.fixture.remote,
+    );
+    expect(await t.importer.preflight((await t.offers.open()).offerId, { needs })).toMatchObject({
+      ok: true,
+      missingSecrets: [],
+      runtime: 'claude-default',
+    });
+    expect(asked).toEqual([['claude-default', 'API_TOKEN']]);
+  });
+
   test('a folder with no remote cannot be matched, so it is refused', async () => {
     const w = await world();
     const target = await targetWorld({}, w.fixture.remote);

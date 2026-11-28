@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { afterAll } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FerretId, HarnessKey, StartRequest } from '@ferretry/core-ferrets/contract';
@@ -15,6 +16,10 @@ import type { World } from './world.ts';
 import { FERRET } from './fake-ferrets.ts';
 
 const NORMAL_REMOTE = normalizeRemote(REMOTE_URL) as string;
+const targetRoots = new Set<string>();
+afterAll(() => {
+  for (const root of targetRoots) rmSync(root, { recursive: true, force: true });
+});
 export const NEW_FERRET = 'f-on-b' as FerretId;
 
 export interface TargetOptions {
@@ -22,6 +27,7 @@ export interface TargetOptions {
   readonly project?: boolean;
   readonly accounts?: number;
   readonly secrets?: readonly string[];
+  readonly vault?: ImporterDeps['vault'];
   readonly harnesses?: readonly string[];
   readonly runtimeOk?: boolean;
   readonly start?: 'ok' | 'refuse' | 'throw';
@@ -79,6 +85,7 @@ export interface TargetWorld {
 /** One target machine: its own clone of the project on a real disk, real git, and fakes for the neighbours it asks. */
 export async function targetWorld(options: TargetOptions = {}, remoteBare?: string): Promise<TargetWorld> {
   const root = mkdtempSync(join(tmpdir(), 'relocate-target-'));
+  targetRoots.add(root);
   const machine = join(root, 'machine');
   mkdirSync(machine, { recursive: true });
   const repo = join(machine, 'project');
@@ -204,7 +211,12 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
                     },
                   },
           } as never),
-    vault: () => ({ has: async (name: string) => (options.secrets ?? []).includes(name) }) as never,
+    vault:
+      options.vault ??
+      (() => ({
+        has: async () => false,
+        hasForRuntime: async (_runtime: string, name: string) => (options.secrets ?? []).includes(name),
+      })),
     checkout: options.wrapCheckout === undefined ? realCheckout : options.wrapCheckout(realCheckout),
     received: {
       record: async (ferret, entry) => {

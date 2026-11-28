@@ -12,12 +12,24 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KernelPorts } from '@ferretry/kernel/contract';
-import { afterAll } from 'bun:test';
+import { afterAll, afterEach } from 'bun:test';
 
 const fixtureRoots = new Set<string>();
 afterAll(() => {
   for (const root of fixtureRoots) rmSync(root, { recursive: true, force: true });
 });
+
+const privateWorktrees = new Set<string>();
+afterEach(() => {
+  for (const root of privateWorktrees) rmSync(root, { recursive: true, force: true });
+  privateWorktrees.clear();
+});
+
+function privateWorktreeRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), 'relocate-private-worktrees-'));
+  privateWorktrees.add(root);
+  return root;
+}
 
 /** A hermetic git: no user config, no system config, a fixed identity, so a fixture is the same on every machine. */
 const GIT_ENV = {
@@ -50,7 +62,7 @@ export function gitInput(cwd: string, input: Uint8Array, ...args: string[]): str
  */
 export function realKernel(
   remotes: ReadonlyMap<string, string> = new Map(),
-  worktrees = mkdtempSync(join(tmpdir(), 'relocate-private-worktrees-')),
+  worktrees = privateWorktreeRoot(),
 ): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
   mkdirSync(worktrees, { recursive: true, mode: 0o700 });
   return {

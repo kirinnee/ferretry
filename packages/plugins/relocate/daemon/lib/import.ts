@@ -54,7 +54,7 @@ export interface ImporterDeps {
   readonly projects: () => Pick<ProjectsApi, 'list'> | undefined;
   readonly gitAccounts: () => Pick<GitAccountsApi, 'list'> | undefined;
   readonly runtimes: () => Pick<RuntimesApi, 'resolve' | 'default'> | undefined;
-  readonly vault: () => Pick<VaultApi, 'has'> | undefined;
+  readonly vault: () => Pick<VaultApi, 'hasForRuntime'> | undefined;
   readonly checkout: Checkout;
   readonly received: ReceivedLedger;
   readonly log: Pick<Log, 'warn'>;
@@ -399,8 +399,8 @@ export class Importer {
     const missingSecrets: string[] = [];
     if (needs.secrets.length > 0) {
       const vault = this.deps.vault();
-      if (vault === undefined) missingSecrets.push(...needs.secrets);
-      else for (const name of needs.secrets) if (!(await vault.has(name as never))) missingSecrets.push(name);
+      if (vault?.hasForRuntime === undefined || runtime === undefined) missingSecrets.push(...needs.secrets);
+      else for (const name of needs.secrets) if (!(await vault.hasForRuntime(runtime, name))) missingSecrets.push(name);
       if (missingSecrets.length > 0)
         refusals.push(
           `this machine does not hold the secret${missingSecrets.length === 1 ? '' : 's'} ${missingSecrets.join(', ')}; copy ${missingSecrets.length === 1 ? 'it' : 'them'} first`,

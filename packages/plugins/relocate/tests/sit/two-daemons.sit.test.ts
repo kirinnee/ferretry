@@ -340,7 +340,7 @@ beforeAll(async () => {
   );
   await writeFile(
     path.join(a.home, 'state/ferrets/f1/launch-references.json'),
-    JSON.stringify({ format: 1, names: [] }),
+    JSON.stringify({ format: 1, names: ['SIT_LOGIN_TOKEN'] }),
   );
   await writeFile(
     path.join(a.home, 'state/ferrets/f1/ferret.json'),
@@ -485,6 +485,7 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
   } = {};
   let moved: Awaited<ReturnType<typeof carry>>;
   let reviewed: Awaited<ReturnType<typeof review>>;
+  let completedExportId = '';
 
   it('person releases a handed-out abandoned export on real A and immediately reuses the slot', async () => {
     const source = machineOf(a);
@@ -549,6 +550,23 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
     sourceBefore.head = git(fixture.folder, 'rev-parse', 'HEAD');
     sourceBefore.diff = git(fixture.folder, 'diff', 'HEAD');
     reviewed = await review('f1', machineOf(a), machineOf(b));
+    expect(reviewed.source.needs.secrets).toContain('SIT_LOGIN_TOKEN');
+    // The SAME offer and runtime reference: B holding the key passes, removing it names the missing key,
+    // restoring it passes again. Presence is checked through the real per-needer Vault, never a fake.
+    expect(reviewed.target.missingSecrets).toEqual([]);
+    expect((await admin(b, 'DELETE', '/v1/secrets/SIT_LOGIN_TOKEN')).status).toBe(200);
+    const target = machineOf(b);
+    const check = async () =>
+      await target.press(() =>
+        target.client.call('POST /v1/relocate/offers/:offerId/preflight', {
+          params: { offerId: reviewed.offer.offerId },
+          body: { needs: reviewed.source.needs },
+        }),
+      );
+    const missing = await check();
+    expect(missing).toMatchObject({ ok: false, missingSecrets: ['SIT_LOGIN_TOKEN'] });
+    expect((await admin(b, 'POST', '/v1/secrets', { name: 'SIT_LOGIN_TOKEN', value: LOGIN_SECRET })).status).toBe(200);
+    expect(await check()).toMatchObject({ ok: true, missingSecrets: [] });
     expect(reviewed.refusals, reviewed.refusals.join('; ')).toEqual([]);
     expect(reviewed.ok).toBe(true);
     expect(reviewed.source.moves.map(row => row.id)).toContain('conversation');
@@ -570,6 +588,7 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
       client: {
         call: (async (route, init) => {
           const result = await realSource.client.call(route, init);
+          if (route.endsWith('/export')) completedExportId = ExportResponseSchema.parse(result).exportId;
           if (route.endsWith('/complete') && !lost) {
             lost = true;
             throw new Error('synthetic lost completion reply');
@@ -716,11 +735,12 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
     });
     expect((await admin(a, 'GET', '/v1/ferrets/f1')).json.movedTo).toMatchObject({ machine: 'beta' });
     const entry = MovedDocumentSchema.parse(await machineOf(a).client.call('GET /v1/relocate/moved')).moved.f1!;
-    expect(entry.exportId).toBeDefined();
+    expect(entry.exportId).toBeUndefined();
+    expect(completedExportId).not.toBe('');
     const source = machineOf(a);
     const completed = await source.press(() =>
       source.client.call('POST /v1/relocate/exports/:exportId/complete', {
-        params: { exportId: entry.exportId! },
+        params: { exportId: completedExportId },
         body: { to: { daemonId: b.daemonId, ferretId: moved.received.ferretId } },
       }),
     );
@@ -732,7 +752,7 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
       await expect(
         source.press(() =>
           source.client.call('POST /v1/relocate/exports/:exportId/complete', {
-            params: { exportId: entry.exportId! },
+            params: { exportId: completedExportId },
             body: { to },
           }),
         ),
@@ -806,6 +826,12 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
     // and a read of where ferrets went is the fleet's use, which that device keeps
     const seen = await limitedA.client.call('GET /v1/relocate/moved');
     expect(MovedDocumentSchema.parse(seen).moved.f1?.daemonId).toBe(b.daemonId);
+    expect(Object.keys((seen as { moved: Record<string, object> }).moved.f1!).sort()).toEqual([
+      'at',
+      'daemonId',
+      'ferretId',
+    ]);
+    expect(JSON.stringify(seen)).not.toContain(completedExportId);
   });
 
   it('a governed device holding every grant is still asked for its passkey on each machine before any step', async () => {

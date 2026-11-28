@@ -100,6 +100,11 @@ describe('the four routes', () => {
     const ledger = await host.request('GET', '/v1/relocate/moved', { as: owner() });
     expect(ledger.status).toBe(200);
     expect(ledger.json()).toMatchObject({ moved: { [FERRET]: { daemonId: target.daemonId, ferretId: 'f-on-b' } } });
+    expect(Object.keys((ledger.json() as { moved: Record<string, object> }).moved[FERRET]!).sort()).toEqual([
+      'at',
+      'daemonId',
+      'ferretId',
+    ]);
     expect((await host.request('GET', '/v1/relocate/moved', { as: ferret('f1') })).status).toBe(403);
     await host.stop();
   });
@@ -111,6 +116,33 @@ describe('the four routes', () => {
     expect(ledger.json()).toEqual({ moved: {} });
     await host.stop();
   });
+});
+
+test('Release refuses a live source with no held export, without stopping it; an already stopped source can reconcile', async () => {
+  const { host, ferrets } = await started();
+  try {
+    const refused = await host.request('POST', '/v1/relocate/exports/release', {
+      as: owner(),
+      body: { ferretId: FERRET },
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.json()).toMatchObject({
+      code: 'no_interrupted_move',
+      error: 'There is no held move for this ferret, and the source is not stopped.',
+    });
+    expect(ferrets.state).toBe('idle');
+    expect(ferrets.calls).toEqual([]);
+    ferrets.state = 'stopped';
+    const reconciled = await host.request('POST', '/v1/relocate/exports/release', {
+      as: owner(),
+      body: { ferretId: FERRET },
+    });
+    expect(reconciled.status).toBe(200);
+    expect(reconciled.json()).toEqual({ state: 'stopped' });
+    expect(ferrets.calls).toEqual([]);
+  } finally {
+    await host.stop();
+  }
 });
 
 test('person releases an abandoned handed-out export, leaving a resumed A stopped and the slot reusable', async () => {

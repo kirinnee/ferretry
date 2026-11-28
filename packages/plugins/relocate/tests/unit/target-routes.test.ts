@@ -33,7 +33,7 @@ async function started(over: { readonly secrets?: readonly string[]; readonly re
           runtime: { id: 'claude-default', harness: 'claude-code', launch: { available: true } },
         }),
       },
-      vault: { has: async (name: string) => (over.secrets ?? []).includes(name) },
+      vault: { hasForRuntime: async (_runtime: string, name: string) => (over.secrets ?? []).includes(name) },
     },
   });
   return { host, ferrets };

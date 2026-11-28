@@ -52,7 +52,7 @@ beforeAll(async () => {
   );
   server = Bun.serve({
     hostname: '127.0.0.1',
-    port: 0,
+    port: Number(process.env.FY_MOVE_TEST_PORT ?? 7489),
     fetch: request => {
       const path = new URL(request.url).pathname;
       const scene = path.startsWith('/actions') ? actions : move;
@@ -123,9 +123,11 @@ async function states(width: number, scheme: string, style: string): Promise<voi
     const picker = await open('');
     expect(await picker.textContent('[data-move-step="pick"]')).toContain('Laptop');
     expect(await picker.textContent('[data-move-step="pick"]')).toContain('offline');
+    expect(await picker.locator('[data-move-release]').count()).toBe(0);
     await settle(picker, 'pick');
     await picker.click('text=Check what would move');
     await picker.waitForSelector('[data-move-step="review"]');
+    expect(await picker.locator('[data-move-release]').count()).toBe(0);
     const table = (await picker.textContent('[data-move-step="review"]')) ?? '';
     expect(table).toContain('Moves with it');
     expect(table).toContain('Stays on this machine');
@@ -174,14 +176,24 @@ async function states(width: number, scheme: string, style: string): Promise<voi
     await settle(released, 'released');
 
     const repeat = await open('&unconfirmed=1');
+    expect(await repeat.locator('[data-move-release]').count()).toBe(0);
+    await repeat.click('text=Check what would move');
+    await repeat.click('text=Move to Laptop');
+    await repeat.waitForSelector('[data-move-recovery]');
     await repeat.click('text=Release this move on Desk');
     await repeat.waitForFunction(() =>
       document.querySelector('[data-move-release]')?.textContent?.includes('Its move slot is free'),
     );
-    await repeat.click('text=Check what would move');
-    await repeat.click('text=Move to Laptop');
-    await repeat.waitForSelector('[data-move-recovery]');
-    expect(await repeat.getByRole('button', { name: 'Release this move on Desk' }).isEnabled()).toBe(true);
+    expect(await repeat.getByRole('button', { name: 'Release this move on Desk' }).isDisabled()).toBe(true);
+
+    for (const failure of ['look', 'export', 'chunk']) {
+      const failed = await open(`&fail=${failure}`);
+      await failed.click('text=Check what would move');
+      if (failure !== 'look') await failed.click('text=Move to Laptop');
+      await failed.waitForSelector('[data-move-step="failed"]');
+      expect(await failed.locator('[data-move-release]').count()).toBe(failure === 'chunk' ? 1 : 0);
+      await settle(failed, `failed-${failure}`);
+    }
 
     const interrupted = await open('&interrupt=1&recovery=1');
     await interrupted.click('text=Check what would move');

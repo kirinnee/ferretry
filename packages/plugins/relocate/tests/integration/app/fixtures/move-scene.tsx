@@ -109,6 +109,12 @@ const EXPORT = {
 const answerOf = (daemon: string) => async (route: string, init?: { params?: Record<string, string> }) => {
   await new Promise(resolve => setTimeout(resolve, 60));
   if (daemon === SOURCE) {
+    if (
+      (params.get('fail') === 'look' && route.endsWith('/preflight')) ||
+      (params.get('fail') === 'export' && route.endsWith('/export')) ||
+      (params.get('fail') === 'chunk' && route.includes('/chunks/'))
+    )
+      throw new Error('The move could not continue.');
     if (route === 'POST /v1/relocate/exports/release') return { state: 'stopped' };
     if (route === 'POST /v1/relocate/:ferretId/preflight') return PREFLIGHT;
     if (route === 'POST /v1/relocate/:ferretId/export') return EXPORT;

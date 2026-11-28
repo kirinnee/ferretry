@@ -161,7 +161,14 @@ export default implementDaemon(manifest, {
       'GET /v1/relocate/moved': async () => {
         const read = await kernel.state.read(MOVED_STATE);
         if (!read.ok) throw new ApiError(500, 'the moved ledger could not be read', 'moved_unreadable');
-        return jsonResponse(read.value ?? { moved: {} });
+        return jsonResponse({
+          moved: Object.fromEntries(
+            Object.entries(read.value?.moved ?? {}).map(([id, entry]) => [
+              id,
+              { daemonId: entry.daemonId, ferretId: entry.ferretId, at: entry.at },
+            ]),
+          ),
+        });
       },
       'POST /v1/relocate/:ferretId/preflight': async (call: CallContext) => {
         mayReadTree(call);

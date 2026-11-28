@@ -35,7 +35,7 @@ type Phase =
   | { readonly kind: 'review'; readonly to: DaemonReach; readonly reviewed: Review }
   | { readonly kind: 'moving'; readonly to: DaemonReach; readonly reviewed: Review; readonly progress: Progress }
   | { readonly kind: 'done'; readonly to: DaemonReach; readonly moved: Moved }
-  | { readonly kind: 'failed'; readonly message: string };
+  | { readonly kind: 'failed'; readonly message: string; readonly interrupted: boolean };
 
 const STEPS: readonly { readonly step: Step; readonly label: string }[] = [
   { step: 'sealing', label: 'Stopping the ferret and sealing it' },
@@ -84,13 +84,17 @@ export function MoveMachine({
       });
       setPhase({ kind: 'review', to, reviewed });
     } catch (error) {
-      setPhase({ kind: 'failed', message: messageOf(error) });
+      setPhase({ kind: 'failed', message: messageOf(error), interrupted: false });
     }
   };
   const move = async (to: DaemonReach, reviewed: Review): Promise<void> => {
     setReleased(false);
     setReleaseNote('');
-    const show = (progress: Progress): void => setPhase({ kind: 'moving', to, reviewed, progress });
+    let exported = false;
+    const show = (progress: Progress): void => {
+      if (progress.step === 'carrying') exported = true;
+      setPhase({ kind: 'moving', to, reviewed, progress });
+    };
     show({ step: 'sealing' });
     try {
       const moved = await carry(ferret, machineOf(from), machineOf(to), reviewed, {
@@ -100,7 +104,7 @@ export function MoveMachine({
       setPhase({ kind: 'done', to, moved });
       onMoved();
     } catch (error) {
-      setPhase({ kind: 'failed', message: messageOf(error) });
+      setPhase({ kind: 'failed', message: messageOf(error), interrupted: exported });
     }
   };
   return (
@@ -326,8 +330,10 @@ export function MoveMachine({
             <p className="m-0 text-cell text-err">{phase.message}</p>
             <p className="m-0 text-meta text-muted">
               Check both machines before resuming. The source’s present state and any partial import need
-              reconciliation; do not resume both copies. Release the interrupted move here to keep the source stopped
-              and free its slot.
+              reconciliation; do not resume both copies.
+              {phase.interrupted
+                ? ' Release the interrupted move here to keep the source stopped and free its slot.'
+                : ''}
             </p>
             <div className="flex justify-end gap-sm">
               <button type="button" className="kt-btn" onClick={onClose}>
@@ -340,8 +346,7 @@ export function MoveMachine({
           </section>
         ) : null}
         {!busy &&
-        (phase.kind === 'pick' ||
-          phase.kind === 'failed' ||
+        ((phase.kind === 'failed' && phase.interrupted) ||
           (phase.kind === 'done' && phase.moved.stub === 'unmarked')) ? (
           <section className="flex flex-col gap-sm" data-move-release="">
             <p className="m-0 text-meta text-muted">

@@ -286,7 +286,14 @@ export class Relocation {
           'export_busy',
         );
       const fenced = summary.movedTo !== undefined;
-      if (!fenced) {
+      const held = [...this.#exports.values()].some(open => open.ferret === summary.id);
+      if (!held && summary.state !== 'stopped')
+        throw new RelocateRefused(
+          409,
+          'There is no held move for this ferret, and the source is not stopped.',
+          'no_interrupted_move',
+        );
+      if (!fenced && summary.state !== 'stopped') {
         await this.deps.ferrets.stop(summary.id, 'polite', 'releasing an interrupted move');
         const stopped = await this.deps.ferrets.get(summary.id);
         if (stopped?.state !== 'stopped')
