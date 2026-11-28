@@ -1,5 +1,6 @@
 import type { PageFieldFacts } from '@ferretry/core-vault/contract';
 import { recogniseBrowserChallenge } from '../../challenges/recognise.ts';
+import { boundedAction } from './form-action.ts';
 import {
   BROWSER_INPUT_SHOT_MARGIN,
   BROWSER_INPUT_SHOT_MAX_SIDE,
@@ -209,7 +210,7 @@ const TITLE_WAIT_MS = 750;
  * What the page says about a field, read in the trusted world (an isolated world: nothing the page defines is called, and
  * every method is taken from the prototype so a form's named children cannot shadow it): its label (`aria-label`, else the
  * text of what its `aria-labelledby` names, else its `<label>`s) and the form that owns it (the form it submits with, `form=`
- * included): its id, its name and where it sends what is typed, as origin + path: the form's action, or the `formaction` of
+ * included): its id, its name and its full canonical destination: the form's action, or the `formaction` of
  * its default submit button. A field with no form answers `form: null`. Only read, never trusted: every fact is compared
  * with itself across looks and, in the card's classifier, can only raise a field's care.
  */
@@ -227,13 +228,16 @@ const FIELD_READ = `function () {
   let form = null;
   if (owner) {
     let raw = attr(owner, "action");
-    const button = Element.prototype.querySelector.call(owner, 'button:not([type]), button[type="submit" i], input[type="submit" i], input[type="image" i]');
+    const root = Node.prototype.getRootNode.call(owner);
+    const query = root instanceof Document ? Document.prototype.querySelectorAll : DocumentFragment.prototype.querySelectorAll;
+    const buttons = query.call(root, 'button, input[type="submit" i], input[type="image" i]');
+    const button = Array.from(buttons).find((button) => button.form === owner && (button instanceof HTMLButtonElement ? button.type === 'submit' : true));
     const own = button ? attr(button, "formaction") : null;
-    if (own !== null && own.trim() !== "") raw = own;
+    if (own !== null) raw = own;
     let action = "";
     try {
-      const url = raw === null || raw.trim() === "" ? new URL(get(Document.prototype, "URL").call(doc)) : new URL(raw, get(Node.prototype, "baseURI").call(doc));
-      action = url.origin + url.pathname;
+      const url = raw === null || raw === "" ? new URL(get(Document.prototype, "URL").call(doc)) : new URL(raw, get(Node.prototype, "baseURI").call(doc));
+      action = url.href;
     } catch (error) { action = ""; }
     form = { id: clean(attr(owner, "id")), name: clean(attr(owner, "name")), action };
   }
@@ -330,6 +334,8 @@ export function inputFieldAttributes(node: unknown, label?: string, form?: FormR
           ...(form.id === '' ? {} : { formId: form.id }),
           ...(form.name === '' ? {} : { formName: form.name }),
           formAction: form.action,
+          ...(form.digest === undefined ? {} : { formActionDigest: form.digest }),
+          ...(form.originDigest === undefined ? {} : { formActionOriginDigest: form.originDigest }),
         }),
   };
 }
@@ -338,7 +344,10 @@ export function inputFieldAttributes(node: unknown, label?: string, form?: FormR
 interface FormRead {
   readonly id: string;
   readonly name: string;
+  /** The safe display cut to the protocol's bound; the fingerprints always cover the whole action and origin. */
   readonly action: string;
+  readonly digest?: string;
+  readonly originDigest?: string;
 }
 
 const sameAttributes = (left: FieldAttributes, right: FieldAttributes): boolean =>
@@ -725,7 +734,7 @@ interface FieldRead {
   readonly unread?: true;
 }
 
-/** A form fact that does not fit the protocol's bounds, or an action that did not resolve, is not a fact: it is unread. */
+/** A form fact that does not fit the protocol's bounds (an action is cut and fingerprinted first), or an action that did not resolve, is not a fact: it is unread. */
 const formFits = (form: FormRead): boolean =>
   form.action !== '' &&
   form.action.length <= ACTION_LIMIT &&
@@ -754,8 +763,17 @@ async function pageReadOf(trusted: TrustedField, session: InputCdpSession): Prom
     (typeof form.id !== 'string' || typeof form.name !== 'string' || typeof form.action !== 'string')
   )
     throw new Refusal();
+  const bounded = form === null ? undefined : boundedAction(form.action as string, ACTION_LIMIT);
   const owner =
-    form === null ? null : { id: form.id as string, name: form.name as string, action: form.action as string };
+    form === null || bounded === undefined
+      ? null
+      : {
+          id: form.id as string,
+          name: form.name as string,
+          action: bounded.display,
+          digest: bounded.digest,
+          originDigest: bounded.originDigest,
+        };
   if (owner !== null && !formFits(owner)) throw new Refusal();
   return { label: read.label, form: owner };
 }

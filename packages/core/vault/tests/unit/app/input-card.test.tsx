@@ -60,6 +60,23 @@ async function hidePage(): Promise<() => void> {
   };
 }
 
+describe('all the card risks are visible', () => {
+  it('shows the origin warning beside the red plain-field risk and a new-document warning', async () => {
+    const moved = { level: 'amber' as const, reason: 'The form now sends to another site.' };
+    const document = { level: 'amber' as const, reason: 'This is another document.' };
+    const plain = { level: 'red' as const, reason: 'The ferret can read this value.' };
+    const { mounted } = await card(pageRequest({ risk: plain, risks: [document, moved] }));
+    try {
+      expect(mounted.container.textContent).toContain(plain.reason);
+      expect(mounted.container.textContent).toContain(document.reason);
+      expect(mounted.container.textContent).toContain(moved.reason);
+      expect(mounted.container.querySelectorAll('[data-input-warning]').length).toBe(2);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
 describe('the input card holds a typed value only in its field', () => {
   it('I6 never puts what is typed into the markup: not in the page, not in the value attribute, shown or hidden', async () => {
     const { mounted } = await card();
