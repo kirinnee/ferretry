@@ -202,6 +202,33 @@ export interface SecretOfferSignRequest {
   readonly expiresAt: string;
 }
 
+/** A move offer to sign (Relocate): the fields the target publishes; the kernel adds its own id and key. */
+export interface RelocateOfferSignRequest {
+  readonly v: number;
+  readonly offerId: string;
+  /** The offer's one-time X25519 public key, base64url. */
+  readonly publicKey: string;
+  readonly expiresAt: string;
+}
+
+/** What the kernel adds to a move offer: the daemon id, the identity key (SPKI, base64url) and the signature. */
+export interface SignedRelocateOffer {
+  readonly daemonId: string;
+  readonly identityKey: string;
+  readonly signature: string;
+}
+
+/** Relocate's SOURCE header; the kernel supplies sourceDaemonId and identityKey. */
+export interface RelocateBundleSignRequest {
+  readonly v: number;
+  readonly offerId: string;
+  readonly targetDaemonId: string;
+  readonly expiresAt: string;
+  readonly ephemeralKey: string;
+  readonly chunks: number;
+  readonly bytes: number;
+}
+
 /** What the kernel adds to an offer: the daemon id, the identity key (SPKI, base64url) and the signature. */
 export interface SignedSecretOffer {
   readonly daemonId: string;
@@ -226,6 +253,9 @@ export interface IdentitySigner {
   signLinkStoreRequest(request: LinkStoreSignRequest): Promise<SignedLinkStoreSignature>;
   /** LP(`ferretry-secret-import-offer-v1`) ‖ LP(v) ‖ LP(importId) ‖ LP(daemonId) ‖ LP(identityKey) ‖ LP(publicKey) ‖ LP(expiresAt). */
   signSecretOffer(request: SecretOfferSignRequest): Promise<SignedSecretOffer>;
+  /** LP(`ferretry-relocate-offer-v1`) ‖ LP(v) ‖ LP(offerId) ‖ LP(daemonId) ‖ LP(identityKey) ‖ LP(publicKey) ‖ LP(expiresAt). */
+  signRelocateOffer(request: RelocateOfferSignRequest): Promise<SignedRelocateOffer>;
+  signRelocateBundle(request: RelocateBundleSignRequest): Promise<SignedRelocateOffer>;
 }
 
 /**

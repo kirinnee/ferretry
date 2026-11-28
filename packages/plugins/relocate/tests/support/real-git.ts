@@ -1,10 +1,11 @@
 import {
-  realpathSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -30,11 +31,22 @@ export function git(cwd: string, ...args: string[]): string {
   return done.stdout.toString();
 }
 
+/** Synthetic raw tree objects cannot be made through porcelain: this input path deliberately constructs hostile packs. */
+export function gitInput(cwd: string, input: Uint8Array, ...args: string[]): string {
+  const done = Bun.spawnSync(['git', ...args], { cwd, env: GIT_ENV, stdin: input });
+  if (done.exitCode !== 0) throw new Error('the synthetic git object could not be made');
+  return done.stdout.toString().trim();
+}
+
 /**
  * The kernel's spawn and roots as far as the working tree uses them, over the real disk: real git, real files. The
  * folder handle refuses what the kernel's `imports` root refuses for this use (a `..`, a link, a second hard link).
  */
-export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
+export function realKernel(
+  remotes: ReadonlyMap<string, string> = new Map(),
+  worktrees = mkdtempSync(join(tmpdir(), 'relocate-private-worktrees-')),
+): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
+  mkdirSync(worktrees, { recursive: true, mode: 0o700 });
   return {
     clock: { nowMs: () => performance.now() } as KernelPorts['clock'],
     spawn: {
@@ -45,12 +57,34 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
         throw new Error('not used');
       },
       runBytes: async (program, args, options) => {
-        const child = Bun.spawn([program, ...args], {
+        let invocation = [...args];
+        if (program === 'git' && args.includes('clone')) {
+          const remote = args[args.length - 2] ?? '';
+          const fixture = remotes.get(remote);
+          if (fixture === undefined || fixture === '') throw new Error('test network fence: no external git transport');
+          invocation = [
+            ...args.slice(0, args.indexOf('clone')),
+            '-c',
+            'protocol.file.allow=always',
+            ...args.slice(args.indexOf('clone'), -2),
+            fixture,
+            args.at(-1) as string,
+          ];
+        }
+        const child = Bun.spawn([program, ...invocation], {
           env: { ...GIT_ENV, ...(options?.env as Readonly<Record<string, string>> | undefined) },
           cwd: typeof options?.cwd === 'string' ? options.cwd : options?.cwd?.describe,
           stdout: 'pipe',
           stderr: 'pipe',
+          stdin: options?.stdin === undefined ? 'ignore' : 'pipe',
         });
+        if (options?.stdin !== undefined) {
+          const sink = child.stdin as unknown as { write(data: Uint8Array): unknown; end(): unknown };
+          sink.write(
+            typeof options.stdin === 'string' ? new TextEncoder().encode(options.stdin) : new Uint8Array(options.stdin),
+          );
+          sink.end();
+        }
         const out = new Uint8Array(await new Response(child.stdout).arrayBuffer());
         const exitCode = await child.exited;
         const cap = options?.maxStdoutBytes ?? 1024 * 1024;
@@ -65,8 +99,8 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
       },
     },
     roots: {
-      root: (_name: string, scope?: { readonly subfolder?: string }) => {
-        const base = scope?.subfolder ?? '';
+      root: (name: string, scope?: { readonly subfolder?: string }) => {
+        const base = name === 'worktrees' ? worktrees : (scope?.subfolder ?? '');
         return {
           resolve: (relative: string) =>
             relative.startsWith('/') || relative.split('/').includes('..')
@@ -77,6 +111,10 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
             close: async () => {},
           }),
           realPath: async (path: string) => realpathSync(path),
+          fileIdentity: async (path: string) => {
+            const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+            return stat === undefined ? undefined : { device: stat.dev, inode: stat.ino };
+          },
           lstat: async (path: string) => {
             try {
               const s = lstatSync(path);
@@ -93,14 +131,41 @@ export function realKernel(): Pick<KernelPorts, 'roots' | 'spawn' | 'clock'> {
           },
           readBytes: async (path: string, limit?: number) =>
             new Uint8Array(await Bun.file(path).arrayBuffer()).slice(0, limit),
+          makeDirectory: async (path: string) => {
+            mkdirSync(path, { recursive: true });
+          },
+          createDirectory: async (path: string) => {
+            mkdirSync(path, { mode: 0o700 });
+            const stat = lstatSync(path, { bigint: true });
+            return { device: stat.dev, inode: stat.ino };
+          },
+          writeBytes: async (path: string, bytes: Uint8Array, options?: { readonly exclusive?: boolean }) => {
+            if (options?.exclusive === true && lstatSync(path, { throwIfNoEntry: false }) !== undefined)
+              throw new Error('exists');
+            writeFileSync(path, bytes);
+          },
+          remove: async (path: string, options?: { expectedIdentity?: { device: bigint; inode: bigint } }) => {
+            if (options?.expectedIdentity !== undefined) {
+              const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+              if (stat === undefined) return;
+              if (stat.dev !== options.expectedIdentity.device || stat.ino !== options.expectedIdentity.inode)
+                throw new Error('changed');
+            }
+            rmSync(path, { recursive: true, force: true });
+          },
         };
       },
     } as unknown as KernelPorts['roots'],
   };
 }
 
+/** The address a fixture's project is known by on both machines: never contacted. */
+export const REMOTE_URL = 'https://example.invalid/acme/project.git';
+
 export interface Fixture {
   readonly folder: string;
+  /** The bare repository the fixture pushed to: a target's own clone of the project comes from here. */
+  readonly remote: string;
   /** Every planted value a move must never carry, by the file it was planted in. */
   readonly secrets: Readonly<Record<string, string>>;
 }
@@ -123,6 +188,10 @@ export function makeRepository(): Fixture {
   git(folder, 'add', '.');
   git(folder, 'commit', '-q', '-m', 'first');
   git(folder, 'push', '-q', 'origin', 'main');
+  // A network-shaped address, so a move can match the project by it; the bare repository above is where the commits are.
+  git(folder, 'remote', 'set-url', 'origin', REMOTE_URL);
+  // ... and a push (a test that publishes the local commit) still lands in the bare repository, never on the network.
+  git(folder, 'remote', 'set-url', '--push', 'origin', remote);
   writeFileSync(join(folder, 'second.txt'), 'two\n');
   git(folder, 'add', '.');
   git(folder, 'commit', '-q', '-m', 'second (not pushed)');
@@ -138,7 +207,7 @@ export function makeRepository(): Fixture {
   writeFileSync(join(folder, 'deploy.pem'), `${secrets['deploy.pem']}\n`);
   mkdirSync(join(folder, 'node_modules/pkg'), { recursive: true });
   writeFileSync(join(folder, 'node_modules/pkg/index.js'), 'module.exports = 1;\n');
-  return { folder, secrets };
+  return { folder, remote, secrets };
 }
 
 /** Every file below a folder, as `relative path → bytes`, for a byte-for-byte comparison before and after. */

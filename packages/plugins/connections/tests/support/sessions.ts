@@ -52,6 +52,12 @@ export class FakeSessions implements SessionLayer {
     signSecretOffer: async () => {
       throw new Error('not used by this fixture');
     },
+    signRelocateOffer: async () => {
+      throw new Error('not used by this fixture');
+    },
+    signRelocateBundle: async () => {
+      throw new Error('not used');
+    },
   };
   readonly links: FakeLink[] = [];
   readonly carriers: CarrierKey[] = [];

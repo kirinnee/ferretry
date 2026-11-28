@@ -14,6 +14,7 @@ import {
   type PackId,
 } from '../ids.ts';
 import type { RunnerHandle } from '../kinds.ts';
+import type { PackedConversation } from '../kinds/harness.ts';
 
 /**
  * The most free-form harness flags one start may carry, and the longest one may be (today's `protocol/src/lib/
@@ -149,6 +150,13 @@ export interface StartRequest {
   readonly prompt?: string;
   /** Start bound to an existing harness conversation (§6.2). */
   readonly harnessConversation?: string;
+  /**
+   * Start on a conversation that arrived from another machine (C-45, Relocate's import): the harness writes it into THIS
+   * ferret's own home during the launch (`Harness.unpackConversation`) and the ferret resumes it. Only the owner's start may
+   * carry one, never together with `harnessConversation`, and only a harness that can unpack takes it: every other case is
+   * refused before the first write. A pack that the harness then refuses fails the launch like any other start failure.
+   */
+  readonly relocated?: PackedConversation;
   readonly conversationSource?: ConversationSource;
   readonly by: 'owner' | 'ferret' | 'pack' | 'board' | 'warden';
   /**

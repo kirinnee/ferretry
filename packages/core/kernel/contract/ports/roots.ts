@@ -416,6 +416,12 @@ export interface RootHandle {
   lstat(path: FencedPath): Promise<RootLstat | undefined>;
   /** `mkdir -p` inside the root; a new folder gets `mode` (default `0o700`). */
   makeDirectory(path: FencedPath, options?: { readonly mode?: number }): Promise<void>;
+  /**
+   * Exclusively creates ONE 0700 directory in a daemon-owned 0700 parent of a writable internal root.
+   * Returns device/inode from the creating descriptor, before releasing the parent; never adopts an existing entry.
+   * The caller must recheck this identity before use and pass it to `remove`. Optional only for test doubles.
+   */
+  createDirectory?(path: FencedPath): Promise<RootIdentity>;
   /** The real path of an EXISTING name, links resolved, checked again to be inside the root. */
   realPath(path: FencedPath): Promise<FencedPath>;
   /**

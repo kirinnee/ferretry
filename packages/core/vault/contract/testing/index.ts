@@ -328,6 +328,10 @@ export class FakeRedaction implements Redaction {
       return masked;
     };
     const scope: RedactionScope = {
+      secretNamesIn: bytes =>
+        values
+          .filter(([, value]) => value !== '' && Buffer.from(bytes).includes(Buffer.from(value)))
+          .map(([name]) => name),
       text: s => values.reduce((out, [secret, value]) => out.split(value).join(secretMask(secret)), s),
       cells: (grid: CellGrid): CellGrid => {
         const rows = grid.rows.map(row => {

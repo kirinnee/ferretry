@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import { FerretFolderGuard } from '../worktrees/ferret-folders.ts';
 import type { AsksApi } from '@ferretry/core-asks/contract';
-import type { ChildEnvironment, VaultApi } from '@ferretry/core-vault/contract';
+import { secretReferencesIn, type ChildEnvironment, type VaultApi } from '@ferretry/core-vault/contract';
 import type { FencedPath, HookDecision, InstructionEntry, SharedCredential } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
@@ -32,6 +32,7 @@ import { beforePane, type LaunchGuard, type LaunchSteps, paneOpened, paneVariabl
 import { paneEnvironment } from './pane-env.ts';
 import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../../../contract/agent-address.ts';
+import { relocatedRefusal, unpackRelocated, conversationForLaunch } from './start-conversation.ts';
 import {
   type FerretBirth,
   DAEMON_ORIGIN,
@@ -302,6 +303,7 @@ export interface FerretsPorts {
   realPath?(ferret: FerretId, folder: string): Promise<string | undefined>;
   /** Where a launch records the switches it handed the pane (`instructions` reads them back). Unbound: none is kept. */
   launchEnvironment?: Pick<LaunchEnvironmentRecord, 'write'>;
+  recordLaunchSecrets?(ferret: FerretId, names: readonly string[]): Promise<void>;
   /**
    * Where a launch records the instruction sections it told the pane, by id and fingerprint, so a ferret whose words
    * changed since can be told apart (`outdated`). Unbound, or a write that fails: none is kept and the ferret is never
@@ -527,6 +529,7 @@ interface LaunchExtras {
   readonly carried?: ResumeOptions['onCarried'] | undefined;
   readonly notInWardenTree?: true | undefined;
   readonly fast?: DecidedFast | undefined;
+  readonly relocated?: StartRequest['relocated'];
 }
 
 /**
@@ -756,6 +759,8 @@ interface LaunchSaid {
   conversationUnknown?: true;
   /** The harness's own sentence for a first turn that failed to start ({@link Harness.startFailure}), when it fits the cause. */
   explained?: string;
+  /** A conversation that came from another machine, unpacked into this ferret's own home before the pane opens. */
+  relocated?: StartRequest['relocated'];
 }
 
 class ResumeRefusal extends Error {
@@ -1155,6 +1160,8 @@ export class FerretsService implements FerretsApi {
     if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');
     if (this.ports.harness(harnessKey) === undefined)
       return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);
+    const unfit = relocatedRefusal(request, this.ports.harness(harnessKey), harnessKey);
+    if (unfit !== undefined) return unfit;
     // Bind before admission; the launch verifies this identity again before the harness starts.
     const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
     if (!bound.ok) return bound;
@@ -1262,6 +1269,7 @@ export class FerretsService implements FerretsApi {
             return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
               attached: opening.value.files,
               bound: bound.value,
+              ...(request.relocated === undefined ? {} : { relocated: request.relocated }),
               ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
             });
           });
@@ -2154,13 +2162,14 @@ export class FerretsService implements FerretsApi {
     revive?: ReviveTurnRequest,
     extras: LaunchExtras = {},
   ): Promise<Result<FerretId, StartFailure>> {
-    const { attached = [], carried, notInWardenTree, bound, fast, prepared } = extras;
+    const { attached = [], carried, notInWardenTree, bound, fast, prepared, relocated } = extras;
     const created = new Set<RunnerHandle>();
     let runner: Runner | undefined;
     let failure: StartFailure;
     let turn: PendingTurn | undefined;
     // A START that names a conversation is an explicit continue: it never falls back to a fresh conversation.
     const said: LaunchSaid = kind === 'start' ? { requireConversation: true } : {};
+    if (relocated !== undefined) said.relocated = relocated;
     try {
       const session = await this.sessionStep(record, kind, prompt, revive, attached, notInWardenTree);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
@@ -2332,7 +2341,6 @@ export class FerretsService implements FerretsApi {
     const collected = await collectLaunchParts(this.ports.launchParts(), forTakers);
     if (!collected.ok) return collected;
     const spec: LaunchSpec = { ...base, parts: collected.value };
-    // Ordinary launches keep their order. A live replacement checks its sealed environment before changing the home or token.
     if (!staged) {
       const home = await prepareLaunchHome(harness, spec);
       if (!home.ok) return home;
@@ -2368,7 +2376,8 @@ export class FerretsService implements FerretsApi {
     const ready =
       prepared === undefined ? await this.prepareLaunch(record, prompt, conversation, decidedFast) : ok(prepared);
     if (!ready.ok) return ready;
-    const { harness, spec, env, issued } = ready.value;
+    const { harness, env, issued } = ready.value;
+    let spec = ready.value.spec;
     if (prepared !== undefined) {
       if (await this.isCutOff(record.id))
         return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
@@ -2377,25 +2386,17 @@ export class FerretsService implements FerretsApi {
       const home = await prepareLaunchHome(harness, spec);
       if (!home.ok) return home;
     }
-    // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
-    // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
-    // A conversation the harness PROVES it does not have is not resumed: a real harness asked to would fail the launch
-    // ("No conversation found…"). A ferret converted from v4 names one whose transcript was left behind (!A516). It
-    // starts a new conversation instead, and the caller says so; any doubt resumes as asked.
-    const resumable =
-      conversation === undefined || harness.hasConversation === undefined
-        ? conversation
-        : (await harness.hasConversation(spec, conversation).catch(() => undefined)) === false
-          ? undefined
-          : conversation;
-    if (conversation !== undefined && resumable === undefined) {
-      if (said.requireConversation === true)
-        return failed(
-          'refused',
-          `the ${record.harness} conversation ${conversation} was not found, so the ferret was not started (only the owner's start copies one in from this computer, and only while the Conversations plugin is on)`,
-        );
-      said.conversationNotFound = conversation;
+    let named = conversation;
+    if (said.relocated !== undefined) {
+      const unpacked = await unpackRelocated(harness, spec, said.relocated);
+      if (!unpacked.ok) return unpacked;
+      ({ spec, conversation: named } = unpacked.value);
     }
+    // Recheck the launch folder before the harness (remaining chdir window: docs/secrets.md).
+    const resumed = await conversationForLaunch(harness, spec, conversation, named, said.requireConversation === true);
+    if (!resumed.ok) return resumed;
+    const resumable = resumed.value.conversation;
+    if (resumed.value.missing !== undefined) said.conversationNotFound = resumed.value.missing;
     if (bound !== undefined) {
       const held = await bound.verify().catch(() => err('the launch folder could not be checked again'));
       if (!held.ok) return failed('refused', held.error);
@@ -2883,7 +2884,6 @@ export class FerretsService implements FerretsApi {
     signedIn: Readonly<Record<string, string>>,
     harness: HarnessKey,
   ): Promise<Result<ChildEnvironment, string | { readonly kind: 'subscription_login' }>> {
-    // Login, mode defaults, then owner parts; FY_* switches keep final precedence.
     const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     // What a plugin gives THIS pane (the Git account's ssh-agent and git settings): judged by name, refused naming the plugin.
@@ -2915,6 +2915,7 @@ export class FerretsService implements FerretsApi {
     const steps = this.ports.launchSteps;
     if (steps !== undefined && !steps.sealed()) return err(LAUNCH_STEPS_UNSEALED);
     Object.assign(env, await paneVariables(steps?.stores() ?? [], ferret));
+    await this.ports.recordLaunchSecrets?.(ferret, secretReferencesIn(JSON.stringify([parts, env])));
     const resolved = await this.ports.vault.childEnvironment(ferret, env, harness);
     if (!resolved.ok)
       return err(
@@ -2922,7 +2923,6 @@ export class FerretsService implements FerretsApi {
           ? { kind: 'subscription_login' as const }
           : `unknown secrets: ${resolved.error.unknown.join(', ')}`,
       );
-    // Persist only switches for `instructions`, after refusal is impossible. A record failure never fails the launch.
     await this.ports.launchEnvironment?.write(ferret, recordedSwitches(env)).catch(() => undefined);
     return ok(resolved.value);
   }

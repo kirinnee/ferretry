@@ -1,5 +1,5 @@
 import type { FerretId, FerretsApi, FerretSummary } from '@ferretry/core-ferrets/contract';
-import type { Clock, Log } from '@ferretry/kernel/contract';
+import type { Clock, Log, IdentitySigner, Redaction } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { type CloneCrypto, toBase64Url } from '@ferretry/std/sealing';
 import {
@@ -50,6 +50,10 @@ export interface MovedLedger {
 }
 
 export interface RelocationDeps {
+  /** Names only from the published runtime profile; no configuration or credential leaves this daemon. */
+  readonly profileSecrets: (runtime: string) => Promise<readonly string[]>;
+  readonly signer: Pick<IdentitySigner, 'signRelocateBundle'>;
+  readonly redaction: Redaction;
   readonly crypto: CloneCrypto;
   readonly ferrets: Pick<FerretsApi, 'get' | 'workFolder' | 'relocationSource' | 'stop' | 'resume'>;
   readonly treeOf: (folder: string) => WorkingTree;
@@ -86,7 +90,7 @@ export class Relocation {
     if (to === this.deps.daemonId)
       throw new RelocateRefused(400, 'a machine cannot move a ferret to itself', 'same_machine');
     const { inputs } = await this.#inputs(ferretId);
-    return preflightView(await this.#planned(ferretId, inputs));
+    return preflightView(await this.#planned(ferretId, inputs), inputs.summary);
   }
 
   async export(ferretId: string, offer: RelocateOffer): Promise<ExportResponse> {
@@ -128,9 +132,38 @@ export class Relocation {
       const found = await preparation.wait(() => plan(after));
       if (found.refusals.length > 0) throw new RelocateRefused(409, found.refusals.join('; '), 'move_refused');
       const entries = await preparation.wait(() => gather(after, found));
-      const manifest = await preparation.wait(() =>
-        manifestOf(this.deps.crypto, { id: summary.id, name: stopped.name }, found, entries),
+      await preparation.wait(() =>
+        this.deps.redaction
+          .read(async scope => {
+            if (scope.secretNamesIn === undefined)
+              throw new Error('the daemon cannot inspect a move for known secret values');
+            const check = (path: string, bytes: Uint8Array) => {
+              const names = scope.secretNamesIn?.(bytes) ?? [];
+              if (names.length > 0)
+                throw new RelocateRefused(
+                  409,
+                  `secret ${names.join(', ')} occurs in ${scope.text(path)}; the move was refused`,
+                  'secret_in_move',
+                );
+            };
+            check('move manifest', new TextEncoder().encode(JSON.stringify({ summary: stopped, plan: found })));
+            for (const entry of entries) {
+              check(entry.path, new TextEncoder().encode(entry.path));
+              check(entry.path, entry.bytes);
+            }
+            // A git pack compresses its blobs. Inspect their original bytes as well as the exported pack.
+            await after.tree?.inspect(check, entries.find(entry => entry.kind === 'worktree-changes')?.bytes);
+          })
+          .catch(error => {
+            if (error instanceof RelocateRefused) throw error;
+            throw new RelocateRefused(
+              409,
+              'the daemon could not inspect the move for known secret values',
+              'secret_check_failed',
+            );
+          }),
       );
+      const manifest = await preparation.wait(() => manifestOf(this.deps.crypto, stopped, found, entries));
       const manifestBytes = new TextEncoder().encode(JSON.stringify(manifest));
       const length = new Uint8Array(4);
       new DataView(length.buffer).setUint32(0, manifestBytes.length, false);
@@ -142,6 +175,7 @@ export class Relocation {
           sourceDaemonId: this.deps.daemonId,
           parts: [length, manifestBytes, ...entries.map(entry => entry.bytes)],
           chunkBytes: RELOCATE_CHUNK_BYTES,
+          signer: this.deps.signer,
         }),
       );
       const exportId = newId(this.deps.crypto, 'fy_relocate_export_');
@@ -216,7 +250,15 @@ export class Relocation {
     if (source === undefined)
       throw new RelocateRefused(409, 'this machine cannot read this ferret’s files for a move', 'unavailable');
     const folder = (await this.deps.ferrets.workFolder(summary.id))?.folder;
-    return { summary, inputs: { summary, source, tree: folder === undefined ? undefined : this.deps.treeOf(folder) } };
+    const profile = summary.runtime === undefined ? [] : await this.deps.profileSecrets(summary.runtime);
+    const ownSource = {
+      ...source,
+      secretNames: async () => [...new Set([...(await source.secretNames()), ...profile])],
+    };
+    return {
+      summary,
+      inputs: { summary, source: ownSource, tree: folder === undefined ? undefined : this.deps.treeOf(folder) },
+    };
   }
 
   async #planned(ferretId: string, inputs: SnapshotInputs): Promise<Plan> {

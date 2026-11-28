@@ -15,6 +15,10 @@ export const RELOCATE_CHUNK_BYTES = 1024 * 1024;
 export const RELOCATE_MAX_BUNDLE_BYTES = 500 * 1024 * 1024;
 /** One file over this is refused at preflight and named; the whole is read into memory a file at a time. */
 export const RELOCATE_MAX_FILE_BYTES = 64 * 1024 * 1024;
+/** How long an offer the target opened stays good: five minutes, spent on its first import (the source checks the same bound). */
+export const RELOCATE_OFFER_TTL_MS = 5 * 60 * 1000;
+/** A target keeps at most this many open offers: each can buffer a whole bundle. */
+export const RELOCATE_MAX_OPEN_OFFERS = 1;
 /** How long a sealed export waits to be fetched and completed before it is forgotten. */
 export const RELOCATE_EXPORT_TTL_MS = 15 * 60 * 1000;
 /** The source never holds more than this many sealed exports at once: each one is a whole bundle in memory. */
@@ -103,6 +107,22 @@ export const STAYS = [
 
 // ─── the offer the target opened, and the bundle sealed to it ──────────────────────────────────────────────────────────
 
+/** A secret's NAME as the Vault spells it. Names only ever cross a move, never a value. */
+export const SecretNameSchema = z.string().regex(/^[A-Z][A-Z0-9_]{0,127}$/u);
+
+/**
+ * What the target must have for a ferret to run there, in names and facts only: the harness it runs on (and the runtime name
+ * it had), the project's remote (credentials stripped) and the `${secret:NAME}` names its launch refers to.
+ */
+export const NeedsSchema = z.strictObject({
+  harness: z.string().min(1).max(128),
+  runtime: z.string().min(1).max(256).optional(),
+  /** `https://<host>/<path>`, never the remote as written: it may carry a token. Absent: the folder has no remote. */
+  remote: z.string().min(1).max(2048).optional(),
+  secrets: z.array(SecretNameSchema).max(256),
+});
+export type Needs = z.infer<typeof NeedsSchema>;
+
 const Base64UrlSchema = z.string().regex(/^[A-Za-z0-9_-]+$/u);
 export const DaemonIdSchema = z.string().regex(/^fy_daemon_[A-Za-z0-9_-]{43}$/u);
 export const OfferIdSchema = z.string().regex(/^fy_relocate_offer_[A-Za-z0-9_-]{16,64}$/u);
@@ -127,6 +147,8 @@ export const BundleHeaderSchema = z.strictObject({
   v: z.literal(RELOCATE_FORMAT),
   offerId: OfferIdSchema,
   sourceDaemonId: DaemonIdSchema,
+  identityKey: Base64UrlSchema,
+  signature: Base64UrlSchema,
   targetDaemonId: DaemonIdSchema,
   expiresAt: InstantSchema,
   /** The source's one-time X25519 public key. */
@@ -140,6 +162,7 @@ export type BundleHeader = z.infer<typeof BundleHeaderSchema>;
 export const BundleManifestSchema = z.strictObject({
   v: z.literal(RELOCATE_FORMAT),
   ferret: z.strictObject({ id: z.string().min(1), name: z.string().min(1) }),
+  needs: NeedsSchema,
   worktree: z
     .strictObject({
       branch: z.string().min(1).optional(),
@@ -175,6 +198,8 @@ export const PreflightResponseSchema = z.strictObject({
   bytes: z.number().int().nonnegative(),
   /** The largest files, when the bundle is over the cap or a file is over the file cap. */
   largest: z.array(z.strictObject({ path: z.string(), size: z.number().int().nonnegative() })),
+  /** What the other machine must have to run this ferret: the same facts the target's preflight is asked with. */
+  needs: NeedsSchema,
   /** The top-level names git ignores in the working tree: what stays, so the person sees it. */
   ignored: z.array(z.string()),
   /** New files whose NAME says secret: they stay too. */
@@ -221,3 +246,86 @@ export const CompleteResponseSchema = z.strictObject({
   movedTo: z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string(), at: InstantSchema }),
 });
 export type CompleteResponse = z.infer<typeof CompleteResponseSchema>;
+
+// ─── the TARGET end: open an offer, check, receive the chunks, import ────────────────────────────────────────────────────
+
+/** An absolute folder the person named; never relative, so it cannot resolve against the daemon's own directory. */
+const AbsoluteFolderSchema = z
+  .string()
+  .min(2)
+  .max(4096)
+  .refine(path => path.startsWith('/') && !/[\p{Cc}]/u.test(path) && !path.split('/').includes('..'), {
+    message: 'a folder is an absolute path with no .. in it',
+  });
+
+/** `POST /v1/relocate/offers/:offerId/preflight`: what the source's preflight said the ferret needs, and where a clone may go. */
+export const TargetPreflightRequestSchema = z.strictObject({
+  needs: NeedsSchema,
+  /** The folder a clone of the project would be made in, when no registered project has the remote. */
+  cloneInto: AbsoluteFolderSchema.optional(),
+});
+export type TargetPreflightRequest = z.infer<typeof TargetPreflightRequestSchema>;
+
+export const ProjectResolutionSchema = z.enum(['found', 'clone', 'none']);
+
+export const TargetPreflightResponseSchema = z.strictObject({
+  ok: z.boolean(),
+  refusals: z.array(z.string()),
+  /** `found`: a registered project has this remote. `clone`: none has, and this machine may clone it. `none`: refused. */
+  project: ProjectResolutionSchema,
+  /** The runtime a start here would use, when one could be resolved for the harness. */
+  runtime: z.string().optional(),
+  /** Secret NAMES this machine does not hold. A move refuses until each exists (copying them is the secrets copy). */
+  missingSecrets: z.array(SecretNameSchema),
+});
+export type TargetPreflightResponse = z.infer<typeof TargetPreflightResponseSchema>;
+
+/** `PUT /v1/relocate/offers/:offerId/chunks/:index`: one sealed chunk as base64url (a request body here is text). */
+export const ChunkUploadSchema = z.strictObject({ chunk: Base64UrlSchema });
+export type ChunkUpload = z.infer<typeof ChunkUploadSchema>;
+/** The most base64url characters one chunk upload carries: a chunk plus its nonce and tag, encoded. */
+export const RELOCATE_MAX_CHUNK_TEXT = Math.ceil(((RELOCATE_CHUNK_BYTES + 64) * 4) / 3) + 64;
+
+export const ChunkReceivedSchema = z.strictObject({ index: z.number().int().nonnegative() });
+
+/** `POST /v1/relocate/offers/:offerId/import`: the header the source sealed with, and where a clone may go. */
+export const ImportRequestSchema = z.strictObject({
+  header: BundleHeaderSchema,
+  /** The SOURCE chosen through the owner's paired-machine list, independently of the uploaded header. */
+  sourceDaemonId: DaemonIdSchema,
+  cloneInto: AbsoluteFolderSchema.optional(),
+});
+export type ImportRequest = z.infer<typeof ImportRequestSchema>;
+
+export const ImportResponseSchema = z.strictObject({
+  ferretId: z.string(),
+  folder: z.string(),
+  movedFrom: z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1) }),
+  /** A launch succeeded but provenance could not be saved. The ferret and its files are kept. */
+  recovery: z
+    .strictObject({
+      code: z.literal('provenance_unrecorded'),
+      state: z.enum(['running', 'stopped', 'unknown']),
+      message: z.string(),
+    })
+    .optional(),
+});
+export type ImportResponse = z.infer<typeof ImportResponseSchema>;
+
+/** `state/relocate/received.json`: the ferrets this machine took from another, so each says where it came from. */
+export const ReceivedDocumentSchema = z.strictObject({
+  received: z.record(
+    z.string(),
+    z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1), at: InstantSchema }),
+  ),
+});
+export type ReceivedDocument = z.infer<typeof ReceivedDocumentSchema>;
+
+export const RECEIVED_STATE = defineState({
+  name: 'received',
+  path: 'received.json',
+  store: 'json',
+  format: 1,
+  schema: ReceivedDocumentSchema,
+  mode: 0o600,
+});

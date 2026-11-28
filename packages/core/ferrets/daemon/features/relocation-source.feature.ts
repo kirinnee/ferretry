@@ -8,6 +8,7 @@ import {
   type RelocationSource,
 } from '../../contract/index.ts';
 import { parseSessionId } from '../lib/session-id.ts';
+import { FerretLaunchSecretFiles } from '../../contract/state/launch-secrets.state.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
 /** The journal's name in a move: it is a `history` area file, never a path below the session folder. */
@@ -92,6 +93,12 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   const sourceOf = (ferret: FerretId): RelocationSource => {
     const root = () => sessionFiles.root(parseSessionId(ferret));
     return {
+      secretNames: async () => {
+        const read = await f.kernel.state.read(FerretLaunchSecretFiles, ferret);
+        if (!read.ok || read.value === undefined)
+          throw new Error('this ferret’s launch secret names have not been recorded; resume it here before moving');
+        return read.value.names;
+      },
       files: async () => {
         const found: RelocationFile[] = [];
         const budget = { names: 0 };

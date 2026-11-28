@@ -191,6 +191,8 @@ export interface RelocationFile {
  * leftovers are not listed and cannot be read through it, whatever path a caller asks for. A link is never followed.
  */
 export interface RelocationSource {
+  /** Secret NAMES referenced by this ferret's composed launch (profile, MCP and environment). */
+  secretNames(): Promise<readonly string[]>;
   /** Every file that may travel, in a stable order, each with its size: the caller weighs the whole before it reads any. */
   files(): Promise<readonly RelocationFile[]>;
   /** One listed file's bytes, at most `limitBytes` of them (a longer file rejects); rejects for a name `files()` did not list. */
