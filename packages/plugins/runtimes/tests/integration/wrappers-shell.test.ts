@@ -22,7 +22,6 @@ import {
   TOOLS_SERVER_INSTRUCTIONS,
 } from '../../daemon/lib/account/fixed-layer.ts';
 import type { HarnessKind } from '../../daemon/lib/manifest.ts';
-import { REAL_KITS } from '../support/real-kits.ts';
 import { type RuntimeWrapperInput, renderRuntimeWrapperScript, shellQuote } from '../../daemon/lib/wrappers.ts';
 import { REAL_KITS } from '../support/real-kits.ts';
 

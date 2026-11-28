@@ -6,7 +6,6 @@
  */
 import { describe, it } from 'bun:test';
 import { fixedLayerFor } from '../../../daemon/lib/account/fixed-layer.ts';
-import { REAL_KITS } from '../../support/real-kits.ts';
 import {
   renderCommandScript,
   renderRuntimeWrapperScript,
