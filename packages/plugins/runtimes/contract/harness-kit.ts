@@ -81,6 +81,8 @@ export interface KitCredentialInput {
   readonly env?: Readonly<Record<string, string>>;
   /** The file or directory the login-keeper named for a Ferretry-kept login. */
   readonly signInFile?: string;
+  /** The variables the login-keeper named for a Ferretry-kept login's runtimes (a Claude login's one secure-storage variable). */
+  readonly variables?: Readonly<Record<string, string>>;
 }
 
 /** Where one credential lives, as a kit says it. Never a credential value. */

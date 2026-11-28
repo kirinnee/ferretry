@@ -222,6 +222,7 @@ export function refusal(edge: ImportEdge): string | undefined {
       'tests/unit/lib/account-import-login-env.test.ts',
       'tests/unit/lib/account-import-branches.test.ts',
       'tests/unit/daemon/setup-service.test.ts',
+      'tests/unit/golden/credentials.golden.test.ts',
       'tests/unit/golden/support/world.ts',
       'tests/support/real-kits.ts',
     ].includes(edge.from.slice(edge.fromPkg.dir.length + 1)) &&

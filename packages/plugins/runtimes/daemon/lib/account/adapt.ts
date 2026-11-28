@@ -570,6 +570,31 @@ const replacedLeaves = (
 // ── Adapting a runtime ───────────────────────────────────────────────────────────────────────────
 
 /**
+ * The reason a runtime of `harness` cannot be planned without its plugin's kit, or `undefined` when it can. Claude's MCP
+ * servers and config documents are the Claude kit's (E-276 PR 6), so a Claude runtime whose plugin is off is published
+ * unavailable with this sentence; Codex still branches in Runtimes and needs none. Only that runtime is affected: the
+ * rest of the plan is made as usual.
+ */
+export const missingKitReason = (harness: string, kit: RuntimesHarnessKit | undefined): string | undefined =>
+  byHarness<string | undefined>(harness, {
+    claude: () => (kit === undefined ? new UnsupportedHarnessError(harness).message : undefined),
+    codex: () => undefined,
+  });
+
+/** What a runtime that cannot be planned for want of its kit writes: nothing. Never reaches a file. */
+export const kitlessAdaptation = (harness: HarnessKind): AdaptedRuntime => ({
+  harness,
+  entries: [],
+  absent: [],
+  settings: { dest: '', format: 'json', value: {} },
+  launchEnv: {},
+  harnessOwned: [],
+  plumbing: [],
+  overrides: [],
+  problems: [],
+});
+
+/**
  * Turn a profile resolved for one harness into that harness's files (§8.3). Total: a runtime that
  * cannot be written as asked comes back with {@link AdaptedRuntime.problems}.
  */

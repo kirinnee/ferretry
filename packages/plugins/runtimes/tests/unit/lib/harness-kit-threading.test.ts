@@ -2,7 +2,8 @@
  * The kit a harness's own plugin hands Runtimes reaches every group a materialisation asks about that harness (E-276 PR 1):
  * each group function is given the kit of the runtime's own harness, and a harness whose plugin gives none is given none —
  * never another harness's. Claude's MCP and document members are read now (E-276 PR 6), so a Claude runtime without its kit is
- * REFUSED by name instead of written in another shape; Codex still branches in Runtimes, so its fake kit is only handed through.
+ * published UNAVAILABLE by name instead of written in another shape, and the rest of the plan still publishes; Codex still
+ * branches in Runtimes, so its fake kit is only handed through.
  *
  * It is also the startup order: the settings sources can answer `unavailable` while plugins are still starting, so the
  * kit is read live with each plan and the first plan after a source comes online carries it.
@@ -14,6 +15,7 @@ import {
   type ProfileComponentSource,
   type RuntimesHarnessKit,
 } from '../../../contract/index.ts';
+import type { FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
 import { harnessKits } from '../../../daemon/adapters/profile-components.ts';
 import { installGroupSpies } from '../../support/group-spies.ts';
 import { REAL_KITS } from '../../support/real-kits.ts';
@@ -21,7 +23,17 @@ import { REAL_KITS } from '../../support/real-kits.ts';
 const spies = installGroupSpies();
 afterAll(spies.restore);
 
-const { twoHarnessWorld } = await import('../../support/two-harness-world.ts');
+const { twoHarnessWorld, wrapperText } = await import('../../support/two-harness-world.ts');
+
+const accountOf = (accounts: readonly { readonly displayName: string }[], name: string) => {
+  const found = accounts.find(account => account.displayName === name);
+  if (found === undefined) throw new Error(`no account ${name}`);
+  return found as typeof found & {
+    readonly available: boolean;
+    readonly unavailableReason: string | null;
+    readonly home: string;
+  };
+};
 
 const CLAUDE_KIT = REAL_KITS.get('claude') as RuntimesHarnessKit;
 const CODEX_KIT: RuntimesHarnessKit = { command: 'codex' };
@@ -51,26 +63,48 @@ describe('the kit threaded to the groups of a materialisation', () => {
     }
   });
 
-  it('should hand a harness whose plugin gives no kit no kit, never another harness one, and refuse its runtime', async () => {
+  it('should hand a harness whose plugin gives no kit no kit, never another harness one, and publish only its runtime unavailable', async () => {
     spies.calls.length = 0;
-    const { service } = twoHarnessWorld({ kits: () => new Map([['codex', CODEX_KIT]] as const) });
-    await expect(service.publishFromFiles()).rejects.toThrow('claude is not supported here');
+    const { service, plans } = twoHarnessWorld({ kits: () => new Map([['codex', CODEX_KIT]] as const) });
+    await expect(service.publishFromFiles()).resolves.toBe('applied');
     expect(kitsOf('plumbingOf', 'claude')).toEqual([undefined]);
     expect(kitsOf('plumbingOf', 'codex').every(kit => kit === CODEX_KIT)).toBe(true);
+    const accounts = plans[0]?.manifest.accounts ?? [];
+    expect(accountOf(accounts, 'claude-default')).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringContaining('is not supported here'),
+    });
+    expect(accountOf(accounts, 'codex-default').unavailableReason ?? '').not.toContain('is not supported here');
+    expect(wrapperText(plans[0] as FleetApplyPlan, 'codex-default')).not.toContain('is not supported here');
+    expect(wrapperText(plans[0] as FleetApplyPlan, 'claude-default')).toContain('is not supported here');
   });
 
-  it('should hand no group a kit when nothing supplies kits', async () => {
+  it('should write nothing into the home of a Claude runtime whose plugin gives no kit', async () => {
+    const { service, plans } = twoHarnessWorld({ kits: () => new Map([['codex', CODEX_KIT]] as const) });
+    await service.publishFromFiles();
+    const claudeHome = accountOf(plans[0]?.manifest.accounts ?? [], 'claude-default').home;
+    const written = (plans[0]?.operations ?? []).filter(
+      operation => 'path' in operation && operation.path.startsWith(`${claudeHome}/`),
+    );
+    expect(written).toEqual([]);
+  });
+
+  it('should hand no group a kit when nothing supplies kits, and publish the Codex runtime all the same', async () => {
     spies.calls.length = 0;
-    const { service } = twoHarnessWorld({ kits: undefined });
-    await expect(service.publishFromFiles()).rejects.toThrow('is not supported here');
+    const { service, plans } = twoHarnessWorld({ kits: undefined });
+    await expect(service.publishFromFiles()).resolves.toBe('applied');
     expect(spies.calls.length).toBeGreaterThan(0);
     expect(spies.calls.every(call => call.kit === undefined)).toBe(true);
+    const accounts = plans[0]?.manifest.accounts ?? [];
+    expect(accountOf(accounts, 'claude-default').available).toBe(false);
+    // The Codex runtime is still planned and its wrapper still written: a missing kit refuses its own runtime only.
+    expect(wrapperText(plans[0] as FleetApplyPlan, 'codex-default')).toContain('codex-default');
   });
 
   it('should give the first plan after a settings source comes online the kit, and the plan before it none', async () => {
     spies.calls.length = 0;
     let online = false;
-    const { service } = twoHarnessWorld({
+    const { service, plans } = twoHarnessWorld({
       kits: () =>
         harnessKits(hook => {
           if (!online) return 'unavailable';
@@ -81,10 +115,14 @@ describe('the kit threaded to the groups of a materialisation', () => {
               : 'unavailable';
         }),
     });
-    await expect(service.publishFromFiles()).rejects.toThrow('claude is not supported here');
+    await service.publishFromFiles();
     expect(kitsOf('plumbingOf', 'claude')).toEqual([undefined]);
+    expect(accountOf(plans[0]?.manifest.accounts ?? [], 'claude-default').available).toBe(false);
     online = true;
     await service.publishFromFiles();
+    expect(accountOf(plans.at(-1)?.manifest.accounts ?? [], 'claude-default').unavailableReason ?? '').not.toContain(
+      'is not supported here',
+    );
     for (const group of GROUPS) {
       expect(kitsOf(group, 'claude').at(-1)).toBe(CLAUDE_KIT);
       expect(kitsOf(group, 'codex').at(-1)).toBe(CODEX_KIT);

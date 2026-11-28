@@ -22,6 +22,7 @@ const TESTS = [
   'tests/unit/lib/account-import-login-env.test.ts',
   'tests/unit/lib/account-import-branches.test.ts',
   'tests/unit/daemon/setup-service.test.ts',
+  'tests/unit/golden/credentials.golden.test.ts',
   'tests/unit/golden/support/world.ts',
   'tests/support/real-kits.ts',
 ];
