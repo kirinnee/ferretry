@@ -81,9 +81,22 @@ async function world() {
     { home: ferretryHome, plugin: 'projects', worktrees: `${ferretryHome}-w` },
     ['imports'],
     () => undefined,
-    { pins },
+    { pins, pinWrite: () => true }, // Synthetic caller with WRITE authority; Gate's device matrix is tested separately.
   );
-  const spawn = restrictSpawn('projects', ['mkdir', 'rmdir'], hostSpawn, undefined, pins);
+  const started: string[] = [];
+  const spawn = restrictSpawn(
+    'projects',
+    ['mkdir', 'rmdir'],
+    {
+      ...hostSpawn,
+      run: async (program, args, options) => {
+        started.push(program);
+        return await hostSpawn.run(program, args, options);
+      },
+    },
+    undefined,
+    pins,
+  );
   const kernel = { roots, paths: { home: () => user }, spawn } as unknown as Pick<
     KernelPorts,
     'roots' | 'paths' | 'spawn'
@@ -95,7 +108,7 @@ async function world() {
       browser,
       folders: { mayName: async path => roots.root('imports', { subfolder: path }).resolve('').ok },
     });
-  return { user, parent, ferretryHome, outside, real, explorerOver, explorer: explorerOver() };
+  return { user, parent, ferretryHome, outside, real, started, explorerOver, explorer: explorerOver() };
 }
 
 /** The outside-home gate of a caller who may not (a use-only remote device): it refuses. */
@@ -332,7 +345,7 @@ describe('the explorer over the real imports root', () => {
     expect((await failure(() => racing.list('~/Documents', true))).code).toBe('folder_refused');
   });
 
-  test('the parent swapped for a link after it was checked: the folder is made in the folder that was held, never outside', async () => {
+  test('SEC-K1 a swap between the folder read and mkdir refuses before any write; both trees stay unchanged', async () => {
     const w = await world();
     const parent = join(w.user, 'code');
     const racing = w.explorerOver(
@@ -343,11 +356,11 @@ describe('the explorer over the real imports root', () => {
         },
       }),
     );
-    // What was made went into the held folder (now `code-moved`); the path no longer reaches it, so it is taken back.
     const refused = await failure(() => racing.make({ parent: '~/code', name: 'x' }));
-    expect(refused.status).toBe(403);
+    expect(refused.status).toBe(422);
     expect(await readdir(join(w.user, '.ssh'))).toEqual(['id_work_ed25519']);
     expect(await readdir(`${parent}-moved`)).not.toContain('x');
+    expect(w.started).not.toContain('mkdir');
   });
 
   test('the new folder swapped for a link at the moment it is made is taken back, and nothing outside is touched', async () => {
@@ -363,7 +376,7 @@ describe('the explorer over the real imports root', () => {
       }),
     );
     const refused = await failure(() => racing.make({ parent: '~/code', name: 'y' }));
-    expect(refused.status).toBe(403);
+    expect(refused.status).toBe(422);
     expect((await readdir(w.outside)).sort()).toEqual(['deep', 'file.txt']);
   });
 

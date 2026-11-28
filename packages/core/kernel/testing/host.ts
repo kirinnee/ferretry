@@ -163,6 +163,7 @@ import {
   type ItemReachOf,
   NO_ITEMS,
   PermissionError,
+  pinnedSpawnOptions,
   type ResolverOf,
   spawnPermitted,
 } from '../host/permissions.ts';
@@ -170,7 +171,8 @@ import { configOwnedKinds, itemReach } from '../host/items.ts';
 import { scratchPort } from '../host/scratch.ts';
 import { type DetachedCall, detachedAsked, detachedHandle, detachedRefusal } from '../host/detached.ts';
 import { PinRegistry } from '../host/pins.ts';
-import { type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
+import { mayWritePin, mintRootPin } from '../host/pin-authority.ts';
+import { type HeldRoot, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
 import { matchingHook } from '../host/hooks.ts';
 import { CORE_IDS, type FerretId } from '../contract/ids.ts';
 import { KERNEL_NEEDER, neederOf, ProvidedPerNeeder } from '../host/needer.ts';
@@ -2338,8 +2340,20 @@ async function start(world: World): Promise<TestHost> {
           },
           pin: async (path, pinOptions) => {
             // The test world keeps no state home, so its pin fences nothing beneath the root.
-            const held = await pins.pin(manifest.id, path, pinOptions);
-            return Object.freeze({ ...held, fenced: async (rels: readonly string[]) => rels.map(() => false) });
+            const judge = () => mayWritePin(manifest, name, admission, actorScope.getStore());
+            const source = ownPath(path);
+            const identity = fileInode(source);
+            const held = await mintRootPin(pins, manifest.id, path, pinOptions, isReadOnlyRoot(name), judge);
+            const write: NonNullable<HeldRoot['withWritePin']> = async use => {
+              if (!judge() || rootLinks.has(source) || fileInode(source) !== identity)
+                throw new PermissionError('The caller cannot write this held root.', 'pin_write_required');
+              return await pins.withWritePin(manifest.id, held.policyCwd, judge, use);
+            };
+            return Object.freeze({
+              ...held,
+              fenced: async (rels: readonly string[]) => rels.map(() => false),
+              withWritePin: write,
+            });
           },
         };
         testHandles.set(handle, {
@@ -2527,6 +2541,7 @@ async function start(world: World): Promise<TestHost> {
       },
       spawn: {
         async run(program, args, spawnOptions) {
+          args = Object.freeze([...args]);
           if (detachedAsked(spawnOptions))
             refuseDetached(manifest, itemsOf, 'run', program, spawnOptions, resolversOf(manifest.id));
           if (
@@ -2540,7 +2555,11 @@ async function start(world: World): Promise<TestHost> {
           )
             throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           if (options.spawn === undefined) throw new Error(`${manifest.id}: spawn ${program} with no spawn fake`);
-          return options.spawn(program, args, spawnOptions);
+          return options.spawn(
+            program,
+            args,
+            pinnedSpawnOptions(manifest.id, program, args, spawnOptions, pins, manifest.permissions?.readOnlySpawn),
+          );
         },
         async runBytes(program, args, spawnOptions) {
           if (detachedAsked(spawnOptions))
@@ -2560,6 +2579,7 @@ async function start(world: World): Promise<TestHost> {
           };
         },
         start(program, args, spawnOptions): ChildHandle {
+          args = Object.freeze([...args]);
           if (detachedAsked(spawnOptions)) {
             refuseDetached(manifest, itemsOf, 'start', program, spawnOptions, resolversOf(manifest.id));
             if (options.detachedStart === undefined)
@@ -2576,7 +2596,11 @@ async function start(world: World): Promise<TestHost> {
               args,
             )
           )
-            return options.start(program, args, spawnOptions);
+            return options.start(
+              program,
+              args,
+              pinnedSpawnOptions(manifest.id, program, args, spawnOptions, pins, manifest.permissions?.readOnlySpawn),
+            );
           if (options.start !== undefined) throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           throw new Error(
             `${manifest.id}: the test host does not start long-lived ${program}; fake the port that does`,

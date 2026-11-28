@@ -90,6 +90,7 @@ import { bindDirectory } from './bound-directory.ts';
 import { bindProgram, checkDirectory, gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from './paths.ts';
 import { type ExecutableProbe, handleReaders, locateCommand, whichCommand, whichForCommand } from './which.ts';
 import { currentActor, currentStanding, runInCall } from './call-scope.ts';
+import { mayWritePin } from './pin-authority.ts';
 import { loadDataPlugins } from './data-plugins.ts';
 import { configOwnedKinds, type InstalledItems, installedItemReach, itemReach } from './items.ts';
 import {
@@ -866,7 +867,6 @@ async function bootLocked(
           throw new ApiError(503, `${record.manifest.title} is not running.`, 'plugin_unavailable');
       },
     );
-
   const pins = new PinRegistry(() => adapters.pinner ?? NO_PINNER);
   /** Paths before gating; whichFor's readers come only from declared manifests, never caller input. */
   const ownerPathsFor = (plugin: string): PathsPort => {
@@ -956,14 +956,13 @@ async function bootLocked(
         privateWatch: watchPrivate,
         privateReport: pinReport,
         ...(pins === undefined ? {} : { pins }),
+        pinWrite: root => mayWritePin(manifest, root, bound.admission),
         ...(manifest.permissions?.harnessFiles === undefined
           ? {}
           : { harnessFiles: manifest.permissions.harnessFiles }),
-        // Shared trees (`kernel.roots.share`): only a manifest that declares it mints; its own opaque named trees are the
-        // only state it may share; every tree it minted is revoked when it stops.
+        // Only declared own opaque state trees are shared (`kernel.roots.share`), and revoked on stop.
         shareTrees: manifest.permissions?.shareTrees === true,
-        // Shared credentials (`kernel.roots.shareCredential`): only the `credentials` root's owner mints, and only a basename its
-        // manifest lists; every credential it minted is revoked when it stops.
+        // Only the credentials root's owner shares listed basenames; every shared credential is revoked on stop.
         ...(manifest.permissions?.shareCredentials === undefined
           ? {}
           : { shareCredentials: manifest.permissions.shareCredentials }),
@@ -1019,6 +1018,7 @@ async function bootLocked(
           items,
           pins,
           resolversOf(manifest.id),
+          manifest.permissions?.readOnlySpawn,
         ),
         adapters.spawn,
         items,

@@ -61,6 +61,7 @@ import {
 import { identityKey, type TruncationWatcher } from './fence-index.ts';
 import { HOME_ROOT_FOLDERS, isInternalRoot, isKernelMadeRoot } from '../contract/internal-roots.ts';
 import type { PinRegistry, UnjudgedRoot } from './pins.ts';
+import { mintRootPin, withWritePin } from './pin-authority.ts';
 import {
   credentialFileListed,
   credentialFileRefusal,
@@ -1256,15 +1257,13 @@ const PLACED_LINKS = new PlacedCredentialLinks();
 const linkMark = (found: Pick<FileIdentity, 'device' | 'inode'>): string => `${found.device}:${found.inode}`;
 
 interface HandleSetup {
+  readonly pinWrite?: () => boolean;
   readonly fs: HostFs;
   readonly home: string;
   readonly name: RootName;
   readonly plugin: string;
   readonly base: () => string | undefined;
-  /**
-   * The folders from the caller's `within` anchor down to the scoped folder (`anchorWalk`), each of which must be no
-   * link; `undefined` when the scope names no anchor (every call is then judged exactly as before).
-   */
+  /** Link-free folders from the caller's `within` anchor down to the scope (`anchorWalk`); undefined without one. */
   readonly linkFreeFolders: () => readonly string[] | undefined;
   /** The scope's `within` anchor exactly as the caller spelled it (`project-files` reads it for its descent); `undefined` when none. */
   readonly within?: string;
@@ -2893,12 +2892,11 @@ function rootHandle(setup: HandleSetup): RootHandle {
       await setModeChecked(scope, full, bits);
     },
     pin: async (path, options) => {
-      // A held folder is walked by descriptor beneath it with no per-name check, so it could reach past the declared set.
+      // Descriptor walks bypass per-name grants, so project-files cannot pin; check the held object's location below.
       if (projectRoot) return refuse('not_declared');
       if (pins === undefined) return refuse('not_declared');
       const { full, scope } = await real(path);
-      const pinned = await pins.pin(plugin, full, options);
-      // The name was checked; now the OBJECT held: what the descriptor resolves to must still be in the root.
+      const pinned = await mintRootPin(pins, plugin, full, options, readOnly, setup.pinWrite);
       try {
         if (!within(scope.base.real, pinned.rootReal)) refuse('link_escape');
         if (await heldPlace(scope, pinned.rootReal)) refuse('fenced');
@@ -2906,11 +2904,13 @@ function rootHandle(setup: HandleSetup): RootHandle {
         await pinned.close();
         throw error;
       }
-      if (scope.base.fence === undefined) return internalPin(pinned, scope.base);
-      // Caller-scoped (S47): an agent's read is fenced beneath the root, a person's is not; saying nothing is fenced.
-      return options?.fence === 'none'
-        ? unfencedPin(pinned, { fs, home, immutable, privateFiles })
-        : fencedPin(pinned, { fs, home, immutable, privateFiles });
+      const held =
+        scope.base.fence === undefined
+          ? internalPin(pinned, scope.base)
+          : options?.fence === 'none'
+            ? unfencedPin(pinned, { fs, home, immutable, privateFiles })
+            : fencedPin(pinned, { fs, home, immutable, privateFiles });
+      return withWritePin(held, plugin, pins, full, fs, setup.pinWrite);
     },
   };
   HANDLES.set(handle, {
@@ -3091,6 +3091,7 @@ async function ensureHomeRootBase(fs: HostFs, home: string, base: string): Promi
 }
 
 export interface RootsOptions {
+  readonly pinWrite?: (root: RootName) => boolean;
   /** A temp file's random suffix. */
   readonly random?: () => string;
   /** Where a file with several names may be read once proven immutable (S49); today's `/nix/store`. */
@@ -3343,6 +3344,7 @@ export function rootsPortFor(
         pins: options.pins,
         privateFiles,
         ...(options.setMode === true ? { setMode: true } : {}),
+        pinWrite: () => options.pinWrite?.(name) === true,
         ...(daemonUid === undefined ? {} : { daemonUid }),
         ...(options.projectFiles === undefined ? {} : { projectFiles: options.projectFiles }),
         ...(name === 'agent-homes' && internal !== undefined

@@ -127,8 +127,10 @@ export function kernelBrowser(kernel: Kernel): FolderBrowser {
   };
 
   const heldFolder = (pinned: HeldRoot): HeldFolder => {
-    const inside = <T>(program: string, args: readonly string[], then: (exitCode: number | null) => T): Promise<T> =>
-      kernel.spawn.run(program, args, { cwd: pinned.policyCwd }).then(done => then(done.exitCode));
+    const inside = <T>(program: string, args: readonly string[], then: (exitCode: number | null) => T): Promise<T> => {
+      if (pinned.withWritePin === undefined) return Promise.reject(new Error('write pins are unavailable'));
+      return pinned.withWritePin(cwd => kernel.spawn.run(program, args, { cwd }).then(done => then(done.exitCode)));
+    };
     return {
       real: pinned.rootReal,
       entries: async limit => {

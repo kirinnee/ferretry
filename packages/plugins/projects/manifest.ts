@@ -19,7 +19,7 @@ import {
   ProjectsFileSchema,
   ProjectsPort,
 } from './contract/index.ts';
-import { defineState } from '@ferretry/kernel/contract';
+import { defineState, TREE_GIT_READS } from '@ferretry/kernel/contract';
 
 /** `state/projects/projects.json`: the registry, `format: 1` first (§9.2). Damaged = the subsystem fails closed. */
 const PROJECTS_STATE = defineState({
@@ -211,5 +211,10 @@ export default definePlugin({
   uses: { ferrets: FerretsPort },
 
   // Registering touches only the folder the owner named, once (`imports` root, §7.7); `git` clones and initialises.
-  permissions: { roots: ['imports'], spawn: ['git', 'mkdir', 'rmdir'] },
+  permissions: {
+    roots: ['imports'],
+    spawn: ['git', 'mkdir', 'rmdir'],
+    readOnlySpawn: TREE_GIT_READS,
+    writePins: [{ root: 'imports', capability: filesystemConfigure.capability }],
+  },
 });

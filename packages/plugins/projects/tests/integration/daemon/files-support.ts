@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { KernelPorts } from '@ferretry/kernel/contract';
+import { type KernelPorts, TREE_GIT_READS } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { bunSpawn } from '../../../../../core/kernel/host/adapters/process.ts';
 import { nodeFs } from '../../../../../core/kernel/host/adapters/node-fs.ts';
@@ -76,6 +76,8 @@ export async function world(limits?: ProjectIndexLimits, overrides: Partial<Proj
     bunSpawn({ PATH: process.env.PATH ?? '', HOME: user }),
     undefined,
     pins,
+    undefined,
+    TREE_GIT_READS,
   );
   const clock = {
     after: (delay: number, fn: () => void) => {

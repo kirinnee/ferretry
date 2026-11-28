@@ -12,6 +12,7 @@ import {
   type ConfigAccessJudgement,
   type ConfigAccessVerdict,
   type ConfigWriteJudgement,
+  type RootWriteJudgement,
   CONNECTOR_GRANT_PATTERN,
   errorResponse,
   headerValue,
@@ -69,6 +70,7 @@ import {
 import { recordedCallDraft, secretSentDraft } from '../audit/recorder.ts';
 import { judgeLooseningWrite } from '../policy/config-judge.ts';
 import { judgeConfigAccess } from '../policy/config-access.ts';
+import { judgeRootWrite } from '../policy/root-write.ts';
 import type { FailClosedStepUps } from '../step-up/witness.ts';
 import { resolveApiActor } from './actor.ts';
 import {
@@ -251,6 +253,10 @@ export class GateAdmission implements Admission {
   /** The kernel's config routes, asked per file: today's grants by file kind (`policy/config-access.ts`). */
   judgeConfigAccess(input: ConfigAccessJudgement): ConfigAccessVerdict {
     return judgeConfigAccess(input);
+  }
+
+  judgeRootWrite(input: RootWriteJudgement): boolean {
+    return judgeRootWrite({ ...input, standing: this.#liveStanding(input.standing) });
   }
 
   /**

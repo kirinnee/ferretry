@@ -20,7 +20,7 @@ export const kernelCloneInto =
       // The saved project is canonical. Any linked/replaced spelling must be chosen again, even if its target is allowed.
       if ((await handle.realPath(self.value)) !== path || (await verdict(path)) !== undefined)
         throw refused(FOLDER_REFUSED);
-      const pinned = await handle.pin(self.value, { fence: 'none' });
+      const pinned = await handle.pin(self.value, { fence: 'none', write: true });
       try {
         if (pinned.rootReal !== path || (await verdict(pinned.rootReal)) !== undefined) throw refused(FOLDER_REFUSED);
         return pinned;

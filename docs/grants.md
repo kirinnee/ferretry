@@ -51,6 +51,30 @@ machine) and `steppedUp` (does this device hold a passkey step-up right now). To
 `!governed`; the two stay separate fields because they are different questions, and a UI that derived one
 from the other would have to be rewritten the day a third caller class appears.
 
+### Writing through a pinned root
+
+A program started with a held root needs that pin's **write authority**. Every program is treated as mutating
+unless `permissions.readOnlySpawn` declares the whole program read-only or matches its exact argument shape and
+required environment. The shared Git read declarations require `GIT_OPTIONAL_LOCKS=0` and `GIT_NO_LAZY_FETCH=1`;
+they admit the declared queries, never `git` as a whole. This is a declaration contract, not an operating-system
+sandbox. Missing, malformed or undetermined authority refuses with `PermissionError.code = pin_write_required`.
+
+An otherwise read-only root needs two independent permissions for an explicit `pin({ write: true })`:
+the plugin's `permissions.writePins` declaration must name the root and capability, and Gate's
+`Admission.judgeRootWrite` must confirm the **current caller's** configure grant for that capability.
+The declaration only permits asking; it never upgrades a use-only device. Projects' folder creation and clone
+pins act under `filesystem.configure`; Relocate's target checkout pins act under `fleet.configure`.
+The route still performs its usual confirmation; this extra check rechecks current grants and unlock without
+spending a second confirmation. It is repeated when the write pin is used, so retaining an owner's pin cannot
+lend that authority to a later read-only caller.
+
+An authenticated ungoverned host caller is allowed. A use-only device, missing standing, an unbound or throwing
+judge, or undetermined live grants is refused. A job has no request standing and cannot acquire an explicit write
+pin. `HeldRoot.withWritePin` makes the same explicit request for a scoped token on the descriptor already held:
+it verifies the original folder's identity, retains that descriptor through the operation, and revokes the token
+when the operation ends. A changed folder or replacement link observed at the write-pin check is refused before
+a write starts. The descriptor fixes identity; it cannot prevent a concurrent process moving that same folder later.
+
 ### A remote MCP connector acts through Gate
 
 `kernel.delegate.call({ grant }, …)` stamps a `delegated` arrival for the connector principal. This arrival is

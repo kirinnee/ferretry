@@ -47,7 +47,7 @@ describe('kernel.spawn with a pinned cwd: only a pin this plugin’s roots minte
   test('a pin minted for the plugin is accepted and handed through as the held object', async () => {
     const held: PinnedWorkingDirectory = { describe: '/work/f1', install: () => () => {} };
     const pins = new PinRegistry(() => pinnerAnswering(held));
-    const root = await pins.pin('ferrets', '/work/f1');
+    const root = await pins.pin('ferrets', '/work/f1', undefined, 'write');
     const base = recordingSpawn();
     await restrictSpawn('ferrets', ['git'], base, undefined, pins).runBytes('git', ['status'], { cwd: root.policyCwd });
     expect(base.cwds).toEqual([held]);
@@ -55,7 +55,7 @@ describe('kernel.spawn with a pinned cwd: only a pin this plugin’s roots minte
 
   test('a Linux pin is a path alias the plugin never holds: the child is given the alias', async () => {
     const pins = new PinRegistry(() => pinnerAnswering('/proc/1/fd/9'));
-    const root = await pins.pin('ferrets', '/work/f1');
+    const root = await pins.pin('ferrets', '/work/f1', undefined, 'write');
     expect(typeof root.policyCwd).toBe('object');
     const base = recordingSpawn();
     await restrictSpawn('ferrets', ['git'], base, undefined, pins).run('git', [], { cwd: root.policyCwd });
@@ -75,5 +75,52 @@ describe('kernel.spawn with a pinned cwd: only a pin this plugin’s roots minte
     // a fenced string cwd is unchanged
     await port.run('git', [], { cwd: '/work/f1' as FencedPath });
     expect(base.cwds).toEqual(['/work/f1']);
+  });
+
+  test('the cwd forwarded is the same object whose write authority was checked', async () => {
+    const writable: PinnedWorkingDirectory = { describe: '/write', install: () => () => {} };
+    const readable: PinnedWorkingDirectory = { describe: '/read', install: () => () => {} };
+    const pins = new PinRegistry(() => pinnerAnswering(writable));
+    await pins.pin('ferrets', '/write', undefined, 'write');
+    let reads = 0;
+    const base = recordingSpawn();
+    await restrictSpawn('ferrets', ['git'], base, undefined, pins).run('git', [], {
+      get cwd() {
+        return reads++ === 0 ? writable : readable;
+      },
+    });
+    expect(base.cwds).toEqual([writable]);
+    expect(reads).toBe(1);
+  });
+
+  test('a scoped write token keeps the held descriptor alive, then expires even if retained by the caller', async () => {
+    let closed = 0;
+    const backing = fakeRoot({ describe: '/work/f1', install: () => () => {} });
+    const pins = new PinRegistry(() => ({
+      pin: async () => ({
+        ...backing,
+        close: async () => {
+          closed++;
+        },
+      }),
+    }));
+    const root = await pins.pin('ferrets', '/work/f1', undefined, 'read');
+    const base = recordingSpawn();
+    const spawn = restrictSpawn('ferrets', ['git'], base, undefined, pins);
+    let retained = root.policyCwd;
+    await pins.withWritePin(
+      'ferrets',
+      root.policyCwd,
+      () => true,
+      async cwd => {
+        retained = cwd;
+        await root.close();
+        expect(closed).toBe(0);
+        await spawn.run('git', [], { cwd });
+      },
+    );
+    expect(closed).toBe(1);
+    await expect(spawn.run('git', [], { cwd: retained })).rejects.toThrow(PermissionError);
+    expect(base.cwds).toHaveLength(1);
   });
 });

@@ -17,29 +17,7 @@ import type { PinnedWorkingDirectory } from '@ferretry/kernel/contract';
  * `core.hooksPath=/dev/null` and `core.fsmonitor=false` close the two config keys that make a read run a program from a
  * repository the owner did not write; the rest keep porcelain output the shape the parsers expect.
  */
-export const HARDENED_GIT_ARGUMENTS: readonly string[] = [
-  '--no-optional-locks',
-  '-c',
-  'core.pager=cat',
-  '-c',
-  'core.hooksPath=/dev/null',
-  '-c',
-  'core.fsmonitor=false',
-  '-c',
-  'core.quotepath=false',
-  '-c',
-  'diff.external=',
-  // Local evidence must never start a transport, including a promisor's implicit lazy fetch.
-  '-c',
-  'protocol.allow=never',
-  // Porcelain paths must stay repo-root-relative whatever a repo-local `status.relativePaths=true` says,
-  // because that is the shape the status parser filters by prefix. And `showUntrackedFiles=all` is pinned
-  // because a repo-local or global `no` would otherwise hide every untracked file from a Changes list.
-  '-c',
-  'status.relativePaths=false',
-  '-c',
-  'status.showUntrackedFiles=all',
-] as const;
+export { HARDENED_GIT_ARGUMENTS } from '@ferretry/kernel/contract';
 
 /**
  * The environment of a Git child: the caller's own, minus every `GIT_*` name, with the configuration closed.
