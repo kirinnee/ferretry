@@ -181,6 +181,7 @@ export class BrowserEnd {
   readonly records: Record<string, unknown>[] = [];
   readonly controls: { readonly sessionId: session.SessionId; readonly message: Record<string, unknown> }[] = [];
   end: SessionEnd | undefined;
+  carrierEnd: SessionEnd | undefined;
   #channel: session.ChannelState | undefined;
   #transcript: Uint8Array | undefined;
   #hello: session.SessionFrame | undefined;
@@ -203,7 +204,8 @@ export class BrowserEnd {
     if (link === undefined || this.end !== undefined) return;
     for (let next = link.outbound.next(); next !== undefined; next = link.outbound.next()) {
       if (isSessionEnd(next)) {
-        this.end = next;
+        this.carrierEnd = next;
+        this.end ??= next;
         return;
       }
       this.receive(next.bytes);
@@ -339,7 +341,15 @@ export class BrowserEnd {
     const opened = await session.openRecord(kernelCrypto, channel, frame);
     if (!opened.ok) throw new Error(opened.reason);
     this.#channel = opened.state;
-    this.records.push(JSON.parse(session.utf8Text(opened.plaintext) ?? '') as Record<string, unknown>);
+    const record = JSON.parse(session.utf8Text(opened.plaintext) ?? '') as Record<string, unknown>;
+    if (
+      record.t === 'session-end' &&
+      record.protocol === session.SESSION_PROTOCOL_ID &&
+      typeof record.code === 'number' &&
+      typeof record.reason === 'string'
+    ) {
+      this.end = { code: record.code, reason: record.reason };
+    } else this.records.push(record);
   }
 }
 
