@@ -33,7 +33,7 @@ import {
   SESSION_MODE_ENV,
 } from './account/fixed-layer.ts';
 import type { KitWrapper, RuntimesHarnessKit } from '../../contract/harness-kit.ts';
-import { byHarness, UnsupportedHarnessError } from './harness-kind.ts';
+import { UnsupportedHarnessError } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 import { shellQuote } from './shell-quote.ts';
 
@@ -57,14 +57,8 @@ export interface ResolvedCommand {
 export const MANAGED_MARKER =
   "# ferretry-managed — regenerated when this machine's runtimes change; edits are overwritten";
 
-/** The executable Codex launches; Claude's is its plugin's word (`RuntimesHarnessKit.command`). */
-const CODEX_BINARY = 'codex';
-
-/** The variable Codex reads its configuration directory from; Claude's is its plugin's word (`RuntimesHarnessKit.homeEnv`). */
-const CODEX_HOME_ENV = 'CODEX_HOME';
-
 /**
- * A word of a harness's own that its plugin gives (Claude's command, its home variable). A harness whose plugin gave none cannot
+ * A word of a harness's own that its plugin gives (its command, its home variable). A harness whose plugin gave none cannot
  * be launched: it is refused by name and never handed another harness's word.
  */
 function kitWord(harness: string, word: string | undefined): string {
@@ -73,12 +67,10 @@ function kitWord(harness: string, word: string | undefined): string {
 }
 
 /** The executable `harness` launches. */
-const binaryOf = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): string =>
-  byHarness<string>(harness, { claude: () => kitWord(harness, kit?.command), codex: () => CODEX_BINARY });
+const binaryOf = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): string => kitWord(harness, kit?.command);
 
 /** The variable `harness` reads its configuration directory from. */
-const homeEnvOf = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): string =>
-  byHarness<string>(harness, { claude: () => kitWord(harness, kit?.homeEnv), codex: () => CODEX_HOME_ENV });
+const homeEnvOf = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): string => kitWord(harness, kit?.homeEnv);
 
 const ENV_REFERENCE = /^\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})$/;
 

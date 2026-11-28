@@ -705,10 +705,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
   operations.push({
     kind: 'prune-directory',
     path: skillsContainer,
-    keep: [
-      ...skillEntries.map(entry => entry.dest.slice(skillsDest.length + 1)),
-      ...ownedSkillEntriesOf(harness, input.kit),
-    ],
+    keep: [...skillEntries.map(entry => entry.dest.slice(skillsDest.length + 1)), ...ownedSkillEntriesOf(input.kit)],
     // Skills the person or the harness added by hand live here too: only what the last apply recorded may go.
     record,
     recordedAs: skillsDest,

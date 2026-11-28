@@ -594,11 +594,15 @@ export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | und
 
 /**
  * The ONE runtime-wide kit decision, for the account plan and the catalog alike: `missingKitRefusal`, and also a kit that gives no launch
- * line, or (Claude) no command or home variable, in the same words. `undefined` when the runtime can be planned and launched.
+ * line, command or home variable, or (Codex) no list of the skill folders it keeps for itself, in the same words. `undefined` when the
+ * runtime can be planned and launched.
  */
 export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
   missingKitRefusal(harness, kit) ??
-  (kit?.wrapper === undefined || (isKind(harness, 'claude') && (kit.command === undefined || kit.homeEnv === undefined))
+  (kit?.wrapper === undefined ||
+  kit.command === undefined ||
+  kit.homeEnv === undefined ||
+  (isKind(harness, 'codex') && kit.ownedSkillEntries === undefined)
     ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
     : undefined);
 
@@ -650,7 +654,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   if (instructions !== undefined) entries.push(instructions);
 
   const skillsDest = destOf(assets, harness, 'skills').dest;
-  const reserved = ownedSkillEntriesOf(harness, input.kit);
+  const reserved = ownedSkillEntriesOf(input.kit);
   for (const { item, layer } of resolved.skills) {
     if (input.bodies?.skillItems?.has(item) === false) continue;
     if (reserved.includes(item)) {
