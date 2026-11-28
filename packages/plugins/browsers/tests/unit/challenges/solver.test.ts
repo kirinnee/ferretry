@@ -184,7 +184,11 @@ describe('the CapSolver adapter', () => {
     });
     should(await lastMonth.solver.ready()).be.undefined();
     should(await lastMonth.solver.solve(TURNSTILE)).eql({ token: TOKEN });
-    should(lastMonth.state.box.value).eql({ month: '2026-11', micros: SOLVE_COST_MICROS.turnstile });
+    should(lastMonth.state.box.value).eql({
+      month: '2026-11',
+      micros: SOLVE_COST_MICROS.turnstile,
+      earlier: { '2026-10': CAPTCHA_MONTHLY_CAP_MICROS },
+    });
   });
 
   it('should refuse plainly, naming the fix and no value, when there is no key, and call the vendor not at all', async () => {
@@ -268,6 +272,36 @@ describe('the CapSolver adapter', () => {
 });
 
 describe('the spend ledger', () => {
+  it('should keep every month’s spend when the clock moves back and forward again', async () => {
+    const state = memoryState();
+    const clock = { now: '2026-11-24T10:00:00.000Z' };
+    const ledger = new SpendLedger(state as never, () => clock.now);
+    should(await ledger.reserve(500, 1_000)).equal('reserved');
+    clock.now = '2026-10-31T23:00:00.000Z';
+    should(await ledger.spent()).equal(0);
+    should(await ledger.reserve(100, 1_000)).equal('reserved');
+    should(await ledger.spent()).equal(100);
+    await ledger.release(40);
+    clock.now = '2026-11-24T10:00:01.000Z';
+    should(await ledger.spent()).equal(500);
+    clock.now = '2026-10-31T23:00:00.000Z';
+    should(await ledger.spent()).equal(60);
+  });
+
+  it('should still read a file written before months were kept, and keep a year of them', async () => {
+    const state = memoryState({ month: '2026-11', micros: 300 });
+    const clock = { now: '2026-11-24T10:00:00.000Z' };
+    const ledger = new SpendLedger(state as never, () => clock.now);
+    should(await ledger.spent()).equal(300);
+    for (let month = 1; month <= 12; month += 1) {
+      clock.now = `2027-${String(month).padStart(2, '0')}-02T10:00:00.000Z`;
+      await ledger.reserve(1, 1_000);
+    }
+    const kept = Object.keys({ ...state.box.value?.earlier, [state.box.value?.month ?? '']: 0 });
+    should(kept).have.length(12);
+    should(kept).not.containEql('2026-11');
+  });
+
   it('should hold a reservation, give it back, and count only the current month', async () => {
     const state = memoryState();
     const ledger = new SpendLedger(state as never, () => NOW);
@@ -281,7 +315,7 @@ describe('the spend ledger', () => {
     state.box.value = { month: '2026-10', micros: 700 };
     should(await ledger.spent()).equal(0);
     await ledger.release(5);
-    should(state.box.value).eql({ month: '2026-11', micros: 0 });
+    should(state.box.value).eql({ month: '2026-11', micros: 0, earlier: { '2026-10': 700 } });
   });
 });
 
@@ -306,10 +340,13 @@ function harness(options: {
   const failures: string[] = [];
   const asked: CaptchaSolveRequest[] = [];
   const clock = { now: 1_000_000 };
+  let probes = 0;
+  const state = { widget: options.widget };
   const page: CaptchaPagePort = {
     captchaProbe: async () => {
-      if (options.widget instanceof Error) throw options.widget;
-      return options.widget === undefined ? undefined : options.widget;
+      probes += 1;
+      if (state.widget instanceof Error) throw state.widget;
+      return state.widget;
     },
     captchaInject: async (pageId, answer) => {
       injected.push({ page: pageId, kind: answer.kind, token: answer.token });
@@ -338,7 +375,7 @@ function harness(options: {
     nowMs: () => clock.now,
     failed: message => failures.push(message),
   });
-  return { solving, injected, injectedAt, audits, failures, asked, clock };
+  return { solving, injected, injectedAt, audits, failures, asked, clock, state, probes: () => probes };
 }
 
 /** Waits for the background solve the way a tool call that comes later would find it done. */
@@ -402,7 +439,7 @@ describe('solving a check a page shows', () => {
     should(injectedAt).eql([PAGE_URL]);
   });
 
-  it('should not solve a page again once it is solved, and say so, until the rest period is over', async () => {
+  it('should not solve a page again while it still shows the widget it was solved for, however long it has been', async () => {
     const { solving, injected, asked, audits, clock } = harness({ widget: WIDGET });
     should(await solving.begin('s1', 'p1')).eql({ kind: 'solving' });
     await settle();
@@ -419,9 +456,24 @@ describe('solving a check a page shows', () => {
     await settle();
     should(asked).have.length(2);
     clock.now += 6 * 60_000;
+    should(await solving.begin('s1', 'p1')).eql({ kind: 'solved' });
+    await settle();
+    should(asked).have.length(2);
+    clock.now += 24 * 60 * 60_000;
+    should(await solving.begin('s1', 'p1')).eql({ kind: 'solved' });
+    should(asked).have.length(2);
+  });
+
+  it('should treat a different widget on the same page as a new check, and solve it', async () => {
+    const { solving, asked, clock, state } = harness({ widget: WIDGET });
+    await solving.begin('s1', 'p1');
+    await settle();
+    should(asked).have.length(1);
+    state.widget = { ...WIDGET, pageUrl: 'https://app.example.com/#/other' };
+    clock.now += 6 * 60_000;
     should(await solving.begin('s1', 'p1')).eql({ kind: 'solving' });
     await settle();
-    should(asked).have.length(3);
+    should(asked).have.length(2);
   });
 
   it('should say a page it cannot solve is the owner’s, and leave that page alone for a while', async () => {
@@ -530,6 +582,17 @@ describe('solving a check a page shows', () => {
     const { solving } = harness({ widget: undefined });
     for (let page = 0; page < 300; page += 1) await solving.begin('s1', `p${String(page)}`);
     should(await solving.begin('s1', 'p299')).have.property('kind', 'not-solving');
+  });
+
+  it('should drop only the oldest page when its memory is full, not every page it has given up on', async () => {
+    const { solving, probes } = harness({ widget: undefined });
+    for (let page = 0; page < 257; page += 1) await solving.begin('s1', `p${String(page)}`);
+    should(probes()).equal(257);
+    await solving.begin('s1', 'p1');
+    await solving.begin('s1', 'p256');
+    should(probes()).equal(257);
+    await solving.begin('s1', 'p0');
+    should(probes()).equal(258);
   });
 });
 
