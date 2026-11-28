@@ -13,10 +13,14 @@ import type { MovedStore } from '../lib/moved-store.ts';
 
 const MOVE_MACHINE_ROW_ID = 'move-machine';
 
-const rowOf = (run: () => void): ActionsRowOffer => ({
+const MOVE_LABEL = 'Move to another machine…';
+const RECOVERY_LABEL = 'Check for an interrupted move…';
+
+/** With no other machine to move to, the row only opens the recovery check, so it says so. */
+const rowOf = (run: () => void, hasTarget: boolean): ActionsRowOffer => ({
   kind: 'run',
   id: MOVE_MACHINE_ROW_ID,
-  label: 'Move to another machine…',
+  label: hasTarget ? MOVE_LABEL : RECOVERY_LABEL,
   group: 'move',
   order: 30,
   run,
@@ -57,6 +61,7 @@ function MoveMachineRow({
   const others = useMemo(() => reaches.filter(reach => reach.daemon !== here && mayMove(reach)), [reaches, here]);
   const ledger = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
   const [open, setOpen] = useState(false);
+  const hasTarget = others.length > 0;
   const offered = offersMove(
     canControl && ledger.moved[ferret] === undefined && from !== undefined && mayMove(from),
     others.length + 1,
@@ -68,10 +73,10 @@ function MoveMachineRow({
     }
     offer(
       MOVE_MACHINE_ROW_ID,
-      rowOf(() => setOpen(true)),
+      rowOf(() => setOpen(true), hasTarget),
     );
     return () => offer(MOVE_MACHINE_ROW_ID, null);
-  }, [offer, offered]);
+  }, [offer, offered, hasTarget]);
   if (ledger.moved[ferret] !== undefined && !open) return <MovedMark ferret={ferret} store={store} />;
   // Withdrawing the menu row must not dismiss the move's progress or recovery receipt.
   return open && from !== undefined ? (

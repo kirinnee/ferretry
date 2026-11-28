@@ -56,7 +56,7 @@ A move also refuses if another ferret shares its folder; put the ferret in a sep
 
 ## 4. Who may do it
 
-Every relocate route is a person's (`caller: 'person'`) and needs `fleet.configure` and `filesystem.use` on **both** machines. A
+Every relocate route that moves a ferret is a person's (`caller: 'person'`) and needs `fleet.configure` and `filesystem.use` on **both** machines. The recovery check (the explicit held read, then Release) concerns only the source: it needs those two on the source machine alone, and works while the target is offline or the only paired machine. A
 governed device steps up with its passkey, as for any `fleet.configure` act. A limited device is refused on both. A ferret can
 never move itself or another ([grants.md](grants.md)). Reading the stub ledger needs only `fleet.use`.
 
@@ -88,7 +88,7 @@ never move itself or another ([grants.md](grants.md)). Reading the stub ledger n
   A's current state is unknown, since a restart can forget a transfer before its fence was written.
   **Check for an interrupted move** explicitly asks A, including after reopening the dialog or choosing Start over; a required
   passkey or refusal is shown, and the check can be retried. No recovery check runs automatically. A's Actions entry remains
-  available when B is offline, with recovery only. **Release this move** appears when A confirms a held export for this ferret
+  available when B is offline or no other machine is paired, with recovery only; it then reads “Check for an interrupted move…”. **Release this move** appears when A confirms a held export for this ferret
   (never another ferret's): it confirms A is stopped or fenced
   before freeing the export slot, never resumes A, and removes the completion retry for a released transfer. It does not
   cancel or delete a partial import on B; check both machines before deliberately resuming either copy.

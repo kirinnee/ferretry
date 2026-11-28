@@ -114,10 +114,17 @@ describe('the move-machine row', () => {
     expect(offersMove(false, 3)).toBe(false);
   });
 
-  it('opens recovery only when this is the only paired machine', async () => {
+  it('says recovery plainly, and opens recovery only, when this is the only paired machine', async () => {
     const offers = await mountRow(['alpha']);
+    const row = must(offers.at(-1)?.[1], 'recovery row');
+    expect(row).toMatchObject({
+      id: 'move-machine',
+      label: 'Check for an interrupted move…',
+      group: 'move',
+      kind: 'run',
+    });
     await interact(async () => {
-      await must(offers.at(-1)?.[1], 'recovery row').run();
+      await row.run();
     });
     expect(document.querySelector('[data-move-step="pick"]')?.textContent).toContain('No other machine is available');
     expect(document.querySelector('[role="radiogroup"]')).toBeNull();
@@ -154,8 +161,10 @@ describe('the move-machine row', () => {
   for (const capability of ['fleet', 'filesystem'])
     it(`excludes a target whose ${capability} authority refuses the move`, async () => {
       const offers = await mountRow(['alpha', 'beta'], true, 'beta', capability);
+      const row = must(offers.at(-1)?.[1], 'recovery row');
+      expect(row.label).toBe('Check for an interrupted move…');
       await interact(async () => {
-        await must(offers.at(-1)?.[1], 'recovery row').run();
+        await row.run();
       });
       expect(document.querySelector('[role="radiogroup"]')).toBeNull();
     });
