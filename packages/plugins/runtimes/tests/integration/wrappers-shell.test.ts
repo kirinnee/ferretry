@@ -23,6 +23,7 @@ import {
 } from '../../daemon/lib/account/fixed-layer.ts';
 import type { HarnessKind } from '../../daemon/lib/manifest.ts';
 import { type RuntimeWrapperInput, renderRuntimeWrapperScript, shellQuote } from '../../daemon/lib/wrappers.ts';
+import { REAL_KITS } from '../support/real-kits.ts';
 
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
 
@@ -42,6 +43,7 @@ const account = (overrides: RuntimeFacts = {}): RuntimeWrapperInput => {
     name: overrides.wrapper ?? 'claude-auto-kirin',
     id: overrides.id ?? ID_ONE,
     harness,
+    kit: REAL_KITS.get(harness),
     configDirectory: overrides.home ?? '$HOME/.state/fleet/homes/auto-kirin',
     env: overrides.env ?? {},
     args: overrides.flags ?? [],

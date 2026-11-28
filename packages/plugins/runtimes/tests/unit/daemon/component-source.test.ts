@@ -39,6 +39,7 @@ import {
 import { hostAssembly, runtimesDaemon } from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../support/fleet-world.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 afterEach(cleanupWorlds);
 
@@ -118,14 +119,20 @@ function ownerPlugins(owners: Owners, absent: readonly string[] = []): DaemonImp
   if (!absent.includes('claude-code'))
     plugins.push(
       stubPlugin('claude-code', [take(ProfileClaudeSettingsSource), take(ProfileClaudeHooksSource)], {
-        'runtimes.components.settings.claude:components': owners.claudeSettings.source,
+        'runtimes.components.settings.claude:components': {
+          ...owners.claudeSettings.source,
+          kit: REAL_KITS.get('claude'),
+        },
         'runtimes.components.hooks.claude:components': owners.claudeHooks.source,
       }),
     );
   if (!absent.includes('codex'))
     plugins.push(
       stubPlugin('codex', [take(ProfileCodexSettingsSource), take(ProfileCodexHooksSource)], {
-        'runtimes.components.settings.codex:components': owners.codexSettings.source,
+        'runtimes.components.settings.codex:components': {
+          ...owners.codexSettings.source,
+          kit: REAL_KITS.get('codex'),
+        },
         'runtimes.components.hooks.codex:components': owners.codexHooks.source,
       }),
     );

@@ -508,6 +508,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
         harnessCommand: input.harnessCommands?.[harness],
+        kit,
         signInLink: codexWrapperLink(home, store),
         refusal: wrapperBlocked,
       }),

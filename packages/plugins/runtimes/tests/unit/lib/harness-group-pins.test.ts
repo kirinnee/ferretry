@@ -6,6 +6,7 @@ import { describe, expect, it } from 'bun:test';
 import { priorServersOf } from '../../../daemon/lib/account/adapt.ts';
 import { harnessFactsOf } from '../../../daemon/lib/service/harness-facts.ts';
 import { autonomousPreparation } from '../../../daemon/lib/wrappers.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import { twoHarnessWorld, wrapperText } from '../../support/two-harness-world.ts';
 
 const SERVERS: Record<string, { command: string; args: string[] }> = {
@@ -37,7 +38,10 @@ describe('autonomousPreparation', () => {
   });
 
   it('should have Claude seed its first run and trust no folder', () => {
-    expect(autonomousPreparation('claude')).toEqual({ seedFirstRun: true, trustLaunchFolder: false });
+    expect(autonomousPreparation('claude', REAL_KITS.get('claude'))).toEqual({
+      seedFirstRun: true,
+      trustLaunchFolder: false,
+    });
   });
 });
 

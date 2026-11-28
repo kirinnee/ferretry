@@ -9,6 +9,8 @@ import {
   COMFORT_SETTINGS,
   starterModelSet,
 } from '../../../../daemon/lib/account/builtin-autonomous.ts';
+import { claudeRuntimesKit } from '../../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { EMPTY_RUNTIME_IDS } from '../../../../daemon/lib/account/ids.ts';
 import { type MaterialiseInput, materialiseFleet } from '../../../../daemon/lib/account/materialise.ts';
 import { type AccountModel, type Credential, parseAccountModel } from '../../../../daemon/lib/account/schema.ts';
@@ -195,6 +197,10 @@ export function planOf(
     harnessCommands: { claude: '/opt/harness/bin/claude', codex: '/opt/harness/bin/codex' },
     hostCodexHome: '/home/person/.codex',
     acceptsAutoPermissionMode: permissions !== 'auto-refused',
+    kits: new Map([
+      ['claude', claudeRuntimesKit],
+      ['codex', codexRuntimesKit],
+    ]),
     loginStores: loginStoresFor(harness, `${harness}-${store}`),
     ...(options.catalogs === true ? { modelCatalogs: GOLDEN_CATALOGS } : {}),
     bodies: {

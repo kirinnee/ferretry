@@ -22,8 +22,6 @@
 import { type SecretName, secretReferencesIn } from '@ferretry/core-vault/contract';
 import {
   binaryName,
-  CLAUDE_NO_QUESTIONS_FLAG,
-  CLAUDE_PROMPTS_SEEN,
   CODEX_QUESTIONS_OFF_OVERRIDE,
   BROWSER_INSTRUCTION,
   BROWSER_STEALTH_ENV,
@@ -35,8 +33,8 @@ import {
   SESSION_MODE_ENV,
   tomlString,
 } from './account/fixed-layer.ts';
-import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
-import { byHarness, isKind } from './harness-kind.ts';
+import type { KitWrapper, RuntimesHarnessKit } from '../../contract/harness-kit.ts';
+import { byHarness, isKind, UnsupportedHarnessError } from './harness-kind.ts';
 import type { HarnessKind } from './manifest.ts';
 import { shellQuote } from './shell-quote.ts';
 
@@ -155,147 +153,6 @@ const secretGuardLine = (name: string, secrets: readonly SecretName[]): string =
   );
 };
 
-/** Set to `0` in the environment to launch without seeding the harness's first-run state. */
-const FIRST_RUN_SEED_TOGGLE = 'FY_SEED_FIRST_RUN';
-
-/**
- * The "already seen" leaves of {@link CLAUDE_PROMPTS_SEEN} as jq paths. A boolean is seen when it is
- * `true`; a number is a count the harness shows the screen until it reaches, so a larger one is kept.
- */
-const PROMPTS_SEEN_LEAVES: readonly { readonly path: string; readonly value: boolean | number }[] = Object.entries(
-  CLAUDE_PROMPTS_SEEN,
-).flatMap(([key, value]) =>
-  typeof value === 'object'
-    ? Object.keys(value).map(inner => ({ path: `.[${JSON.stringify(key)}][${JSON.stringify(inner)}]`, value: true }))
-    : [{ path: `.[${JSON.stringify(key)}]`, value }],
-);
-
-const seenAlready = ({ path, value }: (typeof PROMPTS_SEEN_LEAVES)[number]): string =>
-  typeof value === 'number' ? `((${path} // 0) >= ${value})` : `(${path} == true)`;
-
-const seedSeen = ({ path, value }: (typeof PROMPTS_SEEN_LEAVES)[number]): string =>
-  typeof value === 'number' ? `${path} = ([(${path} // 0), ${value}] | max)` : `${path} = true`;
-
-/**
- * jq filter proving every first-run flag is already what it needs to be, so the usual launch does
- * nothing at all. `$ENV` rather than `--arg`: the same mechanism carries the API key below, and one
- * way of passing a value into jq is easier to keep right than two.
- */
-const SEEDED_ALREADY = [
-  '((.projects[$ENV.FY_SEED_PWD].hasTrustDialogAccepted) == true)',
-  'and (.hasCompletedOnboarding == true)',
-  'and (.hasCompletedClaudeInChromeOnboarding == true)',
-  'and (.claudeInChromeDefaultEnabled != null)',
-  ...PROMPTS_SEEN_LEAVES.map(leaf => `and ${seenAlready(leaf)}`),
-].join(' ');
-
-/**
- * The seeding filter. `claudeInChromeDefaultEnabled` is written **only when null**, because it is the
- * actual gate for the browser prompt and a home where somebody deliberately chose `true` must not be
- * silently turned off.
- */
-const SEED_FILTER = [
-  '.projects[$ENV.FY_SEED_PWD].hasTrustDialogAccepted = true',
-  '| .hasCompletedOnboarding = true',
-  '| .hasCompletedClaudeInChromeOnboarding = true',
-  '| (if .claudeInChromeDefaultEnabled == null then .claudeInChromeDefaultEnabled = false else . end)',
-  ...PROMPTS_SEEN_LEAVES.map(leaf => `| ${seedSeen(leaf)}`),
-].join(' ');
-
-/** A home with no `.claude.json` yet gets the same filter, applied to an empty document. */
-const SEED_NEW_DOCUMENT = `{} | ${SEED_FILTER}`;
-
-/**
- * The one-time prompts that would otherwise stall a launch nobody is watching, seeded into the
- * account's own `.claude.json` before the harness starts.
- *
- * **Why the wrapper and not provisioning.** The state has to hold at *every* launch, not once at the
- * moment a fleet was applied. A home rebuilt, a preference reset, a harness upgrade that reintroduces
- * a prompt — each of those silently undoes an apply-time write, and the resulting failure is total
- * and invisible: a non-interactive session simply hangs at a question no one can see. A line in the
- * wrapper re-asserts on every invocation and cannot drift out from under the fleet.
- *
- * **What it seeds, and why each one.** Folder trust for the working directory, the onboarding flow,
- * the browser-onboarding step, and `claudeInChromeDefaultEnabled` — the actual gate for the "use my
- * browser?" prompt, which shows while that key is null. Then every one-shot dialog the harness
- * records as seen ({@link CLAUDE_PROMPTS_SEEN}): the auto-mode default nudge that parked a bypass
- * agent with every message failing, the effort nudge and the fullscreen upsell. Then, when the account exports its own API
- * key, the key is recorded as approved: the harness's "detected a custom API key, use it?" dialog
- * defaults to **No** and blocks the session until somebody answers, and the wrapper exported that key
- * on purpose.
- *
- * **What it will not do.** It writes nothing when everything is already set, so an ordinary launch
- * costs one `jq` and no write. It never overwrites a deliberate choice. It cannot fail the launch:
- * every step is guarded, a failed rewrite discards its temporary file, and `exec` follows regardless.
- * Without `jq` it says so on stderr rather than skipping in silence — a launch that may stall for a
- * reason nobody was told about is exactly the failure this exists to prevent.
- *
- * The value reaches `jq` through the environment rather than `--arg`, so a key fragment never appears
- * in a process listing.
- */
-const firstRunSeedLines = (kind: HarnessKind): readonly string[] => {
-  if (kind !== 'claude') return [];
-  const home = `$${HARNESS_HOME_ENV.claude}`;
-  return [
-    '',
-    '# Seed the one-time prompts that would otherwise stall a launch nobody is watching. Re-asserted',
-    '# every run, because an apply-time write drifts when a home is rebuilt or a harness upgrades, and',
-    `# the failure is silent and total. Set ${FIRST_RUN_SEED_TOGGLE}=0 to launch without it.`,
-    `if [ "\${${FIRST_RUN_SEED_TOGGLE}:-1}" = "1" ]; then`,
-    '  if command -v jq >/dev/null 2>&1; then',
-    `    _fy_seed_cfg="${home}/.claude.json"`,
-    '    FY_SEED_PWD="$PWD"',
-    '    export FY_SEED_PWD',
-    `    if ! jq -e '${SEEDED_ALREADY}' "$_fy_seed_cfg" >/dev/null 2>&1; then`,
-    `      mkdir -p "${home}"`,
-    // Alongside the destination so the rename is atomic, and 0600 from mktemp itself.
-    `      _fy_seed_tmp="$(mktemp "${home}/.claude.json.fy-XXXXXX" 2>/dev/null)"`,
-    '      if [ -n "$_fy_seed_tmp" ]; then',
-    '        if [ -f "$_fy_seed_cfg" ]; then',
-    `          _fy_seed_ok="$(jq '${SEED_FILTER}' "$_fy_seed_cfg" > "$_fy_seed_tmp" 2>/dev/null && echo y)"`,
-    '        else',
-    `          _fy_seed_ok="$(jq -n '${SEED_NEW_DOCUMENT}' > "$_fy_seed_tmp" 2>/dev/null && echo y)"`,
-    '        fi',
-    '        if [ "$_fy_seed_ok" = y ]; then',
-    '          mv "$_fy_seed_tmp" "$_fy_seed_cfg"',
-    '        else',
-    '          rm -f "$_fy_seed_tmp"',
-    '        fi',
-    '      fi',
-    '    fi',
-    // The account exported this key deliberately; the harness still asks, and defaults to No.
-    '    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then',
-    '      FY_SEED_KEY="$ANTHROPIC_API_KEY"',
-    '      if [ "${#FY_SEED_KEY}" -gt 20 ]; then',
-    '        FY_SEED_KEY="$(printf %s "$ANTHROPIC_API_KEY" | tail -c 20)"',
-    '      fi',
-    '      export FY_SEED_KEY',
-    `      if ! jq -e '(.customApiKeyResponses.approved // []) | index($ENV.FY_SEED_KEY) != null' "$_fy_seed_cfg" >/dev/null 2>&1; then`,
-    `        mkdir -p "${home}"`,
-    `        _fy_seed_tmp="$(mktemp "${home}/.claude.json.fy-XXXXXX" 2>/dev/null)"`,
-    '        if [ -n "$_fy_seed_tmp" ]; then',
-    '          if [ -f "$_fy_seed_cfg" ]; then',
-    `            _fy_seed_ok="$(jq '.customApiKeyResponses.approved = (((.customApiKeyResponses.approved // []) + [$ENV.FY_SEED_KEY]) | unique)' "$_fy_seed_cfg" > "$_fy_seed_tmp" 2>/dev/null && echo y)"`,
-    '          else',
-    `            _fy_seed_ok="$(jq -n '{customApiKeyResponses: {approved: [$ENV.FY_SEED_KEY]}}' > "$_fy_seed_tmp" 2>/dev/null && echo y)"`,
-    '          fi',
-    '          if [ "$_fy_seed_ok" = y ]; then',
-    '            mv "$_fy_seed_tmp" "$_fy_seed_cfg"',
-    '          else',
-    '            rm -f "$_fy_seed_tmp"',
-    '          fi',
-    '        fi',
-    '      fi',
-    '      unset FY_SEED_KEY',
-    '    fi',
-    '    unset FY_SEED_PWD',
-    '  else',
-    `    echo "ferretry: jq is not installed, so this account's first-run prompts were not seeded — a launch nobody is watching may stall at one. Install jq, or set ${FIRST_RUN_SEED_TOGGLE}=0 to silence this." >&2`,
-    '  fi',
-    'fi',
-  ];
-};
-
 /**
  * The guard and export lines for one launch environment, sorted by variable so re-rendering an
  * unchanged runtime is byte-identical. A value naming a `${secret:NAME}` is neither a literal nor an
@@ -390,6 +247,8 @@ export interface RuntimeWrapperInput {
    * Absent means the harness is not located on this host, and the wrapper then execs the bare name.
    */
   readonly harnessCommand?: string | undefined;
+  /** What the harness's own plugin hands the launch line (`RuntimesHarnessKit.wrapper`); absent when its plugin is off. */
+  readonly kit: RuntimesHarnessKit | undefined;
   /**
    * A Codex runtime on a Ferretry-kept login: the link the wrapper makes from the runtime home's `auth.json` to the file Logins keeps
    * that sign-in in, before it starts Codex. Paths only; the file is never read, copied or shown.
@@ -404,16 +263,26 @@ export interface RuntimeWrapperInput {
 }
 
 /**
+ * What a harness's own plugin hands the launch line (`RuntimesHarnessKit.wrapper`). A harness whose plugin gave none cannot
+ * be launched: it is refused by name and never handed another harness's lines.
+ */
+function wrapperOf(harness: string, kit: RuntimesHarnessKit | undefined): KitWrapper {
+  if (kit?.wrapper === undefined) throw new UnsupportedHarnessError(harness);
+  return kit.wrapper;
+}
+
+/**
  * The arguments that may name a conversation, per harness: the shell `case` patterns a wrapper looks
  * for before it pays for a `fy history claim`. Wider than what names one — `--resume` alone opens a
  * picker — because `fy` decides exactly (Ferrets' `fy history claim`, `conversationFromArguments` in
  * `core/ferrets/contract/conversation-lease.ts`);
  * this only keeps an ordinary launch from running it.
  */
-const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {
-  claude: '--resume|--resume=*|-r|--session-id|--session-id=*',
-  codex: 'resume',
-};
+const conversationArgumentPatterns = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): string =>
+  byHarness(harness, {
+    claude: () => wrapperOf(harness, kit).conversationArgs,
+    codex: () => 'resume',
+  });
 
 /**
  * One live writer per conversation (§9.3): claim the conversation before `exec` hands this pid to the
@@ -427,7 +296,11 @@ const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {
  * start (the fork binder) holds a lease and moves it onto the pane's pid (`SessionConversationLeases.moveToPane`); the
  * other launch paths hold none yet (unit c58-36d).
  */
-const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly string[] => {
+const historyClaimLines = (
+  harness: HarnessKind,
+  fyCommand: string,
+  kit: RuntimesHarnessKit | undefined,
+): readonly string[] => {
   const fy = shellPath(fyCommand);
   return [
     '',
@@ -435,7 +308,7 @@ const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly st
     `# the harness. Only a refusal (exit ${HISTORY_CLAIM_HELD_EXIT_CODE}: another session is writing it) stops the launch; any other failure warns and launches anyway.`,
     '_fy_claim=0',
     'for _fy_arg in "$@"; do',
-    `  case "$_fy_arg" in ${CONVERSATION_ARGUMENT_PATTERNS[harness]}) _fy_claim=1 ;; esac`,
+    `  case "$_fy_arg" in ${conversationArgumentPatterns(harness, kit)}) _fy_claim=1 ;; esac`,
     'done',
     'if [ "$_fy_claim" = 1 ]; then',
     `  if command -v ${fy} >/dev/null 2>&1; then`,
@@ -485,11 +358,15 @@ const codexTrustLines = (): readonly string[] => [
 ];
 
 /** The launch arguments that start a runtime on its model set's default (§8.3). */
-const defaultModelArgs = (harness: HarnessKind, model: string | undefined): readonly string[] => {
+const defaultModelArgs = (
+  harness: HarnessKind,
+  model: string | undefined,
+  kit: RuntimesHarnessKit | undefined,
+): readonly string[] => {
   if (model === undefined) return [];
   // Codex: a config override rather than `-m`, so a `-m` the caller passes still decides.
   return byHarness<readonly string[]>(harness, {
-    claude: () => ['--model', model],
+    claude: () => wrapperOf(harness, kit).modelArgs(model),
     codex: () => ['-c', `model=${tomlBasicString(model)}`],
   });
 };
@@ -529,11 +406,17 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
   const environment = environmentLines(input.env, input.secretsFile);
   const harness =
     input.harnessCommand === undefined ? HARNESS_BINARIES[input.harness] : shellPath(input.harnessCommand);
-  const defaults = defaultModelArgs(input.harness, input.defaultModel);
+  const { kit } = input;
+  const defaults = defaultModelArgs(input.harness, input.defaultModel, kit);
+  // What the wrapper supplies itself (the question tool's flag), so the exec line does not repeat the fixed layer's copy.
+  const supplied = byHarness<readonly string[]>(input.harness, {
+    claude: () => wrapperOf(input.harness, kit).suppliedArguments ?? [],
+    codex: () => [],
+  });
   const execLine = (launchArguments: readonly string[], withSections: boolean): string => {
     const args = [...defaults, ...launchArguments]
-      .filter(arg => arg !== CLAUDE_NO_QUESTIONS_FLAG)
-      .map(arg => (withSections ? instructionArgument(input.harness, arg) : undefined) ?? shellQuote(arg))
+      .filter(arg => !supplied.includes(arg))
+      .map(arg => (withSections ? instructionArgument(input.harness, arg, kit) : undefined) ?? shellQuote(arg))
       .join(' ');
     return `exec ${harness}${args === '' ? '' : ` ${args}`} "$@"`;
   };
@@ -555,12 +438,12 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
             '# A ferret started in auto mode runs unattended: the fixed layer, the seeded prompts and the trusted folder.',
             `if ${AUTO_LAUNCH_TEST}; then`,
             ...[
-              ...(autonomous.seedFirstRun ? firstRunSeedLines(input.harness) : []),
-              ...historyClaimLines(input.harness, input.fyCommand),
+              ...(autonomous.seedFirstRun ? autonomousPreludeLines(input.harness, kit) : []),
+              ...historyClaimLines(input.harness, input.fyCommand, kit),
               ...(autonomous.trustLaunchFolder ? codexTrustLines() : []),
-              ...questionLines(input.harness),
-              ...ferretSectionLines(input.harness, input.fyCommand),
-              ...promptSnapshotLines(input.harness, harness),
+              ...questionLines(input.harness, kit),
+              ...ferretSectionLines(input.harness, input.fyCommand, kit),
+              ...promptSnapshotLines(input.harness, harness, kit),
               '',
               execLine(autonomous.args, true),
             ].map(line => (line === '' ? '' : `  ${line}`)),
@@ -574,7 +457,7 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ...environment.exports,
     ...(input.signInLink === undefined ? [] : signInLinkLines(input.signInLink)),
     ...autoBlock,
-    ...historyClaimLines(input.harness, input.fyCommand),
+    ...historyClaimLines(input.harness, input.fyCommand, kit),
     '',
     execLine(input.args, false),
     '',
@@ -615,10 +498,15 @@ const SECTIONS_VARIABLE = '_fy_sections';
  * Codex's value is a TOML basic string, so each section is stored already escaped for one: escaping is
  * per character, so escaped pieces join into the escaped whole.
  */
-function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
+function ferretSectionLines(harness: HarnessKind, fyCommand: string, kit: RuntimesHarnessKit | undefined): string[] {
   const fy = binaryName(fyCommand);
   const quoted = (text: string): string =>
-    shellQuote(byHarness(harness, { claude: () => text, codex: () => tomlString(text).slice(1, -1) }));
+    shellQuote(
+      byHarness(harness, {
+        claude: () => wrapperOf(harness, kit).quoteSection(text),
+        codex: () => tomlString(text).slice(1, -1),
+      }),
+    );
   return [
     '',
     "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
@@ -649,9 +537,18 @@ function packRoutingLines(quoted: (text: string) => string): string[] {
  * can be split or expanded: Claude's `--append-system-prompt=…`, and Codex's
  * `developer_instructions="…"` with the sections inside its closing quote.
  */
-function instructionArgument(harness: HarnessKind, arg: string): string | undefined {
+function instructionArgument(
+  harness: HarnessKind,
+  arg: string,
+  kit: RuntimesHarnessKit | undefined,
+): string | undefined {
   return byHarness<string | undefined>(harness, {
-    claude: () => (arg.startsWith('--append-system-prompt=') ? `${shellQuote(arg)}"$${SECTIONS_VARIABLE}"` : undefined),
+    claude: () => {
+      const split = wrapperOf(harness, kit).instructionArgument(arg);
+      return split === undefined
+        ? undefined
+        : `${shellQuote(split.before)}"$${SECTIONS_VARIABLE}"${split.after === '' ? '' : shellQuote(split.after)}`;
+    },
     codex: () =>
       !arg.startsWith('developer_instructions="') || !arg.endsWith('"')
         ? undefined
@@ -659,31 +556,28 @@ function instructionArgument(harness: HarnessKind, arg: string): string | undefi
   });
 }
 
-/** Claude's switch for the system-prompt record a conversation keeps, spelled as one argument. */
-const CLAUDE_PROMPT_SNAPSHOT_OFF = '--system-prompt-snapshot=off';
-
 /**
- * A RESUMED CONVERSATION MUST HEAR THIS LAUNCH'S SECTIONS. Claude Code records a conversation's system
- * prompt at its first request and, by default, replays that record verbatim on every later request and
- * `--resume` — "even when a later launch passes different text" (`claude --help`,
- * `--system-prompt-snapshot`). Every Restart, migration, revive and import relaunches into the SAME
- * conversation, so without this the sections composed above would reach only a conversation's first
- * launch: a ferret started before a section existed, or with a switch off, would never be told, and the
- * owner's "takes effect at the next restart" would be false.
- *
- * Off is what Claude did before it recorded at all: the prompt is rendered on each request. Asked of the
- * installed Claude at exec time rather than assumed, because an older Claude refuses a flag it does not
- * know — and that refusal would be a ferret that cannot launch. Codex reads `developer_instructions` on
+ * Lines that ask the installed harness about a flag before the auto launch's `exec`. Claude's keep a RESUMED CONVERSATION
+ * hearing this launch's sections (`--system-prompt-snapshot`, in its plugin); Codex reads `developer_instructions` on
  * every launch, so it needs nothing.
  */
-function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
-  if (!isKind(harness, 'claude')) return [];
-  // Bounded, and with no terminal to read: a launch must never wait on a harness that answers `--help`
-  // by starting a session. Three seconds, then the probe is killed and no flag is added.
-  return [
-    `_fy_help="$({ ${command} --help </dev/null 2>/dev/null & _fy_p=$!; { sleep 3; kill "$_fy_p"; } >/dev/null 2>&1 & _fy_k=$!; wait "$_fy_p" 2>/dev/null; kill "$_fy_k" 2>/dev/null; })"`,
-    `case "$_fy_help" in *--system-prompt-snapshot*) set -- ${CLAUDE_PROMPT_SNAPSHOT_OFF} "$@" ;; esac`,
-  ];
+function promptSnapshotLines(
+  harness: HarnessKind,
+  command: string,
+  kit: RuntimesHarnessKit | undefined,
+): readonly string[] {
+  return byHarness<readonly string[]>(harness, {
+    claude: () => wrapperOf(harness, kit).promptSnapshotLines?.(command) ?? [],
+    codex: () => [],
+  });
+}
+
+/** What an auto launch prepares first for Claude, as the lines its plugin writes; Codex's trusted folder is `codexTrustLines`. */
+function autonomousPreludeLines(harness: HarnessKind, kit: RuntimesHarnessKit | undefined): readonly string[] {
+  return byHarness<readonly string[]>(harness, {
+    claude: () => wrapperOf(harness, kit).autonomousPrelude?.({ homeEnv: HARNESS_HOME_ENV[harness] }) ?? [],
+    codex: () => [],
+  });
 }
 
 /**
@@ -693,9 +587,9 @@ function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
  * features.default_mode_request_user_input=false` always beats `config.toml`, where a selected settings component may
  * have switched the feature on (the same spelling as the Codex harness's launch, `CODEX_QUESTIONS_OFF`).
  */
-function questionLines(harness: HarnessKind): string[] {
-  return byHarness(harness, {
-    claude: () => [`set -- ${CLAUDE_NO_QUESTIONS_FLAG} "$@"`],
+function questionLines(harness: HarnessKind, kit: RuntimesHarnessKit | undefined): readonly string[] {
+  return byHarness<readonly string[]>(harness, {
+    claude: () => wrapperOf(harness, kit).questionLines(),
     codex: () => [`set -- -c ${CODEX_QUESTIONS_OFF_OVERRIDE} "$@"`],
   });
 }
@@ -731,10 +625,13 @@ export function renderCommandScript(input: CommandRenderInput): string {
 /** What an auto launch of `harness` prepares before the harness starts: Claude re-asserts its first-run keys, Codex trusts the folder. */
 export function autonomousPreparation(
   harness: string,
-  _kit?: RuntimesHarnessKit,
+  kit?: RuntimesHarnessKit,
 ): {
   readonly seedFirstRun: boolean;
   readonly trustLaunchFolder: boolean;
 } {
-  return { seedFirstRun: isKind(harness, 'claude'), trustLaunchFolder: isKind(harness, 'codex') };
+  return {
+    seedFirstRun: isKind(harness, 'claude') && wrapperOf(harness, kit).autonomousPrelude !== undefined,
+    trustLaunchFolder: isKind(harness, 'codex'),
+  };
 }
