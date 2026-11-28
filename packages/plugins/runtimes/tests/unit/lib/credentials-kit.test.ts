@@ -89,3 +89,73 @@ describe('a Claude credential store through its kit', () => {
     expect(() => credentialLaunchEnvironment(found, undefined)).toThrow(OFF);
   });
 });
+
+/**
+ * The Codex half is its plugin's too (E-276 PR 5): the same asks, the same refusals, a link where Claude has a variable.
+ */
+describe('a Codex credential store through its kit', () => {
+  const CODEX_HOST: Credential = { harness: 'codex', store: 'host' };
+  const CODEX_KEPT: Credential = { harness: 'codex', store: 'ferretry' };
+  const CODEX_PATHS = { userHome: '/home/person', hostCodexHome: '/home/person/.codex' } as const;
+  const CODEX_STORES = new Map([['work', { id: 'work', variables: {}, signInFile: '/fy/logins/work/auth.json' }]]);
+  const CODEX_OFF = 'codex is not supported here';
+
+  it('should link the person’s own login to auth.json in their own Codex home, and export nothing', () => {
+    const found = resolveCredentialStore('x', CODEX_HOST, CODEX_PATHS, REAL_KITS);
+    expect(found).toEqual({ harness: 'codex', store: 'host', canonicalFile: '/home/person/.codex/auth.json' });
+    expect(credentialLaunchEnvironment(found, REAL_KITS)).toEqual({});
+  });
+
+  it('should leave the person’s own login unreachable when their Codex home cannot be named', () => {
+    expect(resolveCredentialStore('x', CODEX_HOST, { userHome: '/home/person' }, REAL_KITS)).toEqual({
+      harness: 'codex',
+      store: 'host',
+      unavailable: 'your own Codex home could not be named, because CODEX_HOME is set to a relative path',
+    });
+  });
+
+  it('should keep a Ferretry-kept login at the file Logins named, and leave one it did not name unreachable', () => {
+    expect(resolveCredentialStore('work', CODEX_KEPT, CODEX_PATHS, REAL_KITS, 'codex', CODEX_STORES)).toEqual({
+      harness: 'codex',
+      store: 'ferretry',
+      signInFile: '/fy/logins/work/auth.json',
+    });
+    expect(resolveCredentialStore('other', CODEX_KEPT, CODEX_PATHS, REAL_KITS, 'codex', CODEX_STORES)).toEqual({
+      harness: 'codex',
+      store: 'ferretry',
+      unavailable: 'Logins names no store for it',
+    });
+  });
+
+  it('should leave a Codex login unreachable, saying why, when the plugin gave no kit', () => {
+    for (const kits of [undefined, new Map(), new Map([['codex', {}]] as const)]) {
+      for (const store of ['host', 'ferretry'] as const) {
+        expect(
+          resolveCredentialStore('work', { harness: 'codex', store }, CODEX_PATHS, kits, 'codex', CODEX_STORES),
+        ).toEqual({ harness: 'codex', store, unavailable: CODEX_OFF });
+      }
+    }
+  });
+
+  it('should not hand Claude’s kit the Codex home, nor Codex’s kit a Claude answer', () => {
+    const seen: unknown[] = [];
+    const spy = new Map([
+      [
+        'claude',
+        {
+          credentialStore: (input: unknown) => {
+            seen.push(input);
+            return { kind: 'unavailable', reason: 'spy' } as const;
+          },
+        },
+      ],
+    ] as const);
+    resolveCredentialStore('x', HOST, CODEX_PATHS, spy);
+    expect(seen).toEqual([{ store: 'host', userHome: '/home/person' }]);
+  });
+
+  it('should refuse a stored Codex resolution whose kit cannot name its variables', () => {
+    const found = resolveCredentialStore('x', CODEX_HOST, CODEX_PATHS, REAL_KITS);
+    expect(() => credentialLaunchEnvironment(found, undefined)).toThrow(CODEX_OFF);
+  });
+});

@@ -2,6 +2,7 @@ import { SURFACE_EVENTS_KEPT_PER_FERRET, type TerminalsState } from '../../../co
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import type { RecordedSurfaceEvent, SurfaceEventSink } from '../../lib/agent-tools/types.ts';
 import type { RegisteredTerminalPane } from '../../lib/session/attach/identity.ts';
+import { scopeBelongsTo } from '../tmux/pane-process-host.ts';
 
 /** Terminals' own `terminals.json` (`TerminalsStateSchema`, format 1). */
 export type TerminalsStateFile = StateFileDef<'terminals', TerminalsState>;
@@ -60,5 +61,25 @@ export class StateTerminalPanes {
     const read = await this.state.read(this.file);
     if (!read.ok) throw new Error(read.error.sentence);
     return (read.value ?? EMPTY).panes[ferret];
+  }
+
+  async scopeOf(ferret: string): Promise<string | undefined> {
+    const read = await this.state.read(this.file);
+    if (!read.ok) throw new Error(read.error.sentence);
+    const scope = read.value?.scopes?.[ferret];
+    return scope !== undefined && ferret.startsWith('fy-') && scopeBelongsTo(scope, ferret.slice(3))
+      ? scope
+      : undefined;
+  }
+
+  async recordScope(ferret: string, scope: string | undefined): Promise<void> {
+    const updated = await this.state.update(this.file, current => {
+      const document = current ?? EMPTY;
+      const scopes = { ...document.scopes };
+      if (scope === undefined) delete scopes[ferret];
+      else scopes[ferret] = scope;
+      return { ...document, scopes };
+    });
+    if (!updated.ok) throw new Error(updated.error.sentence);
   }
 }
