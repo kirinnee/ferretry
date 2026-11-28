@@ -40,6 +40,7 @@ export async function runtimeAdd(deps: AccountCommandDeps, invocation: VerbInvoc
       credential: login,
       profile,
       create: true,
+      namedByOwner: true,
       ...(flagOn(options, 'add-another') ? { addAnother: true } : {}),
     },
     destructive: false,

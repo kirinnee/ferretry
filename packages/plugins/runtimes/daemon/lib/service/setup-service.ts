@@ -851,7 +851,7 @@ export class FleetSetupService {
           `${wanted} is already a runtime on ${this.deps.catalog.machineName()}. Use ${freeName(wanted, taken)}?`,
         );
       }
-      runtimes[wanted] = runtime;
+      runtimes[wanted] = { ...runtime, namedByOwner: true };
     }
     return { ...plan, runtimes };
   }

@@ -1461,13 +1461,15 @@ export function planCloneUpdate(analysis: CloneAnalysis, choices: CloneUpdateCho
       const credential = loginFor.get(String(entry.value.credential)) as string;
       const profile = hereRef(`profile/${String(entry.value.profile)}`) as string;
       const theirRuntime = source.runtimes[entry.name] as Runtime;
-      // Switched off here is this machine's own say, never the source's: a take keeps it, an add never copies it.
+      // Switched off, and who typed the name, are this machine's own say: a take keeps both, an add never copies disabled.
       const disabled = choice === 'take' ? target.runtimes[name]?.disabled : undefined;
+      const namedByOwner = choice === 'take' ? target.runtimes[name]?.namedByOwner : theirRuntime.namedByOwner;
       runtimes[name] = {
         credential,
         profile: profile.slice('profile/'.length),
         ...(theirRuntime.harness === undefined ? {} : { harness: theirRuntime.harness }),
         ...(theirRuntime.compactAt === undefined ? {} : { compactAt: theirRuntime.compactAt }),
+        ...(namedByOwner === undefined ? {} : { namedByOwner: true }),
         ...(disabled === undefined ? {} : { disabled }),
         ...keyed(entry.ref),
       };

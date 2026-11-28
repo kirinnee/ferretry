@@ -556,6 +556,7 @@ export function planClone(target: AccountModel, offered: CloneBundle, options: C
       profile: profileNames.get(runtime.profile) as string,
       ...(runtime.harness === undefined ? {} : { harness: runtime.harness }),
       ...(runtime.compactAt === undefined ? {} : { compactAt: runtime.compactAt }),
+      ...(runtime.namedByOwner === undefined ? {} : { namedByOwner: true }),
       ...keyed(`runtime/${name}`),
     };
     loginRuntimes.set(runtime.credential, [...(loginRuntimes.get(runtime.credential) ?? []), free]);
