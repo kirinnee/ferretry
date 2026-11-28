@@ -153,14 +153,35 @@ async function states(width: number, scheme: string, style: string): Promise<voi
     await unconfirmed.click('text=Move to Laptop');
     await unconfirmed.waitForSelector('[data-move-recovery]');
     expect(await unconfirmed.textContent('[data-move-step="done"]')).toContain('Moved, not started');
-    expect(await unconfirmed.textContent('[data-move-recovery]')).toContain(
-      'Confirm Desk is fenced read-only, then Start on Laptop',
-    );
+    expect(await unconfirmed.textContent('[data-move-recovery]')).toContain('its current state is unknown');
     await settle(unconfirmed, 'not-started');
     await unconfirmed.click('text=Retry completion and start');
     await unconfirmed.waitForFunction(() =>
       document.querySelector('[data-move-step="done"]')?.textContent?.includes('now running'),
     );
+
+    const released = await open('&unconfirmed=1');
+    await released.click('text=Check what would move');
+    await released.click('text=Move to Laptop');
+    await released.waitForSelector('[data-move-recovery]');
+    await released.click('text=Release this move on Desk');
+    await released.waitForFunction(() =>
+      document.querySelector('[data-move-release]')?.textContent?.includes('Its move slot is free'),
+    );
+    expect(await released.locator('text=Retry completion and start').count()).toBe(0);
+    expect(await released.textContent('[data-move-step="done"]')).toContain('stopped on Laptop');
+    expect(await released.getByRole('button', { name: 'Release this move on Desk' }).isDisabled()).toBe(true);
+    await settle(released, 'released');
+
+    const repeat = await open('&unconfirmed=1');
+    await repeat.click('text=Release this move on Desk');
+    await repeat.waitForFunction(() =>
+      document.querySelector('[data-move-release]')?.textContent?.includes('Its move slot is free'),
+    );
+    await repeat.click('text=Check what would move');
+    await repeat.click('text=Move to Laptop');
+    await repeat.waitForSelector('[data-move-recovery]');
+    expect(await repeat.getByRole('button', { name: 'Release this move on Desk' }).isEnabled()).toBe(true);
 
     const interrupted = await open('&interrupt=1&recovery=1');
     await interrupted.click('text=Check what would move');

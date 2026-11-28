@@ -20,6 +20,7 @@ import {
   PreflightRequestSchema,
   RECEIVED_STATE,
   RELOCATE_MAX_CHUNK_TEXT,
+  ReleaseRequestSchema,
   TargetPreflightRequestSchema,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
@@ -46,6 +47,14 @@ async function readJson(call: CallContext): Promise<unknown> {
 export default implementDaemon(manifest, {
   build({ kernel, needs, uses }) {
     const moved: MovedLedger = {
+      completed: async exportId => {
+        const read = await kernel.state.read(MOVED_STATE);
+        if (!read.ok) throw new Error('the moved ledger could not be read');
+        const found = Object.entries(read.value?.moved ?? {}).find(([, entry]) => entry.exportId === exportId);
+        if (found === undefined) return undefined;
+        const [ferretId, entry] = found;
+        return { ferretId, movedTo: { daemonId: entry.daemonId, ferretId: entry.ferretId, at: entry.at } };
+      },
       get: async ferret => {
         const read = await kernel.state.read(MOVED_STATE);
         if (!read.ok) throw new Error('the moved ledger could not be read');
@@ -143,6 +152,12 @@ export default implementDaemon(manifest, {
     };
 
     const routes = {
+      'POST /v1/relocate/exports/release': async (call: CallContext) => {
+        mayReadTree(call);
+        const body = ReleaseRequestSchema.safeParse(await readJson(call));
+        if (!body.success) throw new ApiError(400, 'release takes the source ferret id', 'bad_request');
+        return jsonResponse(await relocation.release(body.data.ferretId).catch(refused));
+      },
       'GET /v1/relocate/moved': async () => {
         const read = await kernel.state.read(MOVED_STATE);
         if (!read.ok) throw new ApiError(500, 'the moved ledger could not be read', 'moved_unreadable');

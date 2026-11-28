@@ -227,6 +227,9 @@ export const CompleteRequestSchema = z.strictObject({
 });
 export type CompleteRequest = z.infer<typeof CompleteRequestSchema>;
 
+/** Explicitly discard a source's abandoned export, leaving that source stopped or fenced. */
+export const ReleaseRequestSchema = z.strictObject({ ferretId: z.string().min(1).max(128) });
+
 /** `state/relocate/moved.json`: the ferrets this machine has handed to another, so each is a read-only stub that says where it went. */
 export const MovedDocumentSchema = z.strictObject({
   moved: z.record(
@@ -236,6 +239,7 @@ export const MovedDocumentSchema = z.strictObject({
       ferretId: z.string().min(1),
       at: InstantSchema,
       machine: z.string().min(1).max(256).optional(),
+      exportId: z.string().optional(),
     }),
   ),
 });
@@ -313,7 +317,13 @@ export const ImportResponseSchema = z.strictObject({
   /** A launch succeeded but its origin could not be saved, or its turns and attachments were not all restored. The ferret and its files are kept. */
   recovery: z
     .strictObject({
-      code: z.enum(['provenance_unrecorded', 'session_unrestored', 'source_unconfirmed', 'start_unconfirmed']),
+      code: z.enum([
+        'provenance_unrecorded',
+        'session_unrestored',
+        'source_unconfirmed',
+        'start_unconfirmed',
+        'move_released',
+      ]),
       state: z.enum(['running', 'stopped', 'unknown']),
       message: z.string(),
     })

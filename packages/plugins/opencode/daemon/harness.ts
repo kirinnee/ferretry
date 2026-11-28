@@ -14,6 +14,10 @@ import { OPENCODE_FACTS, opencodeHomes } from './lib/home.ts';
 import { sessionStore } from './adapters/session-store.ts';
 import { opencodeScreen } from './lib/screen.ts';
 
+/** What a launch on an Anthropic subscription credential is refused with; Ferrets answers it as written. */
+const OPENCODE_SUBSCRIPTION_REFUSAL =
+  'OpenCode refuses Anthropic subscription credentials; choose an API key or endpoint login';
+
 export function opencodeHarness(
   kernel: KernelPorts,
   config: () => HarnessConfig,
@@ -90,6 +94,9 @@ export function opencodeHarness(
     key: 'opencode',
     screenReader: opencodeScreen,
     facts: OPENCODE_FACTS,
+    // Both of OpenCode's launch rules: prepare a replacement before releasing the live pane, and refuse an Anthropic subscription.
+    stagesRelaunch: true,
+    subscriptionRefusal: OPENCODE_SUBSCRIPTION_REFUSAL,
     accepts: ['api-key', 'proxy', 'endpoint'],
     runtime: {
       get binary() {

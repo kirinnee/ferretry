@@ -16,7 +16,7 @@ export interface World {
   readonly fixture: Fixture;
   readonly sourceIdentity: DaemonIdentity;
   readonly targetIdentity: DaemonIdentity;
-  readonly movedLedger: Map<string, { daemonId: string; ferretId: string; at: Instant }>;
+  readonly movedLedger: Map<string, { daemonId: string; ferretId: string; at: Instant; exportId: string }>;
   now: number;
   /** A fresh offer the target would open, good for five minutes from the world's clock. */
   offer(options?: {
@@ -49,8 +49,14 @@ export async function world(
   });
   const sourceIdentity = await newIdentity();
   const targetIdentity = await newIdentity();
-  const movedLedger = new Map<string, { daemonId: string; ferretId: string; at: Instant }>();
+  const movedLedger = new Map<string, { daemonId: string; ferretId: string; at: Instant; exportId: string }>();
   const moved: MovedLedger = {
+    completed: async exportId => {
+      const found = [...movedLedger].find(([, entry]) => entry.exportId === exportId);
+      if (found === undefined) return undefined;
+      const [ferretId, entry] = found;
+      return { ferretId, movedTo: { daemonId: entry.daemonId, ferretId: entry.ferretId, at: entry.at } };
+    },
     get: async ferret => movedLedger.get(ferret),
     record: async (ferret, entry) => {
       if (options.recordFails) throw new Error('moved ledger unavailable');

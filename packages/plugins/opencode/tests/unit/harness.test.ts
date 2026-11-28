@@ -134,6 +134,14 @@ harnessConformance('registered OpenCode V2', async () => {
 });
 
 describe('OpenCode private launches', () => {
+  test('OpenCode says it stages a relaunch and words its subscription refusal, word for word', async () => {
+    const f = await fixture();
+    expect(f.harness.stagesRelaunch).toBe(true);
+    expect(f.harness.subscriptionRefusal).toBe(
+      'OpenCode refuses Anthropic subscription credentials; choose an API key or endpoint login',
+    );
+    await f.host.stop();
+  });
   test('the registered OpenCode descriptor exposes private home names, V2 detection and separate public discovery', async () => {
     const f = await fixture();
     const runtime = f.harness.runtime;

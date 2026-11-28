@@ -58,6 +58,11 @@ async function on<T>(machine: Machine, act: () => Promise<T>): Promise<T> {
   return answer;
 }
 
+/** A person releases A's held export explicitly; the daemon confirms A is stopped or fenced before freeing its slot. */
+export async function releaseMove(ferret: string, from: Machine): Promise<void> {
+  await on(from, () => from.client.call('POST /v1/relocate/exports/release', { body: { ferretId: ferret } }));
+}
+
 /** What the person reads before agreeing: both machines' preflights, with the offer that makes the target's answer good. */
 export interface Review {
   readonly offer: RelocateOffer;
@@ -170,7 +175,7 @@ export async function carry(
   say({ step: 'carrying', chunk: { done: total, of: total } });
 
   say({ step: 'receiving' });
-  let received = ImportResponseSchema.parse(
+  const received = ImportResponseSchema.parse(
     await on(to, () =>
       to.client.call('POST /v1/relocate/offers/:offerId/import', {
         params: { offerId: reviewed.offer.offerId },
@@ -206,7 +211,7 @@ async function finishMove(from: Machine, to: Machine, exportId: string, imported
       recovery: {
         code: 'source_unconfirmed',
         state: 'stopped',
-        message: `Moved, not started: ${why}. ${from.name} has not confirmed its fence; the transfer will not automatically resume it. Confirm ${from.name} is fenced read-only, then Start on ${to.name}. Retry completion to confirm the fence before starting. Keep this receipt; do not resume both copies.${received.recovery === undefined ? '' : ` ${received.recovery.message}`}`,
+        message: `Moved, not started: ${why}. ${from.name} has not confirmed its fence; its current state is unknown. A daemon restart can forget an unfinished transfer. Check ${from.name}; do not resume both copies. Retry completion to confirm its fence before starting ${to.name}, or release the interrupted move on ${from.name} to leave it stopped. Keep this receipt.${received.recovery === undefined ? '' : ` ${received.recovery.message}`}`,
       },
     };
     moved = {

@@ -94,7 +94,14 @@ describe('starting on a conversation that was moved here', () => {
     expect(imported.ok).toBe(true);
     expect(harness.launched).toEqual([]);
     expect(harness.resumed).toEqual([]);
-    expect(saved.at(-1)).toMatchObject({ state: 'stopped', harnessConversation: 'moved-1' });
+    expect(saved.at(-1)).toMatchObject({
+      state: 'stopped',
+      cause: { kind: 'stopped' },
+      harnessConversation: 'moved-1',
+    });
+    expect(await service.heldLaunchRefusal(ferretId('f1'))).toContain('stopped on purpose');
+    expect(await service.launchHeld(ferretId('f1'))).toMatchObject({ ok: false, error: { code: 'refused' } });
+    expect(harness.resumed).toEqual([]);
     const resumed = await service.resume(ferretId('f1'), undefined, { origin: PERSON_ORIGIN });
     expect(resumed.ok).toBe(true);
     expect(harness.resumed).toEqual(['moved-1']);

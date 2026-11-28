@@ -7,8 +7,9 @@ import { FULL_DEVICE_GRANTS, LIMITED_DEVICE_GRANTS } from '@ferretry/core-gate/c
 import { toBase64Url, WebCryptoSessionCrypto } from '@ferretry/kernel/session';
 import type { Machine } from '../../app/lib/move.ts';
 import { carry, review } from '../../app/lib/move.ts';
-import { MovedDocumentSchema } from '../../contract/index.ts';
+import { ExportResponseSchema, MovedDocumentSchema } from '../../contract/index.ts';
 import { normalizeRemote } from '../../daemon/lib/remote.ts';
+import { newIdentity, openOffer } from '../support/identity.ts';
 import { deviceClient } from '../support/device-client.ts';
 import { testPasskey } from '../support/passkey.ts';
 import { git, makeRepository, REMOTE_URL } from '../support/real-git.ts';
@@ -485,6 +486,50 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
   let moved: Awaited<ReturnType<typeof carry>>;
   let reviewed: Awaited<ReturnType<typeof review>>;
 
+  it('person releases a handed-out abandoned export on real A and immediately reuses the slot', async () => {
+    const source = machineOf(a);
+    const destination = await newIdentity();
+    const exportOne = async () =>
+      ExportResponseSchema.parse(
+        await source.press(async () =>
+          source.client.call('POST /v1/relocate/:ferretId/export', {
+            params: { ferretId: 'f1' },
+            body: {
+              offer: (await openOffer(destination, { expiresAtMs: Date.now() + 120_000 })).offer,
+            },
+          }),
+        ),
+      );
+    const first = await exportOne();
+    await source.press(() =>
+      source.client.call('GET /v1/relocate/exports/:exportId/chunks/:index', {
+        params: { exportId: first.exportId, index: '0' },
+      }),
+    );
+    const limited = machineOf(a, 'limited');
+    await expect(
+      limited.client.call('POST /v1/relocate/exports/release', { body: { ferretId: 'f1' } }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(exportOne()).rejects.toMatchObject({ code: 'export_busy' });
+    await source.press(() => source.client.call('POST /v1/relocate/exports/release', { body: { ferretId: 'f1' } }));
+    expect((await admin(a, 'GET', '/v1/ferrets/f1')).json.state).toBe('stopped');
+    const second = await exportOne();
+    expect(second.exportId).not.toBe(first.exportId);
+    await expect(
+      source.press(() =>
+        source.client.call('POST /v1/relocate/exports/:exportId/complete', {
+          params: { exportId: first.exportId },
+          body: { to: { daemonId: destination.daemonId, ferretId: 'abandoned' } },
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'export_unknown' });
+    await source.press(() => source.client.call('POST /v1/relocate/exports/release', { body: { ferretId: 'f1' } }));
+    expect((await admin(a, 'GET', '/v1/ferrets/f1')).json.state).toBe('stopped');
+    // Each acceptance case owns a fresh DIRECT session (the small test client does not replenish its carrier credit).
+    devices.get(`${a.name}:full`)?.close();
+    devices.delete(`${a.name}:full`);
+  });
+
   it('shows what moves and what stays, and both machines agree it can go', async () => {
     sourceBefore.tree = {
       ...(await hashes(path.join(a.home, 'state/ferrets/f1'))),
@@ -518,7 +563,29 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
 
   it('seals on A, carries every chunk A → B and starts the ferret on B’s own login', async () => {
     const steps: string[] = [];
-    moved = await carry('f1', machineOf(a), machineOf(b), reviewed, { onProgress: p => steps.push(p.step) });
+    const realSource = machineOf(a);
+    let lost = false;
+    const source: Machine = {
+      ...realSource,
+      client: {
+        call: (async (route, init) => {
+          const result = await realSource.client.call(route, init);
+          if (route.endsWith('/complete') && !lost) {
+            lost = true;
+            throw new Error('synthetic lost completion reply');
+          }
+          return result;
+        }) as Machine['client']['call'],
+      },
+    };
+    moved = await carry('f1', source, machineOf(b), reviewed, { onProgress: p => steps.push(p.step) });
+    expect(lost, moved.stubNote).toBe(true);
+    expect(moved.stub).toBe('unmarked');
+    expect((await admin(b, 'GET', `/v1/ferrets/${moved.received.ferretId}`)).json.state).toBe('stopped');
+    expect((await admin(a, 'GET', '/v1/ferrets/f1')).json.movedTo).toBeDefined();
+    const retry = await moved.retryComplete?.();
+    expect(retry).toBeDefined();
+    moved = retry!;
     expect(steps).toEqual(expect.arrayContaining(['sealing', 'carrying', 'receiving', 'finishing', 'done']));
     expect(moved.received.recovery, JSON.stringify(moved.received.recovery)).toBeUndefined();
     expect(moved.stub).toBe('marked');
@@ -648,6 +715,28 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
       error: 'This ferret moved to beta and is read-only here.',
     });
     expect((await admin(a, 'GET', '/v1/ferrets/f1')).json.movedTo).toMatchObject({ machine: 'beta' });
+    const entry = MovedDocumentSchema.parse(await machineOf(a).client.call('GET /v1/relocate/moved')).moved.f1!;
+    expect(entry.exportId).toBeDefined();
+    const source = machineOf(a);
+    const completed = await source.press(() =>
+      source.client.call('POST /v1/relocate/exports/:exportId/complete', {
+        params: { exportId: entry.exportId! },
+        body: { to: { daemonId: b.daemonId, ferretId: moved.received.ferretId } },
+      }),
+    );
+    expect(completed).toMatchObject({ ferretId: 'f1', movedTo: { ferretId: moved.received.ferretId, at: entry.at } });
+    for (const to of [
+      { daemonId: b.daemonId, ferretId: 'different-import' },
+      { daemonId: a.daemonId, ferretId: moved.received.ferretId },
+    ])
+      await expect(
+        source.press(() =>
+          source.client.call('POST /v1/relocate/exports/:exportId/complete', {
+            params: { exportId: entry.exportId! },
+            body: { to },
+          }),
+        ),
+      ).rejects.toMatchObject({ code: 'wrong_target' });
   });
 
   it('a corrupt fence refuses mutations with fence_unavailable while ferret, transcript and terminal reads survive', async () => {

@@ -68,6 +68,19 @@ describe('a moved-away source is read-only at the shared admission seam', () => 
     expect(w.gate.readmit(call, fleetUse)).toBe(false);
   });
 
+  test('shared-draft route descriptor fences trailing slash and query spellings at admission and readmission', () => {
+    const w = protectedWorld();
+    const draft = descriptor({ path: '/v1/ferrets/:ferretId/shared-draft/stream' });
+    for (const suffix of ['/', '/?x=1', '?x=1', '']) {
+      const call = request({ bearer: ADMIN, path: `/v1/ferrets/f1/shared-draft/stream${suffix}` });
+      expect(
+        w.gate.admit({ table: 'socket', descriptor: draft, request: call, params: new Map([['ferretId', 'f1']]) })
+          .outcome,
+      ).toBe('refused');
+      expect(w.gate.readmit(call, draft)).toBe(false);
+    }
+  });
+
   test('an unavailable fence returns its own retryable code for mutations while reads remain admitted', () => {
     const w = world();
     Object.assign(w.ferrets, { mutationReady: () => false });

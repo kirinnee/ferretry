@@ -31,6 +31,14 @@ export default definePlugin({
 
   actions: {
     routes: [
+      route('POST /v1/relocate/exports/release', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: { record: RELOCATE_AUDIT.released },
+        guard: { none: 'stops or keeps fenced the source and discards only its held ciphertext; never resumes it' },
+      }),
       route('GET /v1/relocate/moved', {
         minimum: 'operator',
         caller: 'person',

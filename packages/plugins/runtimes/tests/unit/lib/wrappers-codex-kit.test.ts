@@ -15,6 +15,8 @@ const REFUSAL = 'codex is not supported here';
 
 /** A kit that answers with marker words, so the test can see which bytes came from it. */
 const MARKED: RuntimesHarnessKit = {
+  command: 'codex',
+  homeEnv: 'CODEX_HOME',
   wrapper: {
     conversationArgs: 'marked-resume',
     modelArgs: model => ['--marked-model', model],

@@ -77,6 +77,17 @@ describe('the four routes', () => {
       body: { to: { daemonId: target.daemonId, ferretId: 'f-on-b' } },
     });
     expect(done.status).toBe(200);
+    const retried = await host.request('POST', `/v1/relocate/exports/${result.exportId}/complete`, {
+      as: owner(),
+      body: { to: { daemonId: target.daemonId, ferretId: 'f-on-b' } },
+    });
+    expect(retried.status).toBe(200);
+    expect(retried.json()).toEqual(done.json());
+    const other = await host.request('POST', `/v1/relocate/exports/${result.exportId}/complete`, {
+      as: owner(),
+      body: { to: { daemonId: target.daemonId, ferretId: 'different-import' } },
+    });
+    expect(other.status).toBe(403);
     expect(done.json()).toMatchObject({ ferretId: FERRET, movedTo: { ferretId: 'f-on-b' } });
     // the record is durable (state/relocate/moved.json): a second move of the same ferret is refused
     const again = await host.request('POST', `/v1/relocate/${FERRET}/preflight`, {
@@ -100,4 +111,45 @@ describe('the four routes', () => {
     expect(ledger.json()).toEqual({ moved: {} });
     await host.stop();
   });
+});
+
+test('person releases an abandoned handed-out export, leaving a resumed A stopped and the slot reusable', async () => {
+  const { host, ferrets, target } = await started();
+  const first = ExportResponseSchema.parse(
+    (
+      await host.request('POST', `/v1/relocate/${FERRET}/export`, {
+        as: owner(),
+        body: { offer: (await openOffer(target, { expiresAtMs: host.clock.nowMs() + 120000 })).offer },
+      })
+    ).json(),
+  );
+  await host.request('GET', `/v1/relocate/exports/${first.exportId}/chunks/0`, { as: owner() });
+  ferrets.state = 'idle';
+  const denied = await host.request('POST', '/v1/relocate/exports/release', {
+    as: ferret('f1'),
+    body: { ferretId: FERRET },
+  });
+  expect(denied.status).toBe(403);
+  expect(String(ferrets.state)).toBe('idle');
+  const released = await host.request('POST', '/v1/relocate/exports/release', {
+    as: owner(),
+    body: { ferretId: FERRET },
+  });
+  expect(released.status).toBe(200);
+  expect(String(ferrets.state)).toBe('stopped');
+  expect(ferrets.calls).not.toContain('resume');
+  const again = await host.request('POST', `/v1/relocate/${FERRET}/export`, {
+    as: owner(),
+    body: { offer: (await openOffer(target, { expiresAtMs: host.clock.nowMs() + 120000 })).offer },
+  });
+  expect(again.status).toBe(200);
+  expect(
+    (
+      await host.request('POST', `/v1/relocate/exports/${first.exportId}/complete`, {
+        as: owner(),
+        body: { to: { daemonId: target.daemonId, ferretId: 'old-import' } },
+      })
+    ).status,
+  ).toBe(404);
+  await host.stop();
 });

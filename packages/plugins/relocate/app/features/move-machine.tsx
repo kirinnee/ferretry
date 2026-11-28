@@ -15,6 +15,7 @@ import {
   MoveStopped,
   type Progress,
   review,
+  releaseMove,
   type Review,
   sizeWords,
   type Step,
@@ -65,6 +66,8 @@ export function MoveMachine({
   const titleId = useId();
   const [phase, setPhase] = useState<Phase>({ kind: 'pick' });
   const [retrying, setRetrying] = useState(false);
+  const [releaseNote, setReleaseNote] = useState('');
+  const [released, setReleased] = useState(false);
   const [picked, setPicked] = useState<string | undefined>(candidates.find(each => each.online)?.daemon);
   const [folder, setFolder] = useState('');
   const hrefOf = useScreenHref();
@@ -84,8 +87,9 @@ export function MoveMachine({
       setPhase({ kind: 'failed', message: messageOf(error) });
     }
   };
-
   const move = async (to: DaemonReach, reviewed: Review): Promise<void> => {
+    setReleased(false);
+    setReleaseNote('');
     const show = (progress: Progress): void => setPhase({ kind: 'moving', to, reviewed, progress });
     show({ step: 'sealing' });
     try {
@@ -99,7 +103,6 @@ export function MoveMachine({
       setPhase({ kind: 'failed', message: messageOf(error) });
     }
   };
-
   return (
     <div
       className="fixed inset-0 z-[60] flex items-end bg-scrim p-2 sm:items-center sm:justify-center"
@@ -322,8 +325,9 @@ export function MoveMachine({
           <section className="flex flex-col gap-sm" data-move-step="failed" role="alert">
             <p className="m-0 text-cell text-err">{phase.message}</p>
             <p className="m-0 text-meta text-muted">
-              Nothing was changed on {from.machine} that a restart of {name} does not undo; if it is stopped, use Resume
-              ferret.
+              Check both machines before resuming. The source’s present state and any partial import need
+              reconciliation; do not resume both copies. Release the interrupted move here to keep the source stopped
+              and free its slot.
             </p>
             <div className="flex justify-end gap-sm">
               <button type="button" className="kt-btn" onClick={onClose}>
@@ -333,6 +337,54 @@ export function MoveMachine({
                 Start over
               </button>
             </div>
+          </section>
+        ) : null}
+        {!busy &&
+        (phase.kind === 'pick' ||
+          phase.kind === 'failed' ||
+          (phase.kind === 'done' && phase.moved.stub === 'unmarked')) ? (
+          <section className="flex flex-col gap-sm" data-move-release="">
+            <p className="m-0 text-meta text-muted">
+              Interrupted move? Release keeps {name} stopped or read-only on {from.machine} and frees its move slot.
+              Check the other machine before starting either copy.
+            </p>
+            {releaseNote === '' ? null : (
+              <p className="m-0 text-meta" role="status">
+                {releaseNote}
+              </p>
+            )}
+            <button
+              type="button"
+              className="kt-btn self-end"
+              disabled={released}
+              onClick={async () => {
+                setRetrying(true);
+                try {
+                  await releaseMove(ferret, machineOf(from));
+                  setReleased(true);
+                  const message = `${from.machine} confirmed stopped or read-only. Its move slot is free. Keep any imported copy stopped until you choose which copy to use.`;
+                  setReleaseNote(message);
+                  if (phase.kind === 'done')
+                    setPhase({
+                      ...phase,
+                      moved: {
+                        ...phase.moved,
+                        retryComplete: undefined,
+                        received: {
+                          ...phase.moved.received,
+                          recovery: { code: 'move_released', state: 'stopped', message },
+                        },
+                      },
+                    });
+                } catch (error) {
+                  setReleaseNote(messageOf(error));
+                } finally {
+                  setRetrying(false);
+                }
+              }}
+            >
+              Release this move on {from.machine}
+            </button>
           </section>
         ) : null}
       </div>

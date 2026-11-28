@@ -201,7 +201,8 @@ export class GateAdmission implements Admission {
       reference !== undefined &&
       ((input.table === 'socket' &&
         (input.descriptor.capability?.capability === 'terminal' ||
-          /\/shared-draft\/stream(?:\?|$)/u.test(input.request.path))) ||
+          /\/shared-draft\/stream\/?$/u.test(input.descriptor.path) ||
+          /\/shared-draft\/stream\/?(?:\?|$)/u.test(input.request.path))) ||
         !['GET', 'HEAD', 'OPTIONS'].includes(input.request.method))
     ) {
       const decoded = decodeParameter(reference);
@@ -220,7 +221,9 @@ export class GateAdmission implements Admission {
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
     const reference = /^\/v1\/ferrets\/([^/]+)(?:\/|$)/u.exec(request.path)?.[1];
     if (
-      (descriptor.capability?.capability === 'terminal' || /\/shared-draft\/stream(?:\?|$)/u.test(request.path)) &&
+      (descriptor.capability?.capability === 'terminal' ||
+        /\/shared-draft\/stream\/?$/u.test(descriptor.path) ||
+        /\/shared-draft\/stream\/?(?:\?|$)/u.test(request.path)) &&
       reference !== undefined &&
       (decodeParameter(reference) === undefined ||
         this.deps.ferrets()?.mutationReady?.() === false ||

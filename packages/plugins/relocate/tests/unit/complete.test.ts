@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FERRET, HISTORY, SESSION_FILES } from '../support/fake-ferrets.ts';
+import { FERRET, HISTORY, SESSION_FILES, summaryOf } from '../support/fake-ferrets.ts';
 import { snapshotOf } from '../support/real-git.ts';
 import { world } from '../support/world.ts';
 
@@ -16,7 +16,7 @@ describe('export stops the ferret politely, and complete turns the source into a
     w.relocation.chunk(result.exportId, 0);
     w.now += 16 * 60_000;
     await w.relocation.expire();
-    expect(w.ferrets.state).toBe('stopped');
+    expect(String(w.ferrets.state)).toBe('stopped');
     expect(w.ferrets.calls).not.toContain('resume');
     const completed = await w.relocation.complete(result.exportId, {
       to: { daemonId: w.targetIdentity.daemonId, ferretId: 'f-on-b' },
@@ -33,7 +33,7 @@ describe('export stops the ferret politely, and complete turns the source into a
     ).rejects.toThrow('moved ledger unavailable');
     w.now += 20 * 60_000;
     await w.relocation.expire();
-    expect(w.ferrets.state).toBe('stopped');
+    expect(String(w.ferrets.state)).toBe('stopped');
     expect(w.ferrets.calls).not.toContain('resume');
   });
 
@@ -89,4 +89,65 @@ describe('export stops the ferret politely, and complete turns the source into a
     w.now += 20 * 60_000;
     expect(() => w.relocation.chunk(first.exportId, 0)).toThrow();
   });
+});
+
+test('explicit release after handoff expiry stops a manually resumed A and never revives it later', async () => {
+  const w = await world();
+  const first = await w.relocation.export(FERRET, (await w.offer()).offer);
+  w.relocation.chunk(first.exportId, 0);
+  w.now += 20 * 60_000;
+  await w.relocation.expire();
+  expect((await refusal(w.relocation.export(FERRET, (await w.offer()).offer)))?.code).toBe('export_busy');
+  w.ferrets.state = 'idle';
+  await w.relocation.release(FERRET);
+  expect(String(w.ferrets.state)).toBe('stopped');
+  w.now += 20 * 60_000;
+  await w.relocation.expire();
+  expect(String(w.ferrets.state)).toBe('stopped');
+  expect(w.ferrets.calls).not.toContain('resume');
+  await expect(w.relocation.export(FERRET, (await w.offer()).offer)).resolves.toHaveProperty('exportId');
+});
+
+test('release retains the reservation when A cannot confirm stop, and rejects completion while stopping', async () => {
+  const w = await world();
+  const first = await w.relocation.export(FERRET, (await w.offer()).offer);
+  w.relocation.chunk(first.exportId, 0);
+  w.ferrets.state = 'idle';
+  const original = w.ferrets.port.stop;
+  w.ferrets.port.stop = async () => {};
+  await expect(w.relocation.release(FERRET)).rejects.toMatchObject({ code: 'source_unconfirmed' });
+  expect((await refusal(w.relocation.export(FERRET, (await w.offer()).offer)))?.code).toBe('export_busy');
+  let enter!: () => void;
+  let finish!: () => void;
+  const entered = new Promise<void>(r => (enter = r));
+  const held = new Promise<void>(r => (finish = r));
+  w.ferrets.port.stop = async () => {
+    enter();
+    await held;
+    w.ferrets.state = 'stopped';
+  };
+  const releasing = w.relocation.release(FERRET);
+  await entered;
+  await expect(
+    w.relocation.complete(first.exportId, { to: { daemonId: w.targetIdentity.daemonId, ferretId: 'held' } }),
+  ).rejects.toMatchObject({ code: 'export_busy' });
+  finish();
+  await releasing;
+  w.ferrets.port.stop = original;
+  expect(String(w.ferrets.state)).toBe('stopped');
+  await expect(w.relocation.export(FERRET, (await w.offer()).offer)).resolves.toHaveProperty('exportId');
+});
+
+test('releasing a different ferret does not claim the global slot is free or stop an unrelated record', async () => {
+  const w = await world();
+  const first = await w.relocation.export(FERRET, (await w.offer()).offer);
+  w.relocation.chunk(first.exportId, 0);
+  const get = w.ferrets.port.get;
+  w.ferrets.port.get = async id =>
+    id === 'other' ? { ...summaryOf('idle'), id: 'other' as typeof FERRET } : await get(id);
+  const before = [...w.ferrets.calls];
+  await expect(w.relocation.release('other')).rejects.toMatchObject({ code: 'export_busy' });
+  expect(w.ferrets.calls).toEqual(before);
+  expect(w.relocation.chunk(first.exportId, 0).length).toBeGreaterThan(0);
+  await expect(w.relocation.release(FERRET)).resolves.toEqual({ state: 'stopped' });
 });

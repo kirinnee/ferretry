@@ -46,7 +46,7 @@
  */
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames } from '../foreign.ts';
-import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
+import { harnessAsset, HARNESS_ASSETS, ownedSkillEntriesOf, type HarnessAssetTable } from '../assets.ts';
 import {
   isSseUrl,
   type KitPlumbingEntry,
@@ -592,6 +592,20 @@ export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | und
         : undefined,
   });
 
+/**
+ * The ONE runtime-wide kit decision, for the account plan and the catalog alike: `missingKitRefusal`, and also a kit that gives no launch
+ * line, command or home variable, or (Codex) no list of the skill folders it keeps for itself, in the same words. `undefined` when the
+ * runtime can be planned and launched.
+ */
+export const runtimeKitRefusal = (harness: HarnessKind, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
+  missingKitRefusal(harness, kit) ??
+  (kit?.wrapper === undefined ||
+  kit.command === undefined ||
+  kit.homeEnv === undefined ||
+  (isKind(harness, 'codex') && kit.ownedSkillEntries === undefined)
+    ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) }
+    : undefined);
+
 /** What a runtime that cannot be planned for want of its kit writes: nothing. Never reaches a file. */
 export const kitlessAdaptation = (harness: HarnessKind): AdaptedRuntime => ({
   harness,
@@ -640,7 +654,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   if (instructions !== undefined) entries.push(instructions);
 
   const skillsDest = destOf(assets, harness, 'skills').dest;
-  const reserved = HARNESS_OWNED_SKILL_ENTRIES[harness];
+  const reserved = ownedSkillEntriesOf(input.kit);
   for (const { item, layer } of resolved.skills) {
     if (input.bodies?.skillItems?.has(item) === false) continue;
     if (reserved.includes(item)) {

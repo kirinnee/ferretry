@@ -11,18 +11,19 @@ against two real daemons is `packages/plugins/relocate/tests/sit/two-daemons.sit
 already has (the same precedent as the secrets clone, [cross-daemon.md](cross-daemon.md) §4). Nothing is paired by a move
 ([pairing.md](pairing.md) is untouched), no peer credential exists, and no bearer value is made.
 
-| Step | Machine | Route                                              | What it does                                                                                                  |
-| ---- | ------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 1    | target  | `POST /v1/relocate/offers`                         | Opens a one-time X25519 key, signed with the target's daemon identity, good for five minutes, in memory only. |
-| 2    | source  | `POST /v1/relocate/:ferretId/preflight`            | Says what would move, what stays, what the target must have, and why a move cannot start.                     |
-| 2    | target  | `POST /v1/relocate/offers/:offerId/preflight`      | Says whether it has the project, a login for the harness and the secret **names** the ferret needs.           |
-| 3    | source  | `POST /v1/relocate/:ferretId/export`               | Stops the ferret politely at its prompt, snapshots it and seals it to the target's offer.                     |
-| 3    | source  | `GET /v1/relocate/exports/:exportId/chunks/:index` | One sealed chunk (ciphertext).                                                                                |
-| 3    | target  | `PUT /v1/relocate/offers/:offerId/chunks/:index`   | Receives the same chunk, in memory only.                                                                      |
-| 4    | target  | `POST /v1/relocate/offers/:offerId/import`         | Verifies every hash, builds the working tree and restores a stopped ferret.                                   |
-| 5    | source  | `POST /v1/relocate/exports/:exportId/complete`     | Durably fences the source read-only and records where the ferret went.                                        |
-| 6    | target  | `POST /v1/relocate/imports/:ferretId/start`        | Resumes the imported ferret on its own login, only after the app confirms step 5.                             |
-| —    | source  | `GET /v1/relocate/moved`                           | The stub ledger (ids and instants), so the fleet list can say "Moved to <machine>".                           |
+| Step | Machine | Route                                              | What it does                                                                                                    |
+| ---- | ------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 1    | target  | `POST /v1/relocate/offers`                         | Opens a one-time X25519 key, signed with the target's daemon identity, good for five minutes, in memory only.   |
+| 2    | source  | `POST /v1/relocate/:ferretId/preflight`            | Says what would move, what stays, what the target must have, and why a move cannot start.                       |
+| 2    | target  | `POST /v1/relocate/offers/:offerId/preflight`      | Says whether it has the project, a login for the harness and the secret **names** the ferret needs.             |
+| 3    | source  | `POST /v1/relocate/:ferretId/export`               | Stops the ferret politely at its prompt, snapshots it and seals it to the target's offer.                       |
+| 3    | source  | `GET /v1/relocate/exports/:exportId/chunks/:index` | One sealed chunk (ciphertext).                                                                                  |
+| 3    | target  | `PUT /v1/relocate/offers/:offerId/chunks/:index`   | Receives the same chunk, in memory only.                                                                        |
+| 4    | target  | `POST /v1/relocate/offers/:offerId/import`         | Verifies every hash, builds the working tree and restores a stopped ferret.                                     |
+| 5    | source  | `POST /v1/relocate/exports/:exportId/complete`     | Durably fences the source read-only and records where the ferret went.                                          |
+| 6    | target  | `POST /v1/relocate/imports/:ferretId/start`        | Resumes the imported ferret on its own login, only after the app confirms step 5.                               |
+| —    | source  | `POST /v1/relocate/exports/release`                | Person-initiated reconciliation: confirms the named source is stopped or fenced, then discards its held export. |
+| —    | source  | `GET /v1/relocate/moved`                           | The stub ledger (ids and instants), so the fleet list can say "Moved to <machine>".                             |
 
 The app's own flow is `app/lib/move.ts` (`review`, then `carry`); the dialog (`app/features/move-machine.tsx`) only draws it. The
 SIT drives the same two functions against two real daemons.
@@ -82,7 +83,13 @@ never move itself or another ([grants.md](grants.md)). Reading the stub ledger n
 - **At most one copy runs.** Import restores B without launching a process. A must confirm its durable read-only fence before
   the app starts B. If that confirmation is interrupted, B stays imported and stopped, and the app says “Moved, not started”,
   why it stopped, and to confirm A's fence before explicitly starting B. Once any ciphertext chunk is handed out, expiry never
-  resumes A; it holds the source stopped and keeps completion available for retry. A lost start answer reports B's state as
+  resumes A; it retains completion for retry. A lost completion reply can be retried with the same export id and destination,
+  including after A restarts following durable completion. A different destination is refused. An unconfirmed receipt says
+  A's current state is unknown, since a restart can forget a transfer before its fence was written.
+  **Release this move** is available on A's move dialog, including after reopening it: it confirms A is stopped or fenced
+  before freeing the export slot, never resumes A, and removes the completion retry for a released transfer. It does not
+  cancel or delete a partial import on B; check both machines before deliberately resuming either copy.
+  A lost start answer reports B's state as
   unknown and keeps A fenced. While moving, Escape, the backdrop and Close cannot dismiss the receipt.
 - **A damaged fence refuses writes.** Fence loading or corruption returns `503 fence_unavailable` for mutations. Ferret,
   transcript and terminal reads, and other features, keep working. A missing fence is never inferred from a damaged file.
@@ -97,5 +104,8 @@ never move itself or another ([grants.md](grants.md)). Reading the stub ledger n
 - **Automatic Cancel across machines** is deferred: it would have to fence B before restoring A. Keep the receipt, confirm
   A's fence, then start B explicitly, or retry completion. If A restarts before completion, its in-memory export is lost and
   the stopped imports need explicit reconciliation; B is never started automatically without confirmation of A's fence.
+- **Overlapping folders**: preflight refuses exact shared folders; nested source folders are not yet excluded.
+- **Symlink twins**: folder comparisons normalize paths but do not resolve filesystem symlinks.
+- **Audit naming**: the imported-start route retains the cosmetic `imported` audit label.
 - **The fleet list's "Moved to" mark** is drawn only for a row that has a runtime, as every list-row mark is.
 - **The real Claude or Codex resume on the target** is the owner's walk; the acceptance runs a scripted harness CLI.

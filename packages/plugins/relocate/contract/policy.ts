@@ -7,6 +7,7 @@ import { auditKind } from '@ferretry/core-gate/contract';
  */
 export const RELOCATE_AUDIT = {
   exported: auditKind('relocate.exported'),
+  released: auditKind('relocate.released'),
   moved: auditKind('relocate.moved'),
   imported: auditKind('relocate.imported'),
 } as const;

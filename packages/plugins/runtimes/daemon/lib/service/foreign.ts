@@ -9,6 +9,7 @@
  * Pure: no IO.
  */
 import type { z } from 'zod';
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import {
   byHarness,
   type HarnessKeyOfKind,
@@ -45,10 +46,17 @@ export function claudeFastSupport(model: string): boolean {
   return id.includes('opus-4-8') || id.includes('opus-5');
 }
 
-/** What a model choice says about fast mode for `harness`: Claude's is a rule on the model id, Codex's is the live account's to say (nothing here). */
-export function fastSupportOf(harness: string, model: string): { readonly fast?: boolean } {
+/**
+ * What a model choice says about fast mode for `harness`: Claude's is its plugin's rule on the model id (`kit.fastSupport`; no
+ * kit, no claim), Codex's is the live account's to say (nothing here).
+ */
+export function fastSupportOf(
+  harness: string,
+  model: string,
+  kit?: Pick<RuntimesHarnessKit, 'fastSupport'>,
+): { readonly fast?: boolean } {
   return byHarness<{ readonly fast?: boolean }>(harness, {
-    claude: () => ({ fast: claudeFastSupport(model) }),
+    claude: () => (kit?.fastSupport === undefined ? {} : { fast: kit.fastSupport(model) }),
     codex: () => ({}),
   });
 }

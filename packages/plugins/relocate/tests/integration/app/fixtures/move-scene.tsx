@@ -109,6 +109,7 @@ const EXPORT = {
 const answerOf = (daemon: string) => async (route: string, init?: { params?: Record<string, string> }) => {
   await new Promise(resolve => setTimeout(resolve, 60));
   if (daemon === SOURCE) {
+    if (route === 'POST /v1/relocate/exports/release') return { state: 'stopped' };
     if (route === 'POST /v1/relocate/:ferretId/preflight') return PREFLIGHT;
     if (route === 'POST /v1/relocate/:ferretId/export') return EXPORT;
     if (route === 'GET /v1/relocate/exports/:exportId/chunks/:index') {
