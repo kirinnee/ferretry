@@ -35,7 +35,7 @@ import {
 } from './schema.ts';
 
 /** One model a runtime offers. `id` is the value the CLI is handed (with a context suffix). */
-export interface RuntimeModelEntry {
+interface RuntimeModelEntry {
   readonly id: string;
   readonly label: string;
   readonly tier?: ModelTier;

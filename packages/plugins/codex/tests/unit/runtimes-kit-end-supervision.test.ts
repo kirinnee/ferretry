@@ -1,22 +1,19 @@
 /**
- * Runtimes follows an ended Codex ferret (docs/design/account-model.md §8.4): it hears Ferrets' `ferrets.changed`,
- * reads the ferret through `FerretsPort`, and stops the app-server pair under its own runtime's `CODEX_HOME`. Ferrets
- * calls nothing of Runtimes. Booted through the kernel's test host with Ferrets' fake as the ONLY other plugin.
+/**
+ * The Codex plugin follows an ended Codex ferret (docs/design/account-model.md §8.4): Runtimes hands it Ferrets' `ferrets.changed`
+ * (the kit's `onFerretChanged`), it reads the ferret through `FerretsPort`, and stops the app-server pair under its own
+ * runtime's `CODEX_HOME`. Ferrets calls nothing of Runtimes.
  */
 import { describe, it } from 'bun:test';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import { FerretsChanged, type FerretSummary } from '@ferretry/core-ferrets/contract';
-import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
-import type { DaemonImplementation } from '@ferretry/kernel/manifest';
-import { testHost } from '@ferretry/kernel/testing';
-import { FakeVault } from '@ferretry/core-vault/contract/testing';
-import { fakeLoginChanges, fakeLoginEnvImport, fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import type { FerretSummary } from '@ferretry/core-ferrets/contract';
+import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure, type KitEndHost } from '@ferretry/plugin-runtimes/contract';
 import should from 'should';
-import { RuntimesLaunchFailed } from '../../../contract/index.ts';
-import { type RuntimesAssembly, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
-import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '../../../contract/codex-launch.ts';
-import type { CodexAppServerOutcome } from '../../../daemon/lib/service/codex-runtime.ts';
-import { RuntimeEndSupervision, type RuntimeEndSeams } from '../../../daemon/lib/service/runtime-end-supervision.ts';
+import type { CodexAppServerOutcome } from '../../daemon/lib/runtimes-kit/codex-runtime.ts';
+import { codexRuntimesKit } from '../../daemon/lib/runtimes-kit/index.ts';
+import { RuntimeEndSupervision } from '../../daemon/lib/runtimes-kit/runtime-end-supervision.ts';
+
+type RuntimeEndSeams = ConstructorParameters<typeof RuntimeEndSupervision>[0]['seams'] & object;
 
 // The sentence the Codex harness hands Ferrets for a pane showing this, which Ferrets records on the stopped ferret.
 const EXPLAINED = codexLaunchFailure(
@@ -183,30 +180,29 @@ describe('Runtimes follows an ended ferret', () => {
   });
 });
 
-describe('the Runtimes daemon, booted with Ferrets and no other plugin', () => {
-  async function boot(calls: Calls, ferrets: FakeFerrets) {
-    const assembly = (): RuntimesAssembly => ({
-      catalog: {} as RuntimesAssembly['catalog'],
-      setup: {} as RuntimesAssembly['setup'],
-      ended: seams(calls),
-    });
-    return await testHost({
-      plugins: [runtimesDaemon(assembly) as DaemonImplementation<any>],
-      fakes: {
-        ferrets,
-        logins: fakeLogins([]),
-        loginChanges: fakeLoginChanges(),
-        loginEnvImport: fakeLoginEnvImport(),
-        vault: new FakeVault(),
-      },
-      gate: new StandInAdmission(() => ownerStanding()),
-      config: { runtimes: {}, profiles: {} },
-    });
-  }
+describe('the Codex kit follows an ended ferret', () => {
+  const host = (
+    calls: string[],
+    inventory: readonly { kind: string; wrapper: string; home: string }[] = [],
+  ): KitEndHost => ({
+    inventory: { accounts: async () => inventory },
+    fleet: {} as KitEndHost['fleet'],
+    processes: {} as KitEndHost['processes'],
+    homesDirectory: () => '/fy/fleet/homes',
+    sleep: async () => undefined,
+    wrapperOf: async runtime => {
+      calls.push(`wrapperOf ${runtime}`);
+      return runtime === 'codex-work' ? '/fy/fleet/bin/codex-work' : undefined;
+    },
+  });
+  const input = (ferrets: FakeFerrets, calls: string[], offered: KitEndHost | undefined) => ({
+    ferrets,
+    host: offered,
+    launchFailed: (failure: { ferret: string }) => calls.push(`told ${failure.ferret}`),
+  });
 
-  it('should act on the ferrets.changed event of an ended Codex ferret, and publish the explained failure', async () => {
-    // Arrange
-    const calls: Calls = { ended: [], told: [] };
+  it('should look at a stopped Codex ferret through the host and tell why a launch that failed never started', async () => {
+    const calls: string[] = [];
     const ferrets = new FakeFerrets();
     add(ferrets, {
       id: 'c1',
@@ -215,51 +211,50 @@ describe('the Runtimes daemon, booted with Ferrets and no other plugin', () => {
       state: 'stopped',
       cause: { kind: 'start_failed', explained: EXPLAINED },
     });
+
+    await codexRuntimesKit.onFerretChanged?.(input(ferrets, calls, host(calls)), { ferret: 'c1', state: 'stopped' });
+
+    // The runtime is published nowhere in the inventory, so no app server is stopped, but the failure is still told.
+    should(calls).deepEqual(['wrapperOf codex-work', 'told c1']);
+  });
+
+  it('should do nothing for a Claude ferret, or while the host offers nothing', async () => {
+    const calls: string[] = [];
+    const ferrets = new FakeFerrets();
     add(ferrets, {
       id: 'a1',
       harness: 'claude-code',
-      runtime: 'claude-default',
+      runtime: 'claude-work',
       state: 'stopped',
       cause: { kind: 'stopped' },
     });
-    const host = await boot(calls, ferrets);
-    const before = host.published.length;
+    add(ferrets, { id: 'c1', harness: 'codex', runtime: 'codex-work', state: 'stopped' });
 
-    // Act
-    host.emit(FerretsChanged, { ferret: 'a1', generation: 1, state: 'stopped' });
-    host.emit(FerretsChanged, { ferret: 'c1', generation: 1, state: 'stopped' });
-    await host.settle();
+    await codexRuntimesKit.onFerretChanged?.(input(ferrets, calls, host(calls)), { ferret: 'a1', state: 'stopped' });
+    await codexRuntimesKit.onFerretChanged?.(input(ferrets, calls, undefined), { ferret: 'c1', state: 'stopped' });
 
-    // Assert
-    should(calls.ended).deepEqual(['/fy/fleet/bin/codex-work']);
-    const published = host.published.slice(before);
-    should(published.map(event => event.event)).deepEqual([RuntimesLaunchFailed.name]);
-    should(published[0]?.payload).match({ ferret: 'c1', runtime: 'codex-work' });
+    should(calls).deepEqual([]);
   });
+});
 
-  it('should keep listening and change nothing while the host offers no follow-up seams', async () => {
-    // Arrange
+describe('the Codex kit when the host cannot be used', () => {
+  it('should say why the follow-up did not run, and never fail the ending', async () => {
+    const told: string[] = [];
     const ferrets = new FakeFerrets();
     add(ferrets, { id: 'c1', harness: 'codex', runtime: 'codex-work', state: 'stopped' });
-    const host = await testHost({
-      plugins: [runtimesDaemon(unavailableAssembly) as DaemonImplementation<any>],
-      fakes: {
-        ferrets,
-        logins: fakeLogins([]),
-        loginChanges: fakeLoginChanges(),
-        loginEnvImport: fakeLoginEnvImport(),
-        vault: new FakeVault(),
+    const broken = {
+      get inventory(): never {
+        throw new Error('the fleet root is not there');
       },
-      gate: new StandInAdmission(() => ownerStanding()),
-      config: { runtimes: {}, profiles: {} },
-    });
-    const before = host.published.length;
+    } as unknown as KitEndHost;
 
-    // Act
-    host.emit(FerretsChanged, { ferret: 'c1', generation: 1, state: 'stopped' });
-    await host.settle();
+    await codexRuntimesKit.onFerretChanged?.(
+      { ferrets, host: broken, warn: line => told.push(line), launchFailed: () => undefined },
+      { ferret: 'c1', state: 'stopped' },
+    );
 
-    // Assert
-    should(host.published.length).equal(before);
+    should(told).deepEqual([
+      "a Codex ferret stopped, but its runtime's follow-up could not run: the fleet root is not there",
+    ]);
   });
 });

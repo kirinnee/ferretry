@@ -12,7 +12,10 @@ import {
   skillFrontmatterKeys,
 } from '../../../daemon/lib/account/adapt.ts';
 import type { McpComponent } from '../../../daemon/lib/account/schema.ts';
-import { codexCatalogArguments, renderCodexModelCatalog } from '../../../daemon/lib/models/codex-catalog.ts';
+import {
+  codexCatalogArguments,
+  renderCodexModelCatalog,
+} from '../../../../codex/daemon/lib/runtimes-kit/model-catalog.ts';
 import { expectGolden } from './support/golden.ts';
 import { outcome, THIRD_KEY } from './support/thrown.ts';
 

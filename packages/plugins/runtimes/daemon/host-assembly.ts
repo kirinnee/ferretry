@@ -3,8 +3,8 @@
  * kernel now offers and the plugin declares in its manifest:
  *
  *  - the published fleet, read through the `fleet` root ({@link publishedFleet}) between applies (S67);
- *  - an ended Codex ferret's follow-up ({@link endedSeams}): the app-server supervisor over the fleet root and
- *    `kernel.processes`, and a runtime's published wrapper;
+ *  - what an ended ferret's follow-up stands on ({@link endedSeams}): the fleet root, `kernel.processes`, the clock and a
+ *    runtime's published wrapper, which each harness's own plugin acts on;
  *  - the machine's "Auto-resume after restart" switch, from Runtimes' own `runtimes.yaml`;
  *  - the catalogue and the setup over the files ({@link fileAssembly}): the file provisioner on the fleet root (its
  *    apply claim, its journal, the publication gate), the all-or-none config writer on `ConfigPort.writeAll`, and the
@@ -24,7 +24,12 @@ import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
 import { InstantSchema, milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
-import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS, type RuntimeCheckEnvironment } from '../contract/index.ts';
+import {
+  type KitEndHost,
+  PROFILE_COMPONENTS_KEY,
+  PROFILE_ITEMS,
+  type RuntimeCheckEnvironment,
+} from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { componentWriters } from './adapters/component-writers.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
@@ -49,12 +54,10 @@ import type { AccountModel } from './lib/account/schema.ts';
 import { type FleetManifest, type HarnessKind, harnessKindOfKey } from './lib/manifest.ts';
 import { claudeStatuslineFor } from './lib/account/statusline.ts';
 import { assembleServices, unavailableSetupDeps } from './lib/service/assembly.ts';
-import { CodexAppServerSupervisor } from './lib/service/codex-runtime.ts';
 import type { FleetCatalogServiceDeps } from './lib/service/catalog-service.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import type { FleetSetupServiceDeps } from './lib/service/setup-service.ts';
 import { RuntimeSessionRecords, SESSION_STATUS_OF } from './adapters/runtime-session-records.ts';
-import type { RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
 
 /** The published manifest's name in the fleet folder. */
 const MANIFEST_FILE = 'manifest.json';
@@ -164,25 +167,23 @@ export function manifestUnreadableProbe(
   };
 }
 
-/** What an ended Codex ferret's follow-up stands on, from the kernel's roots, processes and clock. */
+/** What an ended ferret's follow-up stands on, from the kernel's roots, processes and clock. */
 export function endedSeams(
   kernel: Pick<KernelPorts, 'roots' | 'processes' | 'clock'>,
   publication: FleetPublication = new FleetPublication(),
-): RuntimeEndSeams {
+): KitEndHost {
   const fleet = kernel.roots.root('fleet');
-  const supervisor = new CodexAppServerSupervisor({
+  return {
     inventory: {
       accounts: async () => (await publishedFleet(kernel.roots, fleet, publication)).manifest?.accounts ?? [],
     },
-    host: { fleet, processes: kernel.processes },
+    fleet,
+    processes: kernel.processes,
     homesDirectory: () => `${fleetDirectory(fleet)}/homes`,
     sleep: async ms =>
       await new Promise<void>(resolve => {
         kernel.clock.after(milliseconds(ms), resolve);
       }),
-  });
-  return {
-    supervisor,
     wrapperOf: async runtime =>
       (await publishedFleet(kernel.roots, fleet, publication)).manifest?.runtimes.find(
         published => published.name === runtime,
