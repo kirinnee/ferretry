@@ -36,7 +36,7 @@ const f = fixture([
       'tests/unit/lib/unlisted.test.ts': imports('../../../../'),
       'tests/unit/golden/nearby.test.ts': imports('../../../../'),
       'daemon/private.ts': imports('../../'),
-      'tests/unit/lib/other-half.test.ts': "import '../../../../claude-code/daemon/private.ts';\n",
+      'tests/unit/lib/other-half.test.ts': "import '../../../../../plugins/claude-code/daemon/private.ts';\n",
     },
   },
   ...['claude-code', 'codex'].map(id => ({
@@ -104,4 +104,40 @@ test('only the named Runtimes integration proofs may import the two real kit ent
   ])
     expect(found).toContain(`${path}:`);
   expect(findings).toHaveLength(9);
+});
+
+const FACTS = ['claude-code/daemon/lib/harness/facts.ts', 'codex/daemon/lib/facts.ts'];
+const factsImports = (path: string) =>
+  FACTS.map(file => `import '${'../'.repeat(path.split('/').length + 1)}plugins/${file}';\n`).join('');
+const NAMED = 'tests/unit/golden/transcript-harness.test.ts';
+const facts = fixture([
+  {
+    id: 'ferrets',
+    core: true,
+    files: {
+      [NAMED]: factsImports(NAMED),
+      // Right folder, not the named test.
+      'tests/unit/golden/other.golden.test.ts': factsImports('tests/unit/golden/other.golden.test.ts'),
+      // The named test may not reach any other file of the plugin.
+      'tests/unit/golden/transcript-harness-private.test.ts':
+        "import '../../../../../plugins/claude-code/daemon/private.ts';\n",
+    },
+  },
+  ...['claude-code', 'codex'].map(id => ({
+    id,
+    files: {
+      'daemon/lib/harness/facts.ts': 'export {};\n',
+      'daemon/lib/facts.ts': 'export {};\n',
+      'daemon/private.ts': 'export {};\n',
+    },
+  })),
+]);
+afterAll(() => facts.dispose());
+
+test('only the named Ferrets golden may import the two real harness facts files', async () => {
+  const findings = await check.run(contextFor(facts.root, { base: 'file:/nonexistent/ports-pending.json' }));
+  const found = findings.map(finding => `${finding.where}: ${finding.message}`).join('\n');
+  expect(found).not.toContain(`ferrets/${NAMED}:`);
+  expect(found).toContain('ferrets/tests/unit/golden/other.golden.test.ts:');
+  expect(found).toContain('ferrets/tests/unit/golden/transcript-harness-private.test.ts:');
 });

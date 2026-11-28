@@ -253,6 +253,24 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // NINTH EXEMPTION: E-276 PR 15 made Ferrets read a harness's transcript format, history pool and footer flag from its
+  // own `HarnessFacts`, and the one frozen Ferrets golden that pins those answers must be given the REAL facts of the two
+  // shipped harnesses (not copies that could drift). Only that one named test may import exactly those two facts files.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/core-ferrets' &&
+    edge.from.slice(edge.fromPkg.dir.length + 1) === 'tests/unit/golden/transcript-harness.test.ts' &&
+    to === 'daemon' &&
+    [
+      ['@ferretry/plugin-claude-code', 'daemon/lib/harness/facts.ts'],
+      ['@ferretry/plugin-codex', 'daemon/lib/facts.ts'],
+    ].some(
+      ([name, file]) =>
+        toPkg.name === name && resolve(dirname(edge.from), edge.specifier) === resolve(toPkg.dir, file!),
+    )
+  )
+    return undefined;
+
   // Another package.
   switch (to) {
     case 'kernel-contract':

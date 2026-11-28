@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { factsOfKey } from '../../../support/daemon/harness-facts.ts';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { RootHandle, RootsPort } from '@ferretry/kernel/contract';
@@ -326,7 +327,7 @@ class MemoryPool implements ConversationLeaseDisk {
 function realLeases(pool: MemoryPool, registry: FerretRegistry): ConversationLeases {
   return new ConversationLeases(
     new ConversationLeaseStore(pool, () => new Date(NOW)),
-    registryLeaseSessions(registry, async () => undefined),
+    registryLeaseSessions(registry, async () => undefined, factsOfKey),
     DAEMON_PID,
   );
 }

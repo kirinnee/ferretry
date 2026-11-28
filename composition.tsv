@@ -6,3 +6,4 @@ composition	scripts/ci/one-folder.ts	-	-	the PR-body parser, reason rule and pac
 composition	scripts/ci/size-churn.ts	-	-	the size/churn check: the limits and the expiry rule every oversize declaration answers to
 oversize	scripts/gen/registries.ts	1010	2026-11-30	the registry generator; expected churn, every registry kind edits it
 oversize	scripts/rebuild/parity.ts	2025	2026-12-16	grew on base before O18; split by section is an end-list unit
+oversize	scripts/validate/context-imports.ts	330	2026-12-16	each E-276 lane adds one narrow test-import exemption (churn, not size); move the exemptions into a table file at the PR 17 close-out
