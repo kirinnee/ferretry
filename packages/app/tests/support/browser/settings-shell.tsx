@@ -217,6 +217,8 @@ export function renderSettingsShellOf(
  * barrel carries the happy-dom harness, which a browser bundle cannot take.
  */
 export { noteClientDaemon } from '../../../src/connect/daemon-of.ts';
+export { DaemonClient } from '../../../src/client/daemon-client.ts';
+export { deviceViewHarness } from '../../../src/testing/device-view.tsx';
 export { WithAppHooks } from '../../../src/testing/app-hooks.tsx';
 export { type PlacedPanel, WithSlotPanels } from '../../../src/testing/slot-panels.tsx';
 

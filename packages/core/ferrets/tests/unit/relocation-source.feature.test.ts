@@ -1,7 +1,14 @@
+import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { RelocationStubsFile } from '../../contract/state/relocation-stubs.state.ts';
+import type { FerretsService } from '../../daemon/lib/ferrets/service.ts';
+import { repointRuntime } from '../../daemon/lib/ferrets/runtime-records.ts';
 import { describe, expect, test } from 'bun:test';
-import type { FerretId } from '@ferretry/kernel/contract';
+import type { FerretId, StatePort } from '@ferretry/kernel/contract';
 import { FERRET_READABLE_FOLDERS, Harnesses, JobKeeper } from '../../contract/index.ts';
-import relocationFeature, { relocationPortFor } from '../../daemon/features/relocation-source.feature.ts';
+import relocationFeature, {
+  RelocationFence,
+  relocationPortFor,
+} from '../../daemon/features/relocation-source.feature.ts';
 import type { FerretsContext } from '../../daemon/features/types.ts';
 
 const ID = 'f-move-1' as FerretId;
@@ -78,6 +85,7 @@ function build(options: {
   readonly listingError?: { readonly path: string; readonly code: string };
   readonly names?: readonly string[];
   readonly namesUnreadable?: boolean;
+  readonly peers?: readonly { id: string; folder: string }[];
 }) {
   const harness = { packConversation: options.packConversation };
   const folder = sessionFolder(options.files ?? SESSION);
@@ -102,8 +110,11 @@ function build(options: {
       provider: (token: unknown) => (token === Harnesses ? harness : 'unavailable'),
     },
     registry: {
+      list: () => options.peers ?? [{ id: ID, folder: '/work' }],
       get: (id: string) =>
-        options.known === false || id !== ID ? undefined : { state: options.state ?? 'idle', harness: 'claude-code' },
+        options.known === false || id !== ID
+          ? undefined
+          : { state: options.state ?? 'idle', harness: 'claude-code', folder: '/work' },
     },
     sessionFiles: { root: () => folder },
     sessionStore: {
@@ -185,6 +196,17 @@ describe('relocationSource lists a closed set', () => {
 });
 
 describe('busy says why a ferret cannot move right now', () => {
+  for (const otherFirst of [true, false])
+    test(`shared-folder preflight refuses before snapshot in either list order (${String(otherFirst)})`, async () => {
+      const peers = [
+        { id: ID, folder: '/work' },
+        { id: 'other', folder: '/work' },
+      ];
+      if (otherFirst) peers.reverse();
+      expect(await (await build({ peers })(ID))?.busy()).toContain(
+        'another ferret shares this folder; move it to a separate folder before moving machines',
+      );
+    });
   test.each([
     ['working', ['the ferret is still working; let it finish its turn first']],
     ['starting', ['the ferret is still working; let it finish its turn first']],
@@ -256,4 +278,217 @@ test('R3 a nested attachment directory disappearing refuses instead of losing fi
 test('R3 ENOENT on an absent optional root is the only listing error treated as empty', async () => {
   const source = await build({ files: { 'turns/turn-001.md': SESSION['turns/turn-001.md'] as Node } })(ID);
   expect((await source?.files())?.map(file => file.path)).toEqual(['turns/turn-001.md', 'history.jsonl']);
+});
+
+describe('relocationRestore writes a move’s session files into the NEW ferret, and only those', () => {
+  function restorer(existing: readonly string[] = [], known = true) {
+    const written = new Map<string, Uint8Array>();
+    const folder = {
+      resolve: (relative: string) =>
+        relative.startsWith('/') || relative.split('/').includes('..')
+          ? { ok: false as const, error: 'outside' }
+          : { ok: true as const, value: relative },
+      lstat: async (path: string) =>
+        existing.includes(path) || written.has(path)
+          ? { kind: 'file', size: 0, links: 1, mode: 0o600, modified: '' }
+          : undefined,
+      publish: async (path: string, bytes: Uint8Array, options: { exclusive?: boolean; mode?: number }) => {
+        expect(options).toEqual({ exclusive: true, mode: 0o600 });
+        written.set(path, bytes);
+        return { created: true };
+      },
+    };
+    const context = {
+      kernel: { state: { read: async () => ({ ok: true, value: undefined }) } },
+      hooks: { contributions: () => [], provider: () => 'unavailable' },
+      registry: { get: (id: string) => (known && id === ID ? { state: 'idle', harness: 'claude-code' } : undefined) },
+      sessionFiles: { root: () => folder },
+      sessionStore: {},
+      ready: async () => {},
+    } as unknown as FerretsContext;
+    const restore = relocationFeature.register(context)?.port?.relocationRestore as (
+      ferret: FerretId,
+      files: readonly { path: string; bytes: Uint8Array }[],
+    ) => Promise<void>;
+    return { restore, written };
+  }
+
+  test('writes each file below turns/, channel/ and attachments/ as a new file, byte for byte', async () => {
+    const { restore, written } = restorer();
+    await restore(ID, [
+      { path: 'turns/turn-001.md', bytes: text('task') },
+      { path: 'attachments/a1/photo.txt', bytes: text('photo') },
+    ]);
+    expect([...written.keys()]).toEqual(['turns/turn-001.md', 'attachments/a1/photo.txt']);
+    expect(new TextDecoder().decode(written.get('turns/turn-001.md'))).toBe('task');
+  });
+
+  test('refuses before the first write: a credential, a journal, a path out of the folder, a name already there', async () => {
+    for (const path of [
+      'environment.json',
+      'history.jsonl',
+      'turns',
+      'turns/../environment.json',
+      '/etc/passwd',
+      'media/x.png',
+    ]) {
+      const { restore, written } = restorer();
+      await expect(
+        restore(ID, [
+          { path: 'turns/turn-001.md', bytes: text('ok') },
+          { path, bytes: text('x') },
+        ]),
+      ).rejects.toThrow();
+      expect(written.size).toBe(0);
+    }
+    const taken = restorer(['turns/turn-002.md']);
+    await expect(
+      taken.restore(ID, [
+        { path: 'turns/turn-001.md', bytes: text('a') },
+        { path: 'turns/turn-002.md', bytes: text('b') },
+      ]),
+    ).rejects.toThrow('already exists');
+    expect(taken.written.size).toBe(0);
+  });
+
+  test('refuses a ferret this machine does not know', async () => {
+    const { restore } = restorer([], false);
+    await expect(restore(ID, [{ path: 'turns/turn-001.md', bytes: text('a') }])).rejects.toThrow('does not know');
+  });
+
+  test('only Relocate is handed it', () => {
+    const port = { relocationRestore: async () => undefined, get: async () => undefined };
+    expect(relocationPortFor('relocate', port as never)).toHaveProperty('relocationRestore');
+    for (const other of ['conversation', 'tidy', 'mcp', 'warden'])
+      expect(relocationPortFor(other, port as never)).not.toHaveProperty('relocationRestore');
+  });
+});
+
+const id = 'f1' as FerretId;
+const to = { daemonId: 'beta-daemon', ferretId: 'g1', machine: 'Laptop' };
+const records = () => [{ id, name: 'marin', folder: '/synthetic/work', state: 'stopped' as const }];
+
+test('the durable fence survives a new reader and resolves callsigns with the daemon’s address rules', async () => {
+  const state = new MemoryStateFolder().port([RelocationStubsFile]);
+  const fence = new RelocationFence(state, records);
+  await fence.loaded;
+  expect(fence.refusal(id)).toBeUndefined();
+  await fence.protect(id, to);
+  const restarted = new RelocationFence(state, records);
+  await restarted.loaded;
+  for (const reference of [id, 'marin', ' MARIN '])
+    expect(restarted.refusal(reference)).toBe('This ferret moved to Laptop and is read-only here.');
+  expect(restarted.refusal('unrelated')).toBeUndefined();
+});
+
+for (const otherFirst of [true, false])
+  test(`folder fence uses a moved record in either order and judges existing ferrets by id (${String(otherFirst)})`, async () => {
+    const rows = [
+      ...records(),
+      { id: 'f2' as FerretId, name: 'other', folder: '/synthetic/work', state: 'stopped' as const },
+    ];
+    if (otherFirst) rows.reverse();
+    const state = new MemoryStateFolder().port([RelocationStubsFile]);
+    const shared = new RelocationFence(state, () => rows);
+    await expect(shared.protect(id, to)).rejects.toThrow('another ferret shares this folder');
+    expect(shared.destination(id)).toBeUndefined();
+    await state.update(RelocationStubsFile, () => ({ moved: { [id]: to } }));
+    const fence = new RelocationFence(state, () => rows);
+    await fence.loaded;
+    expect(fence.refusal('f2', '/synthetic/work')).toBeUndefined();
+    expect(fence.refusal('', '/synthetic/work')).toContain('read-only');
+    expect(fence.refusal('', '/synthetic/work/sub')).toContain('read-only');
+    expect(fence.refusal('', '/synthetic/work-other')).toBeUndefined();
+  });
+
+test('an unreadable fence fails closed; a running source cannot be committed as a moved-away stub', async () => {
+  const broken = new RelocationFence({ read: async () => ({ ok: false }) } as unknown as StatePort, records);
+  await expect(broken.loaded).rejects.toThrow('could not be read');
+  expect(broken.refusal(id)).toContain('could not be checked');
+  const guarded = broken.guard({
+    get: async () => 'read works',
+    rename: async () => 'write happened',
+  } as unknown as FerretsService);
+  expect(await guarded.get(id)).toBe('read works' as never);
+  await expect(guarded.rename(id, { name: 'new-name' })).rejects.toMatchObject({
+    status: 503,
+    code: 'fence_unavailable',
+  });
+  const state = new MemoryStateFolder().port([RelocationStubsFile]);
+  const running = new RelocationFence(state, () => [{ ...records()[0]!, state: 'idle' }]);
+  await expect(running.protect(id, to)).rejects.toThrow('only a stopped ferret');
+});
+
+test('repointRuntime skips a stub before any session/record rewrite and still updates unrelated ferrets', async () => {
+  const state = new MemoryStateFolder().port([RelocationStubsFile]);
+  const fence = new RelocationFence(state, () => records().map(record => ({ ...record, runtime: 'old-runtime' })));
+  await fence.protect(id, to);
+  const calls: string[] = [];
+  const rows = [id, 'f2'].map(id => ({ id, runtime: 'old-runtime', state: 'stopped' }));
+  const moved = await repointRuntime(
+    {
+      registry: { list: () => rows, get: (id: string) => rows.find(row => row.id === id) },
+      serial: { run: async (_id: string, work: () => Promise<unknown>) => await work() },
+      ports: {
+        mutationAllowed: (id: string) => fence.assert(id),
+        session: {
+          repointRuntime: async (id: string) => {
+            calls.push(`session:${id}`);
+            return true;
+          },
+        },
+      },
+      write: async (record: { id: string }) => {
+        calls.push(`record:${record.id}`);
+      },
+    } as never,
+    { from: 'old-runtime', to: 'new-runtime', fromWrapper: '/synthetic/old', toWrapper: '/synthetic/new' },
+  );
+  expect(moved).toBe(1);
+  expect(calls).toEqual(['session:f2', 'record:f2']);
+});
+
+test('in-process launch and mutation families cannot bypass the fence through the Ferrets service', async () => {
+  const state = new MemoryStateFolder().port([RelocationStubsFile]);
+  const fence = new RelocationFence(state, records);
+  await fence.protect(id, to);
+  const called: string[] = [];
+  const fake = Object.fromEntries(
+    [
+      'start',
+      'resume',
+      'rename',
+      'stop',
+      'launchHeld',
+      'move',
+      'attach',
+      'revokeToken',
+      'get',
+      'repointRuntime',
+      'withWorktreeMove',
+    ].map(key => [
+      key,
+      async () => {
+        called.push(key);
+      },
+    ]),
+  );
+  const service = fence.guard(fake as unknown as FerretsService);
+  for (const key of ['resume', 'rename', 'stop', 'launchHeld', 'move', 'attach', 'revokeToken'])
+    await expect(
+      (service as unknown as Record<string, (id: FerretId) => Promise<unknown>>)[key]!(id),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: 'moved_away',
+      message: 'This ferret moved to Laptop and is read-only here.',
+    });
+  await expect(service.start({ folder: '/synthetic/work' } as never, { kind: 'person' })).rejects.toMatchObject({
+    code: 'moved_away',
+  });
+  expect(called).toEqual([]);
+  await expect(service.withWorktreeMove('/synthetic/work', async () => undefined)).rejects.toMatchObject({
+    code: 'moved_away',
+  });
+  await service.get(id);
+  expect(called).toEqual(['get']);
 });

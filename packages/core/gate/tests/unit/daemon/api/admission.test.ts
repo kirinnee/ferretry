@@ -42,6 +42,141 @@ const narrowed = { ...DEFAULT_GATE_CONFIG, grants: allOff };
 const perAct = { ...DEFAULT_GATE_CONFIG, security: { ...DEFAULT_GATE_SECURITY, stepUpOnActions: true } };
 const person = (fields = {}) => descriptor({ caller: 'person', ...fields });
 
+describe('a moved-away source is read-only at the shared admission seam', () => {
+  const sentence = 'This ferret moved to Laptop and is read-only here.';
+  const protectedWorld = () => {
+    const w = world();
+    Object.assign(w.ferrets, { mutationRefusal: (id: string) => (id === 'f1' ? sentence : undefined) });
+    return w;
+  };
+
+  test('malformed parameter is a 400; shared-draft sockets and their subsequent writes are fenced', () => {
+    const w = protectedWorld();
+    const malformed = w.gate.admit({
+      table: 'route',
+      descriptor: descriptor({ method: 'POST' }),
+      request: request({ bearer: ADMIN, method: 'POST' }),
+      params: new Map([['ferretId', '%ZZ']]),
+    });
+    expect(malformed.outcome).toBe('refused');
+    if (malformed.outcome === 'refused') expect(malformed.response.status).toBe(400);
+    const call = request({ bearer: ADMIN, path: '/v1/ferrets/f1/shared-draft/stream' });
+    expect(
+      w.gate.admit({ table: 'socket', descriptor: fleetUse, request: call, params: new Map([['ferretId', 'f1']]) })
+        .outcome,
+    ).toBe('refused');
+    expect(w.gate.readmit(call, fleetUse)).toBe(false);
+  });
+
+  test('shared-draft route descriptor fences trailing slash and query spellings at admission and readmission', () => {
+    const w = protectedWorld();
+    const draft = descriptor({ path: '/v1/ferrets/:ferretId/shared-draft/stream' });
+    for (const suffix of ['/', '/?x=1', '?x=1', '']) {
+      const call = request({ bearer: ADMIN, path: `/v1/ferrets/f1/shared-draft/stream${suffix}` });
+      expect(
+        w.gate.admit({ table: 'socket', descriptor: draft, request: call, params: new Map([['ferretId', 'f1']]) })
+          .outcome,
+      ).toBe('refused');
+      expect(w.gate.readmit(call, draft)).toBe(false);
+    }
+  });
+
+  test('an unavailable fence returns its own retryable code for mutations while reads remain admitted', () => {
+    const w = world();
+    Object.assign(w.ferrets, { mutationReady: () => false });
+    const answer = w.gate.admit({
+      table: 'route',
+      descriptor: descriptor({ method: 'POST' }),
+      request: request({ bearer: ADMIN, method: 'POST' }),
+      params: new Map([['ferretId', 'f1']]),
+    });
+    expect(answer.outcome).toBe('refused');
+    if (answer.outcome === 'refused') {
+      expect(answer.response.status).toBe(503);
+      expect(JSON.parse(String(answer.response.body)).code).toBe('fence_unavailable');
+    }
+    expect(
+      w.gate.admit({
+        table: 'route',
+        descriptor: fleetUse,
+        request: request({ bearer: ADMIN }),
+        params: new Map([['ferretId', 'f1']]),
+      }).outcome,
+    ).toBe('admitted');
+  });
+
+  test('refuses every mutation method before its body is read, even for the host owner', () => {
+    const w = protectedWorld();
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+      const call = request({ bearer: ADMIN, method, path: '/v1/ferrets/f%31/rename' });
+      const answer = w.gate.admit({
+        table: 'route',
+        descriptor: descriptor({ method }),
+        request: call,
+        params: new Map([['ferretId', 'f%31']]),
+      });
+      expect(answer.outcome).toBe('refused');
+      if (answer.outcome !== 'refused') throw new Error('a moved stub was admitted');
+      expect(answer.response.status).toBe(409);
+      expect(JSON.parse(String(answer.response.body))).toEqual({ error: sentence, code: 'moved_away' });
+      expect(call.bodyRead()).toBe(false);
+    }
+  });
+
+  test('keeps reads and unrelated ferrets available and checks ordinary authorization first', () => {
+    const w = protectedWorld();
+    for (const method of ['GET', 'HEAD', 'OPTIONS', 'POST'] as const) {
+      const reference = method === 'POST' ? 'f2' : 'f1';
+      expect(
+        w.gate.admit({
+          table: 'route',
+          descriptor: descriptor({ method }),
+          request: request({ bearer: ADMIN, method }),
+          params: new Map([['ferretId', reference]]),
+        }).outcome,
+      ).toBe('admitted');
+    }
+    const refused = w.gate.admit({
+      table: 'route',
+      descriptor: descriptor({ method: 'POST' }),
+      request: request({ method: 'POST' }),
+      params: new Map([['ferretId', 'f1']]),
+    });
+    expect(refused.outcome).toBe('refused');
+    if (refused.outcome !== 'refused') throw new Error('an unauthenticated caller was admitted');
+    expect(refused.response.status).toBe(401);
+  });
+
+  test('refuses new terminal sockets and re-admits no terminal frame after the source moved', () => {
+    const w = world();
+    let moved = false;
+    Object.assign(w.ferrets, { mutationRefusal: (id: string) => (moved && id === 'f1' ? sentence : undefined) });
+    const call = request({ bearer: ADMIN, path: '/v1/ferrets/f%31/terminals/t1/stream' });
+    expect(
+      w.gate.admit({ table: 'socket', descriptor: terminalUse, request: call, params: new Map([['ferretId', 'f%31']]) })
+        .outcome,
+    ).toBe('admitted');
+    moved = true;
+    const answer = w.gate.admit({
+      table: 'socket',
+      descriptor: terminalUse,
+      request: call,
+      params: new Map([['ferretId', 'f%31']]),
+    });
+    expect(answer.outcome).toBe('refused');
+    expect(w.gate.readmit(call, terminalUse)).toBe(false);
+    expect(w.gate.readmit(call, fleetUse)).toBe(true);
+    expect(w.gate.readmit(request({ bearer: ADMIN, path: '/v1/ferrets/f2/terminals/t1/stream' }), terminalUse)).toBe(
+      true,
+    );
+    expect(w.gate.readmit(request({ bearer: ADMIN }), terminalUse)).toBe(true);
+    expect(
+      w.gate.admit({ table: 'socket', descriptor: fleetUse, request: call, params: new Map([['ferretId', 'f1']]) })
+        .outcome,
+    ).toBe('admitted');
+  });
+});
+
 describe('who is governed', () => {
   test('G1 only the admin token at the machine is ungoverned; a device, a relayed admin token are governed', () => {
     const w = world({ policy: narrowed });

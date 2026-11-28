@@ -6,7 +6,7 @@ import type {
   FerretWaiting,
   PackId,
 } from '../../../contract/index.ts';
-import { type FerretDetails } from '../../../contract/index.ts';
+import type { FerretDetails } from '../../../contract/index.ts';
 import { sessionNameClaim } from '../names/session-names.ts';
 import type { NameClaim } from '../names/types.ts';
 
@@ -110,6 +110,7 @@ export class FerretRegistry {
       readonly state: FerretState;
       readonly gone?: true;
     }) => void = () => {},
+    private readonly decorate: (summary: FerretSummary) => FerretSummary = summary => summary,
   ) {
     for (const record of records) this.put(record);
   }
@@ -124,7 +125,8 @@ export class FerretRegistry {
   }
 
   summary(ferret: FerretId): FerretSummary | undefined {
-    return this.summaries.get(ferret);
+    const summary = this.summaries.get(ferret);
+    return summary === undefined ? undefined : this.decorate(summary);
   }
 
   /** Summaries in creation order (then id), filtered. The same objects while nothing moved. */
@@ -137,7 +139,7 @@ export class FerretRegistry {
           (filter.pack === undefined || record.pack === filter.pack),
       )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
-      .map(record => this.summaries.get(record.id) as FerretSummary);
+      .map(record => this.summary(record.id) as FerretSummary);
   }
 
   put(record: FerretRecord): void {

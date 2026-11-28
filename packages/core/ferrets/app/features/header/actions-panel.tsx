@@ -94,7 +94,14 @@ function ActionsBar({
       {daemon === undefined ? null : (
         <PanelSlot
           daemon={daemon}
-          props={{ ferret: ferret.id, name, canControl, offer: actions.offer } satisfies ActionsRowSlotProps}
+          props={
+            {
+              ferret: ferret.id,
+              name,
+              canControl: actions.canControl,
+              offer: actions.offer,
+            } satisfies ActionsRowSlotProps
+          }
           slot={ACTIONS_ROW_SLOT}
         />
       )}

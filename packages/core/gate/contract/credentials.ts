@@ -182,6 +182,10 @@ export type BearerDigest = string & { readonly __bearerDigest: true };
  * returns a digest or a token.
  */
 export interface FerretBearerDirectory {
+  /** Ferrets' durable moved-away fence; names and one refusal sentence only, never a credential. */
+  mutationRefusal?(reference: string): string | undefined;
+  /** Fence loading/corruption blocks writes with a retryable refusal; reads and bearer lookup remain available. */
+  mutationReady?(): boolean;
   ferretFor(digest: BearerDigest): FerretId | undefined;
   /**
    * Whether a digest this directory names nothing for is really unknown. `false` while the tokens are still being read:

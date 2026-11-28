@@ -6,6 +6,7 @@ import type {
   PackedConversation,
   StartFailure,
   StartRequest,
+  LaunchOrigin,
 } from '../../../contract/index.ts';
 
 const failed = (code: StartFailure['code'], reason: string): Result<never, StartFailure> => err({ code, reason });
@@ -18,8 +19,11 @@ export function relocatedRefusal(
   request: StartRequest,
   harness: Pick<Harness, 'unpackConversation'> | undefined,
   key: HarnessKey,
+  origin?: LaunchOrigin,
 ): Result<never, StartFailure> | undefined {
   if (request.relocated === undefined) return undefined;
+  if (request.relocated.pending && origin?.kind !== 'person')
+    return failed('refused', 'only the owner may stage a moved conversation without starting it');
   if (request.by !== 'owner' || request.harnessConversation !== undefined)
     return failed(
       'refused',

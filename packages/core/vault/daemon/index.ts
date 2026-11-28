@@ -476,6 +476,12 @@ export default implementDaemon(manifest, {
             ? (await full.names()).filter(secret => mayTouchSecret(needer, secret.name))
             : await full.names(),
         has: async name => mayTouchSecret(needer, String(name)) && (await full.has(name)),
+        ...(needer.id === 'relocate'
+          ? {
+              hasForRuntime: async (runtime: string, name: SecretName) =>
+                (await profileReferences(runtime)).has(name) && (await full.has(name)),
+            }
+          : {}),
         put: async (name, value) => {
           const secret = String(name);
           if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'write');

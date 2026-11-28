@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { onTestFinished } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FerretId, HarnessKey, StartRequest } from '@ferretry/core-ferrets/contract';
@@ -22,6 +23,7 @@ export interface TargetOptions {
   readonly project?: boolean;
   readonly accounts?: number;
   readonly secrets?: readonly string[];
+  readonly vault?: ImporterDeps['vault'];
   readonly harnesses?: readonly string[];
   readonly runtimeOk?: boolean;
   readonly start?: 'ok' | 'refuse' | 'throw';
@@ -33,6 +35,8 @@ export interface TargetOptions {
   /** The ledger that says where a ferret came from cannot be written. */
   readonly recordFails?: boolean;
   readonly stopFails?: boolean;
+  /** Ferrets refuses to write the moved ferret's turns and attachments into its new session folder. */
+  readonly restoreFails?: boolean;
   readonly actualState?: 'idle' | 'stopped' | 'unavailable';
   /** Wraps the real checkout, so a test can make one step fail. */
   readonly wrapCheckout?: (real: Checkout) => Checkout;
@@ -52,6 +56,8 @@ export interface TargetWorld {
   readonly offers: OfferBook;
   readonly started: StartRequest[];
   readonly stopped: string[];
+  /** What the importer asked Ferrets to restore into the new ferret, by path. */
+  readonly restored: { ferret: string; path: string; bytes: Uint8Array }[];
   readonly recorded: Map<string, { daemonId: string; ferretId: string; at: Instant }>;
   readonly registered: string[];
   readonly removedProjects: string[];
@@ -75,12 +81,14 @@ export interface TargetWorld {
 /** One target machine: its own clone of the project on a real disk, real git, and fakes for the neighbours it asks. */
 export async function targetWorld(options: TargetOptions = {}, remoteBare?: string): Promise<TargetWorld> {
   const root = mkdtempSync(join(tmpdir(), 'relocate-target-'));
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const machine = join(root, 'machine');
   mkdirSync(machine, { recursive: true });
   const repo = join(machine, 'project');
   const identity = await newIdentity();
   const started: StartRequest[] = [];
   const stopped: string[] = [];
+  const restored: TargetWorld['restored'] = [];
   const recorded = new Map<string, { daemonId: string; ferretId: string; at: Instant }>();
   const registered: string[] = [];
   const removedProjects: string[] = [];
@@ -129,7 +137,7 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
     ferrets: {
       get: async () => {
         if (options.actualState === 'unavailable') throw new Error('state unavailable');
-        return { state: options.actualState ?? 'idle' } as never;
+        return { state: options.actualState ?? 'stopped' } as never;
       },
       harnesses: () => (options.harnesses ?? ['claude-code']) as readonly HarnessKey[],
       start: async request => {
@@ -142,6 +150,10 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
       stop: async (ferret: string) => {
         stopped.push(ferret);
         if (options.stopFails) throw new Error('stop failed');
+      },
+      relocationRestore: async (ferret: string, files: readonly { path: string; bytes: Uint8Array }[]) => {
+        if (options.restoreFails === true) throw new Error('a file of the move already exists in the new ferret');
+        for (const file of files) restored.push({ ferret, path: file.path, bytes: file.bytes });
       },
     } as ImporterDeps['ferrets'],
     projects: () =>
@@ -195,7 +207,12 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
                     },
                   },
           } as never),
-    vault: () => ({ has: async (name: string) => (options.secrets ?? []).includes(name) }) as never,
+    vault:
+      options.vault ??
+      (() => ({
+        has: async () => false,
+        hasForRuntime: async (_runtime: string, name: string) => (options.secrets ?? []).includes(name),
+      })),
     checkout: options.wrapCheckout === undefined ? realCheckout : options.wrapCheckout(realCheckout),
     received: {
       record: async (ferret, entry) => {
@@ -216,6 +233,7 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
     offers,
     started,
     stopped,
+    restored,
     recorded,
     registered,
     removedProjects,

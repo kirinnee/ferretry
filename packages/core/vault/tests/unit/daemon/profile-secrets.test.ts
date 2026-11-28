@@ -79,6 +79,18 @@ async function world(options: { permissions: Permissions; answer?: ProfileSecret
   const plugins = [
     vault,
     mcp(options.permissions),
+    implementDaemon(
+      definePlugin({
+        id: 'relocate',
+        title: 'relocate',
+        version: '1.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        needs: { vault: VaultPort },
+      }),
+      { build: () => ({}) },
+    ),
     ...(options.answer === undefined ? [] : [runtimes(options.answer)]),
   ];
   const host = await testHost({
@@ -93,12 +105,53 @@ async function world(options: { permissions: Permissions; answer?: ProfileSecret
   const api = host.provided(VaultPort, 'mcp');
   const opened = (env: unknown): Readonly<Record<string, string>> | undefined =>
     host.provided(ChildEnvironmentPort).open(env as never);
-  return { api, opened };
+  return { api, opened, relocate: host.provided(VaultPort, 'relocate'), core };
 }
 
 const PROFILE_ONLY: ProfileSecretReferences = {
   references: async runtime => (runtime === 'claude-work' ? [PROFILE] : []),
 };
+
+describe('Relocate asks presence for one runtime, inside the Vault', () => {
+  test('a held runtime secret is present even though Relocate cannot list or use it', async () => {
+    const { relocate } = await world({ permissions: {}, answer: PROFILE_ONLY });
+    expect(await relocate.has(PROFILE)).toBe(false);
+    expect(await relocate.names()).toEqual([]);
+    expect(await relocate.hasForRuntime?.('claude-work', PROFILE)).toBe(true);
+    expect(await relocate.childEnvironment('f1' as never, { A: ref(PROFILE) })).toEqual({
+      ok: false,
+      error: { unknown: [PROFILE] },
+    });
+  });
+
+  test('a genuinely missing reference is absent; unrelated held names and another runtime reveal nothing', async () => {
+    const { relocate, core, api } = await world({ permissions: { profileSecrets: true }, answer: PROFILE_ONLY });
+    expect(await relocate.hasForRuntime?.('claude-work', OTHER)).toBe(false);
+    expect(await relocate.hasForRuntime?.('claude-other', PROFILE)).toBe(false);
+    expect(api.hasForRuntime).toBeUndefined();
+    await core.remove(PROFILE);
+    expect(await relocate.hasForRuntime?.('claude-work', PROFILE)).toBe(false);
+  });
+
+  test('presence is read afresh and fails closed when Runtimes is absent or unreadable', async () => {
+    let names: readonly string[] = [PROFILE];
+    const live = await world({ permissions: {}, answer: { references: async () => names } });
+    expect(await live.relocate.hasForRuntime?.('claude-work', PROFILE)).toBe(true);
+    names = [];
+    expect(await live.relocate.hasForRuntime?.('claude-work', PROFILE)).toBe(false);
+    const absent = await world({ permissions: {} });
+    const failing = await world({
+      permissions: {},
+      answer: {
+        references: async () => {
+          throw new Error('unreadable');
+        },
+      },
+    });
+    expect(await absent.relocate.hasForRuntime?.('claude-work', PROFILE)).toBe(false);
+    expect(await failing.relocate.hasForRuntime?.('claude-work', PROFILE)).toBe(false);
+  });
+});
 
 describe('a check may use the secrets the checked runtime’s profile references', () => {
   test('a profile-referenced secret reaches the one child, beside the server’s own, and no value comes back', async () => {
