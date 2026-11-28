@@ -1415,6 +1415,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
             // The wrapper is named after the runtime (`<bin>/<name>`), and `fy start --agent` takes that name.
             wrapper: name,
             harness: harnessKey(harness),
+            ...(runtime.namedByOwner === undefined ? {} : { namedByOwner: true as const }),
             credential: {
               id: runtime.credential,
               store: credential.store,

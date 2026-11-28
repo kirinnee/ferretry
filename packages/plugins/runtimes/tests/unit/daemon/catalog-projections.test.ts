@@ -648,6 +648,18 @@ describe('runtimeCatalog', () => {
     should(runtime('second').sameAs).eql([]);
   });
 
+  it('should say on the wire which runtime names the owner typed (E-296)', () => {
+    const model = modelOf({
+      runtimes: {
+        'claude-default': { credential: 'claude-a', profile: 'plain' },
+        'claude-work': { credential: 'claude-b', profile: 'plain', namedByOwner: true },
+      },
+    });
+
+    should(runtime('claude-work', {}, model).namedByOwner).equal(true);
+    should(runtime('claude-default', {}, model).namedByOwner).be.undefined();
+  });
+
   it('should use the id a publish gave a runtime, and the files the last apply left alone', () => {
     // Act
     const facts: Partial<CatalogFacts> = {

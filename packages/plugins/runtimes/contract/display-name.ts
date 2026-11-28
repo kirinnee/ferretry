@@ -6,9 +6,11 @@
  * word one runtime two ways. It is display only: the stored id, name and wrapper are never changed, and nothing is
  * migrated.
  *
- * - **A name the owner chose wins** and is shown as typed. A name is machine-made when it is its login's id (a runtime
- *   derived from a ready login) or starts with its own CLI word and nothing else (`claude-you`, `codex-default-2`).
- *   No wire field says who named a runtime, so a hand-typed `claude-work` reads as machine-made; that is the declared limit.
+ * - **A name the owner chose wins** and is shown as typed. The record says so (`namedByOwner`, set when a person types a
+ *   name: `fy runtime add`, a rename, a name given in setup), and that is the whole proof. A record without it is read the
+ *   way it always was: machine-made when its name is its login's id (a runtime derived from a ready login) or starts with
+ *   its own CLI word and nothing else (`claude-you`, `codex-default-2`). A `claude-work` typed before records said so
+ *   still reads that way until it is renamed or re-added; that is the declared limit.
  * - Otherwise it is "<Harness> · <where its sign-in comes from>": the CLI the person already uses in a terminal, a
  *   sign-in made inside Ferretry, or a key or endpoint of a provider.
  * - A label the owner put on the login is appended: `Claude · your terminal sign-in (work)`.
@@ -46,6 +48,8 @@ export interface RuntimeNameSource {
   readonly name: string;
   readonly harness: HarnessKey;
   readonly harnessDisplayName?: string;
+  /** Set when the owner typed the name: it is shown as typed. Absent: the name's own shape decides. */
+  readonly namedByOwner?: true;
   readonly credential: {
     readonly id: string;
     readonly store: CredentialStore;
@@ -58,10 +62,13 @@ export interface RuntimeNameSource {
   readonly models?: { readonly catalog: { readonly label: string } } | undefined;
 }
 
-/** Whether a stored name is one the machine made: its login's id, or its own CLI word with plain suffixes. */
-export const isMachineMadeRuntimeName = (source: Pick<RuntimeNameSource, 'name' | 'harness' | 'credential'>): boolean =>
-  source.name === source.credential.id ||
-  new RegExp(`^${cliWordOf(source.harness)}(-[a-z0-9]+)*$`, 'u').test(source.name);
+/** Whether a stored name is one the machine made: not typed by the owner, and its login's id or its own CLI word with plain suffixes. */
+export const isMachineMadeRuntimeName = (
+  source: Pick<RuntimeNameSource, 'name' | 'harness' | 'credential' | 'namedByOwner'>,
+): boolean =>
+  source.namedByOwner !== true &&
+  (source.name === source.credential.id ||
+    new RegExp(`^${cliWordOf(source.harness)}(-[a-z0-9]+)*$`, 'u').test(source.name));
 
 /** Where the sign-in a runtime spends comes from, in plain words. */
 const signInSource = (source: RuntimeNameSource): string => {
