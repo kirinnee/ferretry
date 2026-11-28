@@ -281,7 +281,10 @@ async function servedLooks(fs: HostFs, l: Layout, decisions: readonly Decision[]
   const laterGlobal = folder !== undefined && fence?.keys.has(identityKey(folder)) === true;
   return served.map(({ decision, at }) => {
     const walk = decision.walked
-      .map(step => `${step.path} key=${step.key ?? 'none'} scoped(before=${step.heldBefore} after=${step.heldAfter})`)
+      .map(
+        step =>
+          `${step.path.slice(l.parent.length)} key=${step.key ?? 'none'} scoped(before=${step.heldBefore} after=${step.heldAfter})`,
+      )
       .join('; ');
     return [
       `served ${LOOKS[at]}:`,
