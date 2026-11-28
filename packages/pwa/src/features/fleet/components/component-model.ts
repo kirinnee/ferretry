@@ -278,6 +278,7 @@ export function draftFromComponent(component: FleetComponentView): ComponentDraf
         hiddenKeys: entries.flatMap(entry => ('hidden' in entry ? [entry.key] : [])),
         keptEnv: detail.env.map(entry => entry.name),
         flags: detail.flags ?? [],
+        redacted: (detail.flags ?? []).some(flag => flag.includes('‹hidden›')),
       };
     }
     default:
@@ -364,6 +365,7 @@ export const mcpDraftIsUrl = (draft: Pick<ComponentDraft, 'body'>): boolean => U
 /** The ONE change a saved form asks for. Call only when {@link draftProblem} says nothing. */
 export function componentChange(draft: ComponentDraft, create: boolean): FleetAccountChange {
   if (draft.unavailable !== undefined) throw new Error('Unavailable component content cannot be saved.');
+  if (draft.redacted) throw new Error('Redacted component content cannot be saved.');
   const name = draft.name.trim();
   const put = (component: Extract<FleetAccountChange, { kind: 'component.put' }>['component'], content?: string) =>
     ({

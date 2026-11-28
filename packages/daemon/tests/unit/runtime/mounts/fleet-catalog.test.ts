@@ -130,6 +130,36 @@ const post = (path: string, body?: string) =>
   });
 
 describe('the fleet catalogue mount', () => {
+  it.each([
+    { flags: ['--permission-mode', 'prefix-‹hidden›'] },
+    { entries: { theme: { value: 'prefix-‹hidden›' } } },
+    { entries: { theme: { value: { nested: ['prefix-‹hidden›'] } } } },
+  ])('should refuse remote hidden-marker settings writes, including older clients: %j', async fields => {
+    const { subsystem, calls } = stub();
+    const change = {
+      kind: 'component.put',
+      name: 'private',
+      component: { kind: 'settings', harness: 'claude', ...fields },
+      create: false,
+    };
+    const send = (loopback: boolean, paired = false) =>
+      dispatcher(subsystem).dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/fleet/proposals',
+          loopback,
+          headers: paired ? {} : human,
+          ...(paired ? { device: { deviceId: 'paired', appSession: 'paired-app' } } : {}),
+          body: JSON.stringify({ change }),
+        }),
+      );
+    should((await send(false)).status).equal(409);
+    should((await send(true, true)).status).equal(409);
+    should(calls.proposed).have.length(0);
+    should((await send(true)).status).equal(200);
+    should(calls.proposed).have.length(1);
+  });
+
   it.each(['', ' \n\t', {}])('should refuse remote unavailable-content clears: %j', async empty => {
     const kind = typeof empty === 'string' ? 'instructions' : 'settings';
     const catalog: FleetComponentCatalog = {

@@ -980,7 +980,7 @@ function fixedLayerView(
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),
               }
             : {
-                key: entry.tokens[0] as string,
+                key: facts.remote === false ? (entry.tokens[0] as string) : redactText(entry.tokens[0] as string).text,
                 value: overriddenValue(entry.tokens[0] as string, entry.tokens.join(' ')),
                 from: entry.layer.name,
                 sentence: OVERRIDE_SENTENCE(entry.layer.name),

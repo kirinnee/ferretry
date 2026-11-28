@@ -154,6 +154,18 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
         // Older clients can turn an omitted body into an empty draft. Never let that erase a file
         // this remote caller could not read. Local edits and deliberate clears of visible text still work.
         const change = request.change;
+        // A cached client can round-trip masked flags or settings. A placeholder is never their replacement.
+        if (
+          context.presentation?.loopback !== true &&
+          change.kind === 'component.put' &&
+          change.component.kind === 'settings' &&
+          JSON.stringify({
+            content: change.content,
+            flags: change.component.flags,
+            entries: change.component.entries,
+          }).includes('‹hidden›')
+        )
+          throw new ApiError(409, 'This content is unavailable. Edit it on the machine.', 'fleet_content_unavailable');
         if (
           context.presentation?.loopback !== true &&
           change.kind === 'component.put' &&

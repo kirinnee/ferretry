@@ -109,6 +109,16 @@ describe('drafts', () => {
       expect(() => componentChange(draft, false)).toThrow('Unavailable component content cannot be saved.');
     }
   });
+
+  it('never round-trips masked flags from an otherwise readable settings component', () => {
+    const draft = draftFromComponent({
+      ...claudeSettings,
+      detail: { kind: 'settings', env: [], flags: ['--permission-mode', 'prefix-‹hidden›'] },
+    });
+    expect(draft.redacted).toBe(true);
+    expect(draftProblem(draft, all, claudeSettings.name)).toContain('looks like a secret');
+    expect(() => componentChange(draft, false)).toThrow('Redacted component content cannot be saved.');
+  });
   it('starts each kind from what the component holds', () => {
     expect(draftFromComponent(instructions)).toMatchObject({ body: '# How we work\n- Small PRs.', redacted: false });
     expect(draftFromComponent(github)).toMatchObject({
