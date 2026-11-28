@@ -2,6 +2,7 @@ import { ApiError } from '@ferretry/kernel/contract';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
 import type manifest from '../manifest.ts';
+import type { HarnessFacts } from '../contract/index.ts';
 import type { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { KernelProcessProbe, PaneProcessInventory, type ProcessHostFacts } from './adapters/moves/process-inventory.ts';
 import { MovePreflight } from './lib/moves/preflight-service.ts';
@@ -64,6 +65,8 @@ export interface MovesOwn {
   readonly storage: DaemonStorage;
   /** The binary name a person drives, which the gate recognises a ferret's own `fy` calls by. */
   readonly clientName: string;
+  /** The facts of the harness a session records (a family word or a key), or `undefined` for one no harness answers for. */
+  readonly harnessFacts: (harness: string) => HarnessFacts | undefined;
   /**
    * The job keeper (Terminals' `jobs.keeper` hook), read at the moment of a move; unbound, no attachment is known, none is
    * detached and the hand-over has no jobs section (the gate classifies as it always did).
@@ -124,6 +127,7 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
           attachments: async ferret => (await own.jobs?.()?.attachments(ferret)) ?? [],
           sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
         }),
+        own.harnessFacts,
       ),
       askAgent: unboundFn('Queueing a message'),
       ...(own.jobs === undefined ? {} : { jobs: own.jobs }),

@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
+import { factsOfRecorded } from '../../../support/daemon/harness-facts.ts';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { readFile, readdir, readlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -170,7 +171,7 @@ describe('a move with a kept job, on a real tmux', () => {
       servers: { read: async () => [] },
       attachments: async () => await keeper.attachments(),
     });
-    const preflight = new MovePreflight(inventory);
+    const preflight = new MovePreflight(inventory, factsOfRecorded);
 
     // Act — the gate looks at the pane, mid-turn. PRODUCTION SHAPE: the state records no open tool calls (`undefined`), so the
     // shell Claude wrote its stdout to `tasks/<id>.output` for may be a foreground call and is NOT called a background job.
@@ -309,6 +310,7 @@ describe('a move with a kept job, on a real tmux', () => {
         servers: { read: async () => [] },
         attachments: async () => await keeper.attachments(),
       }),
+      factsOfRecorded,
     );
     let message: string | undefined;
     let attachmentGoneAtKill: boolean | undefined;

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { factsOfKey } from '../../../support/daemon/harness-facts.ts';
 import { ok } from '@ferretry/std';
 import { ConversationLeaseStore } from '../../../../contract/conversation-lease.ts';
 import { type FerretRecord, type LaunchSpec, PERSON_ORIGIN, type RunSpec } from '../../../../contract/index.ts';
@@ -65,7 +66,7 @@ function built(options: { readonly empty?: boolean; readonly resumable?: boolean
     base.registry.put({ ...(base.registry.get(base.id) as FerretRecord), harnessConversation: OLD });
   const real = new ConversationLeases(
     new ConversationLeaseStore(new MemoryLeaseDisk(), () => NOW),
-    registryLeaseSessions(base.registry, async () => ({ status: 'running' })),
+    registryLeaseSessions(base.registry, async () => ({ status: 'running' }), factsOfKey),
     4000,
   );
   const leases: FerretLaunchLeases = {

@@ -11,4 +11,5 @@ export const CLAUDE_CODE_FACTS: HarnessFacts = {
   mcp: { format: 'json', file: 'mcp.json' },
   transcriptFormat: 'claude',
   catalogHalf: 'claude',
+  historyPool: 'claude',
 };

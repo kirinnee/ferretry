@@ -1,4 +1,4 @@
-import type { FerretId, FerretRecord, FerretState, HarnessKey } from '../../../../contract/index.ts';
+import type { FerretId, FerretRecord, FerretState, HarnessFacts, HarnessKey } from '../../../../contract/index.ts';
 import {
   type ConversationHolderStanding,
   type ConversationId,
@@ -7,6 +7,7 @@ import {
   type ConversationLeaseStore,
   conversationFromArguments,
   type HistoryHarness,
+  HistoryHarnessSchema,
 } from '../../../../contract/conversation-lease.ts';
 import { type SessionId, tryParseSessionId } from '../../session-id.ts';
 import type { FerretLaunchLeases } from '../../ferrets/launch-leases.ts';
@@ -33,8 +34,17 @@ export interface ConversationLeaseSessions {
   readState(id: SessionId): Promise<unknown>;
 }
 
-/** The history pool a harness key writes to: Claude Code's and Codex's own. */
-const POOL_OF: Readonly<Record<HarnessKey, HistoryHarness>> = { 'claude-code': 'claude', codex: 'codex' };
+/** The harness facts of a key, or `undefined` for a key no harness answers for (the registry's providers decide). */
+export type HarnessFactsOf = (key: HarnessKey) => HarnessFacts | undefined;
+
+/**
+ * The history pool a harness writes to, from its own facts (`HarnessFacts.historyPool`), or `undefined` for a harness that
+ * declares none or one the leases do not know: it launches nothing the daemon can name (no lease, never Claude's pool).
+ */
+const poolOf = (facts: HarnessFacts | undefined): HistoryHarness | undefined => {
+  const pool = HistoryHarnessSchema.safeParse(facts?.historyPool);
+  return pool.success ? pool.data : undefined;
+};
 
 /**
  * What the leases know of a session, from the ferret registry (the harness and runtime a ferret launches on) and the
@@ -43,12 +53,12 @@ const POOL_OF: Readonly<Record<HarnessKey, HistoryHarness>> = { 'claude-code': '
 export function registryLeaseSessions(
   registry: { get(id: FerretId): Pick<FerretRecord, 'harness' | 'runtime' | 'state'> | undefined },
   readState: ConversationLeaseSessions['readState'],
+  factsOf: HarnessFactsOf,
 ): ConversationLeaseSessions {
   return {
     launchOf: id => {
       const held = registry.get(id as unknown as FerretId);
-      // A harness with no history pool of the two here launches nothing the daemon can name (no lease, never Claude's pool).
-      const pool = held === undefined ? undefined : POOL_OF[held.harness];
+      const pool = held === undefined ? undefined : poolOf(factsOf(held.harness));
       return held === undefined || pool === undefined
         ? undefined
         : { harness: pool, ...(held.runtime === undefined ? {} : { runtime: held.runtime }) };

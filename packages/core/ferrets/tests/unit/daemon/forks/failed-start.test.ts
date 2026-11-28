@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { factsOfKey } from '../../../support/daemon/harness-facts.ts';
 import { ok } from '@ferretry/std';
 import { ConversationLeaseStore } from '../../../../contract/conversation-lease.ts';
 import { PERSON_ORIGIN, type RunnerHandle, type RunSpec } from '../../../../contract/index.ts';
@@ -33,7 +34,7 @@ test('a failed fork start whose pane cannot stop retains its cut and the live co
   const disk = new MemoryLeaseDisk();
   const leases = new ConversationLeases(
     new ConversationLeaseStore(disk, () => new Date('2026-11-16T10:00:00Z')),
-    registryLeaseSessions(base.registry, async () => ({ status: 'running' })),
+    registryLeaseSessions(base.registry, async () => ({ status: 'running' }), factsOfKey),
     4000,
   );
   const launch = new FerretsService(base.registry, base.tokens, { ...base.ports, runner: () => runner, leases });

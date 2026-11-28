@@ -298,7 +298,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       ),
       () => new Date(kernel.clock.nowMs()),
     ),
-    registryLeaseSessions(registry, async id => await sessionStore.readState(id)),
+    registryLeaseSessions(
+      registry,
+      async id => await sessionStore.readState(id),
+      key => harnessOf(key)?.facts,
+    ),
     process.pid,
   );
 
