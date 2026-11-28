@@ -107,6 +107,7 @@ function fixedLayer(input: KitFixedLayerInput): KitFixedLayerResult {
         ...CLAUDE_PROMPTS_SEEN,
         projects: { [cwd]: { hasTrustDialogAccepted: true } },
       },
+      supersededFlags: SUPERSEDED_FLAGS,
     },
   };
 }
@@ -124,4 +125,4 @@ const SUPERSEDED_FLAGS = {
 } as const;
 
 /** What Runtimes builds the layer a launched Claude agent gets last from. */
-export const claudeFixedLayerKit: RuntimesHarnessKit = { fixedLayer, supersededFlags: SUPERSEDED_FLAGS };
+export const claudeFixedLayerKit: RuntimesHarnessKit = { fixedLayer };

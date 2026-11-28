@@ -105,7 +105,7 @@ describe('a Claude runtime without its plugin kit, as data', () => {
     expect(
       missingKitRefusal('codex', {
         runtimeExtras: () => ({ env: {} }),
-        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [] } }),
+        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [], supersededFlags: {} } }),
       }),
     ).toBeUndefined();
     expect(missingKitRefusal('codex', { runtimeExtras: () => ({ env: {} }) })).toEqual({

@@ -25,21 +25,49 @@ export const SPELLING_FILES: ReadonlySet<string> = new Set([
   `${SCOPE}lib/config.ts`,
 ]);
 
-/** `path` to its count. */
+/** A row's key to its count: `path` for a file's harness literals, `path::tables` for its per-harness tables (see {@link tablesKey}). */
 export type Counts = ReadonlyMap<string, number>;
 
+/** The key of a file's per-harness tables: a typed `Record<HarnessKind, …>` or a mapped type over the kind needs no quoted literal. */
+export const tablesKey = (path: string): string => `${path}::tables`;
+
+/** Per-harness tables that stand in Runtimes' daemon, by file (under {@link SCOPE}) with their count. See the list for what each is. */
+const TABLE_PINS: readonly (readonly [string, number])[] = [
+  ['adapters/host-harness-scan.ts', 1],
+  ['lib/account/halves.ts', 2],
+  ['lib/account/import-plan.ts', 2],
+  ['lib/account/import.ts', 1],
+  ['lib/account/layering.ts', 1],
+  ['lib/account/materialise.ts', 1],
+  ['lib/account/scope.ts', 1],
+  ['lib/assets.ts', 2],
+  ['lib/harness-kind.ts', 2],
+  ['lib/models/catalog.ts', 4],
+  ['lib/provisioning.ts', 1],
+  ['lib/service/assembly.ts', 1],
+  ['lib/service/catalog.ts', 1],
+  ['lib/service/foreign.ts', 2],
+  ['lib/service/harness-facts.ts', 1],
+  ['lib/service/setup-service.ts', 1],
+  ['lib/service/tool-install.ts', 4],
+  ['lib/settings.ts', 1],
+];
+
 /**
- * THE PIN: the only rows the list may ever hold, with the highest count each may have. They are the four files whose literals
- * E-276 PR 17b moves (each needs a kit member AND the frozen goldens' setup threaded with the real kits), approved when the close-out
- * was split. The list may lower a count or delete a row; it may never add a row or raise a count past this pin, whatever the code
- * holds and whatever the base ref says (a base that predates the list, or a base that was itself loosened, pins nothing). Editing
- * this constant is a change to the gate itself and is reviewed as one.
+ * THE PIN: the only rows the list may ever hold, with the highest count each may have. The four literal rows are the files whose
+ * literals E-276 PR 17b moves (each needs a kit member AND the frozen goldens' setup threaded with the real kits), approved when the
+ * close-out was split. The table rows (`path::tables`) are every per-harness table the close-out left where it is: each is a typed
+ * `Record<HarnessKind, …>` (or a mapped type over the kind) that holds no quoted literal, so no literal row can count it. The list may
+ * lower a count or delete a row; it may never add a row or raise a count past this pin, whatever the code holds and whatever the base
+ * ref says (a base that predates the list, or a base that was itself loosened, pins nothing). Editing this constant is a change to the
+ * gate itself and is reviewed as one.
  */
 export const PINNED: Counts = new Map([
   [`${SCOPE}lib/account/builtin-autonomous.ts`, 2],
   [`${SCOPE}lib/account/layering.ts`, 2],
   [`${SCOPE}lib/account/scope.ts`, 4],
   [`${SCOPE}lib/service/foreign.ts`, 2],
+  ...TABLE_PINS.map(([file, n]): [string, number] => [tablesKey(`${SCOPE}${file}`), n]),
 ]);
 
 const HARNESS_WORDS: ReadonlySet<string> = new Set(['claude', 'codex']);
@@ -68,20 +96,86 @@ const BEFORE_REGEX = new Set([
   '^',
 ]);
 
+/** Words after which a `/` opens a regular expression (`return /'codex'/.test(x)`), not a division. */
+const KEYWORDS_BEFORE_REGEX: ReadonlySet<string> = new Set([
+  'return',
+  'typeof',
+  'case',
+  'throw',
+  'in',
+  'of',
+  'delete',
+  'void',
+  'new',
+  'else',
+  'do',
+  'yield',
+  'await',
+  'instanceof',
+]);
+
+/** The types that name a harness as a table's key: a `Record<…>` keyed by one, or a mapped type over one, is a per-harness table. */
+export const TABLE_KEY_TYPES: ReadonlySet<string> = new Set(['HarnessKind', 'HarnessScope']);
+
+/** What one reading of a source file counts. */
+export interface Reading {
+  /** String literals that are exactly `claude` or `codex`. */
+  readonly literals: number;
+  /** Per-harness tables: a `Record<K, …>` or a mapped type `[x in K]` whose key type K names a harness (see {@link TABLE_KEY_TYPES}). */
+  readonly tables: number;
+}
+
+/** A key type being read: from the `<` of a `Record<` (or the `in` of `[x in`) to its first top-level `,` (or the closing `>` / `]`). */
+interface KeyRead {
+  readonly closer: '>' | ']';
+  depth: number;
+  found: boolean;
+}
+
 /**
- * How many string literals of `text` are exactly `claude` or `codex`, read the way TypeScript reads them: comments are skipped,
- * a quoted string is read to its closing quote (an escape skips one character), a regular expression is skipped whole, and a
- * template literal is read as its text AND its `${ ... }` code, nested to any depth, so a literal inside an interpolation (or a
- * template inside one) counts like any other. A template with no placeholder counts when its whole text is the word.
+ * Reads `text` the way TypeScript reads it: comments are skipped, a quoted string is read to its closing quote (an escape skips one
+ * character), a regular expression is skipped whole (also one after `return` and the like), and a template literal is read as its
+ * text AND its `${ ... }` code, nested to any depth, so a literal inside an interpolation (or a template inside one) counts like any
+ * other. A template with no placeholder counts when its whole text is the word. A table is counted from the code's tokens, so a
+ * typed table with unquoted keys (`const t: Record<HarnessKind, X> = { claude: a, codex: b }`, `satisfies Record<HarnessKind, X>`,
+ * a mapped type over the kind) is seen although it holds no quoted literal.
  */
-export const countLiterals = (text: string): number => {
-  let count = 0;
+export const read = (text: string): Reading => {
+  let literals = 0;
+  let tables = 0;
   let at = 0;
   let last = '';
+  /** The last token's word when it is an identifier (so `return /re/` is not a division), else `''`. */
+  let lastWord = '';
   /** One entry per open `{` of code: `'template'` when it is a `${` that returns to its template text on its `}`. */
   const braces: ('block' | 'template')[] = [];
   /** Every template being read, innermost last: where it opens and whether it has a placeholder yet. */
   const templateStarts: { readonly at: number; placeholder: boolean }[] = [];
+  /** The tokens that came before, for table detection (the last two are enough to see `Record <` and `[ x in`). */
+  const recent: string[] = [];
+  /** The key types being read, innermost last. */
+  const keyReads: KeyRead[] = [];
+
+  /** One token of code. `str` stands for any string, template or regular expression. */
+  const token = (t: string): void => {
+    for (const reading of [...keyReads]) {
+      if (TABLE_KEY_TYPES.has(t)) reading.found = true;
+      let finished = false;
+      if (t === '<' || t === '(' || t === '[' || t === '{') reading.depth++;
+      else if (t === '>' || t === ')' || t === ']' || t === '}') {
+        if (reading.depth > 0) reading.depth--;
+        else finished = t === reading.closer;
+      } else finished = t === ',' && reading.depth === 0 && reading.closer === '>';
+      if (finished) {
+        if (reading.found) tables++;
+        keyReads.splice(keyReads.indexOf(reading), 1);
+      }
+    }
+    if (t === '<' && recent[recent.length - 1] === 'Record') keyReads.push({ closer: '>', depth: 0, found: false });
+    if (t === 'in' && recent[recent.length - 2] === '[') keyReads.push({ closer: ']', depth: 0, found: false });
+    recent.push(t);
+    if (recent.length > 3) recent.shift();
+  };
 
   /** Reads template text from `at` to its closing backtick or its next `${` (which returns to code). */
   const readTemplateText = (): void => {
@@ -90,16 +184,20 @@ export const countLiterals = (text: string): number => {
       const char = text[at];
       if (char === '\\') at += 2;
       else if (char === '`') {
-        if (!open.placeholder && HARNESS_WORDS.has(text.slice(open.at + 1, at))) count++;
+        if (!open.placeholder && HARNESS_WORDS.has(text.slice(open.at + 1, at))) literals++;
         templateStarts.pop();
         at++;
         last = '`';
+        lastWord = '';
+        token('str');
         return;
       } else if (char === '$' && text[at + 1] === '{') {
         open.placeholder = true;
         braces.push('template');
         at += 2;
         last = '{';
+        lastWord = '';
+        token('{');
         return;
       } else at++;
     }
@@ -113,7 +211,7 @@ export const countLiterals = (text: string): number => {
     } else if (char === '/' && next === '*') {
       const end = text.indexOf('*/', at + 2);
       at = end < 0 ? text.length : end + 2;
-    } else if (char === '/' && (last === '' || BEFORE_REGEX.has(last))) {
+    } else if (char === '/' && (last === '' || BEFORE_REGEX.has(last) || KEYWORDS_BEFORE_REGEX.has(lastWord))) {
       let inClass = false;
       at++;
       while (at < text.length && text[at] !== '\n' && (inClass || text[at] !== '/')) {
@@ -124,6 +222,8 @@ export const countLiterals = (text: string): number => {
       }
       at++;
       last = '/';
+      lastWord = '';
+      token('str');
     } else if (char === "'" || char === '"') {
       let end = at + 1;
       while (end < text.length && text[end] !== char) {
@@ -131,9 +231,11 @@ export const countLiterals = (text: string): number => {
         else if (text[end] === '\n') break;
         end++;
       }
-      if (HARNESS_WORDS.has(text.slice(at + 1, end))) count++;
+      if (HARNESS_WORDS.has(text.slice(at + 1, end))) literals++;
       at = end + 1;
       last = char;
+      lastWord = '';
+      token('str');
     } else if (char === '`') {
       templateStarts.push({ at, placeholder: false });
       at++;
@@ -142,36 +244,62 @@ export const countLiterals = (text: string): number => {
       braces.push('block');
       at++;
       last = '{';
+      lastWord = '';
+      token('{');
     } else if (char === '}') {
       at++;
       last = '}';
+      lastWord = '';
+      token('}');
       if (braces.pop() === 'template') readTemplateText();
+    } else if (/[A-Za-z_$]/u.test(char)) {
+      let end = at + 1;
+      while (end < text.length && /[\w$]/u.test(text[end] as string)) end++;
+      const word = text.slice(at, end);
+      at = end;
+      last = word.slice(-1);
+      lastWord = word;
+      token(word);
     } else {
-      if (!/\s/u.test(char)) last = char;
+      if (!/\s/u.test(char)) {
+        last = char;
+        lastWord = '';
+        // `=>` is an arrow, not the close of a type argument list.
+        if (!(char === '>' && text[at - 1] === '=')) token(char);
+      }
       at++;
     }
   }
-  return count;
+  return { literals, tables };
 };
 
+/** How many string literals of `text` are exactly `claude` or `codex` (see {@link read}). */
+export const countLiterals = (text: string): number => read(text).literals;
+
+/** How many per-harness tables `text` declares: a `Record<HarnessKind, …>` or a mapped type over the kind (see {@link read}). */
+export const countTables = (text: string): number => read(text).tables;
+
 /** Whether `path` is a source file the rule reads. */
-export const inScope = (path: string): boolean =>
-  path.startsWith(SCOPE) && /\.tsx?$/u.test(path) && !SPELLING_FILES.has(path);
+export const inScope = (path: string): boolean => path.startsWith(SCOPE) && /\.tsx?$/u.test(path);
 
 const git = (root: string, args: readonly string[]): { status: number | null; stdout: string; stderr: string } => {
   const result = spawnSync('git', [...args], { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 };
 
-/** The literal counts of every tracked or new, not ignored, source file of the tree. */
+/**
+ * The counts of every tracked or new, not ignored, source file of the tree: its harness literals (not in the four files that spell
+ * the stored word) and its per-harness tables (in every file: the word table holds one too).
+ */
 export const scanTree = (root: string): Counts => {
   const listed = git(root, ['ls-files', '-co', '--exclude-standard', '-z', '--', SCOPE]);
   if (listed.status !== 0) throw new Error(`git ls-files failed (exit ${listed.status}): ${listed.stderr}`);
   const counts = new Map<string, number>();
   for (const path of new Set(listed.stdout.split('\0'))) {
     if (path === '' || !inScope(path) || !existsSync(join(root, path))) continue;
-    const n = countLiterals(readFileSync(join(root, path), 'utf8'));
-    if (n > 0) counts.set(path, n);
+    const reading = read(readFileSync(join(root, path), 'utf8'));
+    if (reading.literals > 0 && !SPELLING_FILES.has(path)) counts.set(path, reading.literals);
+    if (reading.tables > 0) counts.set(tablesKey(path), reading.tables);
   }
   return counts;
 };
@@ -239,9 +367,11 @@ export const run = (
   const delta = diffExact(ledger, actual);
   if (delta.length > 0) {
     failed = true;
-    console.error(`❌ a harness literal ('claude' or 'codex') in Runtimes' daemon differs from its list (${LEDGER}).`);
     console.error(
-      "   '<' is the list, '>' is the code. A '>' row is a NEW (or more) literal: what a harness does inside Runtimes is its",
+      `❌ a harness literal ('claude' or 'codex') or a per-harness table (a Record<HarnessKind, …> or mapped type over the kind) in Runtimes' daemon differs from its list (${LEDGER}).`,
+    );
+    console.error(
+      "   '<' is the list, '>' is the code. A '>' row is a NEW (or more) literal or table (`path::tables`): what a harness does inside Runtimes is its",
     );
     console.error(
       "   plugin's kit (packages/plugins/runtimes/contract/harness-kit.ts), found by the harness the runtime is for.",
@@ -254,7 +384,7 @@ export const run = (
   if (beyondPin.length > 0) {
     failed = true;
     console.error(
-      `❌ ${LEDGER} holds more than the pinned four rows of E-276 PR 17b (PINNED in ${SCANNER}): a row is never added and a count never goes up, even when the code matches it.`,
+      `❌ ${LEDGER} holds more than its pinned rows (PINNED in ${SCANNER}: the four literal rows of E-276 PR 17b and the per-harness tables left where they are): a row is never added and a count never goes up, even when the code matches it.`,
     );
     for (const row of beyondPin) console.error(row);
   }

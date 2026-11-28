@@ -107,6 +107,13 @@ export type KitFixedLayerResult =
         readonly settingsOverlay?: KitSettingsObject;
         readonly rules?: string;
         readonly configJson?: KitSettingsObject;
+        /**
+         * The flags this layer takes over from a profile, by how much of the command line each uses (`bare`: the flag alone,
+         * `value`: it and the next token unless written `--flag=value`, `config`: `-c key=value`, taken over only for the keys the
+         * layer sets). REQUIRED, because it is the other half of the layer: a layer that names its own permission option without
+         * saying which of a profile's it replaces would launch with BOTH options and lose the override report.
+         */
+        readonly supersededFlags: Readonly<Record<string, 'bare' | 'value' | 'config'>>;
       };
     }
   | { readonly ok: false; readonly refusal: { readonly kind: string; readonly message: string } };
@@ -351,8 +358,6 @@ export interface RuntimesHarnessKit {
 
   // The layer every launched agent gets last.
   fixedLayer?(input: KitFixedLayerInput): KitFixedLayerResult;
-  /** Flags the fixed layer takes over from a profile, by how much of the command line each uses. */
-  readonly supersededFlags?: Readonly<Record<string, 'bare' | 'value' | 'config'>>;
 
   // The credential store.
   credentialStore?(input: KitCredentialInput): KitCredentialResolution;

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { countLiterals, PINNED } from './no-harness-literal.ts';
+import { countLiterals, countTables, PINNED, tablesKey } from './no-harness-literal.ts';
 
 const root = join(import.meta.dir, '../..');
 const GATE = 'scripts/validate/no-harness-literal.sh';
@@ -90,6 +90,48 @@ describe('countLiterals', () => {
   });
 });
 
+describe('a regular expression after a keyword', () => {
+  test('is skipped whole, so its quoted word is not a string', () => {
+    expect(countLiterals("export function m(input: string) { return /'codex'/.test(input); }")).toBe(0);
+    expect(countLiterals("const f = (x: string) => { throw /'claude'/.exec(x) ?? 'codex'; };")).toBe(1);
+    expect(countLiterals("switch (k) { case /'claude'/.source: break; } const b = 'codex';")).toBe(1);
+  });
+
+  test('a division after a name is still a division', () => {
+    expect(countLiterals("const a = total / 2; const b = 'claude'; const c = total / 3;")).toBe(1);
+  });
+});
+
+describe('countTables', () => {
+  test('counts a Record, a Partial/Readonly one, a satisfies, an as and a mapped type keyed by the kind', () => {
+    expect(countTables('const a: Record<HarnessKind, number> = { claude: 1, codex: 2 };')).toBe(1);
+    expect(countTables('const a: Readonly<Partial<Record<HarnessKind, string>>> = {};')).toBe(1);
+    expect(countTables('const a = { claude: 1, codex: 2 } as const satisfies Record<HarnessKind, number>;')).toBe(1);
+    expect(countTables('const a = make() as Record<HarnessKind, number>;')).toBe(1);
+    expect(countTables('type T = { [Kind in HarnessKind]: Kind };')).toBe(1);
+    expect(countTables('const a: Record<HarnessScope, string> = x;')).toBe(1);
+  });
+
+  test('counts a table whose key type is split over lines or qualified by an import type', () => {
+    expect(countTables('const a = x as Record<\n  HarnessKind,\n  number\n>;')).toBe(1);
+    expect(countTables("const a: Record<import('./harness-kind.ts').HarnessKind, number> = x;")).toBe(1);
+  });
+
+  test('counts each table of a line, nested ones included', () => {
+    expect(
+      countTables('type A = Record<HarnessKind, Record<HarnessKind, number>>; type B = Record<HarnessKind, 1>;'),
+    ).toBe(3);
+  });
+
+  test('does not count a Record whose KEY is another type, a value typed by the kind, or a word in a comment or string', () => {
+    expect(countTables('const a: Record<string, HarnessKind> = x;')).toBe(0);
+    expect(countTables('const a: Record<PackageManager, { harness: HarnessKind }> = x;')).toBe(0);
+    expect(countTables("// Record<HarnessKind, number>\nconst a = 'Record<HarnessKind, number>';")).toBe(0);
+    expect(countTables('for (const k in HarnessKind) go(k); const f = (k: HarnessKind) => k;')).toBe(0);
+    expect(countTables('const f = (a: number) => a > 1; const b: Map<HarnessKind, number> = x;')).toBe(0);
+  });
+});
+
 describe('the harness-literal gate', () => {
   test('is clean on this repository', () => {
     // Against this very commit, so the ratchet reads a base wherever the test runs; the ratchet itself is proven on
@@ -166,13 +208,113 @@ describe('the harness-literal gate', () => {
     expect(run({ [FILE]: two }, { ledger: `${FILE}::2\n`, base: `${FILE}::2\n` }).status).toBe(0);
   });
 
-  test('the pin names exactly the four rows of E-276 PR 17b, with their counts', () => {
+  test('the pin names exactly the four literal rows and the table rows of E-276 PR 17b, with their counts', () => {
     expect([...PINNED].map(([path, n]) => `${path.slice(DAEMON.length + 1)}::${n}`).toSorted()).toEqual([
+      'adapters/host-harness-scan.ts::tables::1',
       'lib/account/builtin-autonomous.ts::2',
+      'lib/account/halves.ts::tables::2',
+      'lib/account/import-plan.ts::tables::2',
+      'lib/account/import.ts::tables::1',
       'lib/account/layering.ts::2',
+      'lib/account/layering.ts::tables::1',
+      'lib/account/materialise.ts::tables::1',
       'lib/account/scope.ts::4',
+      'lib/account/scope.ts::tables::1',
+      'lib/assets.ts::tables::2',
+      'lib/harness-kind.ts::tables::2',
+      'lib/models/catalog.ts::tables::4',
+      'lib/provisioning.ts::tables::1',
+      'lib/service/assembly.ts::tables::1',
+      'lib/service/catalog.ts::tables::1',
       'lib/service/foreign.ts::2',
+      'lib/service/foreign.ts::tables::2',
+      'lib/service/harness-facts.ts::tables::1',
+      'lib/service/setup-service.ts::tables::1',
+      'lib/service/tool-install.ts::tables::4',
+      'lib/settings.ts::tables::1',
     ]);
+  });
+
+  /** A tracked Runtimes file the pin does not name, with a typed table whose keys are identifiers (no quoted literal). */
+  const GATE_FILE = `${DAEMON}/lib/launch-gate.ts`;
+  const TYPED_TABLE =
+    "import type { HarnessKind } from './harness-kind.ts';\nexport const weight: Readonly<Record<HarnessKind, number>> = { claude: 1, codex: 2 };\n";
+
+  test('refuses a typed per-harness table with unquoted keys in a tracked Runtimes file (no literal, no list change)', () => {
+    const result = run({ [GATE_FILE]: TYPED_TABLE });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${tablesKey(GATE_FILE)}::1`);
+  });
+
+  test.each([
+    ['a satisfies', 'export const w = { claude: 1, codex: 2 } as const satisfies Record<HarnessKind, number>;\n'],
+    ['a mapped type over the kind', 'export type W = { readonly [Kind in HarnessKind]: number };\n'],
+    [
+      'a table typed by an import type',
+      "export const w: Record<import('./harness-kind.ts').HarnessKind, number> = x;\n",
+    ],
+    ['a Partial table', 'export const w: Partial<Record<HarnessKind, number>> = {};\n'],
+  ])('refuses %s, too', (_name, source) => {
+    const result = run({ [GATE_FILE]: source });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${tablesKey(GATE_FILE)}::1`);
+  });
+
+  test('refuses a table in one of the four stored-word files too (it may spell the word, not hold a new table)', () => {
+    const result = run({ [`${DAEMON}/lib/config.ts`]: TYPED_TABLE });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${tablesKey(`${DAEMON}/lib/config.ts`)}::1`);
+  });
+
+  test('a pinned table row passes at its count, and a second table in that file is refused', () => {
+    const TABLES_FILE = `${DAEMON}/lib/settings.ts`;
+    const ledger = `${tablesKey(TABLES_FILE)}::1\n`;
+    expect(run({ [TABLES_FILE]: TYPED_TABLE }, { ledger }).status).toBe(0);
+    const two = `${TYPED_TABLE}export type V = Record<HarnessKind, string>;\n`;
+    const grown = run({ [TABLES_FILE]: two }, { ledger });
+    expect(grown.status).toBe(1);
+    expect(grown.stderr).toContain(`${tablesKey(TABLES_FILE)}::2`);
+  });
+
+  test('a table row the pin does not hold is refused even with matching code and a base that predates the list', () => {
+    const result = run({ [GATE_FILE]: TYPED_TABLE }, { ledger: `${tablesKey(GATE_FILE)}::1  # a blessed table\n` });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('the pin holds no such row');
+  });
+
+  test('a table row left behind for a file with no table is refused', () => {
+    const TABLES_FILE = `${DAEMON}/lib/settings.ts`;
+    const result = run({ [TABLES_FILE]: 'export const x = 1;\n' }, { ledger: `${tablesKey(TABLES_FILE)}::1\n` });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('delete or lower its row');
+  });
+
+  test('a regular expression after return does not count as a quoted literal', () => {
+    const result = run({ [NEW_FILE]: "export function matches(input: string) { return /'codex'/.test(input); }\n" });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  /** The per-harness things the list names but the gate cannot count (values, not harness-keyed types): each must still be there. */
+  const NAMED_GAPS: readonly (readonly [file: string, needle: string])[] = [
+    [`${DAEMON}/adapters/account-model-files.ts`, 'defaultHomeDirectories: {'],
+    [`${DAEMON}/host-assembly.ts`, 'const harnessHomesOf ='],
+    [`${DAEMON}/lib/account/fixed-layer.ts`, 'const CODEX_FIXED_CONFIG_KEYS'],
+    [`${DAEMON}/lib/account/fixed-layer.ts`, 'const CARRIED_FLAGS'],
+    [`${DAEMON}/adapters/profile-components.ts`, 'const SOURCES'],
+    [`${DAEMON}/lib/account/credentials.ts`, 'const SIGN_IN_FILES'],
+    ['packages/plugins/runtimes/contract/display-name.ts', 'const HARNESS_WORD'],
+    ['packages/plugins/runtimes/contract/display-name.ts', 'const CLI_WORD'],
+    ['packages/plugins/runtimes/contract/display-name.ts', 'const FERRETRY_SIGN_IN'],
+    ['packages/plugins/runtimes/contract/harness-words.ts', "'claude-code': {"],
+  ];
+
+  test('every named exemption of the list is still where the list says (so the list cannot go stale)', () => {
+    const list = readFileSync(join(root, LEDGER), 'utf8');
+    for (const [file, needle] of NAMED_GAPS) {
+      expect(readFileSync(join(root, file), 'utf8')).toContain(needle);
+      expect(list).toContain(file.replace(`${DAEMON}/`, '').replace('packages/plugins/runtimes/contract/', ''));
+    }
   });
 
   test('a NEW row with matching code is refused even when the base predates the list (the bootstrap)', () => {

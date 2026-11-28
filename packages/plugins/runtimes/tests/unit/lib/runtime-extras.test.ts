@@ -69,7 +69,7 @@ describe('runtimeExtras', () => {
     expect(
       missingKitRefusal('codex', {
         runtimeExtras: () => ({ env: {} }),
-        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [] } }),
+        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [], supersededFlags: {} } }),
       }),
     ).toBeUndefined();
   });

@@ -498,12 +498,12 @@ export function fixedLayerFor(
     ...(layer.rules === undefined ? {} : { codexRules: layer.rules }),
     ...(layer.configJson === undefined ? {} : { claudeJson: layer.configJson }),
   };
-  SUPERSEDED_FLAGS.set(made, kit.supersededFlags ?? {});
+  SUPERSEDED_FLAGS.set(made, layer.supersededFlags);
   return { ok: true, layer: made };
 }
 
 /**
- * The permission flags a layer's harness replaces, from its plugin's kit (`kit.supersededFlags`), by the layer `fixedLayerFor` made.
+ * The permission flags a layer's harness replaces, from its plugin's kit (the `supersededFlags` of the layer its `fixedLayer` returns, so a kit cannot give a layer without them), by the layer `fixedLayerFor` made.
  * Kept beside the layer and not on it, so the layer stays the plain data it always was (the wrapper golden pins it whole). A layer
  * nobody made through `fixedLayerFor` replaces no flag of a profile's.
  */

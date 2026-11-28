@@ -115,6 +115,7 @@ function fixedLayer(input: KitFixedLayerInput): KitFixedLayerResult {
         `developer_instructions=${tomlString(instruction)}`,
       ],
       rules: codexKillRules(),
+      supersededFlags: SUPERSEDED_FLAGS,
     },
   };
 }
@@ -135,4 +136,4 @@ const SUPERSEDED_FLAGS = {
 } as const;
 
 /** What Runtimes builds the layer a launched Codex agent gets last from. */
-export const codexFixedLayerKit: RuntimesHarnessKit = { fixedLayer, supersededFlags: SUPERSEDED_FLAGS };
+export const codexFixedLayerKit: RuntimesHarnessKit = { fixedLayer };
