@@ -229,6 +229,8 @@ export class TestClient {
   readonly records: Record<string, unknown>[] = [];
   readonly wire: Uint8Array[] = [];
   end: SessionEnd | undefined;
+  /** Plain teardown, kept separate from the authenticated daemon verdict. */
+  carrierEnd: SessionEnd | undefined;
   channel: ChannelState | undefined;
   transcript: Uint8Array | undefined;
   creditReceived = 0;
@@ -354,7 +356,8 @@ export class TestClient {
         const next = this.link.outbound.next();
         if (next === undefined) break;
         if (isSessionEnd(next)) {
-          this.end = next;
+          this.carrierEnd = next;
+          this.end ??= next;
           return;
         }
         pulled = true;
@@ -389,7 +392,15 @@ export class TestClient {
     if (!opened.ok) throw new Error(opened.reason);
     this.channel = opened.state;
     const text = utf8Text(opened.plaintext) ?? '';
-    this.records.push(JSON.parse(text) as Record<string, unknown>);
+    const record = JSON.parse(text) as Record<string, unknown>;
+    if (
+      record.t === 'session-end' &&
+      record.protocol === SESSION_PROTOCOL_ID &&
+      typeof record.code === 'number' &&
+      typeof record.reason === 'string'
+    ) {
+      this.end = { code: record.code, reason: record.reason };
+    } else this.records.push(record);
   }
 
   last(t: string): Record<string, unknown> | undefined {

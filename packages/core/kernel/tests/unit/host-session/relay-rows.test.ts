@@ -181,7 +181,7 @@ describe('relay-protocol rows on the kernel wire', () => {
   });
 
   test('R533 the daemon ends a session when more than one credit window of whole answers waits; parts of a large answer do not count', async () => {
-    // a peer that never credits: whole answers pile up past a window, and the session ends 4400
+    // A peer that never credits: the daemon records 4400 locally but cannot send another sealed record.
     const fx = await fixture();
     const { client } = await serving(fx);
     for (let id = 1; id <= 3 * CREDIT_WINDOW_FRAMES; id += 1) {
@@ -189,7 +189,9 @@ describe('relay-protocol rows on the kernel wire', () => {
       if (id % 8 === 0) await client.pump();
     }
     await client.pump();
-    expect(client.end).toEqual({ code: 4400, reason: 'this session cannot carry its own answer' });
+    expect(client.end).toEqual({ code: 4440, reason: 'the session concluded' });
+    expect(fx.layer.report().lastRefusal).toContain('this session cannot carry its own answer');
+    expect(client.wire.filter(bytes => bytes[2] === FRAME_KINDS.data)).toHaveLength(CREDIT_WINDOW_FRAMES - 1);
     // one answer in more parts than a window, never credited: still open
     const large = await fixture();
     large.dispatch = async () => ({

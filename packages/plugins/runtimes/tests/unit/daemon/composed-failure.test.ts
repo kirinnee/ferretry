@@ -22,6 +22,7 @@ import { renderChangeOutcome } from '../../../cli/lib/fleet/account-render.ts';
 import type { AccountChangeOutcome } from '../../../contract/index.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon } from '../../../daemon/index.ts';
 import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
+import { settingsOwners } from '../../support/settings-owners.ts';
 
 afterEach(cleanupWorlds);
 
@@ -43,7 +44,7 @@ async function composeWithBlockedBin(
   const real: RuntimesAssembler = ctx =>
     hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
   return await testHost({
-    plugins: [runtimesDaemon(real) as DaemonImplementation<any>],
+    plugins: [...settingsOwners(), runtimesDaemon(real) as DaemonImplementation<any>],
     fakes: {
       ferrets: new FakeFerrets(),
       logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),

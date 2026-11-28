@@ -185,6 +185,9 @@ export class ShellRuntime {
     this.#grants = new GrantsCache(
       () => this.#changed(),
       (daemon, rows) => {
+        const connection = this.#connections.get(daemon);
+        const inventory = connection?.kind === 'connected' ? connection.client.inventory : undefined;
+        if (inventory?.kind === 'unreadable' && inventory.versionUnsupported === true) return;
         const device = this.daemons.get(daemon)?.deviceId;
         if (device !== undefined) this.#shape?.saveGrants(daemon, device, rows);
       },
@@ -678,9 +681,8 @@ export class ShellRuntime {
       this.#grants.refresh(paired.daemon);
       this.#changed();
     });
-    // A session ended with `4403` (S12). That close is cleartext a relay can forge, so it is NOT an unpair: nothing is
-    // removed, no key is deleted and no plugin forgets anything. This page just stops dialling the machine and says
-    // so ("Pair again"); a reload asks the daemon again. Another machine is never touched.
+    // A sealed session-end refused this device (S12). Keep the pairing and its key until the person removes it;
+    // this page stops dialling and offers "Pair again". A reload asks the daemon again.
     client.onRefused(why => {
       const held = this.#connections.get(paired.daemon);
       if (held?.kind === 'connected' && held.client === client) this.#refuse(paired.daemon, held, why);

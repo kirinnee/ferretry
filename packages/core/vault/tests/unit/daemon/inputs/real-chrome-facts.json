@@ -24,7 +24,9 @@
             "maxlength": "6",
             "label": "Verification code",
             "formId": "f",
-            "formAction": "http://127.0.0.1:4000/"
+            "formAction": "http://127.0.0.1:4000/",
+            "formActionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formActionOriginDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "box": {
             "x": 20,
@@ -60,7 +62,9 @@
             "maxlength": "6",
             "label": "Verification code",
             "formId": "f",
-            "formAction": "http://127.0.0.1:4000/"
+            "formAction": "http://127.0.0.1:4000/",
+            "formActionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formActionOriginDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "box": {
             "x": 20,
@@ -98,7 +102,9 @@
             "maxlength": "6",
             "label": "Verification code",
             "formId": "f",
-            "formAction": "http://127.0.0.1:4000/"
+            "formAction": "http://127.0.0.1:4000/",
+            "formActionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formActionOriginDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "box": {
             "x": 20,
@@ -134,7 +140,9 @@
             "maxlength": "6",
             "label": "Verification code",
             "formId": "f",
-            "formAction": "http://127.0.0.1:4000/"
+            "formAction": "http://127.0.0.1:4000/",
+            "formActionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formActionOriginDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "box": {
             "x": 20,
@@ -173,7 +181,9 @@
             "maxlength": "6",
             "label": "Verification code",
             "formId": "f",
-            "formAction": "http://127.0.0.1:4000/"
+            "formAction": "http://127.0.0.1:4000/",
+            "formActionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formActionOriginDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "box": {
             "x": 20,
@@ -209,7 +219,9 @@
             "maxlength": "6",
             "label": "Card number",
             "formId": "f",
-            "formAction": "http://127.0.0.1:4000/"
+            "formAction": "http://127.0.0.1:4000/",
+            "formActionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formActionOriginDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "box": {
             "x": 20,
@@ -247,7 +259,9 @@
             "maxlength": "6",
             "label": "Verification code",
             "formId": "f",
-            "formAction": "http://127.0.0.1:4000/"
+            "formAction": "http://127.0.0.1:4000/",
+            "formActionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formActionOriginDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "box": {
             "x": 20,
@@ -283,7 +297,9 @@
             "maxlength": "6",
             "label": "Verification code",
             "formId": "f",
-            "formAction": "https://evil.example/collect"
+            "formAction": "https://evil.example/collect",
+            "formActionDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "formActionOriginDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "box": {
             "x": 20,

@@ -67,7 +67,6 @@ function world(
   const base = unavailableCatalogDeps(() => 1_794_052_800_000, logins, changes);
   const deps: FleetCatalogServiceDeps = {
     ...base,
-    kits: () => REAL_KITS,
     warn: (message, fields) => {
       warnings.push({ message, fields });
     },
@@ -103,6 +102,7 @@ function world(
     layout: LAYOUT,
     claudeStatusline: own => (own === undefined ? "'fy' statusline" : `'fy' statusline --then '${own}'`),
     fyCommand: '/opt/ferretry/bin/fy',
+    kits: () => REAL_KITS,
     provisioner: {
       preview: async plan => ({ ...plan, sharedHistory: [] }),
       apply: async plan => {

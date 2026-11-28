@@ -5,6 +5,7 @@ import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { type CarrierSocketEvents, SessionTransport } from '../../../src/session/session-transport.ts';
 import { RELAY_CLOSE_CODES } from '../../../src/session/wire/index.ts';
 import { controlFrame, newDaemonIdentity, relayCrypto, testDevice, testSessionId } from '../../../src/testing/relay.ts';
+import { rotatingDial } from '../../../src/testing/rotating-daemon.ts';
 import { registeredForgets } from '../../../src/connect/provides.ts';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
@@ -61,11 +62,11 @@ describe('S12 forget', () => {
   });
 
   /**
-   * C1: a `4403` is a cleartext word a relay can forge (docs/relay-protocol.md), so it NEVER unpairs. Each test drives the
-   * REAL session transport and session client through one of the three ways a `4403` reaches the browser: a WebSocket
-   * close, the rendezvous `closed` message and the rendezvous `error` message.
+   * C1: only a sealed `4403` refuses this page. Plain socket/control forgeries are outages. Neither unpairs:
+   * the real session transport and client retain the pairing, key and plugin state in every case.
    */
-  const sources: readonly (readonly [string, (events: CarrierSocketEvents) => void])[] = [
+  const sources: readonly (readonly [string, ((events: CarrierSocketEvents) => void) | undefined])[] = [
+    ['a sealed session-end', undefined],
     ['a WebSocket close', events => queueMicrotask(() => events.onClose(RELAY_CLOSE_CODES.authRejected, 'forged'))],
     [
       'a rendezvous closed message',
@@ -88,7 +89,7 @@ describe('S12 forget', () => {
   ];
 
   for (const [source, refuse] of sources) {
-    test(`C1 a 4403 from ${source} never unpairs, deletes no key and forgets nothing; the page stops dialling and offers to pair again`, async () => {
+    test(`C1 a 4403 from ${source} never unpairs, deletes no key and forgets nothing; only a sealed refusal stops the page`, async () => {
       const forgotten: string[] = [];
       const keysDeleted: string[] = [];
       const surfaces = [
@@ -97,6 +98,7 @@ describe('S12 forget', () => {
       ];
       const identity = await newDaemonIdentity();
       const device = await testDevice('dev');
+      const genuine = rotatingDial(identity, { accepts: () => [], respond: async () => ({ status: 200, body: {} }) });
       let dials = 0;
       const refusing = new SessionTransport({
         crypto: relayCrypto,
@@ -104,6 +106,7 @@ describe('S12 forget', () => {
         device: device.claim,
         dial: events => {
           dials += 1;
+          if (refuse === undefined) return genuine.dial(events);
           refuse(events);
           return { send() {}, sendText() {}, close() {} };
         },
@@ -135,17 +138,32 @@ describe('S12 forget', () => {
       expect(daemons.get('refused')).toBeDefined();
       expect(keysDeleted).toEqual([]);
       expect(forgotten).toEqual([]);
-      // The page says so, and stops dialling that machine; the other machine is untouched.
-      expect(runtime.isRefused('refused')).toBe(true);
-      expect(runtime.wholeDaemonLine('refused')).toBe(DEVICE_NOT_ACCEPTED_SENTENCE);
-      expect(runtime.blockedLine('refused', 'conversation')).toBe(DEVICE_NOT_ACCEPTED_SENTENCE);
-      expect(runtime.connection('refused').kind).toBe('refused');
+      const authenticated = refuse === undefined;
+      expect(runtime.isRefused('refused')).toBe(authenticated);
+      if (authenticated) {
+        expect(runtime.wholeDaemonLine('refused')).toBe(DEVICE_NOT_ACCEPTED_SENTENCE);
+        expect(runtime.blockedLine('refused', 'conversation')).toBe(DEVICE_NOT_ACCEPTED_SENTENCE);
+        expect(runtime.connection('refused').kind).toBe('refused');
+      } else {
+        expect(runtime.wholeDaemonLine('refused')).not.toBe(DEVICE_NOT_ACCEPTED_SENTENCE);
+        expect(runtime.connection('refused').kind).toBe('connected');
+      }
       expect(runtime.isRefused('fine')).toBe(false);
       expect(runtime.wholeDaemonLine('fine')).toBeUndefined();
       const dialled = dials;
       runtime.connection('refused');
       await settle();
-      expect(dials).toBe(dialled);
+      if (authenticated) expect(dials).toBe(dialled);
+      else {
+        const connection = runtime.connection('refused');
+        if (connection.kind !== 'connected') throw new Error('the forgery stopped the page');
+        await connection.client.refresh();
+        expect(dials).toBeGreaterThan(dialled);
+        connection.client.stop();
+      }
+      refusing.close();
+      const other = runtime.connection('fine');
+      if (other.kind === 'connected') other.client.stop();
     });
   }
 
@@ -153,6 +171,7 @@ describe('S12 forget', () => {
     const surfaces = [...CORE];
     const identity = await newDaemonIdentity();
     const device = await testDevice('dev');
+    const genuine = rotatingDial(identity, { accepts: () => [], respond: async () => ({ status: 200, body: {} }) });
     let dials = 0;
     const refusing = new SessionTransport({
       crypto: relayCrypto,
@@ -160,8 +179,7 @@ describe('S12 forget', () => {
       device: device.claim,
       dial: events => {
         dials += 1;
-        queueMicrotask(() => events.onClose(RELAY_CLOSE_CODES.authRejected, 'forged'));
-        return { send() {}, sendText() {}, close() {} };
+        return genuine.dial(events);
       },
     });
     const fine = new FakeTransport((request: TransportRequest) =>

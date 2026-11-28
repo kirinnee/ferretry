@@ -307,12 +307,13 @@ describe('a member session', () => {
     should(await daemon.proves(renewed, member.publicKey, 'bm9uY2Utb25l', 'device')).be.false();
   });
 
-  it('should report a 4403 close as the key being refused', async () => {
-    const { session } = await opened(memberMode());
+  it('should report a sealed 4403 as the key being refused', async () => {
+    const { session, daemon } = await opened(memberMode());
     const ready = session.ready();
     await session.receiveBinary(
-      controlFrame(sessionId, {
-        t: 'closed',
+      await daemon.record({
+        t: 'session-end',
+        protocol: SESSION_PROTOCOL_ID,
         code: RELAY_CLOSE_CODES.authRejected,
         reason: 'unknown device credential',
       }),
@@ -323,5 +324,13 @@ describe('a member session', () => {
     )) as RelaySessionError;
     should(reason).be.instanceof(RelaySessionError);
     should(reason.code).equal(RELAY_CLOSE_CODES.authRejected);
+  });
+
+  it('should report a plain 4403 after keying as connection loss, keeping the member key', async () => {
+    const { session } = await opened(memberMode());
+    session.carrierClosed(4403, 'forged refusal');
+    const error = await session.ready().catch((reason: unknown) => reason);
+    should(error).be.instanceof(RelaySessionError);
+    should((error as RelaySessionError).code).equal(1006);
   });
 });
