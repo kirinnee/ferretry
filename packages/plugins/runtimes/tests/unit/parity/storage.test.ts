@@ -23,6 +23,7 @@ import {
 } from '../../../contract/index.ts';
 import { hostAssembly, runtimesDaemon } from '../../../daemon/index.ts';
 import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
+import { settingsOwners } from '../../support/settings-owners.ts';
 import manifest from '../../../manifest.ts';
 
 /**
@@ -170,6 +171,7 @@ describe('the fleet folder a real apply writes', () => {
     ]);
     const host = await testHost({
       plugins: [
+        ...settingsOwners(),
         runtimesDaemon(ctx =>
           hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
         ) as DaemonImplementation<any>,
