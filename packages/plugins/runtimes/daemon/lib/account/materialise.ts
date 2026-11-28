@@ -334,6 +334,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // A derived runtime whose pinned model is gone, or whose pins nobody could read, is refused by name: never moved to the live default.
     if (runtime.refused !== undefined) reasons.push(runtime.refused);
 
+    // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
+    const kit = input.kits?.get(harness);
+    // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
+    // ...and so is one whose kit gives no launch line (E-276 PR 8), in the same words.
+    const kitMissing: KitRefusal | undefined =
+      missingKitRefusal(harness, kit) ??
+      (isKind(harness, 'claude') && kit?.wrapper === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
+        : undefined);
     const store = resolveCredentialStore(
       runtime.credential,
       credential,
@@ -342,10 +351,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness,
       loginStores,
     );
-    if ('unavailable' in store)
-      reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
-    if (store.store === 'environment' && store.problem !== undefined) {
-      reasons.push(`its login "${runtime.credential}" cannot launch: ${store.problem}`);
+    // The typed refusal is the ONE reason a kitless runtime gets, whatever store its login is in (environment, stored or host):
+    // its login then has nothing further to say, and the reason is never said twice.
+    if (kitMissing !== undefined) reasons.push(kitMissing.message);
+    else {
+      if ('unavailable' in store)
+        reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
+      if (store.store === 'environment' && store.problem !== undefined) {
+        reasons.push(`its login "${runtime.credential}" cannot launch: ${store.problem}`);
+      }
     }
 
     const availableModels = input.availableModels?.[runtime.credential];
@@ -378,17 +392,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
 
     // The fixed layer: computed for a placeholder folder, which never reaches a file.
     let fixed: FixedLayer | undefined;
-    // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
-    const kit = input.kits?.get(harness);
-    // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
-    // ...and so is one whose kit gives no launch line (E-276 PR 8), in the same words.
-    const kitMissing: KitRefusal | undefined =
-      missingKitRefusal(harness, kit) ??
-      (isKind(harness, 'claude') && kit?.wrapper === undefined
-        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
-        : undefined);
-    // (A login whose own store already says so is not said twice.)
-    if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing.message);
     const result = fixedLayerOf(
       harness,
       {
@@ -400,9 +403,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       kit,
     );
     if (result.ok) fixed = withoutLaunchFolder(result.layer);
-    // An auto launch the harness cannot honour refuses THAT launch only: the person's own run and an interactive ferret
-    // never get the fixed layer, so they are not stopped by it.
-    const autoRefusal = result.ok ? undefined : result.refusal.message;
+    // A missing kit (`harness-unsupported`) refuses the WHOLE runtime above, so it is never also an auto refusal. Any other
+    // refusal is an auto launch the harness cannot honour: it refuses THAT launch only, so the person's own run and an
+    // interactive ferret never get the fixed layer and are not stopped by it.
+    const autoRefusal = result.ok || result.refusal.kind === 'harness-unsupported' ? undefined : result.refusal.message;
     const launch = fixed === undefined ? undefined : applyFixedLayer(resolved, fixed);
 
     const adapted =

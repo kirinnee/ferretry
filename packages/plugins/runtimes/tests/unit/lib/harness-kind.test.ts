@@ -78,7 +78,7 @@ describe.each(UNKNOWN)('a harness Runtimes has no behaviour for (%s)', unknown =
 
   test('is refused where the fixed launch layer was Claude unless it was Codex', () => {
     const input = { harness: unknown, agentPermissions: 'skip', cwd: '/x', fyCommand: 'fy' } as never;
-    expect(refused(() => fixedLayerFor(input))).toBe(refusal(unknown));
+    expect(refused(() => fixedLayerFor(input, undefined))).toBe(refusal(unknown));
   });
 
   test('is refused where a credential store was Claude unless it was Codex', () => {

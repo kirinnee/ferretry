@@ -80,7 +80,8 @@ import {
 } from './layering.ts';
 import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
-import { byHarness, UnsupportedHarnessError } from '../harness-kind.ts';
+import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
+import { byHarness, harnessKeyOfKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { AgentPermissions } from './schema.ts';
 import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
@@ -131,7 +132,8 @@ export interface FixedLayer {
 
 /** Why an agent runtime cannot be launched as asked. */
 interface FixedLayerRefusal {
-  readonly kind: 'claude-auto-mode-unsupported';
+  /** `harness-unsupported` when a harness's plugin gives no layer; otherwise the plugin's own word (Claude: `claude-auto-mode-unsupported`). */
+  readonly kind: string;
   readonly message: string;
 }
 
@@ -166,9 +168,6 @@ export type FixedLayerInput =
  */
 const KILL_COMMANDS = ['pkill', 'killall'] as const;
 
-/** Claude's `permissions.deny` rules for {@link KILL_COMMANDS}, with any arguments. */
-const CLAUDE_KILL_DENY: readonly string[] = KILL_COMMANDS.map(command => `Bash(${command}:*)`);
-
 /** The Codex home file the {@link codexKillRules} are written to (beside `default.rules`, which Codex keeps for itself). */
 export const CODEX_KILL_RULES_FILE = 'rules/ferretry.rules';
 
@@ -178,12 +177,6 @@ const codexKillRules = (): string =>
     command =>
       `prefix_rule(pattern=[${JSON.stringify(command)}], decision="forbidden", justification="${command} can stop other ferrets' processes; stop the one process you started instead")`,
   ).join('\n')}\n`;
-
-/** Claude's spelling of each Agent permissions choice (§3.6). */
-const CLAUDE_PERMISSION_MODES: Readonly<Record<AgentPermissions, string>> = {
-  auto: 'auto',
-  skip: 'bypassPermissions',
-};
 
 /**
  * The one-time screens Claude records as SEEN in a config directory's `.claude.json`, each a dialog
@@ -244,9 +237,6 @@ export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
  * Copied from the Codex plugin's `CODEX_QUESTIONS_OFF` (a plugin never imports another's daemon code).
  */
 export const CODEX_QUESTIONS_OFF_OVERRIDE = 'features.default_mode_request_user_input=false';
-
-/** Claude's "start Remote Control in every session" preference. */
-const CLAUDE_REMOTE_CONTROL_KEY = 'remoteControlAtStartup';
 
 /** The launch variable naming a ferret's mode (`interactive` or `auto`); written by the daemon at creation. */
 export { SESSION_MODE_ENV };
@@ -399,21 +389,6 @@ export const BROWSER_INSTRUCTION = {
   on: "On the owner's identities the browser passes bot checks and solves token checks (Turnstile, reCAPTCHA, hCaptcha) itself. You may try a simple picture puzzle shown in the page yourself; never use outside tools or services to solve or bypass a check, and never change the browser's identity. If a check stays, ask the owner (browser_ask_owner).",
 } as const;
 
-/** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
-export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
-  mcpServers: {
-    [FERRETRY_MCP_SERVER]: {
-      type: 'stdio',
-      command: fyCommand,
-      args: [...FERRETRY_MCP_ARGS],
-      // Claude passes a stdio server the agent's whole environment; the admin token must not be in it.
-      env: {
-        FY_TOKEN: '',
-      },
-    },
-  },
-});
-
 /** Codex's `mcp_servers.ferretry` table for the tools server. */
 export const codexToolsServer = (fyCommand: string): SettingsObject => ({
   command: fyCommand,
@@ -446,9 +421,6 @@ const entry = (
   path: readonly string[],
   value: unknown,
 ): FixedEntry => ({ purpose, target, path, key: target === 'launch' ? path.join(' ') : settingsKey(path), value });
-
-const AUTO_MODE_REFUSAL =
-  "Claude Code on this machine does not accept Auto mode (--permission-mode auto), so Ferretry won't launch this agent runtime. Update Claude Code, or switch this machine's Agent permissions to Skip all permission checks.";
 
 /**
  * Changing Ferretry's own settings — the short form of the "Set up Ferretry" skill. The whole skill is
@@ -581,103 +553,102 @@ export { TOOLS_SERVER_INSTRUCTIONS } from './pane-contract.ts';
 /** The binary's name, as an instruction names it: the last segment of the command a wrapper runs. */
 export const binaryName = (fyCommand: string): string => fyCommand.split('/').pop() || fyCommand;
 
-/** The fixed layer for an agent runtime of `input.harness`, or the reason it cannot launch (O4). */
-export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
-  const { agentPermissions, cwd, fyCommand } = input;
-  const instruction = AGENT_BASE_INSTRUCTION(binaryName(fyCommand));
+/**
+ * The fixed layer for an agent runtime of `input.harness`, or the reason it cannot launch (O4). `kits` is what each
+ * harness's own plugin hands Runtimes: Claude's layer is its plugin's, so a Claude runtime whose plugin gives no layer is
+ * refused by name and never handed another harness's answer.
+ */
+export function fixedLayerFor(
+  input: FixedLayerInput,
+  kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined,
+): FixedLayerResult {
   switch (input.harness) {
-    case 'claude': {
-      if (agentPermissions === 'auto' && !input.acceptsAutoPermissionMode) {
-        return { ok: false, refusal: { kind: 'claude-auto-mode-unsupported', message: AUTO_MODE_REFUSAL } };
-      }
-      const mode = CLAUDE_PERMISSION_MODES[agentPermissions];
-      const skip = agentPermissions === 'skip';
-      const entries = [
-        entry('permission-mode', 'settings', ['permissions', 'defaultMode'], mode),
-        ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
-        entry('trust', 'claude-json', ['projects', cwd, 'hasTrustDialogAccepted'], true),
-        entry('onboarding', 'claude-json', ['hasCompletedOnboarding'], true),
-        entry('remote-control', 'settings', [CLAUDE_REMOTE_CONTROL_KEY], false),
-        ...Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) =>
-          entry('one-time-prompts', 'claude-json', [key], value),
-        ),
-        ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
-        entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
-        entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
-        entry('instructions', 'launch', ['--append-system-prompt'], instruction),
-      ];
-      return {
-        ok: true,
-        layer: {
-          harness: 'claude',
-          agentPermissions,
-          entries,
-          // Both in their `=` spelling: `--mcp-config` takes several values, and a bare one would swallow
-          // the arguments after it — the prompt included.
-          args: [
-            '--permission-mode',
-            mode,
-            CLAUDE_NO_QUESTIONS_FLAG,
-            `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand))}`,
-            `--append-system-prompt=${instruction}`,
-          ],
-          // The mode is named HERE too: the overlay is the flag settings source, and a mode named by one
-          // is what keeps the auto-default dialog away (see the header).
-          claudeSettingsOverlay: {
-            permissions: { defaultMode: mode, deny: CLAUDE_KILL_DENY },
-            [CLAUDE_REMOTE_CONTROL_KEY]: false,
-            ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
-          },
-          claudeJson: {
-            hasCompletedOnboarding: true,
-            ...CLAUDE_PROMPTS_SEEN,
-            projects: { [cwd]: { hasTrustDialogAccepted: true } },
-          },
-        },
-      };
-    }
-    case 'codex': {
-      const { approvalPolicy, sandboxMode } = CODEX_PERMISSIONS[agentPermissions];
-      return {
-        ok: true,
-        layer: {
-          harness: 'codex',
-          agentPermissions,
-          entries: [
-            entry('permission-mode', 'settings', ['approval_policy'], approvalPolicy),
-            entry('permission-mode', 'settings', ['sandbox_mode'], sandboxMode),
-            entry('trust', 'settings', ['projects', cwd, 'trust_level'], 'trusted'),
-            entry('no-alt-screen', 'launch', [CODEX_NO_ALT_SCREEN_FLAG], true),
-            ...CODEX_HIDDEN_NOTICES.map(key => entry('one-time-prompts', 'settings', ['notice', key], true)),
-            entry('tools', 'settings', ['mcp_servers', FERRETRY_MCP_SERVER], codexToolsServer(fyCommand)),
-            entry('instructions', 'settings', ['developer_instructions'], instruction),
-          ],
-          args: [
-            '-c',
-            `approval_policy=${tomlString(approvalPolicy)}`,
-            '-c',
-            `sandbox_mode=${tomlString(sandboxMode)}`,
-            '-c',
-            codexTrustOverride(cwd),
-            CODEX_NO_ALT_SCREEN_FLAG,
-            '-c',
-            codexNoticeOverride(),
-            '-c',
-            `mcp_servers.${FERRETRY_MCP_SERVER}.command=${tomlString(fyCommand)}`,
-            '-c',
-            `mcp_servers.${FERRETRY_MCP_SERVER}.args=${tomlArray(FERRETRY_MCP_ARGS)}`,
-            '-c',
-            `mcp_servers.${FERRETRY_MCP_SERVER}.env_vars=${tomlArray(FERRETRY_MCP_ENV_VARS)}`,
-            '-c',
-            `developer_instructions=${tomlString(instruction)}`,
-          ],
-          codexRules: codexKillRules(),
-        },
-      };
-    }
+    case 'claude':
+      return claudeFixedLayer(kits?.get('claude'), input);
+    case 'codex':
+      return codexFixedLayer(input);
     default:
       throw new UnsupportedHarnessError(String((input as { harness: string }).harness));
   }
+}
+
+/** A Codex agent runtime's fixed layer: still decided here until Codex's own plugin takes it (E-276 PR 3). */
+function codexFixedLayer(input: Extract<FixedLayerInput, { readonly harness: 'codex' }>): FixedLayerResult {
+  const { agentPermissions, cwd, fyCommand } = input;
+  const instruction = AGENT_BASE_INSTRUCTION(binaryName(fyCommand));
+  const { approvalPolicy, sandboxMode } = CODEX_PERMISSIONS[agentPermissions];
+  return {
+    ok: true,
+    layer: {
+      harness: 'codex',
+      agentPermissions,
+      entries: [
+        entry('permission-mode', 'settings', ['approval_policy'], approvalPolicy),
+        entry('permission-mode', 'settings', ['sandbox_mode'], sandboxMode),
+        entry('trust', 'settings', ['projects', cwd, 'trust_level'], 'trusted'),
+        entry('no-alt-screen', 'launch', [CODEX_NO_ALT_SCREEN_FLAG], true),
+        ...CODEX_HIDDEN_NOTICES.map(key => entry('one-time-prompts', 'settings', ['notice', key], true)),
+        entry('tools', 'settings', ['mcp_servers', FERRETRY_MCP_SERVER], codexToolsServer(fyCommand)),
+        entry('instructions', 'settings', ['developer_instructions'], instruction),
+      ],
+      args: [
+        '-c',
+        `approval_policy=${tomlString(approvalPolicy)}`,
+        '-c',
+        `sandbox_mode=${tomlString(sandboxMode)}`,
+        '-c',
+        codexTrustOverride(cwd),
+        CODEX_NO_ALT_SCREEN_FLAG,
+        '-c',
+        codexNoticeOverride(),
+        '-c',
+        `mcp_servers.${FERRETRY_MCP_SERVER}.command=${tomlString(fyCommand)}`,
+        '-c',
+        `mcp_servers.${FERRETRY_MCP_SERVER}.args=${tomlArray(FERRETRY_MCP_ARGS)}`,
+        '-c',
+        `mcp_servers.${FERRETRY_MCP_SERVER}.env_vars=${tomlArray(FERRETRY_MCP_ENV_VARS)}`,
+        '-c',
+        `developer_instructions=${tomlString(instruction)}`,
+      ],
+      codexRules: codexKillRules(),
+    },
+  };
+}
+
+/** A Claude agent runtime's fixed layer, as Claude's own plugin builds it; Runtimes adds the words every agent is told. */
+function claudeFixedLayer(
+  kit: RuntimesHarnessKit | undefined,
+  input: Extract<FixedLayerInput, { readonly harness: 'claude' }>,
+): FixedLayerResult {
+  if (kit?.fixedLayer === undefined)
+    return {
+      ok: false,
+      refusal: {
+        kind: 'harness-unsupported',
+        message: unsupportedHarnessSentence(harnessKeyOfKind('claude')),
+      },
+    };
+  const { agentPermissions, cwd, fyCommand, acceptsAutoPermissionMode } = input;
+  const result = kit.fixedLayer({
+    agentPermissions,
+    cwd,
+    fyCommand,
+    acceptsAutoPermissionMode,
+    instruction: AGENT_BASE_INSTRUCTION(binaryName(fyCommand)),
+  });
+  if (!result.ok) return result;
+  const { layer } = result;
+  return {
+    ok: true,
+    layer: {
+      harness: 'claude',
+      agentPermissions,
+      entries: layer.entries.map(fixed => entry(fixed.purpose, fixed.target, fixed.path, fixed.value)),
+      args: layer.args,
+      ...(layer.settingsOverlay === undefined ? {} : { claudeSettingsOverlay: layer.settingsOverlay }),
+      ...(layer.configJson === undefined ? {} : { claudeJson: layer.configJson }),
+    },
+  };
 }
 
 // ── Applying it ──────────────────────────────────────────────────────────────────────────────────
@@ -918,19 +889,19 @@ export interface FixedLayerRequest {
 
 /**
  * The fixed layer for the harness `harness` (a stored word or a plugin key), or the reason it cannot launch. `kit` is the
- * harness's own plugin's hand to Runtimes; no member is read yet (the move PRs fill them in), so the harness still decides.
+ * harness's own plugin's hand to Runtimes; Claude's layer is its, Codex's is still decided here (E-276 PR 3).
  */
-export function fixedLayerOf(harness: string, request: FixedLayerRequest, _kit?: RuntimesHarnessKit): FixedLayerResult {
+export function fixedLayerOf(harness: string, request: FixedLayerRequest, kit?: RuntimesHarnessKit): FixedLayerResult {
   const { agentPermissions, cwd, fyCommand } = request;
   return byHarness<FixedLayerResult>(harness, {
     claude: () =>
-      fixedLayerFor({
+      claudeFixedLayer(kit, {
         harness: 'claude',
         agentPermissions,
         cwd,
         acceptsAutoPermissionMode: request.acceptsAutoPermissionMode,
         fyCommand,
       }),
-    codex: () => fixedLayerFor({ harness: 'codex', agentPermissions, cwd, fyCommand }),
+    codex: () => codexFixedLayer({ harness: 'codex', agentPermissions, cwd, fyCommand }),
   });
 }

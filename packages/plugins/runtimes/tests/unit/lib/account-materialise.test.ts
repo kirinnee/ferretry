@@ -982,6 +982,31 @@ describe('materialiseFleet', () => {
     });
   });
 
+  // E-276 PR 2 (addendum 12): a Claude runtime whose plugin gives no kit is unavailable as a WHOLE, not only for auto launches.
+  it('should make an environment-backed Claude runtime unavailable, and no Claude wrapper launchable, when only the Codex kit is present', () => {
+    // Arrange — an environment login, not the host's own (a host login can be refused for an unrelated credential-store reason).
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'environment', env: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+    });
+    const codexOnly = new Map([...REAL_KITS].filter(([harness]) => harness === 'codex'));
+
+    // Act
+    const result = plan(model, { kits: codexOnly });
+
+    // Assert — Claude is refused by name and never launches; Codex still publishes healthy.
+    const reason = 'claude-code is not supported here';
+    should(result.manifest.accounts[0]).match({ available: false, unavailableReason: reason });
+    should(result.manifest.accounts[0]?.autoRefusal).be.undefined();
+    const wrapper = wrapperOf(result, 'claude-default');
+    should(wrapper).containEql(`ferretry: claude-default cannot start: ${reason}`).and.containEql('exit 1');
+    should(wrapper).not.containEql('exec claude');
+    should(result.manifest.accounts[1]).match({ available: true, unavailableReason: null });
+    should(wrapperOf(result, 'codex-default')).containEql('exec codex');
+  });
+
   // A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, ^A500). Claude Code ranks
   // a folder's `env` above the process environment and a `--settings` file above the folder, so the ONLY way a login's value
   // could beat a repo's is by being written into a `--settings` file. It never is: the login's variables are the process
@@ -1472,5 +1497,40 @@ describe('the variables a runtime publishes for a check to fill from', () => {
     should(Object.keys(account?.launchEnv ?? {})).not.containEql('ANTHROPIC_AUTH_TOKEN');
     should(JSON.stringify(result.manifest)).not.containEql('loge-internal');
     should(account?.secretEnv).containEql({ ANTHROPIC_API_KEY: '${secret:WORK_KEY}' });
+  });
+});
+
+// E-276 PR 5 (addendum 12): a harness whose plugin gives no kit is unavailable as a WHOLE, in every credential store.
+describe('a runtime whose harness has no kit', () => {
+  it('should make every Codex runtime unavailable as unsupported, in both credential stores, while Claude publishes, when only the Claude kit is present', () => {
+    // Arrange — Codex on an environment login and on the person's own login; only Claude has a kit.
+    const model = modelOf({
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'host' },
+        'codex-env': { harness: 'codex', store: 'environment', env: { OPENAI_API_KEY: '${secret:WORK_KEY}' } },
+        'codex-host': { harness: 'codex', store: 'host' },
+      },
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+        'codex-env': { credential: 'codex-env', profile: 'default' },
+        'codex-host': { credential: 'codex-host', profile: 'default' },
+      },
+    });
+    const claudeOnly = new Map([...REAL_KITS].filter(([harness]) => harness === 'claude'));
+
+    // Act
+    const result = plan(model, { kits: claudeOnly });
+
+    // Assert — each Codex runtime is refused by name, with no Codex launch; Claude is untouched.
+    const reason = 'codex is not supported here';
+    const accountOf = (name: string) => result.manifest.accounts.find(account => account.displayName === name);
+    for (const name of ['codex-env', 'codex-host']) {
+      should(accountOf(name)).match({ available: false, unavailableReason: reason });
+      should(wrapperOf(result, name))
+        .containEql(`ferretry: ${name} cannot start: ${reason}`)
+        .and.not.containEql('exec codex');
+    }
+    should(accountOf('claude-default')).match({ available: true, unavailableReason: null });
+    should(wrapperOf(result, 'claude-default')).containEql('exec claude');
   });
 });
