@@ -37,7 +37,11 @@ const accountOf = (accounts: readonly { readonly displayName: string }[], name: 
 };
 
 const CLAUDE_KIT = REAL_KITS.get('claude') as RuntimesHarnessKit;
-const CODEX_KIT: RuntimesHarnessKit = { command: 'codex', runtimeExtras: () => ({ env: {} }) };
+const CODEX_KIT: RuntimesHarnessKit = {
+  command: 'codex',
+  runtimeExtras: () => ({ env: {} }),
+  fixedLayer: () => ({ ok: true, layer: { entries: [], args: [] } }),
+};
 const GROUPS = ['fixedLayerOf', 'plumbingOf', 'priorServersOf', 'runtimeExtras', 'autonomousPreparation'] as const;
 
 const source = (kit: RuntimesHarnessKit): ProfileComponentSource => ({
@@ -224,6 +228,21 @@ describe('a Codex runtime without its plugin kit', () => {
     expect(plan.operations.some(operation => 'path' in operation && operation.path.startsWith(`${claudeHome}/`))).toBe(
       true,
     );
+  });
+
+  it('should refuse a Codex runtime whose kit gives no fixed layer the same way, once, and never as an auto refusal', async () => {
+    const { service, plans } = environmentWorld(
+      () =>
+        new Map<'claude' | 'codex', RuntimesHarnessKit>([
+          ['claude', CLAUDE_KIT],
+          ['codex', { command: 'codex', runtimeExtras: () => ({ env: {} }) }],
+        ]),
+    );
+    await service.publishFromFiles();
+    const account = accountOf((plans[0] as FleetApplyPlan).manifest.accounts, 'codex-env');
+    expect(account.available).toBe(false);
+    expect(account.unavailableReason).toBe('codex is not supported here');
+    expect('autoRefusal' in account && account.autoRefusal).toBeFalsy();
   });
 
   it('should refuse a Codex runtime whose kit gives no extras the same way', async () => {
