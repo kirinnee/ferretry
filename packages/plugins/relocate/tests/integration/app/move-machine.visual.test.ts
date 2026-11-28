@@ -1,0 +1,145 @@
+/**
+ * THE MOVE DIALOG IN A REAL BROWSER over two scripted machines (`fixtures/move-scene.tsx`): pick a machine, the review table (what
+ * moves, what stays, what is left behind by name), a review the target refuses, the progress at rest (a chunk held), and the done
+ * state with "Open on <machine>". At 390 and 1440 wide, light and dark, in the default look (Studio) and the roundest (Gen Z).
+ * Real presses; no network (the browser may reach nothing but the scene). Every state must fit its box: no sideways scroll, and
+ * no content outside the inner rounded rectangle of a rounded box (`roundSafeMisses`).
+ *
+ * Set `FY_MOVE_SHOTS_DIR` to keep `<width>-<scheme>-<style>-<state>.png`.
+ */
+import { afterAll, beforeAll, describe, expect, it, setDefaultTimeout } from 'bun:test';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describeRoundMisses, roundSafeMisses, sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
+import type { Browser, Page } from 'playwright-core';
+
+setDefaultTimeout(90_000);
+
+const packageRoot = import.meta.dir;
+const shotsDir = process.env.FY_MOVE_SHOTS_DIR ?? '';
+
+let browser: Browser;
+let directory = '';
+let server: ReturnType<typeof Bun.serve> | undefined;
+
+beforeAll(async () => {
+  directory = await mkdtemp(join(tmpdir(), 'ferretry-move-'));
+  const child = Bun.spawn([process.execPath, sceneBuilder, '--out', directory, '--entry', 'fixtures/move-scene.tsx'], {
+    cwd: packageRoot,
+    stderr: 'pipe',
+    stdout: 'pipe',
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (code !== 0) throw new Error(`the move scene did not build (${code}):\n${stderr}\n${stdout}`);
+  const built = JSON.parse(stdout.trim().split('\n').at(-1) as string) as { css: string; js: string };
+  const css = await readFile(built.css, 'utf8');
+  const js = await readFile(built.js, 'utf8');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head><body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/app.js"></script></body></html>`;
+  server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: request =>
+      new URL(request.url).pathname === '/app.js'
+        ? new Response(js, { headers: { 'content-type': 'text/javascript' } })
+        : new Response(html, { headers: { 'content-type': 'text/html' } }),
+  });
+  browser = await sharedChromium();
+  if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
+}, 180_000);
+
+afterAll(async () => {
+  server?.stop(true);
+  if (directory !== '') await rm(directory, { force: true, recursive: true });
+});
+
+const WIDTHS = [390, 1440] as const;
+const SCHEMES = ['light', 'dark'] as const;
+const STYLES = ['studio', 'genz'] as const;
+
+async function states(width: number, scheme: string, style: string): Promise<void> {
+  const phone = width < 600;
+  const context = await browser.newContext({
+    viewport: { width, height: phone ? 900 : 1000 },
+    deviceScaleFactor: phone ? 2 : 1,
+    hasTouch: phone,
+    isMobile: phone,
+    colorScheme: scheme as 'light' | 'dark',
+  });
+  const origin = server?.url.origin ?? '';
+  await context.route('**/*', async route =>
+    new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+  );
+  const problems: string[] = [];
+  const open = async (query: string): Promise<Page> => {
+    const tab = await context.newPage();
+    tab.on('pageerror', error => problems.push(error.message));
+    await tab.goto(`${origin}/?theme=studio-${scheme}&style=${style}${query}`);
+    await tab.waitForSelector('[data-move-step="pick"]');
+    return tab;
+  };
+  const name = (state: string) => `${String(width)}-${scheme}-${style}-${state}`;
+  const settle = async (tab: Page, state: string) => {
+    await tab.mouse.move(0, 0);
+    await tab.waitForTimeout(350);
+    if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name(state)}.png`) });
+    expect(
+      await tab.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      `${name(state)}: no sideways scroll`,
+    ).toBeLessThanOrEqual(0);
+    const misses = await roundSafeMisses(tab);
+    expect(misses.length, `${name(state)}: ${describeRoundMisses(misses)}`).toBe(0);
+  };
+  try {
+    const picker = await open('');
+    expect(await picker.textContent('[data-move-step="pick"]')).toContain('Laptop');
+    expect(await picker.textContent('[data-move-step="pick"]')).toContain('offline');
+    await settle(picker, 'pick');
+    await picker.click('text=Check what would move');
+    await picker.waitForSelector('[data-move-step="review"]');
+    const table = (await picker.textContent('[data-move-step="review"]')) ?? '';
+    expect(table).toContain('Moves with it');
+    expect(table).toContain('Stays on this machine');
+    expect(table).toContain('Left behind by name: .env, node_modules, deploy.pem');
+    await settle(picker, 'review');
+    await picker.click('text=Move to Laptop');
+    await picker.waitForSelector('[data-move-step="done"]');
+    expect(await picker.textContent('[data-move-step="done"]')).toContain('Open on Laptop');
+    expect(await picker.getAttribute('[data-move-step="done"] a', 'href')).toContain('/chat/g9');
+    await settle(picker, 'done');
+
+    const refused = await open('&refuse=1');
+    await refused.click('text=Check what would move');
+    await refused.waitForSelector('[data-move-refusals]');
+    expect(await refused.textContent('[data-move-refusals]')).toContain(
+      'Laptop: this machine has no claude-code login',
+    );
+    expect(await refused.textContent('[data-move-secrets]')).toContain('ZAI_API_KEY');
+    await settle(refused, 'refused');
+
+    const moving = await open('&hold=1');
+    await moving.click('text=Check what would move');
+    await moving.click('text=Move to Laptop');
+    await moving.waitForFunction(() =>
+      document.querySelector('[data-move-step="moving"]')?.textContent?.includes('(1 of 3)'),
+    );
+    expect(await moving.textContent('[data-move-step="moving"]')).toContain('1 of 3');
+    await settle(moving, 'moving');
+  } finally {
+    await context.close();
+  }
+  expect(problems).toEqual([]);
+}
+
+describe('the move dialog', () => {
+  for (const width of WIDTHS)
+    for (const scheme of SCHEMES)
+      for (const style of STYLES)
+        it(`${String(width)} ${scheme} ${style}: pick, review, refused, moving and done each fit their box`, async () => {
+          await states(width, scheme, style);
+        });
+});

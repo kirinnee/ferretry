@@ -301,10 +301,10 @@ export const ImportResponseSchema = z.strictObject({
   ferretId: z.string(),
   folder: z.string(),
   movedFrom: z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1) }),
-  /** A launch succeeded but provenance could not be saved. The ferret and its files are kept. */
+  /** A launch succeeded but its origin could not be saved, or its turns and attachments were not all restored. The ferret and its files are kept. */
   recovery: z
     .strictObject({
-      code: z.literal('provenance_unrecorded'),
+      code: z.enum(['provenance_unrecorded', 'session_unrestored']),
       state: z.enum(['running', 'stopped', 'unknown']),
       message: z.string(),
     })

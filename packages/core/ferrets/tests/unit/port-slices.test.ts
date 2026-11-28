@@ -11,7 +11,7 @@ import type { HarnessHistorySource } from '../../contract/history.ts';
 import type { FerretState, FerretSummary, HarnessKey, PackId } from '../../contract/ids.ts';
 import type { ConversationImport, HarnessFacts, RunnerHandle, TurnUsage } from '../../contract/kinds.ts';
 import type { LaunchOrigin } from '../../contract/launch-origin.ts';
-import type { RelocationSource } from '../../contract/ports/reads.port.ts';
+import type { RelocatedFile, RelocationSource } from '../../contract/ports/reads.port.ts';
 import type {
   RepoWorktreeListResponse,
   RemovedWorktree,
@@ -108,6 +108,7 @@ interface FerretsApiAtBase {
   exclusive?<T>(ferret: FerretId, work: () => Promise<T>): Promise<T>;
   runtimeControl?: RuntimeControlApi['runtimeControl'];
   relocationSource?(ferret: FerretId): Promise<RelocationSource | undefined>;
+  relocationRestore?(ferret: FerretId, files: readonly RelocatedFile[]): Promise<void>;
   forks?: ForksApi['forks'];
 }
 

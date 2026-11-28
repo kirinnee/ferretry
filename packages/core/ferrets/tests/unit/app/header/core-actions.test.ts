@@ -36,7 +36,6 @@ describe('FERRET_ACTION_IDS', () => {
       'pin',
       'move-login',
       'move-harness',
-      'move-machine',
       'restart',
       'earlier-conversation',
       'resume',
@@ -92,7 +91,6 @@ describe('CORE_FERRET_ACTIONS — a controlled, running ferret', () => {
       FERRET_ACTION_IDS.rename,
       FERRET_ACTION_IDS.copyId,
       FERRET_ACTION_IDS.move,
-      FERRET_ACTION_IDS.machine,
       FERRET_ACTION_IDS.restart,
       FERRET_ACTION_IDS.stop,
     ]);
@@ -122,12 +120,6 @@ describe('CORE_FERRET_ACTIONS — a controlled, running ferret', () => {
     expect(entry?.label).toBe('Go back to the earlier conversation…');
     if (entry?.kind === 'confirm') await entry.run();
     expect(asked).toBe(1);
-  });
-
-  it('move to another machine exists but is always unavailable', () => {
-    const sections = ferretActionSections(CORE_FERRET_ACTIONS, context('working'));
-    const machine = sections.flatMap(section => section.entries).find(entry => entry.id === FERRET_ACTION_IDS.machine);
-    expect(machine?.unavailable).toBe('later');
   });
 
   it('carries the ferret’s runtime as the Move to another login detail', () => {

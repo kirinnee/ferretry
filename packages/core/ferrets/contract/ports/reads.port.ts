@@ -174,6 +174,19 @@ export interface ReadsApi {
    * Ferrets can reach. `undefined` for a ferret this daemon does not know. See {@link RelocationSource}.
    */
   relocationSource?(ferret: FerretId): Promise<RelocationSource | undefined>;
+  /**
+   * Additive (C-45, U16): the other end of {@link relocationSource}. Writes the turns, queued messages and attachments a move
+   * carried into the NEW ferret's own session folder, below `turns/`, `channel/` and `attachments/` only, each as a new file
+   * (an existing name is refused, never replaced; a link is never followed). Relocate's alone. Rejects, having written
+   * nothing it could not name, for a ferret this daemon does not know or a path outside the three folders.
+   */
+  relocationRestore?(ferret: FerretId, files: readonly RelocatedFile[]): Promise<void>;
+}
+
+/** One file a move restores: its path below the ferret's session folder and its bytes. */
+export interface RelocatedFile {
+  readonly path: string;
+  readonly bytes: Uint8Array;
 }
 
 /** One file of a ferret that may travel: where it is (`area`), its path below that area, and its size in bytes. */

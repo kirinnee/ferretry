@@ -162,14 +162,44 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         await ready();
         return registry.get(ferret) === undefined ? undefined : sourceOf(ferret);
       },
+      relocationRestore: async (ferret, files) => {
+        await ready();
+        if (registry.get(ferret) === undefined)
+          throw new Error('this machine does not know the ferret to restore into');
+        const handle = sessionFiles.root(parseSessionId(ferret));
+        // Every path is judged before the first byte is written, so a refusal leaves the folder as it was.
+        const planned = files.map(file => {
+          const parts = file.path.split('/');
+          const top = parts[0] ?? '';
+          if (
+            !(FERRET_READABLE_FOLDERS as readonly string[]).includes(top) ||
+            parts.length < 2 ||
+            parts.some(part => part === '' || part === '.' || part === '..')
+          )
+            throw new Error('a move restores only turns, queued messages and attachments, each below its own folder');
+          const fenced = handle.resolve(file.path);
+          if (!fenced.ok) throw new Error('that file is outside the ferret\u2019s session folder');
+          return { fenced: fenced.value as FencedPath, bytes: file.bytes };
+        });
+        for (const file of planned) {
+          if ((await handle.lstat(file.fenced)) !== undefined)
+            throw new Error('a file of the move already exists in the new ferret, so nothing more was written');
+        }
+        for (const file of planned) await handle.publish(file.fenced, file.bytes, { exclusive: true, mode: 0o600 });
+      },
     },
   };
 }
 
-/** Only Relocate is handed `relocationSource`: it reads session files no other plugin may. */
+/** Only Relocate is handed `relocationSource` and `relocationRestore`: it reads session files no other plugin may. */
 export function relocationPortFor(needer: string, port: Partial<FerretsApi>): Partial<FerretsApi> {
-  const { relocationSource, ...rest } = port;
-  return needer === 'relocate' && relocationSource !== undefined ? { ...rest, relocationSource } : rest;
+  const { relocationSource, relocationRestore, ...rest } = port;
+  if (needer !== 'relocate') return rest;
+  return {
+    ...rest,
+    ...(relocationSource === undefined ? {} : { relocationSource }),
+    ...(relocationRestore === undefined ? {} : { relocationRestore }),
+  };
 }
 
 export default { id: 'relocation-source', register } satisfies FerretsFeature;

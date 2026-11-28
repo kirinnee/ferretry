@@ -99,6 +99,7 @@
         "packages/plugins/accounts/",
         "packages/plugins/onboarding/",
         "packages/plugins/packs/",
+        "packages/plugins/relocate/tests/integration/",
         "packages/plugins/updates/",
         "packages/plugins/warden/"
       ]

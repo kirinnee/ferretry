@@ -48,6 +48,8 @@ const READ_BYTES = 64 * 1024;
 export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Checkout {
   const alternates = new Map<string, string>();
   const quarantines = new Map<string, () => Promise<void>>();
+  /** Each prepared quarantine's name below the `worktrees` root: the one root a moved working tree is written through. */
+  const stageNames = new Map<string, string>();
   const verify = async (folder: string) => {
     for (const [quarantine, check] of quarantines)
       if (folder === quarantine || folder.startsWith(`${quarantine}/`)) await check();
@@ -146,9 +148,11 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
           throw new CheckoutError('the quarantine folder changed; it was kept');
       };
       quarantines.set(stage, check);
+      stageNames.set(stage, name);
       const cleanup = async () => {
         alternates.delete(repo);
         quarantines.delete(stage);
+        stageNames.delete(stage);
         await check();
         await handle.remove(path.value, { expectedIdentity: identity });
       };
@@ -245,10 +249,19 @@ export function kernelCheckout(kernel: Pick<KernelPorts, 'roots' | 'spawn'>): Ch
 
     writeNewFile: async (tree, relative, bytes) => {
       await verify(tree);
-      const handle = kernel.roots.root('imports', { subfolder: tree });
-      const fenced = handle.resolve(relative);
+      // The tree lives in a quarantine this import made below the kernel's `worktrees` root, the one root that takes writes
+      // (`imports` is read-only): the file's name is judged against that root, which refuses a `..` or a link out.
+      const stage = [...stageNames.keys()].find(known => tree === known || tree.startsWith(`${known}/`));
+      if (stage === undefined) throw new CheckoutError('the moved working tree is not one this import prepared');
+      const handle = kernel.roots.root('worktrees');
+      const inside = `${stageNames.get(stage) as string}${tree.slice(stage.length)}`;
+      const fenced = handle.resolve(`${inside}/${relative}`);
       if (!fenced.ok) throw new CheckoutError('a moved file would land outside its working tree');
-      const folder = relative.includes('/') ? handle.resolve(relative.slice(0, relative.lastIndexOf('/'))) : undefined;
+      const folder = relative.includes('/')
+        ? handle.resolve(`${inside}/${relative.slice(0, relative.lastIndexOf('/'))}`)
+        : undefined;
+      if (folder !== undefined && !folder.ok)
+        throw new CheckoutError('a moved file would land outside its working tree');
       if (folder?.ok === true) await handle.makeDirectory(folder.value, { mode: 0o755 });
       await handle.writeBytes(fenced.value, bytes, { exclusive: true, mode: 0o644 });
     },

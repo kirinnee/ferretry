@@ -1,6 +1,6 @@
-import { FerretsPort } from '@ferretry/core-ferrets/contract';
+import { ACTIONS_ROW_SLOT, FERRET_LIST_ROW_MARK_SLOT, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { cap } from '@ferretry/core-gate/contract';
-import { definePlugin, route } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, route } from '@ferretry/kernel/manifest';
 import { GitAccountsPort } from '@ferretry/plugin-git-accounts/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
@@ -23,7 +23,7 @@ export default definePlugin({
   version: '5.0.0',
   api: 5,
   core: false,
-  kinds: ['command'],
+  kinds: ['command', 'view'],
 
   needs: { ferrets: FerretsPort },
   // The target's neighbours, all optional: with one off, a move that needs it is refused with a sentence (never a crash).
@@ -31,6 +31,14 @@ export default definePlugin({
 
   actions: {
     routes: [
+      route('GET /v1/relocate/moved', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'use'),
+        noStore: true,
+        audit: { skip: 'a read of the stub ledger: ids and instants, so the fleet list can say where a ferret went' },
+        guard: { none: 'ferret ids, daemon ids and instants; nothing of the ferret' },
+      }),
       route('POST /v1/relocate/:ferretId/preflight', {
         minimum: 'operator',
         caller: 'person',
@@ -97,6 +105,15 @@ export default definePlugin({
         audit: { record: RELOCATE_AUDIT.imported },
         guard: { none: 'a header and a folder; every hash is verified before anything is written' },
       }),
+    ],
+  },
+
+  ui: {
+    panels: [
+      // Ferrets' Actions menu: "Move to another machine…", offered only where another machine is paired.
+      panel(ACTIONS_ROW_SLOT, { id: 'move-machine-row', order: 30 }),
+      // The fleet list: a ferret that was moved reads "Moved to <machine>".
+      panel(FERRET_LIST_ROW_MARK_SLOT, { id: 'moved-mark', order: 10 }),
     ],
   },
 

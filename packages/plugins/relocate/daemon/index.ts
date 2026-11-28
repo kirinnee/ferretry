@@ -138,6 +138,11 @@ export default implementDaemon(manifest, {
     };
 
     const routes = {
+      'GET /v1/relocate/moved': async () => {
+        const read = await kernel.state.read(MOVED_STATE);
+        if (!read.ok) throw new ApiError(500, 'the moved ledger could not be read', 'moved_unreadable');
+        return jsonResponse(read.value ?? { moved: {} });
+      },
       'POST /v1/relocate/:ferretId/preflight': async (call: CallContext) => {
         mayReadTree(call);
         const body = PreflightRequestSchema.safeParse(await readJson(call));

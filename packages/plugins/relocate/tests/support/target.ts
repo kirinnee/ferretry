@@ -33,6 +33,8 @@ export interface TargetOptions {
   /** The ledger that says where a ferret came from cannot be written. */
   readonly recordFails?: boolean;
   readonly stopFails?: boolean;
+  /** Ferrets refuses to write the moved ferret's turns and attachments into its new session folder. */
+  readonly restoreFails?: boolean;
   readonly actualState?: 'idle' | 'stopped' | 'unavailable';
   /** Wraps the real checkout, so a test can make one step fail. */
   readonly wrapCheckout?: (real: Checkout) => Checkout;
@@ -52,6 +54,8 @@ export interface TargetWorld {
   readonly offers: OfferBook;
   readonly started: StartRequest[];
   readonly stopped: string[];
+  /** What the importer asked Ferrets to restore into the new ferret, by path. */
+  readonly restored: { ferret: string; path: string; bytes: Uint8Array }[];
   readonly recorded: Map<string, { daemonId: string; ferretId: string; at: Instant }>;
   readonly registered: string[];
   readonly removedProjects: string[];
@@ -81,6 +85,7 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
   const identity = await newIdentity();
   const started: StartRequest[] = [];
   const stopped: string[] = [];
+  const restored: TargetWorld['restored'] = [];
   const recorded = new Map<string, { daemonId: string; ferretId: string; at: Instant }>();
   const registered: string[] = [];
   const removedProjects: string[] = [];
@@ -142,6 +147,10 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
       stop: async (ferret: string) => {
         stopped.push(ferret);
         if (options.stopFails) throw new Error('stop failed');
+      },
+      relocationRestore: async (ferret: string, files: readonly { path: string; bytes: Uint8Array }[]) => {
+        if (options.restoreFails === true) throw new Error('a file of the move already exists in the new ferret');
+        for (const file of files) restored.push({ ferret, path: file.path, bytes: file.bytes });
       },
     } as ImporterDeps['ferrets'],
     projects: () =>
@@ -216,6 +225,7 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
     offers,
     started,
     stopped,
+    restored,
     recorded,
     registered,
     removedProjects,

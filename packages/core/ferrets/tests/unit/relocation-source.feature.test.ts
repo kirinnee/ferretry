@@ -257,3 +257,87 @@ test('R3 ENOENT on an absent optional root is the only listing error treated as 
   const source = await build({ files: { 'turns/turn-001.md': SESSION['turns/turn-001.md'] as Node } })(ID);
   expect((await source?.files())?.map(file => file.path)).toEqual(['turns/turn-001.md', 'history.jsonl']);
 });
+
+describe('relocationRestore writes a move’s session files into the NEW ferret, and only those', () => {
+  function restorer(existing: readonly string[] = [], known = true) {
+    const written = new Map<string, Uint8Array>();
+    const folder = {
+      resolve: (relative: string) =>
+        relative.startsWith('/') || relative.split('/').includes('..')
+          ? { ok: false as const, error: 'outside' }
+          : { ok: true as const, value: relative },
+      lstat: async (path: string) =>
+        existing.includes(path) || written.has(path)
+          ? { kind: 'file', size: 0, links: 1, mode: 0o600, modified: '' }
+          : undefined,
+      publish: async (path: string, bytes: Uint8Array, options: { exclusive?: boolean; mode?: number }) => {
+        expect(options).toEqual({ exclusive: true, mode: 0o600 });
+        written.set(path, bytes);
+        return { created: true };
+      },
+    };
+    const context = {
+      kernel: { state: { read: async () => ({ ok: true, value: undefined }) } },
+      hooks: { contributions: () => [], provider: () => 'unavailable' },
+      registry: { get: (id: string) => (known && id === ID ? { state: 'idle', harness: 'claude-code' } : undefined) },
+      sessionFiles: { root: () => folder },
+      sessionStore: {},
+      ready: async () => {},
+    } as unknown as FerretsContext;
+    const restore = relocationFeature.register(context)?.port?.relocationRestore as (
+      ferret: FerretId,
+      files: readonly { path: string; bytes: Uint8Array }[],
+    ) => Promise<void>;
+    return { restore, written };
+  }
+
+  test('writes each file below turns/, channel/ and attachments/ as a new file, byte for byte', async () => {
+    const { restore, written } = restorer();
+    await restore(ID, [
+      { path: 'turns/turn-001.md', bytes: text('task') },
+      { path: 'attachments/a1/photo.txt', bytes: text('photo') },
+    ]);
+    expect([...written.keys()]).toEqual(['turns/turn-001.md', 'attachments/a1/photo.txt']);
+    expect(new TextDecoder().decode(written.get('turns/turn-001.md'))).toBe('task');
+  });
+
+  test('refuses before the first write: a credential, a journal, a path out of the folder, a name already there', async () => {
+    for (const path of [
+      'environment.json',
+      'history.jsonl',
+      'turns',
+      'turns/../environment.json',
+      '/etc/passwd',
+      'media/x.png',
+    ]) {
+      const { restore, written } = restorer();
+      await expect(
+        restore(ID, [
+          { path: 'turns/turn-001.md', bytes: text('ok') },
+          { path, bytes: text('x') },
+        ]),
+      ).rejects.toThrow();
+      expect(written.size).toBe(0);
+    }
+    const taken = restorer(['turns/turn-002.md']);
+    await expect(
+      taken.restore(ID, [
+        { path: 'turns/turn-001.md', bytes: text('a') },
+        { path: 'turns/turn-002.md', bytes: text('b') },
+      ]),
+    ).rejects.toThrow('already exists');
+    expect(taken.written.size).toBe(0);
+  });
+
+  test('refuses a ferret this machine does not know', async () => {
+    const { restore } = restorer([], false);
+    await expect(restore(ID, [{ path: 'turns/turn-001.md', bytes: text('a') }])).rejects.toThrow('does not know');
+  });
+
+  test('only Relocate is handed it', () => {
+    const port = { relocationRestore: async () => undefined, get: async () => undefined };
+    expect(relocationPortFor('relocate', port as never)).toHaveProperty('relocationRestore');
+    for (const other of ['conversation', 'tidy', 'mcp', 'warden'])
+      expect(relocationPortFor(other, port as never)).not.toHaveProperty('relocationRestore');
+  });
+});

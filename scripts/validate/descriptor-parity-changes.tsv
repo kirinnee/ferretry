@@ -541,3 +541,4 @@ route	POST /v1/relocate/offers/:offerId/import	added	new in G15 U15 (relocate, t
 route	POST /v1/projects/:id/repos	added	new in F-101: clone another repository into an existing project; filesystem configure, a person's act
 route	GET /v1/browser/identities	added	new in G4 U4 (browsers): the browser identities the daemon would open now (running or not, engine, proxy by name only, last used) for Settings > Browser > Identities; a person's read on browser use, no store, no credential
 route	POST /v1/browser/identities/:identity/stop	added	new in G4 U4 (browsers): closes one configured identity's Chrome and pages and no other identity's; a person's act on browser use, audited as surface.control, keeps the profile folder
+route	GET /v1/relocate/moved	added	new in G15 U16 (relocate): the ferrets this machine handed to another (ferret id, other daemon id, instant) so the fleet list can say "Moved to <machine>"; a person only, fleet.use, ids and instants only, no store

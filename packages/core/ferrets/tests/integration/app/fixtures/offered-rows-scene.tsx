@@ -4,6 +4,7 @@
  *
  *   ?theme=<family>-<mode>
  *   ?compact=1   the phone layout
+ *   ?move=1      Relocate's row, "Move to another machine…", in the Move group, as the menu draws it
  */
 
 import type { ActionsRowOffer } from '@ferretry/core-ferrets/contract';
@@ -48,7 +49,9 @@ const OFFERS: readonly ActionsRowOffer[] = [
   run('something-new', 'A row the menu has not heard of', 'ferret', 80),
 ];
 
-const sections = ferretActionSections(OFFERS.map(contributionOf), {} as never);
+const offers =
+  params.get('move') === '1' ? [...OFFERS, run('move-machine', 'Move to another machine…', 'move', 30)] : OFFERS;
+const sections = ferretActionSections(offers.map(contributionOf), {} as never);
 
 function Scene() {
   return (

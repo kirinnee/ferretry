@@ -85,6 +85,19 @@ describe('the four routes', () => {
     });
     expect(again.status).toBe(409);
     expect(again.json()).toMatchObject({ code: 'already_moved' });
+    // and the fleet list can read where it went: ids and instants, to a person only
+    const ledger = await host.request('GET', '/v1/relocate/moved', { as: owner() });
+    expect(ledger.status).toBe(200);
+    expect(ledger.json()).toMatchObject({ moved: { [FERRET]: { daemonId: target.daemonId, ferretId: 'f-on-b' } } });
+    expect((await host.request('GET', '/v1/relocate/moved', { as: ferret('f1') })).status).toBe(403);
+    await host.stop();
+  });
+
+  test('before any move the ledger is empty, not an error', async () => {
+    const { host } = await started();
+    const ledger = await host.request('GET', '/v1/relocate/moved', { as: owner() });
+    expect(ledger.status).toBe(200);
+    expect(ledger.json()).toEqual({ moved: {} });
     await host.stop();
   });
 });

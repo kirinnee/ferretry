@@ -12,19 +12,7 @@
  *     only fail is worse than no row.
  */
 
-import {
-  ArrowLeftRight,
-  Copy,
-  History,
-  KeyRound,
-  Pencil,
-  Pin,
-  PinOff,
-  Play,
-  RotateCw,
-  Server,
-  Square,
-} from 'lucide-react';
+import { ArrowLeftRight, Copy, History, KeyRound, Pencil, Pin, PinOff, Play, RotateCw, Square } from 'lucide-react';
 import type { ReactNode } from 'react';
 import {
   conversionTargetOf,
@@ -69,7 +57,6 @@ export const FERRET_ACTION_IDS = {
   pin: 'pin',
   move: 'move-login',
   convert: 'move-harness',
-  machine: 'move-machine',
   restart: 'restart',
   earlierConversation: 'earlier-conversation',
   resume: 'resume',
@@ -147,21 +134,6 @@ export const CORE_FERRET_ACTIONS: readonly FerretActionContribution<CoreActionCo
             label: `Move to ${harnessShortName(conversionTargetOf(context.ferret.harness))}…`,
             icon: ArrowLeftRight,
             run: context.openConvert,
-          }
-        : null,
-  },
-  {
-    group: 'move',
-    order: 30,
-    build: context =>
-      context.canControl
-        ? {
-            kind: 'run',
-            id: FERRET_ACTION_IDS.machine,
-            label: 'Move to another machine',
-            icon: Server,
-            unavailable: 'later',
-            run: () => undefined,
           }
         : null,
   },
