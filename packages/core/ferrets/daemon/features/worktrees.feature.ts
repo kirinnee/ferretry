@@ -52,13 +52,18 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       }));
     },
     terminalRoots: async () => await liveTerminalRoots(hooks.contributions(TerminalRoots).map(entry => entry.item)),
-    withFerretMove: async (path, move) => await f.service.withWorktreeMove(path, move),
-    withTerminalRemoval: async (path, remove) =>
-      await withTerminalRemoval(
+    withFerretMove: async (path, move) => {
+      f.relocations.assertFolder(path, true);
+      return await f.service.withWorktreeMove(path, move);
+    },
+    withTerminalRemoval: async (path, remove) => {
+      f.relocations.assertFolder(path, true);
+      return await withTerminalRemoval(
         hooks.contributions(TerminalRoots).map(entry => entry.item),
         path,
         remove,
-      ),
+      );
+    },
     newId: () => randomUUID(),
   });
   late.worktrees = worktrees;

@@ -210,28 +210,19 @@ describe('the harness-literal gate', () => {
 
   test('the pin names exactly the four literal rows and the table rows of E-276 PR 17b, with their counts', () => {
     expect([...PINNED].map(([path, n]) => `${path.slice(DAEMON.length + 1)}::${n}`).toSorted()).toEqual([
-      'adapters/host-harness-scan.ts::tables::1',
       'lib/account/builtin-autonomous.ts::2',
       'lib/account/halves.ts::tables::2',
       'lib/account/import-plan.ts::tables::2',
       'lib/account/import.ts::tables::1',
       'lib/account/layering.ts::2',
-      'lib/account/layering.ts::tables::1',
       'lib/account/materialise.ts::tables::1',
       'lib/account/scope.ts::4',
-      'lib/account/scope.ts::tables::1',
-      'lib/assets.ts::tables::2',
+      'lib/assets.ts::tables::1',
       'lib/harness-kind.ts::tables::2',
       'lib/models/catalog.ts::tables::4',
-      'lib/provisioning.ts::tables::1',
-      'lib/service/assembly.ts::tables::1',
       'lib/service/catalog.ts::tables::1',
-      'lib/service/foreign.ts::2',
-      'lib/service/foreign.ts::tables::2',
       'lib/service/harness-facts.ts::tables::1',
       'lib/service/setup-service.ts::tables::1',
-      'lib/service/tool-install.ts::tables::4',
-      'lib/settings.ts::tables::1',
     ]);
   });
 
@@ -267,7 +258,7 @@ describe('the harness-literal gate', () => {
   });
 
   test('a pinned table row passes at its count, and a second table in that file is refused', () => {
-    const TABLES_FILE = `${DAEMON}/lib/settings.ts`;
+    const TABLES_FILE = `${DAEMON}/lib/service/harness-facts.ts`;
     const ledger = `${tablesKey(TABLES_FILE)}::1\n`;
     expect(run({ [TABLES_FILE]: TYPED_TABLE }, { ledger }).status).toBe(0);
     const two = `${TYPED_TABLE}export type V = Record<HarnessKind, string>;\n`;
@@ -283,7 +274,7 @@ describe('the harness-literal gate', () => {
   });
 
   test('a table row left behind for a file with no table is refused', () => {
-    const TABLES_FILE = `${DAEMON}/lib/settings.ts`;
+    const TABLES_FILE = `${DAEMON}/lib/service/harness-facts.ts`;
     const result = run({ [TABLES_FILE]: 'export const x = 1;\n' }, { ledger: `${tablesKey(TABLES_FILE)}::1\n` });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('delete or lower its row');
@@ -297,14 +288,8 @@ describe('the harness-literal gate', () => {
 
   /** The per-harness things the list names but the gate cannot count (values, not harness-keyed types): each must still be there. */
   const NAMED_GAPS: readonly (readonly [file: string, needle: string])[] = [
-    [`${DAEMON}/adapters/account-model-files.ts`, 'defaultHomeDirectories: {'],
-    [`${DAEMON}/host-assembly.ts`, 'const harnessHomesOf ='],
-    [`${DAEMON}/lib/account/fixed-layer.ts`, 'const CODEX_FIXED_CONFIG_KEYS'],
-    [`${DAEMON}/lib/account/fixed-layer.ts`, 'const CARRIED_FLAGS'],
     [`${DAEMON}/adapters/profile-components.ts`, 'const SOURCES'],
     [`${DAEMON}/lib/account/credentials.ts`, 'const SIGN_IN_FILES'],
-    ['packages/plugins/runtimes/contract/display-name.ts', 'const HARNESS_WORD'],
-    ['packages/plugins/runtimes/contract/display-name.ts', 'const CLI_WORD'],
     ['packages/plugins/runtimes/contract/display-name.ts', 'const FERRETRY_SIGN_IN'],
     ['packages/plugins/runtimes/contract/harness-words.ts', "'claude-code': {"],
   ];

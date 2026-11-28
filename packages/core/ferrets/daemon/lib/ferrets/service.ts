@@ -174,6 +174,7 @@ function endedOnPurpose(record: FerretRecord): boolean {
 
 /** Everything the service reaches outside its own memory. The daemon half binds these to kernel ports. */
 export interface FerretsPorts {
+  readonly mutationAllowed?: (ferret: FerretId) => void;
   /** Resolves once the held ferret records are loaded (a read before then would see no ferret). */
   ready?(): Promise<void>;
   /** Whether the held records have finished loading AND every one was read whole: a synchronous flag, `false` until the load settles (never waits). Unbound: it is. */
@@ -1160,7 +1161,7 @@ export class FerretsService implements FerretsApi {
     if (harnessKey === undefined) return failed('harness_unavailable', 'no harness plugin is on');
     if (this.ports.harness(harnessKey) === undefined)
       return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);
-    const unfit = relocatedRefusal(request, this.ports.harness(harnessKey), harnessKey);
+    const unfit = relocatedRefusal(request, this.ports.harness(harnessKey), harnessKey, origin);
     if (unfit !== undefined) return unfit;
     // Bind before admission; the launch verifies this identity again before the harness starts.
     const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
@@ -2171,7 +2172,9 @@ export class FerretsService implements FerretsApi {
     const said: LaunchSaid = kind === 'start' ? { requireConversation: true } : {};
     if (relocated !== undefined) said.relocated = relocated;
     try {
-      const session = await this.sessionStep(record, kind, prompt, revive, attached, notInWardenTree);
+      const session = extras.relocated?.pending
+        ? ok(undefined)
+        : await this.sessionStep(record, kind, prompt, revive, attached, notInWardenTree);
       if (!session.ok) return await this.abandon(record, session.error.code, session.error.reason);
       turn = session.value;
       runner = this.ports.runner();
@@ -2396,11 +2399,23 @@ export class FerretsService implements FerretsApi {
     const resumed = await conversationForLaunch(harness, spec, conversation, named, said.requireConversation === true);
     if (!resumed.ok) return resumed;
     const resumable = resumed.value.conversation;
-    if (resumed.value.missing !== undefined) said.conversationNotFound = resumed.value.missing;
     if (bound !== undefined) {
       const held = await bound.verify().catch(() => err('the launch folder could not be checked again'));
       if (!held.ok) return failed('refused', held.error);
     }
+    if (said.relocated?.pending) {
+      // Reuse the same verified home/unpack path, but stop before admission or any harness process/turn.
+      this.tokens.revoke(record.id);
+      await this.ports.saveTokens(this.tokens.snapshot());
+      const cause = { kind: 'stopped' } as const;
+      await this.write(
+        { ...record, state: 'stopped', cause, stateAt: this.ports.now(), harnessConversation: resumable },
+        record.state,
+        'state',
+      );
+      return ok(record.id);
+    }
+    if (resumed.value.missing !== undefined) said.conversationNotFound = resumed.value.missing;
     // One guard snapshot serves both phases; the innermost conversation lease refuses another live writer's conversation.
     const guards = this.guards();
     const claimed = await beforePane(guards, { record, conversation: resumable });

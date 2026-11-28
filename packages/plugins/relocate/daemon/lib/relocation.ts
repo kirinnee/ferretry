@@ -7,6 +7,7 @@ import {
   type CompleteRequest,
   type CompleteResponse,
   type ExportResponse,
+  type HeldMove,
   type PreflightResponse,
   RELOCATE_CHUNK_BYTES,
   RELOCATE_EXPORT_TTL_MS,
@@ -40,12 +41,13 @@ export class RelocateRefused extends Error {
 
 /** The ferrets this machine has handed to another: the one thing Relocate keeps. */
 export interface MovedLedger {
+  completed(exportId: string): Promise<CompleteResponse | undefined>;
   get(
     ferret: string,
   ): Promise<{ readonly daemonId: string; readonly ferretId: string; readonly at: Instant } | undefined>;
   record(
     ferret: string,
-    entry: { readonly daemonId: string; readonly ferretId: string; readonly at: Instant },
+    entry: { readonly daemonId: string; readonly ferretId: string; readonly at: Instant; readonly exportId: string },
   ): Promise<void>;
 }
 
@@ -56,6 +58,7 @@ export interface RelocationDeps {
   readonly redaction: Redaction;
   readonly crypto: CloneCrypto;
   readonly ferrets: Pick<FerretsApi, 'get' | 'workFolder' | 'relocationSource' | 'stop' | 'resume'>;
+  readonly protect: NonNullable<FerretsApi['relocationProtect']>;
   readonly treeOf: (folder: string) => WorkingTree;
   readonly daemonId: string;
   readonly clock: Pick<Clock, 'now' | 'nowMs' | 'after'>;
@@ -70,6 +73,9 @@ interface OpenExport {
   readonly createdAtMs: number;
   readonly resumeOnExpiry: boolean;
   completing?: boolean;
+  /** Once completion begins, its fence may be durable even if its answer is lost. Never recover by expiry. */
+  handoff?: boolean;
+  warned?: boolean;
 }
 
 const newId = (crypto: CloneCrypto, prefix: string): string => `${prefix}${toBase64Url(crypto.randomBytes(16))}`;
@@ -83,8 +89,18 @@ export class Relocation {
   #reserved = 0;
   readonly #recovery = new Map<FerretId, Preparation | undefined>();
   readonly #resuming = new Map<FerretId, Promise<boolean>>();
+  #releasing = false;
 
   constructor(private readonly deps: RelocationDeps) {}
+
+  async held(ferretId: string): Promise<HeldMove> {
+    const summary = await this.deps.ferrets.get(ferretId as FerretId);
+    if (summary === undefined) throw new RelocateRefused(404, 'this machine has no such ferret', 'not_found');
+    const open = [...this.#exports.values()].find(each => each.ferret === summary.id);
+    return open === undefined
+      ? { held: false }
+      : { held: true, since: new Date(open.createdAtMs).toISOString() as Instant };
+  }
 
   async preflight(ferretId: string, to: string): Promise<PreflightResponse> {
     if (to === this.deps.daemonId)
@@ -105,7 +121,7 @@ export class Relocation {
     }
     if (this.#spent.has(offer.offerId))
       throw new RelocateRefused(409, 'this offer was already used; open a new one on the other machine', 'offer_spent');
-    if (this.#exports.size + this.#reserved + this.#recovery.size >= RELOCATE_MAX_OPEN_EXPORTS)
+    if (this.#releasing || this.#exports.size + this.#reserved + this.#recovery.size >= RELOCATE_MAX_OPEN_EXPORTS)
       throw new RelocateRefused(409, 'another move is still in progress on this machine', 'export_busy');
 
     // No await between these checks and the reservation: one verified offer buys one attempt.
@@ -217,26 +233,90 @@ export class Relocation {
       throw new RelocateRefused(404, 'no such export here: it timed out or was completed', 'export_unknown');
     const chunk = open.chunks[index];
     if (chunk === undefined) throw new RelocateRefused(404, 'no such chunk in this export', 'chunk_unknown');
+    // A lost reply can still reach B. Once bytes leave A, expiry must never resume it.
+    open.handoff = true;
     return chunk;
   }
 
   async complete(exportId: string, request: CompleteRequest): Promise<CompleteResponse> {
+    const completed = await this.deps.moved.completed(exportId);
+    if (completed !== undefined) {
+      if (completed.movedTo.daemonId !== request.to.daemonId || completed.movedTo.ferretId !== request.to.ferretId)
+        throw new RelocateRefused(403, 'this export was completed for another destination', 'wrong_target');
+      return completed;
+    }
+    if (this.#releasing) throw new RelocateRefused(409, 'a move is being released', 'export_busy');
     await this.expire();
+    if (this.#releasing) throw new RelocateRefused(409, 'a move is being released', 'export_busy');
     const open = this.#exports.get(exportId);
-    if (open === undefined || this.deps.clock.nowMs() - open.createdAtMs >= RELOCATE_EXPORT_TTL_MS)
+    if (open === undefined || (!open.handoff && this.deps.clock.nowMs() - open.createdAtMs >= RELOCATE_EXPORT_TTL_MS))
       throw new RelocateRefused(404, 'no such export here: it timed out or was completed', 'export_unknown');
     if (request.to.daemonId !== open.header.targetDaemonId)
       throw new RelocateRefused(403, 'this export was sealed for another machine', 'wrong_target');
     if (open.completing === true) throw new RelocateRefused(409, 'this move is already being committed', 'export_busy');
     const at = this.deps.clock.now();
-    const entry = { daemonId: request.to.daemonId, ferretId: request.to.ferretId, at };
+    const entry = {
+      daemonId: request.to.daemonId,
+      ferretId: request.to.ferretId,
+      at,
+      ...(request.to.machine === undefined ? {} : { machine: request.to.machine }),
+      exportId,
+    };
     open.completing = true;
+    open.handoff = true;
     try {
+      await this.deps.protect(open.ferret, { ...request.to, machine: request.to.machine ?? request.to.daemonId });
       await this.deps.moved.record(open.ferret, entry);
       this.#exports.delete(exportId);
-      return { ferretId: open.ferret, movedTo: entry };
+      return { ferretId: open.ferret, movedTo: { daemonId: entry.daemonId, ferretId: entry.ferretId, at: entry.at } };
     } finally {
       open.completing = false;
+    }
+  }
+
+  /** Explicit owner reconciliation only. Discard ciphertext only after A is confirmed fenced or stopped; never resume A. */
+  async release(ferretId: string): Promise<{ readonly state: 'stopped' | 'fenced' }> {
+    if (
+      this.#releasing ||
+      this.#reserved > 0 ||
+      this.#recovery.size > 0 ||
+      this.#resuming.size > 0 ||
+      [...this.#exports.values()].some(open => open.completing)
+    )
+      throw new RelocateRefused(409, 'a move is still being prepared or committed; try again', 'export_busy');
+    this.#releasing = true;
+    try {
+      const summary = await this.deps.ferrets.get(ferretId as FerretId);
+      if (summary === undefined) throw new RelocateRefused(404, 'this machine has no such ferret', 'not_found');
+      const other = [...this.#exports.values()].find(open => open.ferret !== summary.id);
+      if (other !== undefined)
+        throw new RelocateRefused(
+          409,
+          `Ferret ${other.ferret} holds this machine’s move slot; release its move instead`,
+          'export_busy',
+        );
+      const fenced = summary.movedTo !== undefined;
+      const held = [...this.#exports.values()].some(open => open.ferret === summary.id);
+      if (!held && summary.state !== 'stopped')
+        throw new RelocateRefused(
+          409,
+          'There is no held move for this ferret, and the source is not stopped.',
+          'no_interrupted_move',
+        );
+      if (!fenced && summary.state !== 'stopped') {
+        await this.deps.ferrets.stop(summary.id, 'polite', 'releasing an interrupted move');
+        const stopped = await this.deps.ferrets.get(summary.id);
+        if (stopped?.state !== 'stopped')
+          throw new RelocateRefused(
+            409,
+            'the source has not confirmed it is stopped; the move remains held',
+            'source_unconfirmed',
+          );
+      }
+      for (const [id, open] of this.#exports) if (open.ferret === summary.id) this.#exports.delete(id);
+      return { state: fenced ? 'fenced' : 'stopped' };
+    } finally {
+      this.#releasing = false;
     }
   }
 
@@ -299,9 +379,19 @@ export class Relocation {
 
   /** Called by the daemon clock even when nobody asks for another chunk. Failed recovery retains its reservation. */
   async expire(): Promise<void> {
+    if (this.#releasing) return;
     const nowMs = this.deps.clock.nowMs();
     for (const [id, open] of this.#exports) {
       if (open.completing === true || nowMs - open.createdAtMs < RELOCATE_EXPORT_TTL_MS) continue;
+      if (open.handoff) {
+        if (!open.warned)
+          this.deps.log.warn(
+            'move expired after handing out ciphertext; automatic resumption is disabled; check both machines and retry completion or release',
+            { ferret: open.ferret },
+          );
+        open.warned = true;
+        continue;
+      }
       if (!open.resumeOnExpiry || (await this.#resume(open.ferret))) this.#exports.delete(id);
     }
     for (const [ferret, preparation] of [...this.#recovery]) {

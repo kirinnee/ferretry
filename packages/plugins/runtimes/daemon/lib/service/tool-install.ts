@@ -24,16 +24,11 @@
  * "installed" means this daemon can now find the tool, not merely that a manager exited zero.
  */
 import type { CallerGovernance } from '@ferretry/core-gate/contract';
-import { supportedKinds } from '../harness-kind.ts';
+import { displayNameOf, unsupportedHarnessSentence } from '../harness-kind.ts';
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { scrubInstallOutput } from './install-output.ts';
-import {
-  type ExecutableResolverPort,
-  HARNESS_LABELS,
-  HARNESS_PACKAGES,
-  type HarnessLocation,
-  stripTerminalEscapes,
-} from './foreign.ts';
+import { type ExecutableResolverPort, type HarnessLocation, stripTerminalEscapes } from './foreign.ts';
 
 /** The package managers a harness may be installed through. */
 type PackageManager = 'brew' | 'apt' | 'npm';
@@ -41,22 +36,17 @@ type PackageManager = 'brew' | 'apt' | 'npm';
 /**
  * THE declared table: per harness, the arguments each manager is given, after the manager's own name.
  *
- * The package names come from `HARNESS_PACKAGES`, the one place they are spelled, which the harness
- * update (`docs/updating.md`) reads too. Claude Code ships a `claude-code` cask and
+ * The package names are the harness plugin's own (`kit.install`), looked up by the harness a request names. Claude Code ships a `claude-code` cask and
  * `@anthropic-ai/claude-code` on npm; Codex ships a `codex` cask and `@openai/codex`. Neither publishes
  * an apt package, so neither has an `apt` entry and apt is never offered — adding one here is the whole
  * change if that ever stops being true.
  */
-const TOOL_PACKAGES: Readonly<Record<HarnessKind, Readonly<Partial<Record<PackageManager, readonly string[]>>>>> =
-  (() => {
-    const table: Partial<Record<HarnessKind, Partial<Record<PackageManager, readonly string[]>>>> = {};
-    for (const kind of supportedKinds())
-      table[kind] = {
-        brew: ['install', '--cask', HARNESS_PACKAGES[kind].cask],
-        npm: ['install', '-g', HARNESS_PACKAGES[kind].npm],
-      };
-    return table as Record<HarnessKind, Partial<Record<PackageManager, readonly string[]>>>;
-  })();
+function toolPackages(install: InstallWords): Readonly<Partial<Record<PackageManager, readonly string[]>>> {
+  return { brew: ['install', '--cask', install.cask], npm: ['install', '-g', install.npm] };
+}
+
+/** What a harness plugin says installs the harness. */
+type InstallWords = NonNullable<RuntimesHarnessKit['install']>;
 
 /**
  * Where each manager usually lives when this daemon's own `PATH` does not say.
@@ -84,9 +74,6 @@ const MANAGER_NAME: Readonly<Record<PackageManager, string>> = { brew: 'Homebrew
  * where the cask's installer can ask for their password; npm and apt take `sudo`.
  */
 const SUDO_REMEDY: Readonly<Record<PackageManager, boolean>> = { brew: false, apt: true, npm: true };
-
-/** Each harness's product name, for sentences: the one table it is spelled in (`foreign.ts`). */
-const TOOL_NAME: Readonly<Record<HarnessKind, string>> = HARNESS_LABELS;
 
 /** How long one install may run before it is stopped. A cask download on a slow link takes minutes. */
 const TOOL_INSTALL_TIMEOUT_MINUTES = 15;
@@ -120,11 +107,11 @@ function display(manager: PackageManager, args: readonly string[]): string {
 
 /** The managers this system offers for this harness, in order, each with its declared arguments. */
 function candidates(
-  harness: HarnessKind,
+  install: InstallWords,
   platform: string,
 ): readonly { readonly manager: PackageManager; readonly args: readonly string[] }[] {
   return managerOrder(platform).flatMap(manager => {
-    const args = TOOL_PACKAGES[harness][manager];
+    const args = toolPackages(install)[manager];
     return args === undefined ? [] : [{ manager, args }];
   });
 }
@@ -168,8 +155,13 @@ function locateManager(manager: PackageManager, executables: ExecutableResolverP
 }
 
 /** Decide how one harness would be installed on this machine. Lookups and stats only. */
-function planToolInstall(harness: HarnessKind, platform: string, executables: ExecutableResolverPort): ToolInstallPlan {
-  const offered = candidates(harness, platform);
+function planToolInstall(
+  harness: HarnessKind,
+  platform: string,
+  executables: ExecutableResolverPort,
+  install: InstallWords,
+): ToolInstallPlan {
+  const offered = candidates(install, platform);
   for (const { manager, args } of offered) {
     const executable = locateManager(manager, executables);
     if (executable !== undefined)
@@ -181,7 +173,7 @@ function planToolInstall(harness: HarnessKind, platform: string, executables: Ex
   return {
     harness,
     kind: 'no-package-manager',
-    reason: `${TOOL_NAME[harness]} is installed with ${names}, and this machine has neither; install ${MANAGER_NAME[first.manager]} first, then run the command yourself`,
+    reason: `${displayNameOf(harness)} is installed with ${names}, and this machine has neither; install ${MANAGER_NAME[first.manager]} first, then run the command yourself`,
     manualCommand: manualCommand(first.manager, first.args, false),
   };
 }
@@ -286,7 +278,7 @@ function classifyInstallResult(
       'needs-admin',
       SUDO_REMEDY[plan.manager]
         ? `${manager} needs admin rights and the account this daemon runs as isn't an admin, so nothing was installed. Ferretry never runs sudo; run the command yourself.`
-        : `${manager} needs your password to finish installing ${TOOL_NAME[plan.harness]}, and this daemon cannot type one. Run the command in your own terminal.`,
+        : `${manager} needs your password to finish installing ${displayNameOf(plan.harness)}, and this daemon cannot type one. Run the command in your own terminal.`,
       true,
     );
   return failed('failed', `${manager} stopped with exit code ${result.code}.${quoted}`);
@@ -337,6 +329,8 @@ interface ToolInstallServiceOptions {
   readonly executables: ExecutableResolverPort;
   /** The daemon's one harness resolution rule (`locateHarnessCommand`, bound to its policy). */
   readonly locate: (harness: HarnessKind) => HarnessLocation;
+  /** What each harness's plugin gives Runtimes, read live. A harness whose plugin gives no `install` is not offered one. */
+  readonly kits: () => ReadonlyMap<HarnessKind, Pick<RuntimesHarnessKit, 'install'>>;
   readonly run: PackageInstallPort;
   /**
    * Looks the commands up AFRESH (the managers and the harnesses), past any cached answer. Asked before an install plans
@@ -365,16 +359,24 @@ export class ToolInstallService {
 
   constructor(private readonly options: ToolInstallServiceOptions) {}
 
-  /** What each named harness is now, and the exact command an install would run. Runs nothing. */
+  /**
+   * What each named harness is now, and the exact command an install would run. Runs nothing. A harness that is not installed
+   * and whose plugin gives no `install` has no command to show, so it is left out ({@link ToolInstallService.install} refuses it by name).
+   */
   plans(harnesses: readonly HarnessKind[]): readonly ToolInstallPreview[] {
-    return harnesses.map(harness => {
+    const kits = this.options.kits();
+    return harnesses.flatMap((harness): ToolInstallPreview[] => {
       const located = this.options.locate(harness);
-      if (located.outcome === 'located') return { harness, installed: true, path: located.path };
-      return {
-        harness,
-        installed: false,
-        plan: planToolInstall(harness, this.#platform(), this.options.executables),
-      };
+      if (located.outcome === 'located') return [{ harness, installed: true, path: located.path }];
+      const install = kits.get(harness)?.install;
+      if (install === undefined) return [];
+      return [
+        {
+          harness,
+          installed: false,
+          plan: planToolInstall(harness, this.#platform(), this.options.executables, install),
+        },
+      ];
     });
   }
 
@@ -404,6 +406,12 @@ export class ToolInstallService {
       // ONE plan per harness, decided here: the plans the person's shown commands are checked against ARE the plans
       // that run. Nothing below plans again, so a refresh after an earlier install cannot change what a later one spawns.
       const checked = this.plans(harnesses);
+      const unplanned = harnesses.filter(harness => !checked.some(entry => entry.harness === harness));
+      if (unplanned.length > 0)
+        throw new ToolInstallRefusal(
+          'tool_install_invalid',
+          unplanned.map(harness => unsupportedHarnessSentence(displayNameOf(harness))).join('; '),
+        );
       this.#assertShownPlans(request.shown ?? [], checked);
       const outcomes: ToolInstallOutcome[] = [];
       for (const preview of checked) {
@@ -435,7 +443,7 @@ export class ToolInstallService {
       if (fresh !== command)
         throw new ToolInstallRefusal(
           'tool_install_plan_changed',
-          `the install command for ${TOOL_NAME[harness]} is not the one that was shown (it is now: ${fresh}); nothing was run. Look at it, then press Install again`,
+          `the install command for ${displayNameOf(harness)} is not the one that was shown (it is now: ${fresh}); nothing was run. Look at it, then press Install again`,
         );
     }
   }

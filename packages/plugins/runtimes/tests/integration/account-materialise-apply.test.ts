@@ -66,7 +66,7 @@ const layoutIn = (root: string): FleetLayout => ({
   homesDirectory: path.join(fleetOf(root), 'homes'),
   assetsDirectory: path.join(fleetOf(root), 'assets'),
   manifestPath: path.join(fleetOf(root), 'manifest.json'),
-  defaultHomeDirectories: { claude: path.join(root, 'person', '.claude'), codex: path.join(root, 'person', '.codex') },
+  defaultHomeDirectories: [path.join(root, 'person', '.claude'), path.join(root, 'person', '.codex')],
 });
 
 /** One Claude agent on the person's own login and one Codex runtime on an empty Ferretry slot. */

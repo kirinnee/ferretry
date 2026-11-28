@@ -210,7 +210,6 @@ describe('the Actions panel in the ferret menu', () => {
       { id: 'copy-id', label: 'Copy ferret id' },
       { id: 'move-login', label: 'Move to another login…' },
       { id: 'move-harness', label: 'Move to Codex…' },
-      { id: 'move-machine', label: 'Move to another machine' },
       { id: 'restart', label: 'Restart CLI' },
       { id: 'earlier-conversation', label: 'Go back to the earlier conversation…' },
       { id: 'stop', label: 'Stop ferret…' },

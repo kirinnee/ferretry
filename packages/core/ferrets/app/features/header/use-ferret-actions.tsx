@@ -84,6 +84,7 @@ export function useFerretActions(
   reload: () => Promise<unknown>,
   { canControl = true, contributions = [], extra }: FerretActionsOptions = {},
 ): FerretActions {
+  canControl = canControl && ferret.movedTo === undefined;
   const router = useOptionalRouter();
   const daemon = router === null ? undefined : daemonOfRoute(router.route);
   const [notice, setNotice] = useState<string | null>(null);

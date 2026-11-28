@@ -186,6 +186,13 @@ export type BundleManifest = z.infer<typeof BundleManifestSchema>;
 export const PreflightRequestSchema = z.strictObject({ to: DaemonIdSchema });
 export type PreflightRequest = z.infer<typeof PreflightRequestSchema>;
 
+/** The source's held move for this ferret only; never its export id or ciphertext. */
+export const HeldMoveSchema = z.union([
+  z.strictObject({ held: z.literal(false) }),
+  z.strictObject({ held: z.literal(true), since: InstantSchema }),
+]);
+export type HeldMove = z.infer<typeof HeldMoveSchema>;
+
 export const MoveRowSchema = z.strictObject({ id: z.string(), label: z.string(), why: z.string().optional() });
 
 export const PreflightResponseSchema = z.strictObject({
@@ -219,15 +226,28 @@ export const ExportResponseSchema = z.strictObject({
 export type ExportResponse = z.infer<typeof ExportResponseSchema>;
 
 export const CompleteRequestSchema = z.strictObject({
-  to: z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1).max(128) }),
+  to: z.strictObject({
+    daemonId: DaemonIdSchema,
+    ferretId: z.string().min(1).max(128),
+    machine: z.string().min(1).max(256).optional(),
+  }),
 });
 export type CompleteRequest = z.infer<typeof CompleteRequestSchema>;
+
+/** Explicitly discard a source's abandoned export, leaving that source stopped or fenced. */
+export const ReleaseRequestSchema = z.strictObject({ ferretId: z.string().min(1).max(128) });
 
 /** `state/relocate/moved.json`: the ferrets this machine has handed to another, so each is a read-only stub that says where it went. */
 export const MovedDocumentSchema = z.strictObject({
   moved: z.record(
     z.string(),
-    z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1), at: InstantSchema }),
+    z.strictObject({
+      daemonId: DaemonIdSchema,
+      ferretId: z.string().min(1),
+      at: InstantSchema,
+      machine: z.string().min(1).max(256).optional(),
+      exportId: z.string().optional(),
+    }),
   ),
 });
 export type MovedDocument = z.infer<typeof MovedDocumentSchema>;
@@ -301,10 +321,16 @@ export const ImportResponseSchema = z.strictObject({
   ferretId: z.string(),
   folder: z.string(),
   movedFrom: z.strictObject({ daemonId: DaemonIdSchema, ferretId: z.string().min(1) }),
-  /** A launch succeeded but provenance could not be saved. The ferret and its files are kept. */
+  /** A launch succeeded but its origin could not be saved, or its turns and attachments were not all restored. The ferret and its files are kept. */
   recovery: z
     .strictObject({
-      code: z.literal('provenance_unrecorded'),
+      code: z.enum([
+        'provenance_unrecorded',
+        'session_unrestored',
+        'source_unconfirmed',
+        'start_unconfirmed',
+        'move_released',
+      ]),
       state: z.enum(['running', 'stopped', 'unknown']),
       message: z.string(),
     })

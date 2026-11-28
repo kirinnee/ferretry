@@ -237,7 +237,7 @@ describe('MUST 3: rollback owns only quarantine bytes', () => {
   });
 });
 
-test('MUST 4: a provenance failure reports the actual admitted launch and keeps its files', async () => {
+test('MUST 4: a provenance failure reports the stopped import and keeps its files', async () => {
   const w = await world();
   const t = await targetWorld({ recordFails: true, stopFails: true }, w.fixture.remote);
   const made = await t.carry(w);
@@ -245,13 +245,13 @@ test('MUST 4: a provenance failure reports the actual admitted launch and keeps 
     header: made.header,
     sourceDaemonId: w.sourceIdentity.daemonId,
   });
-  expect(result.recovery?.state).toBe('running');
+  expect(result.recovery?.state).toBe('stopped');
   expect(result.ferretId).toBeDefined();
   expect(existsSync(join(result.folder, 'new.txt'))).toBe(true);
   expect(t.stopped).toEqual([]);
 });
 
-for (const actualState of ['stopped', 'unavailable'] as const)
+for (const actualState of ['idle', 'stopped', 'unavailable'] as const)
   test(`MUST 4: post-launch provenance receipt reports ${actualState} honestly`, async () => {
     const w = await world();
     const t = await targetWorld({ recordFails: true, actualState }, w.fixture.remote);
@@ -260,7 +260,9 @@ for (const actualState of ['stopped', 'unavailable'] as const)
       header: made.header,
       sourceDaemonId: w.sourceIdentity.daemonId,
     });
-    expect(done.recovery?.state).toBe(actualState === 'unavailable' ? 'unknown' : 'stopped');
+    expect(done.recovery?.state).toBe(
+      actualState === 'unavailable' ? 'unknown' : actualState === 'idle' ? 'running' : 'stopped',
+    );
   });
 
 for (const area of ['conversation', 'session', 'journal', 'untracked', 'diff', 'git history'] as const)

@@ -156,7 +156,8 @@ export interface StartRequest {
    * carry one, never together with `harnessConversation`, and only a harness that can unpack takes it: every other case is
    * refused before the first write. A pack that the harness then refuses fails the launch like any other start failure.
    */
-  readonly relocated?: PackedConversation;
+  /** Relocate stages a stopped record; the source must confirm its durable fence before the owner resumes it. */
+  readonly relocated?: PackedConversation & { readonly pending?: true };
   readonly conversationSource?: ConversationSource;
   readonly by: 'owner' | 'ferret' | 'pack' | 'board' | 'warden';
   /**

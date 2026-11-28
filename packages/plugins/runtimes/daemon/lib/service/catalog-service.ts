@@ -48,7 +48,7 @@ import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { nextDisableExpiry } from '../account/disabled.ts';
 import type { BudgetHolds } from '../account/disabled-runtime.ts';
-import { parseSettings, SETTINGS_FORMAT, type SettingsObject } from '../settings.ts';
+import { parseSettings, settingsFormatOf, type SettingsObject } from '../settings.ts';
 import {
   type AccountChange,
   type ApplyOutcome,
@@ -388,8 +388,8 @@ function sameManifest(planned: { readonly generatedAt: string }, published: unkn
 // ── Component bodies ─────────────────────────────────────────────────────────────────────────────
 
 /** A document that parses, or nothing: an unreadable body is reported by the plan, not here. */
-function parsed(text: string | undefined, format: 'json' | 'toml'): SettingsObject | undefined {
-  if (text === undefined) return undefined;
+function parsed(text: string | undefined, format: 'json' | 'toml' | undefined): SettingsObject | undefined {
+  if (text === undefined || format === undefined) return undefined;
   try {
     return parseSettings(text, format);
   } catch {
@@ -855,7 +855,7 @@ export class FleetCatalogService {
         continue;
       }
       if (component.file === undefined) continue;
-      const body = parsed(await text(component.file), SETTINGS_FORMAT[component.harness]);
+      const body = parsed(await text(component.file), settingsFormatOf(this.deps.kits?.(), component.harness));
       if (body !== undefined) settings[name] = body;
     }
     const hooks: Record<string, SettingsObject> = {};
@@ -990,6 +990,7 @@ export class FleetCatalogService {
         machineName: this.deps.machineName(),
         runningSessions: await this.#runningSessions(),
         settingsBodies: (await this.#bodies(reading.model)).settings ?? {},
+        ...(this.deps.kits === undefined ? {} : { kits: this.deps.kits() }),
         ...runtimeFacts,
       });
     } catch (error) {

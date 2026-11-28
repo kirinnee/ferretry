@@ -77,7 +77,7 @@ const fixtureScan = async (entries: Readonly<Record<string, FixtureEntry>>, clau
   const scanner = new HostHarnessScanner({
     kits: () => IMPORT_KITS,
     userHome: '/fixture/home',
-    ...(claudeConfigDir === undefined ? {} : { claudeConfigDir }),
+    ...(claudeConfigDir === undefined ? {} : { environment: { CLAUDE_CONFIG_DIR: claudeConfigDir } }),
     files: fixture.files,
     commands: { resolve: () => undefined },
     logins: fakeLogins([]),

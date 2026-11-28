@@ -45,6 +45,7 @@ export async function repointRuntime(
   for (const { id } of registry.list()) {
     try {
       const done = await serial.run(id, async () => {
+        ports.mutationAllowed?.(id);
         const configMoved = (await ports.session?.repointRuntime?.(id, rename)) ?? false;
         const record = registry.get(id);
         if (record?.runtime !== rename.from) return configMoved;

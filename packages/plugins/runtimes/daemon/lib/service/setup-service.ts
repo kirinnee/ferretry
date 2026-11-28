@@ -97,14 +97,13 @@ import {
   type ImportRecord,
 } from '../account/import.ts';
 import { mergeImport, planImportRefusing, scansRefusing } from '../account/import-plan.ts';
-import { HARNESS_DISPLAY_NAMES } from '../account/layering.ts';
 import { type ComponentWriter, handedText, withoutHookChanges } from '../account/owner-components.ts';
 import { parseImportRecord } from '../account/import-record.ts';
 import { composeOwned, handOver, type OwnedComponents, recordText, withoutHandedBodies } from './owner-hand-over.ts';
-import { supportedKinds } from '../harness-kind.ts';
+import { displayNameOf, supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
-import { parseSettings, SETTINGS_FORMAT, type SettingsObject } from '../settings.ts';
+import { parseSettings, settingsFormatOf, type SettingsObject } from '../settings.ts';
 import { skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
 import {
   CLONE_BUNDLE_KEYS_LIMIT,
@@ -414,7 +413,7 @@ export class FleetSetupService {
 
   #tools(): SetupTool[] {
     return this.deps.tools.plans(HARNESSES).map(preview => {
-      const label = HARNESS_DISPLAY_NAMES[preview.harness];
+      const label = displayNameOf(preview.harness);
       if (preview.installed) return { harness: harnessKey(preview.harness), label, installed: true };
       const plan = preview.plan;
       return {
@@ -773,6 +772,7 @@ export class FleetSetupService {
       touched,
       ownedOf: reference => plan.record.components[reference]?.owned ?? [],
       etagsOf: reference => plan.record.components[reference]?.etags ?? {},
+      ...(this.deps.catalog.kits === undefined ? {} : { kits: this.deps.catalog.kits() }),
       documents: async (next, outcome) =>
         await this.#documents(reading, next, written, [
           { path: this.#recordPath(), content: recordText(plan, updates, outcome) },
@@ -788,7 +788,7 @@ export class FleetSetupService {
       ...Object.entries(plan.credentials).map(([id, credential]) =>
         credential.store === 'host'
           ? `Login ${id}: shared with ${credential.harness} in your terminal — signing out in one signs out both.`
-          : `Login ${id}: a new ${HARNESS_DISPLAY_NAMES[credential.harness]} login that needs sign-in.`,
+          : `Login ${id}: a new ${displayNameOf(credential.harness)} login that needs sign-in.`,
       ),
       ...(plan.components.length > 0 ? [`Adds ${plural(plan.components.length, 'part')} of your setup.`] : []),
       ...(handed.length === 0
@@ -1356,7 +1356,7 @@ export class FleetSetupService {
     const fenced = [
       `${layout.fleetDirectory.replace(/\/+$/u, '')}/${CREDENTIALS_DIRECTORY}`,
       layout.homesDirectory,
-      ...Object.values(layout.defaultHomeDirectories),
+      ...layout.defaultHomeDirectories,
     ];
     if (file.split('/').includes('..') || !inside(layout.assetsDirectory) || fenced.some(inside)) {
       throw new FleetCatalogRefusal(
@@ -1522,8 +1522,8 @@ export class FleetSetupService {
       const path = expandAssetPath(file, catalog.layout.userHome, catalog.layout.assetsDirectory);
       return overlay.get(path) ?? (await catalog.readAsset(path));
     };
-    const parsed = (body: string | undefined, format: 'json' | 'toml'): SettingsObject | undefined => {
-      if (body === undefined) return undefined;
+    const parsed = (body: string | undefined, format: 'json' | 'toml' | undefined): SettingsObject | undefined => {
+      if (body === undefined || format === undefined) return undefined;
       try {
         return parseSettings(body, format);
       } catch {
@@ -1548,7 +1548,7 @@ export class FleetSetupService {
         continue;
       }
       if (component.file === undefined) continue;
-      const body = parsed(await text(component.file), SETTINGS_FORMAT[component.harness]);
+      const body = parsed(await text(component.file), settingsFormatOf(catalog.kits?.(), component.harness));
       if (body !== undefined) settings[name] = body;
     }
     const hooks: Record<string, SettingsObject> = {};

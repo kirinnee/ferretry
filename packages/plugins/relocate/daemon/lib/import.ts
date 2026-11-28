@@ -49,12 +49,12 @@ export interface ImporterDeps {
   readonly ownDaemonId: string;
   readonly clock: Pick<Clock, 'now'>;
   readonly offers: OfferBook;
-  readonly ferrets: Pick<FerretsApi, 'start' | 'get' | 'harnesses'>;
+  readonly ferrets: Pick<FerretsApi, 'start' | 'get' | 'harnesses' | 'relocationRestore'>;
   /** The optional neighbours: absent means that plugin is off, and a move needing it is refused with a sentence. */
   readonly projects: () => Pick<ProjectsApi, 'list'> | undefined;
   readonly gitAccounts: () => Pick<GitAccountsApi, 'list'> | undefined;
   readonly runtimes: () => Pick<RuntimesApi, 'resolve' | 'default'> | undefined;
-  readonly vault: () => Pick<VaultApi, 'has'> | undefined;
+  readonly vault: () => Pick<VaultApi, 'hasForRuntime'> | undefined;
   readonly checkout: Checkout;
   readonly received: ReceivedLedger;
   readonly log: Pick<Log, 'warn'>;
@@ -241,9 +241,29 @@ export class Importer {
       if (!started.ok) throw new RelocateRefused(409, started.error.reason, 'start_refused');
       ferretExists = true;
       const movedFrom = { daemonId: request.header.sourceDaemonId, ferretId: manifest.ferret.id };
+      // The turns, queued messages and attachments the ferret had, into its own new session folder. Ferrets judges every
+      // path; a refusal here leaves the running ferret and its working tree, and says so.
+      let unrestored: string | undefined;
+      const session = bundle.entries
+        .filter(file => file.kind === 'session')
+        .map(file => ({ path: file.path, bytes: file.bytes }));
+      if (session.length > 0) {
+        try {
+          const restore = this.deps.ferrets.relocationRestore;
+          if (restore === undefined) throw new Error('Ferrets cannot restore a moved ferret\u2019s turns here');
+          await restore(started.value, session);
+        } catch (error) {
+          this.deps.log.warn('a moved ferret\u2019s turns could not be restored');
+          unrestored = sentence(error, 'its turns and attachments could not be written');
+        }
+      }
+      let unrecorded = false;
       try {
         await this.deps.received.record(started.value, { ...movedFrom, at: this.deps.clock.now() });
       } catch {
+        unrecorded = true;
+      }
+      if (unrecorded || unrestored !== undefined) {
         const actual = await this.deps.ferrets.get(started.value).catch(() => undefined);
         const state = actual === undefined ? 'unknown' : actual.state === 'stopped' ? 'stopped' : 'running';
         return {
@@ -251,10 +271,18 @@ export class Importer {
           folder: tree,
           movedFrom,
           recovery: {
-            code: 'provenance_unrecorded',
+            code: unrecorded ? 'provenance_unrecorded' : 'session_unrestored',
             state,
-            message:
-              'the ferret started in this folder; its origin could not be saved; keep this receipt to recover it',
+            message: [
+              unrecorded
+                ? 'the ferret was imported stopped in this folder; its origin could not be saved; keep this receipt to recover it'
+                : undefined,
+              unrestored === undefined
+                ? undefined
+                : `its turns and attachments were not all restored (${unrestored}); the other machine still has every one`,
+            ]
+              .filter(line => line !== undefined)
+              .join('; '),
           },
         };
       }
@@ -289,7 +317,7 @@ export class Importer {
       ...(runtime === undefined ? {} : { runtime }),
       folder,
       by: 'owner',
-      relocated: packed,
+      relocated: { ...packed, pending: true },
       options: {
         teammateFallback: true,
         ...(record.mode === undefined ? {} : { mode: record.mode }),
@@ -371,8 +399,8 @@ export class Importer {
     const missingSecrets: string[] = [];
     if (needs.secrets.length > 0) {
       const vault = this.deps.vault();
-      if (vault === undefined) missingSecrets.push(...needs.secrets);
-      else for (const name of needs.secrets) if (!(await vault.has(name as never))) missingSecrets.push(name);
+      if (vault?.hasForRuntime === undefined || runtime === undefined) missingSecrets.push(...needs.secrets);
+      else for (const name of needs.secrets) if (!(await vault.hasForRuntime(runtime, name))) missingSecrets.push(name);
       if (missingSecrets.length > 0)
         refusals.push(
           `this machine does not hold the secret${missingSecrets.length === 1 ? '' : 's'} ${missingSecrets.join(', ')}; copy ${missingSecrets.length === 1 ? 'it' : 'them'} first`,

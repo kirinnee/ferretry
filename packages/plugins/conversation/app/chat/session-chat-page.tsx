@@ -226,6 +226,7 @@ export function SessionChatPage({
   liveStream,
   liveActivity,
 }: SessionChatPageProps) {
+  canControl = canControl && session.movedTo === undefined;
   const ferretId = session.config.id;
   const agentName = ferretDisplayName(session);
   const account = composerAccountOf(session);
@@ -334,7 +335,7 @@ export function SessionChatPage({
   // The ferret's own chat box gives way to the question's form (a typed message would not answer it). An agenda item's
   // reply box is not that box: it answers THE ITEM, through the Agenda's answer route, so a question the ferret is
   // waiting on never takes it away (the item is a card of that very question as often as not).
-  const showComposer = askId !== undefined || !awaitingAnswer;
+  const showComposer = session.movedTo === undefined && (askId !== undefined || !awaitingAnswer);
   // The answer goes through the question form's own route reader; the chat re-reads once it lands.
   const questionApi = useMemo<QuestionAnswerApi>(() => {
     const api = questionAnswerApi(client);
@@ -401,7 +402,7 @@ export function SessionChatPage({
               <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />
             </ChatTurnContext.Provider>
           </div>
-          <ModesMenu daemon={daemonId} ferret={ferretId} />
+          {session.movedTo === undefined ? <ModesMenu daemon={daemonId} ferret={ferretId} /> : null}
         </div>
       )}
       {liveSample?.compaction?.phase === 'running' || liveStream !== undefined ? (
@@ -571,7 +572,7 @@ export function SessionChatPage({
             >
               {header}
               {/* The chat and the `ferret.side` panels: side by side wide; on a phone one at a time behind chips and "+". */}
-              {embedded ? (
+              {embedded || session.movedTo !== undefined ? (
                 chat
               ) : (
                 <FerretWorkspace

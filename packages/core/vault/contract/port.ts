@@ -87,6 +87,12 @@ export interface VaultApi {
   names(): Promise<readonly SecretSummary[]>;
   /** Whether a secret of this name is held. Never its value. */
   has(name: SecretName): Promise<boolean>;
+  /**
+   * Presence only for Relocate's target preflight. Handed to Relocate alone: a name must be referenced by this
+   * runtime, as Runtimes answers afresh inside the Vault. Unrelated and missing names both answer false.
+   * This grants no listing, use, value, length or digest, and does not widen `has` or `names` for any caller.
+   */
+  hasForRuntime?(runtime: string, name: SecretName): Promise<boolean>;
   /** A value in; person-only at the route. */
   put(name: SecretName, value: string): Promise<void>;
   remove(name: SecretName): Promise<boolean>;

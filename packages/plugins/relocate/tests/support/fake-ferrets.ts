@@ -68,7 +68,7 @@ export function fakeSource(options: FakeSourceOptions = {}): RelocationSource & 
 }
 
 export interface FakeFerrets {
-  readonly port: Pick<FerretsApi, 'get' | 'workFolder' | 'relocationSource' | 'stop' | 'resume'>;
+  readonly port: Pick<FerretsApi, 'get' | 'workFolder' | 'relocationSource' | 'relocationProtect' | 'stop' | 'resume'>;
   readonly calls: string[];
   state: FerretSummary['state'];
 }
@@ -105,6 +105,7 @@ export function fakeFerrets(options: {
           : undefined,
       workFolder: async () => (options.folder === undefined ? undefined : { folder: options.folder }),
       relocationSource: async () => options.source,
+      relocationProtect: async () => undefined,
       stop: async (_ferret, how) => {
         calls.push(`stop:${how}`);
         self.state = 'stopped';

@@ -37,7 +37,7 @@ import {
   type ProjectInstructionHint,
   scannedMcpServers,
 } from '../lib/account/import.ts';
-import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
+import { ownedSkillEntriesOf } from '../lib/assets.ts';
 import { harnessKeyOfKind, supportedKinds, UnsupportedHarnessError } from '../lib/harness-kind.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import type { HostEntry, HostFiles } from './ports.ts';
@@ -54,10 +54,8 @@ export interface HostHarnessScanDeps {
   readonly files: HostFiles;
   /** The home root provided by the permitted host adapter. */
   readonly userHome: string;
-  /** `CLAUDE_CONFIG_DIR` as the person's shell has it, if at all. */
-  readonly claudeConfigDir?: string;
-  /** `CODEX_HOME` as the person's shell has it, if at all. */
-  readonly codexHome?: string;
+  /** The person's shell environment, if the caller has it: each harness's home variable (`kit.homeEnv`: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`) is read from it. */
+  readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly commands: HostCommandResolver;
   /** Safe sign-in facts only; no credential material is reachable through this port. */
   readonly logins: Pick<LoginsApi, 'list'>;
@@ -93,10 +91,6 @@ export class HostHarnessScanner {
   /** Both harnesses, installed or not, in a stable order. A harness without its kit refuses before anything is read. */
   async scan(): Promise<readonly HostHarnessScan[]> {
     const kits = this.deps.kits();
-    const homes: Readonly<Record<HarnessKind, string | undefined>> = {
-      claude: this.deps.claudeConfigDir,
-      codex: this.deps.codexHome,
-    };
     const ready = supportedKinds().map(harness => {
       const kit = kits?.get(harness);
       if (kit?.scanHost === undefined) throw new UnsupportedHarnessError(harness);
@@ -109,10 +103,10 @@ export class HostHarnessScanner {
             harness,
             ...(await scanHost({
               userHome: this.deps.userHome,
-              configuredHome: homes[harness],
+              configuredHome: kit.homeEnv === undefined ? undefined : this.deps.environment?.[kit.homeEnv],
               read: (home, path) => this.#read(home, path),
               readUserMcp: () => this.#readUserClaudeJson(),
-              skills: (home, directory) => this.#skills(harness, home, directory),
+              skills: (home, directory) => this.#skills(ownedSkillEntriesOf(kit), home, directory),
               login: () => this.#login(harness),
               projectInstructions: mcp => this.#projectInstructions(kit, mcp),
             })),
@@ -287,7 +281,7 @@ export class HostHarnessScanner {
 
   /** Every skill folder: one per item, each with a digest of its whole content. */
   async #skills(
-    harness: HarnessKind,
+    owned: readonly string[],
     home: string,
     directory: string,
   ): Promise<{ found: HostSkill[]; problems: string[] }> {
@@ -298,7 +292,7 @@ export class HostHarnessScanner {
       const found: HostSkill[] = [];
       const problems: string[] = [];
       for (const item of [...((await this.deps.files.list(directory)) ?? [])].toSorted()) {
-        if (item.startsWith('.') || isHarnessOwnedSkillEntry(harness, item)) continue;
+        if (item.startsWith('.') || owned.includes(item)) continue;
         const source = join(directory, item);
         try {
           if ((await this.#inspect(home, source))?.kind !== 'directory') continue;

@@ -20,6 +20,7 @@ import {
   PreflightRequestSchema,
   RECEIVED_STATE,
   RELOCATE_MAX_CHUNK_TEXT,
+  ReleaseRequestSchema,
   TargetPreflightRequestSchema,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
@@ -46,6 +47,14 @@ async function readJson(call: CallContext): Promise<unknown> {
 export default implementDaemon(manifest, {
   build({ kernel, needs, uses }) {
     const moved: MovedLedger = {
+      completed: async exportId => {
+        const read = await kernel.state.read(MOVED_STATE);
+        if (!read.ok) throw new Error('the moved ledger could not be read');
+        const found = Object.entries(read.value?.moved ?? {}).find(([, entry]) => entry.exportId === exportId);
+        if (found === undefined) return undefined;
+        const [ferretId, entry] = found;
+        return { ferretId, movedTo: { daemonId: entry.daemonId, ferretId: entry.ferretId, at: entry.at } };
+      },
       get: async ferret => {
         const read = await kernel.state.read(MOVED_STATE);
         if (!read.ok) throw new Error('the moved ledger could not be read');
@@ -81,6 +90,11 @@ export default implementDaemon(manifest, {
       redaction: kernel.redaction,
       crypto,
       ferrets: needs.ferrets,
+      protect: async (ferret, to) => {
+        if (needs.ferrets.relocationProtect === undefined)
+          throw new RelocateRefused(409, 'this daemon cannot protect a moved-away stub', 'move_refused');
+        await needs.ferrets.relocationProtect(ferret, to);
+      },
       treeOf: folder => kernelWorkingTree(kernel, folder),
       daemonId: kernel.identity.daemonId,
       clock: kernel.clock,
@@ -138,6 +152,28 @@ export default implementDaemon(manifest, {
     };
 
     const routes = {
+      'GET /v1/relocate/:ferretId/held': async (call: CallContext) => {
+        mayReadTree(call);
+        return jsonResponse(await relocation.held(param(call, 'ferretId')).catch(refused));
+      },
+      'POST /v1/relocate/exports/release': async (call: CallContext) => {
+        mayReadTree(call);
+        const body = ReleaseRequestSchema.safeParse(await readJson(call));
+        if (!body.success) throw new ApiError(400, 'release takes the source ferret id', 'bad_request');
+        return jsonResponse(await relocation.release(body.data.ferretId).catch(refused));
+      },
+      'GET /v1/relocate/moved': async () => {
+        const read = await kernel.state.read(MOVED_STATE);
+        if (!read.ok) throw new ApiError(500, 'the moved ledger could not be read', 'moved_unreadable');
+        return jsonResponse({
+          moved: Object.fromEntries(
+            Object.entries(read.value?.moved ?? {}).map(([id, entry]) => [
+              id,
+              { daemonId: entry.daemonId, ferretId: entry.ferretId, at: entry.at },
+            ]),
+          ),
+        });
+      },
       'POST /v1/relocate/:ferretId/preflight': async (call: CallContext) => {
         mayReadTree(call);
         const body = PreflightRequestSchema.safeParse(await readJson(call));
@@ -209,6 +245,20 @@ export default implementDaemon(manifest, {
         const body = ImportRequestSchema.safeParse(await readJson(call));
         if (!body.success) throw new ApiError(400, 'import takes the header the source sealed with', 'bad_request');
         return jsonResponse(await importer.import(param(call, 'offerId'), body.data).catch(refused));
+      },
+      'POST /v1/relocate/imports/:ferretId/start': async (call: CallContext) => {
+        mayReadTree(call);
+        const id = param(call, 'ferretId');
+        const received = await kernel.state.read(RECEIVED_STATE);
+        if (!received.ok || received.value?.received[id] === undefined)
+          throw new ApiError(
+            409,
+            'the imported origin could not be confirmed; keep the receipt and recover explicitly',
+            'import_unconfirmed',
+          );
+        const resumed = await needs.ferrets.resume(id as never, undefined, { origin: { kind: 'person' } });
+        if (!resumed.ok) throw new ApiError(409, resumed.error.reason, 'start_refused');
+        return jsonResponse({});
       },
     } satisfies Record<string, RouteHandler>;
 

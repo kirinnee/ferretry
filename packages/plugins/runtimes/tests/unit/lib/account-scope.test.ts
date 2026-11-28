@@ -4,7 +4,7 @@ import { type AccountModel, parseAccountModel } from '../../../daemon/lib/accoun
 import {
   componentScope,
   describeScopeConflict,
-  HARNESS_SCOPE_WORDS,
+  scopeWord,
   layersScope,
   layerWords,
   modelSetScope,
@@ -66,7 +66,11 @@ describe('component scope', () => {
     should(scopeFits('generic', 'claude')).be.true();
     should(scopeFits('claude', 'claude')).be.true();
     should(scopeFits('codex', 'claude')).be.false();
-    should(HARNESS_SCOPE_WORDS).deepEqual({ generic: 'Generic', claude: 'Claude only', codex: 'Codex only' });
+    should([scopeWord('generic'), scopeWord('claude'), scopeWord('codex')]).deepEqual([
+      'Generic',
+      'Claude only',
+      'Codex only',
+    ]);
   });
 });
 

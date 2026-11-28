@@ -248,6 +248,10 @@ export type FerretWaiting = z.infer<typeof FerretWaitingSchema>;
  * without its launch-time `baseline`.
  */
 export const FerretSummarySchema = FerretRecordSchema.omit({ format: true, handle: true }).extend({
+  /** Permanent read-only source stub, derived from a separate fence; the original record is kept untouched. */
+  movedTo: z
+    .strictObject({ daemonId: z.string().min(1), ferretId: z.string().min(1), machine: z.string().min(1) })
+    .optional(),
   /** The latest launch's advisory sentence, recorded with its effective options. */
   notice: z.string().min(1).max(4096).optional(),
   /** The ownership label given to start, independent of pack membership. */

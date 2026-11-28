@@ -62,8 +62,8 @@ import {
   movedUnderFolder,
   referencedFiles,
 } from './clone-parts.ts';
+import { displayNameOf } from '../harness-kind.ts';
 import { freeName } from './import.ts';
-import { HARNESS_DISPLAY_NAMES } from './layering.ts';
 import {
   type AccountModel,
   COMPONENT_KINDS,
@@ -808,9 +808,7 @@ export function describeClone(
   if (chosen !== undefined) lines.push(chosen);
   for (const check of plan.checkPaths) lines.push(`Check after copying: ${check.reference} names ${check.path}.`);
   for (const harness of plan.missingHarnesses) {
-    lines.push(
-      `${HARNESS_DISPLAY_NAMES[harness]} isn't installed on ${machine}: its runtimes are copied and wait for it.`,
-    );
+    lines.push(`${displayNameOf(harness)} isn't installed on ${machine}: its runtimes are copied and wait for it.`);
   }
   if (plan.missingSecrets.length > 0) {
     lines.push(

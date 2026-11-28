@@ -69,6 +69,44 @@ function unpacking(order: string[]): FakeHarness & Unpacks {
 }
 
 describe('starting on a conversation that was moved here', () => {
+  test('only a person may stage a stopped import; agents and daemon recovery write and launch nothing', async () => {
+    const harness = unpacking([]);
+    const { service, saved } = fixture(harness);
+    for (const kind of ['agent', 'daemon'] as const) {
+      const result = await service.start(
+        { folder: '/work', harness: 'claude-code', by: 'owner', relocated: { ...PACKED, pending: true } },
+        { kind },
+      );
+      expect(result).toMatchObject({ ok: false, error: { code: 'refused' } });
+    }
+    expect(saved).toEqual([]);
+    expect(harness.launched).toEqual([]);
+    expect(harness.resumed).toEqual([]);
+  });
+
+  test('a pending relocation restores its conversation but opens no process, and resumes only explicitly', async () => {
+    const harness = unpacking([]);
+    const { service, saved } = fixture(harness);
+    const imported = await service.start(
+      { folder: '/work', harness: 'claude-code', by: 'owner', relocated: { ...PACKED, pending: true } },
+      PERSON_ORIGIN,
+    );
+    expect(imported.ok).toBe(true);
+    expect(harness.launched).toEqual([]);
+    expect(harness.resumed).toEqual([]);
+    expect(saved.at(-1)).toMatchObject({
+      state: 'stopped',
+      cause: { kind: 'stopped' },
+      harnessConversation: 'moved-1',
+    });
+    expect(await service.heldLaunchRefusal(ferretId('f1'))).toContain('stopped on purpose');
+    expect(await service.launchHeld(ferretId('f1'))).toMatchObject({ ok: false, error: { code: 'refused' } });
+    expect(harness.resumed).toEqual([]);
+    const resumed = await service.resume(ferretId('f1'), undefined, { origin: PERSON_ORIGIN });
+    expect(resumed.ok).toBe(true);
+    expect(harness.resumed).toEqual(['moved-1']);
+  });
+
   test('the harness unpacks into the new ferret’s own home, after the home exists and before the pane', async () => {
     const order: string[] = [];
     const harness = unpacking(order);

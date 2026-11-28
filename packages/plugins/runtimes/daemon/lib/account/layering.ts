@@ -43,6 +43,7 @@
  *
  * Pure and total throughout: no filesystem, no environment, no clock, and every failure is a value.
  */
+import { displayNameOf } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { deepMergeSettings, type SettingsObject } from '../settings.ts';
 import { expandStack, type StackFailure } from '../../../contract/profile-stack.ts';
@@ -623,12 +624,6 @@ function resolveModelSet(
 
 // ── Words ────────────────────────────────────────────────────────────────────────────────────────
 
-/** The product's name for each harness. */
-export const HARNESS_DISPLAY_NAMES: Readonly<Record<HarnessKind, string>> = {
-  claude: 'Claude Code',
-  codex: 'Codex',
-};
-
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
 /** The layer a conflict names: a component or base by its name, the way Profiles show it. */
@@ -645,5 +640,5 @@ export function describeConflict(
   const beaten = conflict.overridden
     .map(setter => `${say(conflict, setter.value)} (from ${layerName(setter.layer)})`)
     .join(', ');
-  return `\`${conflict.key}\` · ${HARNESS_DISPLAY_NAMES[conflict.harness]}: ${say(conflict, conflict.winner.value)} (from ${layerName(conflict.winner.layer)}) overrides ${beaten}`;
+  return `\`${conflict.key}\` · ${displayNameOf(conflict.harness)}: ${say(conflict, conflict.winner.value)} (from ${layerName(conflict.winner.layer)}) overrides ${beaten}`;
 }

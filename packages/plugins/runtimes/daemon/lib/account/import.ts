@@ -44,7 +44,7 @@ import {
 import { harnessNamed } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
-import { harnessKeyOfKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import { displayNameOf, harnessKeyOfKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { StarterModels } from '../models/catalog.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
@@ -54,7 +54,7 @@ import {
   type SettingsObject,
   serializeSettings,
 } from '../settings.ts';
-import { HARNESS_DISPLAY_NAMES, modelHarness } from './layering.ts';
+import { modelHarness } from './layering.ts';
 import { secretNameAt } from './secret-names.ts';
 import {
   type AccountModel,
@@ -946,7 +946,7 @@ export function mcpCandidates(harvests: readonly HarnessHarvest[]): { candidates
       make(renamed, second.server, [second.server.source], second.harness);
       notes.push({
         harness: second.harness,
-        text: `Your ${HARNESS_DISPLAY_NAMES[second.harness]} MCP server "${name}" differs from the ${HARNESS_DISPLAY_NAMES[first.harness]} one, so it was kept separately as "${renamed}".`,
+        text: `Your ${displayNameOf(second.harness)} MCP server "${name}" differs from the ${displayNameOf(first.harness)} one, so it was kept separately as "${renamed}".`,
       });
     }
   }
@@ -999,7 +999,7 @@ export function skillsCandidates(harvests: readonly HarnessHarvest[]): {
       sources.set(renamed, [second.skill.source]);
       notes.push({
         harness: second.harness,
-        text: `Your ${HARNESS_DISPLAY_NAMES[second.harness]} skill "${item}" differs from the ${HARNESS_DISPLAY_NAMES[first.harness]} one, so it was kept separately as "${renamed}".`,
+        text: `Your ${displayNameOf(second.harness)} skill "${item}" differs from the ${displayNameOf(first.harness)} one, so it was kept separately as "${renamed}".`,
       });
     }
   }

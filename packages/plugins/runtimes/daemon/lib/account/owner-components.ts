@@ -11,9 +11,9 @@
  * Nothing here holds a value: a document is the component in the model's shape, whose `env` entries are plain values or
  * `${secret:NAME}` references exactly as the import made them.
  */
-import { harnessKeyOfKind } from '../harness-kind.ts';
+import { harnessKeyOfKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { parseSettings, SETTINGS_FORMAT } from '../settings.ts';
+import { parseSettings, settingsFormatOf, type SettingsKits } from '../settings.ts';
 import { foreignComponentRefs } from './runtimes-edits.ts';
 import type { AccountModel, LayerReferenceText } from './schema.ts';
 
@@ -91,6 +91,7 @@ export function ownerWrites(
   touched: readonly string[] = [],
   ownedOf: (reference: string) => readonly string[] = () => [],
   etagsOf: (reference: string) => Readonly<Record<string, string>> = () => ({}),
+  kits?: SettingsKits,
 ): readonly OwnerComponentWrite[] {
   const writes: OwnerComponentWrite[] = [];
   for (const { kind, name } of changedRefs(before, next, touched)) {
@@ -137,11 +138,16 @@ export function ownerWrites(
       writes.push({ ...base, problem: 'the settings this was made from could not be read' });
       continue;
     }
+    const format = settingsFormatOf(kits, settings.harness);
+    if (format === undefined) {
+      writes.push({ ...base, problem: unsupportedHarnessSentence(harnessKeyOfKind(settings.harness)) });
+      continue;
+    }
     try {
       const { file: _file, ...rest } = settings;
       writes.push({
         ...base,
-        text: documentText({ ...rest, document: parseSettings(body, SETTINGS_FORMAT[settings.harness]) }),
+        text: documentText({ ...rest, document: parseSettings(body, format) }),
       });
     } catch {
       writes.push({ ...base, problem: 'the settings this was made from are not valid' });

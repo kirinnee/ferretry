@@ -6,7 +6,7 @@
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
 import type { RuntimesHarnessKit } from '../../../contract/index.ts';
 import { harnessNamed, keepScope, ownMcpItem } from './import-scope.ts';
-import { supportedKinds, UnsupportedHarnessError } from '../harness-kind.ts';
+import { displayNameOf, supportedKinds, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { NO_STARTERS } from '../models/catalog.ts';
 import {
@@ -42,7 +42,6 @@ import {
   skillsCandidates,
 } from './import.ts';
 import { builtinDocument, builtinProfileName } from './builtin-autonomous.ts';
-import { HARNESS_DISPLAY_NAMES } from './layering.ts';
 import { componentScope, scopeFits } from './scope.ts';
 import {
   type AccountModel,
@@ -238,7 +237,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     if (scan.command === undefined) {
       notes.push({
         harness: scan.harness,
-        text: `${HARNESS_DISPLAY_NAMES[scan.harness]} isn't installed · Install later in Settings.`,
+        text: `${displayNameOf(scan.harness)} isn't installed · Install later in Settings.`,
       });
     }
   }

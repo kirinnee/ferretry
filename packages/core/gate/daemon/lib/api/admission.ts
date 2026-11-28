@@ -14,6 +14,7 @@ import {
   type ConfigWriteJudgement,
   type RootWriteJudgement,
   CONNECTOR_GRANT_PATTERN,
+  decodeParameter,
   errorResponse,
   headerValue,
   type InventoryEntry,
@@ -195,10 +196,42 @@ export class GateAdmission implements Admission {
   }
 
   admit(input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }): AdmissionDecision {
-    return this.#authorize(input.descriptor, input.request, input.params, input.table);
+    const decision = this.#authorize(input.descriptor, input.request, input.params, input.table);
+    if (decision.outcome === 'refused') return decision;
+    const reference = input.params.get('ferretId');
+    if (
+      reference !== undefined &&
+      ((input.table === 'socket' &&
+        (input.descriptor.capability?.capability === 'terminal' ||
+          /\/shared-draft\/stream\/?$/u.test(input.descriptor.path) ||
+          /\/shared-draft\/stream\/?(?:\?|$)/u.test(input.request.path))) ||
+        !['GET', 'HEAD', 'OPTIONS'].includes(input.request.method))
+    ) {
+      const decoded = decodeParameter(reference);
+      if (decoded === undefined) return refused(errorResponse(400, 'invalid ferret id', 'bad_request'));
+      const ferrets = this.deps.ferrets();
+      if (ferrets?.mutationReady?.() === false)
+        return refused(
+          errorResponse(503, 'The moved-away fence could not be checked; try again.', 'fence_unavailable'),
+        );
+      const reason = ferrets?.mutationRefusal?.(decoded);
+      if (reason !== undefined) return refused(errorResponse(409, reason, 'moved_away'));
+    }
+    return decision;
   }
 
   readmit(request: ApiRequest, descriptor: ScopedRoute): boolean {
+    const reference = /^\/v1\/ferrets\/([^/]+)(?:\/|$)/u.exec(request.path)?.[1];
+    if (
+      (descriptor.capability?.capability === 'terminal' ||
+        /\/shared-draft\/stream\/?$/u.test(descriptor.path) ||
+        /\/shared-draft\/stream\/?(?:\?|$)/u.test(request.path)) &&
+      reference !== undefined &&
+      (decodeParameter(reference) === undefined ||
+        this.deps.ferrets()?.mutationReady?.() === false ||
+        this.deps.ferrets()?.mutationRefusal?.(decodeParameter(reference) ?? '') !== undefined)
+    )
+      return false;
     // No path parameters on a re-ask: only a warden remedy reads them, and readmit re-asks the descriptor, not one call.
     return this.#authorize(descriptor, request, new Map()).outcome === 'admitted';
   }

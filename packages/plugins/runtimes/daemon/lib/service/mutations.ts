@@ -19,7 +19,7 @@ import { looksSecret } from '@ferretry/std/credential-words';
 import { credentialHarnesses } from '../account/halves.ts';
 import {
   describeScopeConflict,
-  HARNESS_SCOPE_WORDS,
+  scopeWord,
   newlyMisfitRuntimes,
   newlyMixedProfiles,
   type ProfileScope,
@@ -27,13 +27,14 @@ import {
   runtimeHarness,
   scopeFits,
 } from '../account/scope.ts';
-import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
+import { resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { isSupportedKind, kindOf } from '../harness-kind.ts';
+import { displayNameOf, isSupportedKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import {
   parseSettings,
-  SETTINGS_FORMAT,
   type SettingsFormat,
+  settingsFormatOf,
+  type SettingsKits,
   type SettingsObject,
   serializeSettings,
 } from '../settings.ts';
@@ -151,16 +152,18 @@ export interface AccountChangeFacts {
   readonly runningOn?: readonly RunningSession[];
   /** The same, by runtime, for a change that touches several (removing a login that runtimes use). */
   readonly runningByRuntime?: Readonly<Record<string, readonly RunningSession[]>>;
+  /** What each harness's plugin gives Runtimes (its settings format); a settings component for a harness without one is refused. */
+  readonly kits?: SettingsKits;
 }
 
-/** The document format each harness's settings file is in. */
-/** The document format a harness's settings file is written in; a harness Runtimes has no behaviour for is refused. */
-const settingsFormatOf = (harness: string): SettingsFormat => SETTINGS_FORMAT[kindOf(harness)];
+/** The document format a harness's settings file is written in (its plugin's `kit.settingsFile`); a harness whose plugin gives none is refused by name. */
+const settingsFormatFor = (harness: string, facts: AccountChangeFacts): SettingsFormat =>
+  settingsFormatOf(facts.kits, harness) ?? refuse(unsupportedHarnessSentence(harness));
 
 /** The extension each kind's file is written with. */
-const componentExtension = (input: ComponentInput): string | undefined => {
+const componentExtension = (input: ComponentInput, facts: AccountChangeFacts): string | undefined => {
   if (input.kind === 'instructions') return 'md';
-  if (input.kind === 'settings') return settingsFormatOf(input.harness);
+  if (input.kind === 'settings') return settingsFormatFor(input.harness, facts);
   if (input.kind === 'hooks') return 'json';
   return undefined;
 };
@@ -347,8 +350,9 @@ function componentOf(
   given: string | undefined,
   existing: Record<string, unknown> | undefined,
   existingSettings: SettingsObject | undefined,
+  facts: AccountChangeFacts,
 ): { readonly component: Record<string, unknown>; readonly file?: AccountComponentFile } {
-  const built = componentBody(name, input, given, existing, existingSettings);
+  const built = componentBody(name, input, given, existing, existingSettings, facts);
   return { ...built, component: { ...built.component, ...cloneLinkOf(existing) } };
 }
 
@@ -358,13 +362,14 @@ function componentBody(
   given: string | undefined,
   existing: Record<string, unknown> | undefined,
   existingSettings: SettingsObject | undefined,
+  facts: AccountChangeFacts,
 ): { readonly component: Record<string, unknown>; readonly file?: AccountComponentFile } {
   const owner = `${KIND_WORDS[input.kind]} ${name}`;
   const content =
     input.kind === 'settings' && input.entries !== undefined
-      ? settingsFromEntries(input.entries, existingSettings, owner, settingsFormatOf(input.harness))
+      ? settingsFromEntries(input.entries, existingSettings, owner, settingsFormatFor(input.harness, facts))
       : given;
-  const extension = componentExtension(input);
+  const extension = componentExtension(input, facts);
   const ownFile = extension === undefined ? undefined : componentFilePath(input.kind, name, extension);
   const written = content === undefined || ownFile === undefined ? undefined : { file: ownFile, content };
   const keptFile = typeof existing?.file === 'string' ? existing.file : undefined;
@@ -411,7 +416,7 @@ function componentBody(
     case 'skills':
       return { component: { items: [...input.items], ...harness } };
     case 'settings': {
-      if (content !== undefined) assertDocument(content, settingsFormatOf(input.harness), owner);
+      if (content !== undefined) assertDocument(content, settingsFormatFor(input.harness, facts), owner);
       const env = resolvedEnv(input.env, existingEnv, owner);
       const flags = resolvedWords(
         input.flags,
@@ -480,7 +485,7 @@ export function deriveAccountChange(
   const misfit = newlyMisfitRuntimes(model, next)[0];
   if (misfit !== undefined) {
     refuse(
-      `Runtime ${misfit.runtime} uses a ${HARNESS_DISPLAY_NAMES[misfit.harness]} login, and this change would make its profile ${misfit.profile} ${HARNESS_SCOPE_WORDS[misfit.scope]}. Move it to another profile first.`,
+      `Runtime ${misfit.runtime} uses a ${displayNameOf(misfit.harness)} login, and this change would make its profile ${misfit.profile} ${scopeWord(misfit.scope)}. Move it to another profile first.`,
     );
   }
   return { model: next, files, summary, consequences };
@@ -578,7 +583,7 @@ function removeCredential(
     if (runtime === undefined || harness === undefined) return refuse(`no runtime ${name} exists on this machine`);
     if (runtimeHarness(model, { ...runtime, credential: to }) !== harness) {
       refuse(
-        `${name} runs ${HARNESS_DISPLAY_NAMES[harness]}, and login ${to} does not drive it. Pick a ${HARNESS_DISPLAY_NAMES[harness]} login.`,
+        `${name} runs ${displayNameOf(harness)}, and login ${to} does not drive it. Pick a ${displayNameOf(harness)} login.`,
       );
     }
     (draft.runtimes[name] as Record<string, unknown>).credential = to;
@@ -879,7 +884,7 @@ function putRuntime(
   // `change.harness` is a stored word here: `lowerHarness` refused any wire key Runtimes has no behaviour for before this ran.
   if (change.harness !== undefined && isSupportedKind(change.harness) && !served.includes(change.harness)) {
     refuse(
-      `${change.credential} does not drive ${HARNESS_DISPLAY_NAMES[change.harness]}: it is a ${HARNESS_DISPLAY_NAMES[credential.harness]} login.`,
+      `${change.credential} does not drive ${displayNameOf(change.harness)}: it is a ${displayNameOf(credential.harness)} login.`,
     );
   }
   const pinned = change.harness !== undefined && isSupportedKind(change.harness) ? change.harness : undefined;
@@ -896,17 +901,15 @@ function putRuntime(
   if (scope.kind === 'scoped' && !scopeFits(scope.scope, harness)) {
     refuse(
       served.length > 1
-        ? `Profile ${change.profile} is ${HARNESS_SCOPE_WORDS[scope.scope]} and this runtime runs ${HARNESS_DISPLAY_NAMES[harness]} on ${change.credential}. Run it on the other CLI, or pick a Generic or ${HARNESS_SCOPE_WORDS[harness]} profile.`
-        : `Profile ${change.profile} is ${HARNESS_SCOPE_WORDS[scope.scope]} and ${change.credential} is a ${HARNESS_DISPLAY_NAMES[harness]} login. Pick a Generic or ${HARNESS_SCOPE_WORDS[harness]} profile.`,
+        ? `Profile ${change.profile} is ${scopeWord(scope.scope)} and this runtime runs ${displayNameOf(harness)} on ${change.credential}. Run it on the other CLI, or pick a Generic or ${scopeWord(harness)} profile.`
+        : `Profile ${change.profile} is ${scopeWord(scope.scope)} and ${change.credential} is a ${displayNameOf(harness)} login. Pick a Generic or ${scopeWord(harness)} profile.`,
     );
   }
   if (scope.kind === 'mixed' && moving) refuse(describeScopeConflict(scope, change.profile));
   // P5, E14: a profile with nothing for this login's harness launches nothing of the person's setup.
   const resolved = resolveProfile({ model, profile: change.profile, harness });
   if (resolved.ok && !resolved.resolved.availability.available) {
-    refuse(
-      `Nothing in profile ${change.profile} applies on ${HARNESS_DISPLAY_NAMES[harness]}. Pick a different profile.`,
-    );
+    refuse(`Nothing in profile ${change.profile} applies on ${displayNameOf(harness)}. Pick a different profile.`);
   }
   // R4, E15: allowed, but only once the person has seen that it duplicates one.
   const twins = Object.entries(model.runtimes)
@@ -1041,7 +1044,7 @@ function putComponent(
     );
   }
   if (!change.create && existing === undefined) refuse(`no ${word} ${change.name} exists on this machine`);
-  if (change.content !== undefined && componentExtension(change.component) === undefined) {
+  if (change.content !== undefined && componentExtension(change.component, facts) === undefined) {
     refuse(`a ${word} has no text to save; send its fields instead`);
   }
   if (change.component.kind === 'settings' && change.component.entries !== undefined && change.content !== undefined) {
@@ -1053,6 +1056,7 @@ function putComponent(
     change.content,
     existing,
     facts.settingsBodies?.[change.name],
+    facts,
   );
   draft.components[kind][change.name] = built.component;
   if (built.file !== undefined) files.push(built.file);

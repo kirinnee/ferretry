@@ -1,3 +1,9 @@
+import { afterEach, test } from 'bun:test';
+import { createElement } from 'react';
+import { ensureDom, interact, mount, RouterProvider, type Mounted } from '@ferretry/app/testing';
+import { ActionsPanel } from '../../../../app/features/header/actions-panel.tsx';
+import { FerretLifecycle } from '../../../../app/features/header/status-panel.tsx';
+import type { LiveFerretsClient } from '../../../../app/lib/client.ts';
 import { describe, expect, it } from 'bun:test';
 import {
   CORE_FERRET_ACTIONS,
@@ -36,7 +42,6 @@ describe('FERRET_ACTION_IDS', () => {
       'pin',
       'move-login',
       'move-harness',
-      'move-machine',
       'restart',
       'earlier-conversation',
       'resume',
@@ -92,7 +97,6 @@ describe('CORE_FERRET_ACTIONS — a controlled, running ferret', () => {
       FERRET_ACTION_IDS.rename,
       FERRET_ACTION_IDS.copyId,
       FERRET_ACTION_IDS.move,
-      FERRET_ACTION_IDS.machine,
       FERRET_ACTION_IDS.restart,
       FERRET_ACTION_IDS.stop,
     ]);
@@ -122,12 +126,6 @@ describe('CORE_FERRET_ACTIONS — a controlled, running ferret', () => {
     expect(entry?.label).toBe('Go back to the earlier conversation…');
     if (entry?.kind === 'confirm') await entry.run();
     expect(asked).toBe(1);
-  });
-
-  it('move to another machine exists but is always unavailable', () => {
-    const sections = ferretActionSections(CORE_FERRET_ACTIONS, context('working'));
-    const machine = sections.flatMap(section => section.entries).find(entry => entry.id === FERRET_ACTION_IDS.machine);
-    expect(machine?.unavailable).toBe('later');
   });
 
   it('carries the ferret’s runtime as the Move to another login detail', () => {
@@ -239,4 +237,41 @@ describe('CORE_FERRET_ACTIONS — Move to the other harness', () => {
       FERRET_ACTION_IDS.convert,
     );
   });
+});
+
+ensureDom();
+let mounted: Mounted | undefined;
+afterEach(async () => {
+  await mounted?.unmount();
+  mounted = undefined;
+});
+
+test('the moved stub offers no rename, resume, pin or runtime move even when the host can control it', async () => {
+  const ferret = ferretSummary('f1', {
+    state: 'stopped',
+    movedTo: { daemonId: 'beta', ferretId: 'g1', machine: 'Laptop' },
+  });
+  const calls: string[] = [];
+  const client = {
+    call: async (route: string) => {
+      calls.push(route);
+      return ferret;
+    },
+  } as unknown as LiveFerretsClient;
+  await interact(async () => {
+    mounted = await mount(
+      createElement(
+        RouterProvider,
+        null,
+        createElement(ActionsPanel, { canControl: true, client, subject: 'f1' }),
+        createElement(FerretLifecycle, { client, ferret, reload: async () => undefined }),
+      ),
+    );
+    for (let tick = 0; tick < 8; tick++) await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  const text = document.body.textContent ?? '';
+  for (const action of ['Rename', 'Resume', 'Pin to top', 'Move to another login', 'Restart', 'Stop ferret'])
+    expect(text).not.toContain(action);
+  expect(text).toContain('Copy ferret id');
+  expect(calls.every(route => route.startsWith('GET '))).toBe(true);
 });

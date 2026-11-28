@@ -10,7 +10,7 @@ import {
 import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { forkPortFor } from './features/forks.feature.ts';
 import { worktreePortFor } from './features/worktrees.feature.ts';
-import { relocationPortFor } from './features/relocation-source.feature.ts';
+import { RelocationFence, relocationPortFor } from './features/relocation-source.feature.ts';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   type FerretId,
@@ -123,11 +123,16 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   const log = kernel.log.child('ferrets');
   let generation = 0;
   // I108: publish at the registry mutation, including removal, after the service's durable write.
-  const registry = new FerretRegistry([], change => {
-    generation += 1;
-    kernel.events.publish(FerretsChanged, { ...change, generation });
-  });
+  const registry = new FerretRegistry(
+    [],
+    change => {
+      generation += 1;
+      kernel.events.publish(FerretsChanged, { ...change, generation });
+    },
+    summary => relocations.mark(summary),
+  );
   const tokens = new FerretTokenDirectory();
+  const relocations = new RelocationFence(kernel.state, () => registry.list());
   const workFolders = new RegistryWorkFolders(registry);
   const runnerOf = (): Runner | undefined => {
     const found = hooks.provider(Runners, 'tmux');
@@ -501,6 +506,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     harnessKeys: () => [...hooks.providers(Harnesses).keys()] as HarnessKey[],
     runner: runnerOf,
     decide: async input => {
+      relocations.assert(input.ferret, input.realFolder ?? input.folder);
       // RULING #43: today's pack.admit was mandatory for a child start, and Packs owns that answer on start.decide. A
       // child start or resume is admitted only when Packs ITSELF answered (its yes, or its no with its reason); no
       // answer from Packs (absent, failed, a hang, a throw, garbage) is 503 `helper_admission_unavailable`, before
@@ -510,6 +516,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (decision === 'unanswered') throw noHelperAdmission();
       return decision;
     },
+    mutationAllowed: id => relocations.assert(id),
     // Bounds Runtimes' answers below on the kernel clock (RUNTIME_START_DEADLINE_MS).
     after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
     // Which harness and login a runtime starts with: Runtimes alone answers. With no Runtimes a start that names a
@@ -675,7 +682,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     asks: needs.asks,
     leases: conversationLeases,
   } satisfies FerretsPorts & Required<Pick<FerretsPorts, 'serial' | 'cutOffMark'>>;
-  const service = new FerretsService(registry, tokens, servicePorts);
+  const service = relocations.guard(new FerretsService(registry, tokens, servicePorts));
 
   // The transcript, through the harness that wrote it (U5): the proof of WHICH file is a ferret's is the harness's, so
   // Ferrets opens no transcript path. The turn fold and both stream sources read it here.
@@ -862,6 +869,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   // `./generated/features.ts`): each adds its own routes, sockets, jobs and port members. This file keeps the stores, the
   // service and the shared guards; a new feature adds a file there and edits nothing here.
   const context: FerretsContext = {
+    relocations,
     daemon: ctx,
     kernel,
     hooks,
@@ -941,6 +949,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       // Lineage for the agenda: who exists and who started whom (Asks refuses a helper's item on it).
       'agenda.context:ferrets': ferretsAgendaContext(registry, ready),
       'bearers:ferret': {
+        mutationReady: () => relocations.available,
+        mutationRefusal: reference => relocations.refusal(reference),
         judgeable: () => settled,
         ferretFor: (digest: BearerDigest) => {
           const ferret = tokens.ferretFor(digest);
