@@ -197,9 +197,15 @@ export class PushService {
    * discovery can be made: nothing else in this daemon ever learns that a browser is unreachable.
    * `delivered` means a push endpoint accepted the request; it does not claim a person observed it.
    */
-  async notify(dispatch: PushDispatch<PushPayload>, to?: readonly string[]): Promise<PushDeliveryResult> {
+  async notify(
+    dispatch: PushDispatch<PushPayload>,
+    to?: readonly string[],
+    cancelled?: () => boolean,
+  ): Promise<PushDeliveryResult> {
     try {
-      const result = await this.#send(dispatch, to);
+      const result = await this.#send(dispatch, to, cancelled);
+      // A push its sender withdrew before dispatch is no delivery attempt: it must not stand in for the last real one.
+      if (result === undefined) return { delivered: 0, failed: 0 };
       this.#latest = { at: this.#stamp(), delivered: result.delivered, failed: result.failed };
       return result;
     } catch (error) {
@@ -220,8 +226,14 @@ export class PushService {
     }
   }
 
-  async #send(dispatch: PushDispatch<PushPayload>, to?: readonly string[]): Promise<PushDeliveryResult> {
+  async #send(
+    dispatch: PushDispatch<PushPayload>,
+    to?: readonly string[],
+    cancelled?: () => boolean,
+  ): Promise<PushDeliveryResult | undefined> {
     const enrolled = await this.enrolments();
+    // The last look before the transport: the enrolment lookup above is the await a sender's own check cannot see past.
+    if (cancelled?.() === true) return undefined;
     const addressed = (to === undefined ? enrolled : enrolled.filter(record => to.includes(record.id))).filter(
       record => record.deviceId !== dispatch.exceptDevice,
     );

@@ -5,6 +5,8 @@ import { instantFromEpochMs } from '@ferretry/std';
 import type { AskBuzzRecord } from '../../../../contract/index.ts';
 import { ASK_BUZZ_LEDGER_CAP, StateAskBuzzLedger } from '../../../../daemon/adapters/push/state-ask-buzz-ledger.ts';
 import { AskBuzzer, type AskBuzzLedger } from '../../../../daemon/lib/push/ask-buzz.ts';
+import { PushService, type PushDelivery, type PushSubscriptionStore } from '../../../../daemon/lib/push/index.ts';
+import { AT, deviceId, record } from './support.ts';
 
 const NOW = instantFromEpochMs(Date.parse('2026-11-22T09:00:00.000Z'));
 const card = {
@@ -30,7 +32,16 @@ class MemoryLedger implements AskBuzzLedger {
   }
 }
 
-function buzzer(options: { ledger?: AskBuzzLedger; buzz?: (words: BuzzWords) => Promise<number> } = {}) {
+/** A promise opened from outside, so a test says exactly which await it holds and when it lets go. */
+function latch() {
+  let open!: () => void;
+  const opened = new Promise<void>(resolve => (open = resolve));
+  return { opened, open };
+}
+
+function buzzer(
+  options: { ledger?: AskBuzzLedger; buzz?: (words: BuzzWords, cancelled: () => boolean) => Promise<number> } = {},
+) {
   const sent: BuzzWords[] = [];
   const warned: string[] = [];
   const ledger = options.ledger ?? new MemoryLedger();
@@ -100,6 +111,148 @@ describe('AskBuzzer', () => {
     expect((ledger as MemoryLedger).records).toHaveLength(1);
     await made.settle('f1', 'A3');
     expect((ledger as MemoryLedger).records).toEqual([]);
+  });
+
+  test('an ask that settles while its lookup is in flight sends no push and keeps no key (E-242)', async () => {
+    const records = new MemoryLedger();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const slow: AskBuzzLedger = {
+      has: async key => {
+        await gate;
+        return records.has(key);
+      },
+      append: record => records.append(record),
+      forget: key => records.forget(key),
+    };
+    const { made, sent } = buzzer({ ledger: slow });
+    const buzzing = made.buzz(card);
+    const settling = made.settle('f1', 'A3');
+    release();
+    expect(await buzzing).toBe(false);
+    await settling;
+    expect(sent).toEqual([]);
+    expect(records.records).toEqual([]);
+  });
+
+  test('an ask that settles while its push is going out keeps no key (E-242)', async () => {
+    const ledger = new MemoryLedger();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    const entered = latch();
+    const { made } = buzzer({
+      ledger,
+      buzz: async () => {
+        entered.open();
+        await gate;
+        return 1;
+      },
+    });
+    const buzzing = made.buzz(card);
+    await entered.opened;
+    const settling = made.settle('f1', 'A3');
+    release();
+    await Promise.all([buzzing, settling]);
+    expect(ledger.records).toEqual([]);
+  });
+
+  describe('over the real PushService (E-242)', () => {
+    /** The real service over one enrolled device; `granted` and `deliver` are the two awaits a test can hold. */
+    function pushing(
+      hold: { granted?: Promise<void>; deliver?: Promise<void> },
+      signal: { granted: () => void; deliver: () => void },
+    ) {
+      const sends: PushDelivery[] = [];
+      const store: PushSubscriptionStore = {
+        list: async () => [record()],
+        save: async () => undefined,
+        forget: async () => 0,
+      };
+      const service = new PushService({
+        store,
+        transport: {
+          deliver: async delivery => {
+            signal.deliver();
+            await hold.deliver;
+            sends.push(delivery);
+            return 'delivered';
+          },
+        },
+        keys: { publicKey: async () => 'the-public-point' },
+        devices: {
+          granted: async () => {
+            signal.granted();
+            await hold.granted;
+            return new Set([deviceId('a')]);
+          },
+        },
+        clock: { now: () => AT },
+        ids: { next: () => '22222222-2222-4222-8222-222222222222' },
+      });
+      const buzz = async (words: BuzzWords, cancelled: () => boolean) =>
+        (
+          await service.notify(
+            {
+              payload: {
+                version: 1,
+                eventKey: 'e1',
+                title: words.title,
+                body: words.body,
+                tag: words.tag,
+                url: words.url,
+                count: 1,
+                sessionId: 's1',
+                kind: 'agenda',
+              },
+            },
+            undefined,
+            cancelled,
+          )
+        ).delivered;
+      return { sends, buzz };
+    }
+
+    test("an ask that settles during the sender's enrolment lookup sends nothing and keeps no key", async () => {
+      const lookup = latch();
+      const entered = latch();
+      const ledger = new MemoryLedger();
+      const { sends, buzz } = pushing({ granted: lookup.opened }, { granted: entered.open, deliver: () => undefined });
+      const { made } = buzzer({ ledger, buzz });
+      const buzzing = made.buzz(card);
+      await entered.opened; // the sender is inside its enrolment lookup: the ask is already recorded, nothing is sent
+      const settling = made.settle('f1', 'A3');
+      lookup.open();
+      expect(await buzzing).toBe(false);
+      await settling;
+      expect(sends).toEqual([]);
+      expect(ledger.records).toEqual([]);
+    });
+
+    test('an ask that settles right after dispatch still gets exactly one send, and its key goes', async () => {
+      const dispatch = latch();
+      const entered = latch();
+      const ledger = new MemoryLedger();
+      const { sends, buzz } = pushing(
+        { deliver: dispatch.opened },
+        { granted: () => undefined, deliver: entered.open },
+      );
+      const { made } = buzzer({ ledger, buzz });
+      const buzzing = made.buzz(card);
+      await entered.opened; // the transport has been called: the push is already on its way
+      const settling = made.settle('f1', 'A3');
+      dispatch.open();
+      expect(await buzzing).toBe(true);
+      await settling;
+      expect(sends).toHaveLength(1);
+      expect(ledger.records).toEqual([]);
+    });
+  });
+
+  test('a settle that arrives before any buzz does not block a later ask of the same key', async () => {
+    const { made, sent } = buzzer();
+    await made.settle('f1', 'A3');
+    expect(await made.buzz(card)).toBe(true);
+    expect(sent).toHaveLength(1);
   });
 
   test('a ledger that cannot drop a key says so and does not throw', async () => {
