@@ -1356,7 +1356,7 @@ export class FleetSetupService {
     const fenced = [
       `${layout.fleetDirectory.replace(/\/+$/u, '')}/${CREDENTIALS_DIRECTORY}`,
       layout.homesDirectory,
-      ...Object.values(layout.defaultHomeDirectories),
+      ...layout.defaultHomeDirectories,
     ];
     if (file.split('/').includes('..') || !inside(layout.assetsDirectory) || fenced.some(inside)) {
       throw new FleetCatalogRefusal(

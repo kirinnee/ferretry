@@ -17,7 +17,8 @@
 #     `shortNameOf`, `scopeWord`)                                  HARNESS_PACKAGES, TOOL_PACKAGES: the kits' `install`
 #   HARNESS_OWNED_SKILL_ENTRIES: the kits' `ownedSkillEntries`     SETTINGS_FORMAT: the kits' `settingsFile`
 #   CODEX_FIXED_CONFIG_KEYS, CARRIED_FLAGS: the fixed layer's own `fixedConfigKeys` / `carriedFlags` (beside `supersededFlags`)
-#   defaultHomeDirectories, harnessHomesOf: derived from the same words (`hostFolderOf`); the scanner's home variables: `kit.homeEnv`
+#   defaultHomeDirectories: a plain list of paths (no per-harness key), derived from the same words (`hostFolderOf`); harnessHomesOf likewise;
+#     the scanner's home variables: `kit.homeEnv`
 #   the contract's HARNESS_WORD and CLI_WORD (display-name.ts): read from harness-words.ts
 #
 # ── What 17b-2 moves (named, with why it is not in 17b-1) ───────────────────────────────────────────────────────────────────────────

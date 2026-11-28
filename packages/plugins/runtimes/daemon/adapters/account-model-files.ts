@@ -260,9 +260,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     homesDirectory: join(paths.fleet, 'homes'),
     assetsDirectory: join(paths.fleet, 'assets'),
     manifestPath: paths.fleetManifest,
-    defaultHomeDirectories: Object.fromEntries(
-      supportedKinds().map(kind => [kind, join(userHome, hostFolderOf(kind))]),
-    ),
+    defaultHomeDirectories: supportedKinds().map(kind => join(userHome, hostFolderOf(kind))),
   };
   // Strict, unlike a component read: an `ids.json` that exists and cannot be read must refuse the
   // change, because planning without it would give every runtime a new id and a new directory.

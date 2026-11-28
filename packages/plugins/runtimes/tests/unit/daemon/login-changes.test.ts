@@ -50,7 +50,7 @@ const LAYOUT = {
   homesDirectory: '/fy/fleet/homes',
   assetsDirectory: '/fy/fleet/assets',
   manifestPath: '/fy/fleet/manifest.json',
-  defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
+  defaultHomeDirectories: ['/home/person/.claude', '/home/person/.codex'],
 } as const;
 
 const UNTIL = instantFromEpochMs(1_793_491_200_000);

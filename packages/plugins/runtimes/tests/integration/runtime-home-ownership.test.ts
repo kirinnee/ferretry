@@ -76,10 +76,7 @@ async function machine() {
     homesDirectory: path.join(world.fleet, 'homes'),
     assetsDirectory: path.join(world.fleet, 'assets'),
     manifestPath: path.join(world.fleet, 'manifest.json'),
-    defaultHomeDirectories: {
-      claude: path.join(world.parent, 'person', '.claude'),
-      codex: path.join(world.parent, 'person', '.codex'),
-    },
+    defaultHomeDirectories: [path.join(world.parent, 'person', '.claude'), path.join(world.parent, 'person', '.codex')],
   };
   const assets = layout.assetsDirectory;
   await mkdir(path.join(assets, 'components', 'instructions'), { recursive: true });

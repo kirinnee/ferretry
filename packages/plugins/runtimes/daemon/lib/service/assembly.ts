@@ -50,7 +50,7 @@ export function unavailableCatalogDeps(
       homesDirectory: nowhere,
       assetsDirectory: nowhere,
       manifestPath: nowhere,
-      defaultHomeDirectories: Object.fromEntries(supportedKinds().map(kind => [kind, nowhere])),
+      defaultHomeDirectories: supportedKinds().map(() => nowhere),
     },
     mint: () => crypto.randomUUID(),
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),

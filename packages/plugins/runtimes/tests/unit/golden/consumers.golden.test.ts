@@ -443,7 +443,7 @@ describe('data-word consumer goldens', () => {
           homesDirectory: '/fy/fleet/homes',
           assetsDirectory: '/fy/fleet/assets',
           manifestPath: '/fy/fleet/manifest.json',
-          defaultHomeDirectories: { claude: `${HOST_HOME}/.claude`, codex: `${HOST_HOME}/.codex` },
+          defaultHomeDirectories: [`${HOST_HOME}/.claude`, `${HOST_HOME}/.codex`],
         },
         locate: (harness: string) => {
           asked.push(`catalogue ${harness}`);
@@ -528,7 +528,7 @@ describe('data-word consumer goldens', () => {
         homesDirectory: '/fy/fleet/homes',
         assetsDirectory: '/fy/fleet/assets',
         manifestPath: '/fy/fleet/manifest.json',
-        defaultHomeDirectories: { claude: '/home/person/.claude', codex: '/home/person/.codex' },
+        defaultHomeDirectories: ['/home/person/.claude', '/home/person/.codex'],
       },
       kits: () => GOLDEN_KITS,
       claudeStatusline: () => "'fy' statusline",

@@ -83,7 +83,7 @@ const LAYOUT: FleetLayout = {
   homesDirectory: '/state/fleet/homes',
   assetsDirectory: '/state/fleet/assets',
   manifestPath: '/state/fleet/manifest.json',
-  defaultHomeDirectories: { claude: '/person/.claude', codex: '/person/.codex' },
+  defaultHomeDirectories: ['/person/.claude', '/person/.codex'],
 };
 
 const RECORD_PATH = `/state/fleet/${IMPORT_RECORD_FILE}`;
