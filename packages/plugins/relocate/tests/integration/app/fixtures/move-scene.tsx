@@ -20,6 +20,7 @@ const hold = params.get('hold') === '1';
 const refuse = params.get('refuse') === '1';
 const recovery = params.get('recovery') === '1';
 let completions = 0;
+let heldFerret: string | undefined = params.get('otherHold') === '1' ? 'other-ferret' : undefined;
 let release: (() => void) | undefined;
 Object.assign(window, {
   finishMove: () => {
@@ -109,16 +110,24 @@ const EXPORT = {
 const answerOf = (daemon: string) => async (route: string, init?: { params?: Record<string, string> }) => {
   await new Promise(resolve => setTimeout(resolve, 60));
   if (daemon === SOURCE) {
+    if (route === 'GET /v1/relocate/:ferretId/held')
+      return heldFerret === init?.params?.ferretId
+        ? { held: true, since: '2026-11-27T12:00:00.000Z' }
+        : { held: false };
     if (
       (params.get('fail') === 'look' && route.endsWith('/preflight')) ||
       (params.get('fail') === 'export' && route.endsWith('/export')) ||
-      (params.get('fail') === 'chunk' && route.includes('/chunks/'))
+      (params.get('fail') === 'chunk' && route.includes('/chunks/') && init?.params?.index === '1')
     )
       throw new Error('The move could not continue.');
-    if (route === 'POST /v1/relocate/exports/release') return { state: 'stopped' };
+    if (route === 'POST /v1/relocate/exports/release') {
+      heldFerret = undefined;
+      return { state: 'stopped' };
+    }
     if (route === 'POST /v1/relocate/:ferretId/preflight') return PREFLIGHT;
     if (route === 'POST /v1/relocate/:ferretId/export') return EXPORT;
     if (route === 'GET /v1/relocate/exports/:exportId/chunks/:index') {
+      heldFerret = 'f1';
       if (params.get('interrupt') === '1' && init?.params?.index === '1')
         await new Promise<void>(resolve => {
           release = resolve;
@@ -128,6 +137,7 @@ const answerOf = (daemon: string) => async (route: string, init?: { params?: Rec
     }
     if (route === 'POST /v1/relocate/exports/:exportId/complete') {
       if (params.get('unconfirmed') === '1' && completions++ === 0) throw new Error('Desk did not answer');
+      heldFerret = undefined;
       return { ferretId: 'f1', movedTo: { daemonId: TARGET, ferretId: 'g9', at: new Date().toISOString() } };
     }
   } else {
@@ -179,7 +189,7 @@ const reach = (daemon: string, machine: string, online = true): DaemonReach =>
 const FROM = reach(SOURCE, 'Desk');
 const CANDIDATES = [reach(TARGET, 'Laptop'), reach(`fy_daemon_${'C'.repeat(43)}`, 'Studio', false)];
 const MOVED = {
-  moved: { f1: { daemonId: TARGET, ferretId: 'g9', machine: 'Laptop', at: '2026-11-27T00:00:00.000Z' as never } },
+  moved: { f1: { daemonId: TARGET, ferretId: 'g9', at: '2026-11-27T00:00:00.000Z' as never } },
 };
 const movedStore = { snapshot: () => MOVED, subscribe: () => () => undefined, refresh: async () => undefined };
 
@@ -200,7 +210,11 @@ function Dialog() {
           onClose={() => setOpen(false)}
           onMoved={() => undefined}
         />
-      ) : null}
+      ) : (
+        <button type="button" onClick={() => setOpen(true)}>
+          Reopen move
+        </button>
+      )}
     </ScreenHrefProvider>
   );
 }

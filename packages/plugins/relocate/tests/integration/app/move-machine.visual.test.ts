@@ -116,7 +116,8 @@ async function states(width: number, scheme: string, style: string): Promise<voi
     expect(await actions.textContent('[data-actions-scene]')).toContain('Move to another machine…');
     await settle(actions, 'actions-row');
     const stub = await open('&moved=1');
-    expect(await stub.textContent('[data-stub-scene]')).toContain('Moved to Laptop');
+    expect(await stub.textContent('[data-stub-scene]')).toContain('Moved to another machine');
+    expect(await stub.textContent('[data-stub-scene]')).not.toContain('fy_daemon_');
     expect(await stub.textContent('[data-stub-scene]')).toContain('Open there');
     expect(await stub.getAttribute('[data-moved-to]', 'href')).toContain('/chat/g9');
     await settle(stub, 'moved-stub');
@@ -194,6 +195,33 @@ async function states(width: number, scheme: string, style: string): Promise<voi
       expect(await failed.locator('[data-move-release]').count()).toBe(failure === 'chunk' ? 1 : 0);
       await settle(failed, `failed-${failure}`);
     }
+
+    for (const action of ['reopen', 'start-over']) {
+      const abandoned = await open('&fail=chunk');
+      await abandoned.click('text=Check what would move');
+      await abandoned.click('text=Move to Laptop');
+      await abandoned.waitForSelector('[data-move-step="failed"]');
+      if (action === 'reopen') {
+        await abandoned.getByRole('button', { name: 'Close', exact: true }).last().click();
+        await abandoned.getByRole('button', { name: 'Reopen move' }).click();
+      } else await abandoned.getByRole('button', { name: 'Start over' }).click();
+      await abandoned.waitForSelector('[data-move-step="pick"]');
+      await abandoned.waitForSelector('[data-move-release]', { timeout: 3000 });
+      expect(await abandoned.textContent('[data-move-release]')).toContain('A previous move was interrupted');
+      await settle(abandoned, `held-${action}`);
+      await abandoned.getByRole('button', { name: 'Release this move on Desk' }).click();
+      await abandoned.waitForFunction(() =>
+        document.querySelector('[data-move-release]')?.textContent?.includes('Its move slot is free'),
+      );
+      await abandoned.getByRole('button', { name: 'Close', exact: true }).last().click();
+      await abandoned.getByRole('button', { name: 'Reopen move' }).click();
+      await abandoned.waitForTimeout(200);
+      expect(await abandoned.locator('[data-move-release]').count()).toBe(0);
+    }
+
+    const otherHeld = await open('&otherHold=1');
+    await otherHeld.waitForTimeout(200);
+    expect(await otherHeld.locator('[data-move-release]').count()).toBe(0);
 
     const interrupted = await open('&interrupt=1&recovery=1');
     await interrupted.click('text=Check what would move');
