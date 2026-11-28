@@ -15,11 +15,11 @@ const SERVERS: Record<string, { command: string; args: string[] }> = {
 
 describe('priorServersOf', () => {
   it('should answer no prior servers for Codex, whose document keeps none of them', () => {
-    expect(priorServersOf('codex', () => SERVERS)).toEqual({});
+    expect(priorServersOf('codex', () => SERVERS, REAL_KITS.get('codex'))).toEqual({});
   });
 
   it('should answer Claude the servers as its document spells them', () => {
-    expect(Object.keys(priorServersOf('claude', () => SERVERS))).toEqual(['files']);
+    expect(Object.keys(priorServersOf('claude', () => SERVERS, REAL_KITS.get('claude')))).toEqual(['files']);
   });
 
   it('should not read the servers of a harness whose document keeps none', () => {

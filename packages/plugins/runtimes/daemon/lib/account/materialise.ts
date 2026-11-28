@@ -68,6 +68,9 @@ import {
   CLAUDE_JSON_FILE,
   type ClaudeStatuslineCommand,
   componentPartialSupport,
+  type KitRefusal,
+  kitlessAdaptation,
+  missingKitRefusal,
   plumbingOf,
   priorServersOf,
   SKILLS_STORE_DIRECTORY,
@@ -378,13 +381,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     let fixed: FixedLayer | undefined;
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
-    // A Claude runtime is launched only with the launch line its own plugin hands over: without one the WHOLE runtime is
-    // refused by name (never a throw), and every other runtime still publishes.
-    const launchLineMissing = isKind(harness, 'claude') && kit?.wrapper === undefined;
-    if (launchLineMissing) {
-      const unsupported = unsupportedHarnessSentence(harnessKeyOfKind('claude'));
-      if (!reasons.includes(unsupported)) reasons.push(unsupported);
-    }
+    // A Claude runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
+    // ...and so is one whose kit gives no launch line (E-276 PR 8), in the same words.
+    const kitMissing: KitRefusal | undefined =
+      missingKitRefusal(harness, kit) ??
+      (isKind(harness, 'claude') && kit?.wrapper === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
+        : undefined);
+    // (A login whose own store already says so is not said twice.)
+    if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing.message);
     const result = fixedLayerOf(
       harness,
       {
@@ -401,18 +406,26 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const autoRefusal = result.ok ? undefined : result.refusal.message;
     const launch = fixed === undefined ? undefined : applyFixedLayer(resolved, fixed);
 
-    const adapted = adaptProfile({
-      resolved,
-      plumbing: plumbingOf(harness, { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome }, kit),
-      bodies: {
-        ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
-        ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
-        // A skill item whose `SKILL.md` the caller could not read has no copy in the asset tree: nothing to link.
-        ...(input.bodies?.skillFrontmatter === undefined
-          ? {}
-          : { skillItems: new Set(Object.keys(input.bodies.skillFrontmatter)) }),
-      },
-    });
+    const adapted =
+      kitMissing !== undefined
+        ? kitlessAdaptation(harness)
+        : adaptProfile({
+            resolved,
+            plumbing: plumbingOf(
+              harness,
+              { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome },
+              kit,
+            ),
+            kit,
+            bodies: {
+              ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
+              ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
+              // A skill item whose `SKILL.md` the caller could not read has no copy in the asset tree: nothing to link.
+              ...(input.bodies?.skillFrontmatter === undefined
+                ? {}
+                : { skillItems: new Set(Object.keys(input.bodies.skillFrontmatter)) }),
+            },
+          });
     for (const problem of adapted.problems) problems.push({ runtime: name, message: problem.message });
 
     // The launch environment: the credential's, the profile's, the MCP servers' forwarded secrets,
@@ -461,32 +474,34 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     Object.assign(env, extras.env);
     const codexCatalog = extras.catalog?.text;
 
-    operations.push(
-      ...configDirectoryOperations({
-        home,
-        harness,
-        codexCatalog,
-        entries: adapted.entries,
-        absent: adapted.absent,
-        settings: adapted.settings,
-        claudeJson: adapted.claudeJson,
-        // A callback: a harness whose document keeps no prior servers never filters them.
-        priorServers: priorServersOf(
+    // An unavailable runtime for want of its kit writes nothing into its home.
+    if (kitMissing === undefined)
+      operations.push(
+        ...configDirectoryOperations({
+          home,
           harness,
-          () =>
-            Object.fromEntries(
-              Object.entries(model.components.mcp).filter(
-                ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+          codexCatalog,
+          entries: adapted.entries,
+          absent: adapted.absent,
+          settings: adapted.settings,
+          claudeJson: adapted.claudeJson,
+          // A callback: a harness whose document keeps no prior servers never filters them.
+          priorServers: priorServersOf(
+            harness,
+            () =>
+              Object.fromEntries(
+                Object.entries(model.components.mcp).filter(
+                  ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+                ),
               ),
-            ),
-          kit,
-        ),
-        overlay: fixed?.claudeSettingsOverlay,
-        codexRules: fixed?.codexRules,
-        credentialLink: codexCredentialLink(home, store),
-        layout,
-      }),
-    );
+            kit,
+          ),
+          overlay: fixed?.claudeSettingsOverlay,
+          codexRules: fixed?.codexRules,
+          credentialLink: codexCredentialLink(home, store),
+          layout,
+        }),
+      );
 
     const fixedSettingsArgs =
       fixed?.claudeSettingsOverlay === undefined
@@ -514,7 +529,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         defaultModel: defaultModel ?? undefined,
         // What a ferret started in auto mode gets instead (the wrapper runs it only for FY_SESSION_MODE=auto).
         autonomous:
-          launch === undefined || launchLineMissing
+          launch === undefined || kitMissing !== undefined
             ? { refusal: result.ok ? '' : result.refusal.message }
             : {
                 args: [...launchPrefix, ...launch.args, ...fixedSettingsArgs],

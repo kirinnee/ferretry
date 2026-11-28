@@ -84,6 +84,20 @@ describe('a Claude runtime whose plugin gives no kit', () => {
     expect(wrapperOf(plan(codexOnly), 'codex-env')).toBe(wrapperOf(plan(REAL_KITS), 'codex-env'));
   });
 
+  it('should refuse a Claude kit that gives no launch line, by name, and still publish Codex', () => {
+    const noLaunchLine = new Map([
+      ['claude', {} as RuntimesHarnessKit],
+      ['codex', REAL_KITS.get('codex') as RuntimesHarnessKit],
+    ] as const);
+    const result = plan(noLaunchLine);
+    const rows = Object.fromEntries(result.manifest.accounts.map(row => [row.displayName, row]));
+    expect(rows['claude-env']).toMatchObject({
+      available: false,
+      unavailableReason: 'claude-code is not supported here',
+    });
+    expect(rows['codex-env']?.available).toBe(true);
+  });
+
   it('should refuse the same way when no kits are supplied at all', () => {
     const rows = plan(undefined).manifest.accounts;
     expect(rows.find(row => row.displayName === 'claude-env')?.unavailableReason).toBe(
