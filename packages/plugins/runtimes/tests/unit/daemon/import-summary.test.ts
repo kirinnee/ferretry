@@ -3,8 +3,10 @@ import type { ImportPlan } from '../../../daemon/lib/account/import.ts';
 import type { AccountModel } from '../../../daemon/lib/account/schema.ts';
 import { importSummary } from '../../../daemon/lib/service/import-summary.ts';
 
-const plan = (runtimes: Record<string, { credential: string; profile: string }>, credentials = {}): ImportPlan =>
-  ({ runtimes, credentials }) as unknown as ImportPlan;
+const plan = (
+  runtimes: Record<string, { credential: string; profile: string; namedByOwner?: true }>,
+  credentials = {},
+): ImportPlan => ({ runtimes, credentials }) as unknown as ImportPlan;
 const nothing = { credentials: {} } as unknown as AccountModel;
 
 describe('importSummary: what an import says it made', () => {
@@ -38,5 +40,13 @@ describe('importSummary: what an import says it made', () => {
       'Imported into QA Box.',
     );
     expect(importSummary('QA Box', plan({}), nothing)).toBe('Imported into QA Box.');
+  });
+});
+
+describe('importSummary: a runtime the person named', () => {
+  it('says the name the person typed, never the generated login words (E-296)', () => {
+    const credentials = { 'claude-you': { harness: 'claude', store: 'host' } };
+    const made = plan({ 'claude-work': { credential: 'claude-you', profile: 'p', namedByOwner: true } }, credentials);
+    expect(importSummary('QA Box', made, nothing)).toBe('1 runtime created on QA Box: claude-work.');
   });
 });

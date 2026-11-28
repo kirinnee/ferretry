@@ -49,6 +49,7 @@ export function ownedFileBodies(model: AccountModel): ReadonlyMap<string, Body> 
       ...(runtime.shell === undefined ? {} : { shell: runtime.shell }),
       ...(runtime.disabled === undefined ? {} : { disabled: runtime.disabled }),
       ...(runtime.compactAt === undefined ? {} : { compactAt: runtime.compactAt }),
+      ...(runtime.namedByOwner === undefined ? {} : { namedByOwner: true }),
       ...(runtime.clonedFromKey === undefined ? {} : { clonedFromKey: runtime.clonedFromKey }),
     });
   }

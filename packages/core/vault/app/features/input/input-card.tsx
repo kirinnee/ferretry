@@ -779,34 +779,46 @@ export function InputCard({
         )}
       </div>
 
-      {request.risk === undefined ||
-      // A paste card says "you type nothing" once, below: the generic green hidden-typing line is not repeated on it.
-      (request.source !== undefined && request.risk.level === 'green') ? null : replacesSecret(request) ? (
-        // Overwriting a secret cannot be undone: said loudly, in its own box, and the approval below is a destructive one.
-        <div
-          className="flex gap-2 rounded-panel border border-err bg-surface-2 p-panel text-ui font-semibold text-err"
-          data-input-replace=""
-          data-input-risk={request.risk.level}
-          role="alert"
-        >
-          <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
-          <span>{request.risk.reason}</span>
-        </div>
-      ) : request.risk.level === 'amber' ? (
-        // The daemon could not promise the value was never seen: a warning the owner must be able to notice, never footer help.
-        <div
-          className="flex gap-2 rounded-panel border border-warn bg-warn/10 p-panel text-ui font-semibold text-fg"
-          data-input-risk={request.risk.level}
-          data-input-warning=""
-          role="status"
-        >
-          <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0 text-warn" size={16} />
-          <span>{request.risk.reason}</span>
-        </div>
-      ) : (
-        <p className="m-0 text-cell text-muted" data-input-risk={request.risk.level}>
-          {request.risk.reason}
-        </p>
+      {[
+        ...new Map(
+          [request.risk, ...(request.risks ?? [])].filter(risk => risk !== undefined).map(risk => [risk.reason, risk]),
+        ).values(),
+      ].map(risk =>
+        risk === undefined ||
+        // A paste card says "you type nothing" once, below: the generic green hidden-typing line is not repeated on it.
+        (request.source !== undefined && risk.level === 'green') ? null : replacesSecret(request) ? (
+          // Overwriting a secret cannot be undone: said loudly, in its own box, and the approval below is a destructive one.
+          <div
+            className="flex gap-2 rounded-panel border border-err bg-surface-2 p-panel text-ui font-semibold text-err"
+            key={risk.reason}
+            data-input-replace=""
+            data-input-risk={risk.level}
+            role="alert"
+          >
+            <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
+            <span>{risk.reason}</span>
+          </div>
+        ) : risk.level === 'amber' ? (
+          // The daemon could not promise the value was never seen: a warning the owner must be able to notice, never footer help.
+          <div
+            className="flex gap-2 rounded-panel border border-warn bg-warn/10 p-panel text-ui font-semibold text-fg"
+            data-input-risk={risk.level}
+            key={risk.reason}
+            data-input-warning=""
+            role="status"
+          >
+            <ShieldAlert aria-hidden="true" className="mt-0.5 shrink-0 text-warn" size={16} />
+            <span>{risk.reason}</span>
+          </div>
+        ) : (
+          <p
+            key={risk.reason}
+            className={`m-0 text-cell ${risk.level === 'red' ? 'text-err font-semibold' : 'text-muted'}`}
+            data-input-risk={risk.level}
+          >
+            {risk.reason}
+          </p>
+        ),
       )}
       {settled !== null ? (
         <>
