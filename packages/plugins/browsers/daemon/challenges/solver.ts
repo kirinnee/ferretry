@@ -48,7 +48,7 @@ export type CaptchaRefusal = 'cap' | 'no-key' | 'unsupported' | 'failed';
 /** `{ token }`, or a refusal in one plain sentence (the sentence the agent and the owner read, so it names no secret). */
 export type CaptchaSolveResult =
   | { readonly token: string }
-  | { readonly refused: CaptchaRefusal; readonly reason: string };
+  | { readonly refused: CaptchaRefusal; readonly reason: string; readonly charged?: true };
 
 /** Anything that turns a check into a token. Vendors are adapters behind it. */
 export interface CaptchaSolverPort {
@@ -70,6 +70,7 @@ export const SOLVE_COST_MICROS: Readonly<Record<CaptchaKind, number>> = {
 
 /** A `kernel.state` that can read-modify-write a file, and nothing more. */
 export type SpendState = Pick<StatePort, 'update'>;
+type Reservation = { readonly month: string; readonly micros: number };
 
 /**
  * This month's spend, in `captcha-spend.json`. `reserve` adds a cost only if it fits under the cap (the update declines
@@ -87,37 +88,53 @@ export class SpendLedger {
     return this.now().slice(0, 7);
   }
 
-  async reserve(micros: number, cap: number): Promise<'reserved' | 'cap' | 'unreadable'> {
+  async reserve(micros: number, cap: number): Promise<Reservation | 'cap' | 'unreadable'> {
     const month = this.month();
-    let outcome: 'reserved' | 'cap' = 'cap';
+    let outcome: Reservation | 'cap' = 'cap';
     const result = await this.state.update(this.file, current => {
-      const spent = current?.month === month ? current.micros : 0;
+      const months = spendByMonth(current);
+      const spent = months[month] ?? 0;
       if (spent + micros > cap) {
         outcome = 'cap';
         return current ?? { month, micros: 0 };
       }
-      outcome = 'reserved';
-      return { month, micros: spent + micros };
+      outcome = { month, micros };
+      return packSpend({ ...months, [month]: spent + micros });
     });
     return result.ok ? outcome : 'unreadable';
   }
 
-  async release(micros: number): Promise<void> {
-    const month = this.month();
-    await this.state.update(this.file, current => ({
-      month,
-      micros: current?.month === month ? Math.max(0, current.micros - micros) : 0,
-    }));
+  async release({ month, micros }: Reservation): Promise<void> {
+    await this.state.update(this.file, current => {
+      const months = spendByMonth(current);
+      return packSpend({ ...months, [month]: Math.max(0, (months[month] ?? 0) - micros) });
+    });
   }
 
   async spent(): Promise<number> {
     let micros = 0;
     await this.state.update(this.file, current => {
-      micros = current?.month === this.month() ? current.micros : 0;
+      micros = spendByMonth(current)[this.month()] ?? 0;
       return current ?? { month: this.month(), micros: 0 };
     });
     return micros;
   }
+}
+
+/** Every month the file holds spend for. */
+function spendByMonth(current: CaptchaSpend | undefined): Readonly<Record<string, number>> {
+  return current === undefined ? {} : { ...current.earlier, [current.month]: current.micros };
+}
+
+/** The file for these months: the latest as `month`/`micros` and the rest as `earlier`. */
+function packSpend(months: Readonly<Record<string, number>>): CaptchaSpend {
+  // Keep every month: neither a clock jump nor later writes may erase spend or an open reservation.
+  const kept = Object.keys(months).sort();
+  const latest = kept[kept.length - 1] as string;
+  const earlier = Object.fromEntries(kept.slice(0, -1).map(month => [month, months[month] as number]));
+  return kept.length === 1
+    ? { month: latest, micros: months[latest] as number }
+    : { month: latest, micros: months[latest] as number, earlier };
 }
 
 // ─── the CapSolver adapter ───────────────────────────────────────────────────────────────────────────────────
@@ -224,8 +241,8 @@ export class CapSolver implements CaptchaSolverPort {
       return { refused: 'cap', reason: 'The captcha solver’s spending record could not be read, so it is not used.' };
     const { outcome, charged } = await this.run(key, request);
     // The vendor charges for a task it took: only a check it never took, or one it answered with an error, gives its reservation back.
-    if ('refused' in outcome && !charged) await this.ports.ledger.release(cost).catch(() => undefined);
-    return outcome;
+    if ('refused' in outcome && !charged) await this.ports.ledger.release(reserved).catch(() => undefined);
+    return 'refused' in outcome && charged ? { ...outcome, charged: true } : outcome;
   }
 
   /** One vendor call: the key is revealed here, into one request body, and nowhere else. */
@@ -321,6 +338,18 @@ const MAX_REMEMBERED_PAGES = 256;
 
 const IDENTITY = 'agent';
 
+/** A page left alone: its cooldown, what a caller is told, and the widget for a paid answer (accepted or rejected). */
+interface Remembered {
+  readonly until: number;
+  readonly start: CaptchaStart;
+  readonly solved?: CaptchaWidget & { readonly pageUrl: string };
+}
+
+const sameWidget = (
+  a: CaptchaWidget & { readonly pageUrl: string },
+  b: CaptchaWidget & { readonly pageUrl: string },
+): boolean => a.kind === b.kind && a.siteKey === b.siteKey && a.pageUrl === b.pageUrl;
+
 function hostOf(address: string): string | undefined {
   try {
     const host = new URL(address).hostname.toLowerCase();
@@ -332,10 +361,12 @@ function hostOf(address: string): string | undefined {
 
 export class CaptchaSolving {
   private readonly inFlight = new Set<string>();
+  /** Paid widgets have their own capacity; refusal churn must never forget a purchase. Includes pending purchases. */
+  private readonly paid = new Map<string, Remembered>();
   /** The month a cap record was last written for, so a spent month is said once and not on every tool call. */
   private capSaid = '';
-  /** Pages left alone for a while: one the solver gave up on (with why), or one it has solved (the widget's frame stays up until the form is sent). */
-  private readonly coolingUntil = new Map<string, { readonly until: number; readonly start: CaptchaStart }>();
+  /** Refusals left alone for a while, separately bounded from paid widgets. */
+  private readonly coolingUntil = new Map<string, Remembered>();
 
   constructor(private readonly ports: CaptchaSolvingPorts) {}
 
@@ -347,11 +378,24 @@ export class CaptchaSolving {
     if (!this.ports.stealth()) return { kind: 'off' };
     const key = `${sessionId}\u0000${pageId}`;
     if (this.inFlight.has(key)) return { kind: 'solving' };
-    const cooling = this.coolingUntil.get(key);
-    if (cooling !== undefined && cooling.until > this.ports.nowMs()) return cooling.start;
+    this.inFlight.add(key); // Claim before the probe or readiness can yield to another call.
+    return this.start(sessionId, pageId, key).finally(() => {
+      if (this.paid.get(key)?.start.kind !== 'solving') this.inFlight.delete(key);
+    });
+  }
+
+  private async start(sessionId: string, pageId: string, key: string): Promise<CaptchaStart> {
+    const cooling = this.paid.get(key) ?? this.coolingUntil.get(key);
+    if (cooling?.solved === undefined && cooling !== undefined && cooling.until > this.ports.nowMs())
+      return cooling.start;
     const widget = await this.ports
       .onPage(sessionId, pageId, async (page, id) => await page.captchaProbe?.(id))
-      .catch(() => undefined);
+      .catch(() => cooling?.solved);
+    // A paid answer (accepted or rejected) is never bought again for the unchanged widget, even if probing fails.
+    if (cooling?.solved !== undefined) {
+      if (widget === undefined || sameWidget(cooling.solved, widget)) return cooling.start;
+      this.paid.delete(key);
+    }
     if (widget === undefined)
       return this.rest(
         key,
@@ -362,7 +406,9 @@ export class CaptchaSolving {
       if (refusal.refused === 'cap') await this.sayCapOnce();
       return this.rest(key, refusal.reason);
     }
-    this.inFlight.add(key);
+    if (this.paid.size >= MAX_REMEMBERED_PAGES)
+      return this.rest(key, 'The solver is keeping its paid checks; ask your owner to take this page over.');
+    this.paid.set(key, { until: Infinity, start: { kind: 'solving' }, solved: widget });
     void this.solve(sessionId, pageId, key, widget).finally(() => this.inFlight.delete(key));
     return { kind: 'solving' };
   }
@@ -371,9 +417,33 @@ export class CaptchaSolving {
     return this.remember(key, { kind: 'not-solving', reason });
   }
 
-  private remember(key: string, start: CaptchaStart): CaptchaStart {
-    if (this.coolingUntil.size >= MAX_REMEMBERED_PAGES) this.coolingUntil.clear();
-    this.coolingUntil.set(key, { until: this.ports.nowMs() + COOLDOWN_MS, start });
+  private remember(
+    key: string,
+    start: CaptchaStart,
+    solved?: CaptchaWidget & { readonly pageUrl: string },
+  ): CaptchaStart {
+    if (solved !== undefined) {
+      this.coolingUntil.delete(key);
+      this.paid.set(key, { until: Infinity, start, solved });
+      return start;
+    }
+    this.paid.delete(key);
+    this.coolingUntil.delete(key);
+    // At capacity, drop what has run out first, and then only the oldest page: never the whole memory at once.
+    if (this.coolingUntil.size >= MAX_REMEMBERED_PAGES) {
+      const now = this.ports.nowMs();
+      for (const [page, each] of this.coolingUntil)
+        if (each.solved === undefined && each.until <= now) this.coolingUntil.delete(page);
+    }
+    if (this.coolingUntil.size >= MAX_REMEMBERED_PAGES) {
+      const oldest = this.coolingUntil.keys().next();
+      if (oldest.done !== true) this.coolingUntil.delete(oldest.value);
+    }
+    this.coolingUntil.set(key, {
+      until: this.ports.nowMs() + COOLDOWN_MS,
+      start,
+      ...(solved === undefined ? {} : { solved }),
+    });
     return start;
   }
 
@@ -403,8 +473,18 @@ export class CaptchaSolving {
     }
     const outcome =
       'token' in result ? (taken ? 'solved' : 'failed') : result.refused === 'failed' ? 'failed' : 'refused';
-    if (outcome === 'solved') this.remember(key, { kind: 'solved' });
-    else this.rest(key, 'token' in result ? 'The page did not take the solver’s answer.' : result.reason);
+    if ('token' in result || result.charged === true)
+      this.remember(
+        key,
+        taken
+          ? { kind: 'solved' }
+          : {
+              kind: 'not-solving',
+              reason: 'token' in result ? 'The page did not take the solver’s answer.' : result.reason,
+            },
+        widget,
+      );
+    else this.rest(key, result.reason);
     const host = hostOf(widget.pageUrl);
     if (host !== undefined)
       await this.record({
@@ -418,7 +498,7 @@ export class CaptchaSolving {
           vendor: this.ports.solver.vendor,
           outcome,
           ms: Math.max(0, Math.round(this.ports.nowMs() - started)),
-          estimatedCostMicros: 'token' in result ? SOLVE_COST_MICROS[widget.kind] : 0,
+          estimatedCostMicros: 'token' in result || result.charged === true ? SOLVE_COST_MICROS[widget.kind] : 0,
         }),
       });
     if ('refused' in result && result.refused === 'cap') await this.sayCapOnce();
