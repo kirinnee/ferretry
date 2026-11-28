@@ -314,6 +314,34 @@ describe('ComponentsTab — delete (E21)', () => {
 });
 
 describe('ComponentsTab — edit and new (E20)', () => {
+  it('shows refused content read-only and sends no change when an untouched draft is submitted', async () => {
+    const catalog = studioCatalog();
+    const refused = { ...instructions, content: undefined, contentUnavailable: 'not served remotely' as const };
+    const machine = scriptedMachine({
+      catalog: {
+        ...catalog,
+        components: {
+          ...catalog.components,
+          kinds: catalog.components.kinds.map(group =>
+            group.kind === 'instructions'
+              ? {
+                  ...group,
+                  components: [refused],
+                }
+              : group,
+          ),
+        },
+      },
+    });
+    const root = await open(machine);
+    await toDetail(root, 'instructions', instructions.reference);
+    expect(root.textContent).toContain('not served remotely');
+    await click(root, '[data-component-edit]');
+    expect(root.querySelector('[data-component-field="body"]')).toBeNull();
+    expect(root.querySelector<HTMLButtonElement>('[data-change-submit]')?.disabled).toBe(true);
+    await submit(root);
+    expect(stagedChanges(machine)).toEqual([]);
+  });
   it('warns that an edit lands everywhere, saves for all, and keeps the environment', async () => {
     const machine = scriptedMachine();
     const root = await open(machine);

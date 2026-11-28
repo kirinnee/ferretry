@@ -93,6 +93,22 @@ describe('command lines', () => {
 });
 
 describe('drafts', () => {
+  it('accepts benign code identifiers and inline Markdown images without changing the draft', () => {
+    const body =
+      'Call `isUserVerifyingPlatformAuthenticatorAvailable()`.\n![dot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)\n';
+    const draft = draftFromComponent({ ...instructions, content: { form: 'text', text: body, redacted: false } });
+    expect(draftProblem(draft, all, instructions.name)).toBeUndefined();
+    expect(componentChange(draft, false)).toMatchObject({ content: body });
+  });
+
+  it('never turns a refused component into editable or savable file text', () => {
+    for (const row of [instructions, hooks, claudeSettings]) {
+      const draft = draftFromComponent({ ...row, content: undefined, contentUnavailable: 'not served remotely' });
+      expect(draft.body).toBe('');
+      expect(draftProblem(draft, all, row.name)).toContain('not served remotely');
+      expect(() => componentChange(draft, false)).toThrow('Unavailable component content cannot be saved.');
+    }
+  });
   it('starts each kind from what the component holds', () => {
     expect(draftFromComponent(instructions)).toMatchObject({ body: '# How we work\n- Small PRs.', redacted: false });
     expect(draftFromComponent(github)).toMatchObject({

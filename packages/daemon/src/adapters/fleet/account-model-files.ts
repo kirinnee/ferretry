@@ -285,8 +285,9 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     ...componentSourceFence(paths),
     ...(options.pinned === undefined ? {} : { pinned: options.pinned }),
   };
-  // Pin before boot publishes any route, before any file can be moved out of its old name.
-  const sourceFenceReady = resolveSourceFence(sourceFence).then(() => undefined);
+  const remoteSourceFence = { ...sourceFence, rememberPins: true };
+  // Only remote disclosure retains historical identities; local reads and provisioning use current files.
+  const sourceFenceReady = resolveSourceFence(remoteSourceFence).then(() => undefined);
   const layout: FleetLayout = {
     stateHome: paths.home,
     userHome,
@@ -326,7 +327,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     },
     readRemoteAsset: async path => {
       await sourceFenceReady;
-      return await readComponentText(path, sourceFence, true);
+      return await readComponentText(path, remoteSourceFence, true);
     },
     documentRevision,
     ids,

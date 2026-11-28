@@ -22,9 +22,9 @@ export const RESOLVED_HIDDEN_TEXT = '‹hidden›';
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
 /** A value in words, hidden when it looks like a credential under this name. */
-function said(name: string, value: unknown): Pick<FleetResolvedSetter, 'value' | 'hidden'> {
+function said(name: string, value: unknown, hidden = looksSecret): Pick<FleetResolvedSetter, 'value' | 'hidden'> {
   const text = shown(value);
-  return looksSecret(name, text) ? { value: RESOLVED_HIDDEN_TEXT, hidden: true } : { value: text };
+  return hidden(name, text) ? { value: RESOLVED_HIDDEN_TEXT, hidden: true } : { value: text };
 }
 
 /** Where a server is reached, without a query, a fragment or a user in it. */
@@ -38,27 +38,30 @@ function bareUrl(text: string): string {
 }
 
 /** How an MCP server starts: its command line, any credential-looking argument hidden. */
-function serverLine(server: {
-  readonly command?: string | undefined;
-  readonly args?: readonly string[] | undefined;
-  readonly url?: string | undefined;
-}): string {
+function serverLine(
+  server: {
+    readonly command?: string | undefined;
+    readonly args?: readonly string[] | undefined;
+    readonly url?: string | undefined;
+  },
+  hidden = looksSecret,
+): string {
   if (server.url !== undefined) return bareUrl(server.url);
   const words = [server.command ?? '', ...(server.args ?? [])].filter(word => word !== '');
-  return words.map(word => (looksSecret('', word) ? RESOLVED_HIDDEN_TEXT : word)).join(' ');
+  return words.map(word => (hidden('', word) ? RESOLVED_HIDDEN_TEXT : word)).join(' ');
 }
 
 /**
  * One harness's final values, in merge order: instructions, MCP servers, skills, settings keys,
  * environment, flags, hooks, then the model.
  */
-export function resolvedEntries(resolved: ResolvedProfile): readonly FleetResolvedEntry[] {
+export function resolvedEntries(resolved: ResolvedProfile, hidden = looksSecret): readonly FleetResolvedEntry[] {
   const { harness } = resolved;
   const beaten = (field: Conflict['field'], key: string): readonly FleetResolvedSetter[] =>
     resolved.conflicts
       .filter(conflict => conflict.field === field && conflict.key === key)
       .flatMap(conflict =>
-        conflict.overridden.map(setter => ({ ...said(key, setter.value), from: setter.layer.origin })),
+        conflict.overridden.map(setter => ({ ...said(key, setter.value, hidden), from: setter.layer.origin })),
       );
   const entry = (
     field: FleetResolvedField,
@@ -72,16 +75,18 @@ export function resolvedEntries(resolved: ResolvedProfile): readonly FleetResolv
     ...resolved.instructions.map(({ layer, component }) =>
       entry('instructions', layer.name, { value: component.file }, layer),
     ),
-    ...resolved.mcp.map(({ layer, component }) => entry('mcp', layer.name, { value: serverLine(component) }, layer)),
+    ...resolved.mcp.map(({ layer, component }) =>
+      entry('mcp', layer.name, { value: serverLine(component, hidden) }, layer),
+    ),
     ...resolved.skills.map(({ item, layer }) => entry('skills', item, { value: 'included' }, layer)),
     ...resolved.settings.leaves.map(leaf =>
-      entry('settings', leaf.key, said(leaf.key, leaf.value), leaf.layer, beaten('settings', leaf.key)),
+      entry('settings', leaf.key, said(leaf.key, leaf.value, hidden), leaf.layer, beaten('settings', leaf.key)),
     ),
     ...Object.entries(resolved.env).map(([name, { value, layer }]) => {
       const key = settingsKey(['env', name]);
-      return entry('env', key, said(name, value), layer, beaten('env', key));
+      return entry('env', key, said(name, value, hidden), layer, beaten('env', key));
     }),
-    ...resolved.flags.map(({ flag, layer }) => entry('flags', 'flag', said('', flag), layer)),
+    ...resolved.flags.map(({ flag, layer }) => entry('flags', 'flag', said('', flag, hidden), layer)),
     ...resolved.hooks.map(({ layer, component }) =>
       entry('hooks', layer.name, { value: (component.file ?? component.directory) as string }, layer),
     ),

@@ -337,6 +337,7 @@ function parsed(text: string | undefined, format: 'json' | 'toml'): SettingsObje
 
 /** The bodies a materialisation reads, and each hooks file's text as the edit screen shows it. */
 interface ReadBodies extends MaterialiseBodies {
+  readonly remote: boolean;
   readonly hooksTexts: Readonly<Record<string, string>>;
   readonly notServedRemotely?: ReadonlySet<string>;
 }
@@ -448,9 +449,9 @@ export class FleetCatalogService {
   }
 
   /** `GET /v1/fleet/profiles`. */
-  async profiles(): Promise<FleetLayeredProfileCatalog> {
+  async profiles(remote = false): Promise<FleetLayeredProfileCatalog> {
     const reading = await this.#read();
-    return profileCatalog(reading.model, await this.#facts(reading));
+    return profileCatalog(reading.model, await this.#facts(reading, await this.#bodies(reading.model, [], remote)));
   }
 
   /** The earliest `disabled.until` still ahead on any login or runtime (ms), or `undefined` when none is. */
@@ -468,9 +469,9 @@ export class FleetCatalogService {
   }
 
   /** `GET /v1/fleet/runtimes`. */
-  async runtimes(): Promise<FleetRuntimeCatalog> {
+  async runtimes(remote = false): Promise<FleetRuntimeCatalog> {
     const reading = await this.#read();
-    return runtimeCatalog(reading.model, await this.#facts(reading));
+    return runtimeCatalog(reading.model, await this.#facts(reading, await this.#bodies(reading.model, [], remote)));
   }
 
   /**
@@ -537,9 +538,13 @@ export class FleetCatalogService {
   }
 
   /** `POST /v1/fleet/profiles/preview`: a profile's layers before they are saved. Writes nothing. */
-  async previewProfile(request: FleetProfileDraftRequest): Promise<FleetProfileDraftView> {
+  async previewProfile(request: FleetProfileDraftRequest, remote = false): Promise<FleetProfileDraftView> {
     const reading = await this.#read();
-    return profileDraftView(reading.model, request, await this.#facts(reading));
+    return profileDraftView(
+      reading.model,
+      request,
+      await this.#facts(reading, await this.#bodies(reading.model, [], remote)),
+    );
   }
 
   /**
@@ -730,7 +735,7 @@ export class FleetCatalogService {
       const body = await text(`${skillSourceReference(item)}/SKILL.md`);
       if (body !== undefined) skillFrontmatter[item] = skillFrontmatterKeys(body);
     }
-    return { instructions, settings, hooks, skillFrontmatter, hooksTexts, notServedRemotely };
+    return { instructions, settings, hooks, skillFrontmatter, hooksTexts, notServedRemotely, remote };
   }
 
   async #runningSessions(): Promise<number> {
@@ -746,6 +751,7 @@ export class FleetCatalogService {
     );
     return {
       format: reading.format,
+      remote: bodies.remote,
       machineName: this.deps.machineName(),
       tools: { claude: this.deps.locate('claude'), codex: this.deps.locate('codex') },
       runningSessions: await this.#runningSessions(),

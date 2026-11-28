@@ -47,6 +47,8 @@ export interface SourceFence extends StateHomeFence {
   readonly pinned?: readonly string[];
   /** Credential trees: pin every entry without following symbolic links. */
   readonly pinnedTrees?: readonly string[];
+  /** Remote disclosure only: retain credential identities across rotations and moves until shutdown. */
+  readonly rememberPins?: boolean;
   /** A home not made yet is fenced by name instead of failing closed (`resolveStateHomes`). */
   readonly homesMayBeUnmade?: boolean;
 }
@@ -101,10 +103,10 @@ export async function resolveSourceFence(
   fence: SourceFence,
   disk: GuardDisk & FolderDisk = new NodeGuardDisk(),
 ): Promise<ResolvedSourceFence> {
-  let pins = rememberedPins.get(fence);
+  let pins = fence.rememberPins === true ? rememberedPins.get(fence) : undefined;
   if (pins === undefined) {
     pins = new Map();
-    rememberedPins.set(fence, pins);
+    if (fence.rememberPins === true) rememberedPins.set(fence, pins);
   }
   const pinned = [...(fence.pinned ?? [])];
   const visit = async (path: string): Promise<void> => {

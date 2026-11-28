@@ -2377,6 +2377,55 @@ describe('redactText: a pointer is only a name, and a default is a value', () =>
 });
 
 describe('unnamed high entropy component values', () => {
+  it('should keep a remote refusal outside the editable component content', () => {
+    const model = parseAccountModel({ version: 2, components: { instructions: { refused: { file: 'refused.md' } } } });
+    const catalog = FleetComponentCatalogSchema.parse(
+      componentCatalog(
+        model,
+        factsOf({
+          notServedRemotely: new Set(['instructions/refused']),
+        }),
+      ),
+    );
+    const row = catalog.kinds.flatMap(group => group.components)[0];
+    should(row?.content).be.undefined();
+    should(row?.contentUnavailable).equal('not served remotely');
+  });
+  it('should preserve the main-line local content and settings redaction contract byte for byte', () => {
+    const body =
+      'Call `isUserVerifyingPlatformAuthenticatorAvailable()`.\n![dot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)\n';
+    const key = 'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=';
+    const model = parseAccountModel({
+      version: 2,
+      components: {
+        instructions: { benign: { file: 'benign.md' }, opaque: { file: 'opaque.md' } },
+        settings: { opaque: { harness: 'claude', file: 'opaque.json' } },
+      },
+    });
+    const catalog = componentCatalog(
+      model,
+      factsOf({
+        remote: false,
+        instructionBodies: { benign: body, opaque: key },
+        settingsBodies: { opaque: { theme: key } },
+      }),
+    );
+    const rows = catalog.kinds.flatMap(group => group.components);
+    should(rows.find(row => row.reference === 'instructions/benign')?.content).deepEqual({
+      form: 'text',
+      text: body,
+      redacted: false,
+    });
+    should(rows.find(row => row.reference === 'instructions/opaque')?.content).deepEqual({
+      form: 'text',
+      text: key,
+      redacted: false,
+    });
+    should(rows.find(row => row.reference === 'settings/opaque')?.content).deepEqual({
+      form: 'entries',
+      entries: [{ key: 'theme', value: key }],
+    });
+  });
   it.each([
     '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb62714c0a8e39b5d62f1c0479',
     'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',

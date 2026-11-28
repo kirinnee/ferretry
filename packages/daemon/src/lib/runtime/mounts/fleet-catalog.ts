@@ -101,7 +101,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       capability: USE,
       noStore: true,
       handle: async context =>
-        await answer(FleetComponentCatalogSchema, () => subsystem.components(!context.request.loopback)),
+        await answer(FleetComponentCatalogSchema, () => subsystem.components(context.presentation?.loopback !== true)),
     },
     {
       method: 'GET',
@@ -110,7 +110,10 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       caller: 'any',
       capability: USE,
       noStore: true,
-      handle: async () => await answer(FleetLayeredProfileCatalogSchema, () => subsystem.profiles()),
+      handle: async context =>
+        await answer(FleetLayeredProfileCatalogSchema, () =>
+          subsystem.profiles(context.presentation?.loopback !== true),
+        ),
     },
     {
       // A read with a body: it resolves a draft and writes nothing, so it is `use`.
@@ -122,7 +125,9 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, FleetProfileDraftRequestSchema);
-        return await answer(FleetProfileDraftViewSchema, () => subsystem.previewProfile(request));
+        return await answer(FleetProfileDraftViewSchema, () =>
+          subsystem.previewProfile(request, context.presentation?.loopback !== true),
+        );
       },
     },
     {
@@ -132,7 +137,8 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       caller: 'any',
       capability: USE,
       noStore: true,
-      handle: async () => await answer(FleetRuntimeCatalogSchema, () => subsystem.runtimes()),
+      handle: async context =>
+        await answer(FleetRuntimeCatalogSchema, () => subsystem.runtimes(context.presentation?.loopback !== true)),
     },
     {
       method: 'POST',

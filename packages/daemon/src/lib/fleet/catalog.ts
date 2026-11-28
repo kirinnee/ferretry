@@ -161,6 +161,8 @@ export function editConsequence(usage: CatalogUsage): string | undefined {
 
 /** The facts a projection reads that the configuration does not hold. */
 export interface CatalogFacts {
+  /** False preserves the local catalogue's existing redaction contract. */
+  readonly remote?: boolean;
   readonly format: FleetCatalogFormat;
   readonly machineName: string;
   /** The command each harness resolves to on this machine, `undefined` when it is not installed. */
@@ -546,6 +548,7 @@ const componentSecret = (name: string, value: string): boolean =>
 export function redactText(
   text: string,
   isSecret: (name: string, value: string) => boolean = componentSecret,
+  encodedValues = true,
 ): { readonly text: string; readonly redacted: boolean } {
   let redacted = false;
   let named = '';
@@ -584,9 +587,11 @@ export function redactText(
     redacted = true;
     return HIDDEN_TEXT;
   });
-  const encoded = redactEncoded(cut, () => {
-    redacted = true;
-  });
+  const encoded = !encodedValues
+    ? cut
+    : redactEncoded(cut, () => {
+        redacted = true;
+      });
   return { text: encoded, redacted: redacted || lines.redacted };
 }
 
@@ -616,25 +621,29 @@ export function flattenSettings(settings: SettingsObject): readonly (readonly [s
 export const settingsValueText = (value: unknown): string =>
   typeof value === 'string' ? value : JSON.stringify(value);
 
-function settingsEntries(settings: SettingsObject): FleetSettingsEntry[] {
+function settingsEntries(settings: SettingsObject, remote = true): FleetSettingsEntry[] {
   return flattenSettings(settings).map(([key, value]) => {
     const text = settingsValueText(value);
-    return componentSecret(key, text) || redactText(text).redacted
+    return (remote ? componentSecret(key, text) || redactText(text).redacted : looksSecret(key, text))
       ? { key, hidden: true as const }
       : { key, value: text };
   });
 }
 
 function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts): FleetComponentContent | undefined {
-  if (facts.notServedRemotely?.has(`${kind}/${name}`) === true)
-    return { form: 'text', text: 'not served remotely', redacted: false };
+  if (facts.notServedRemotely?.has(`${kind}/${name}`) === true) return undefined;
   if (kind === 'settings') {
     const body = facts.settingsBodies?.[name];
-    return body === undefined ? undefined : { form: 'entries', entries: settingsEntries(body) };
+    return body === undefined ? undefined : { form: 'entries', entries: settingsEntries(body, facts.remote !== false) };
   }
   const text =
     kind === 'instructions' ? facts.instructionBodies?.[name] : kind === 'hooks' ? facts.hooksTexts?.[name] : undefined;
-  return text === undefined ? undefined : { form: 'text', ...redactText(text) };
+  return text === undefined
+    ? undefined
+    : {
+        form: 'text',
+        ...redactText(text, facts.remote === false ? looksSecret : componentSecret, facts.remote !== false),
+      };
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text (U15's clone uses the same). */
@@ -650,7 +659,7 @@ function checkPathOf(kind: ComponentKind, name: string, component: Record<string
   if (kind === 'hooks') texts.push(facts.hooksTexts?.[name] ?? '');
   if (kind === 'settings') {
     // A hidden value is never searched: its path would say what it was.
-    const entries = settingsEntries(facts.settingsBodies?.[name] ?? {});
+    const entries = settingsEntries(facts.settingsBodies?.[name] ?? {}, facts.remote !== false);
     texts.push(...entries.flatMap(entry => ('value' in entry ? [entry.value] : [])));
   }
   if (kind === 'mcp') {
@@ -661,7 +670,11 @@ function checkPathOf(kind: ComponentKind, name: string, component: Record<string
   }
   const home = facts.userHome;
   for (const text of texts) {
-    for (const match of redactText(text).text.matchAll(HOME_PATH)) {
+    for (const match of redactText(
+      text,
+      facts.remote === false ? looksSecret : componentSecret,
+      facts.remote !== false,
+    ).text.matchAll(HOME_PATH)) {
       const path = match[0];
       if (path !== home && !path.startsWith(`${home}/`)) return path;
     }
@@ -705,6 +718,7 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
                 : `It is a layer in ${listed(usage.direct)}. Remove it from ${usage.direct.length === 1 ? 'that profile' : 'those profiles'} first.`,
             ),
             ...(content === undefined ? {} : { content }),
+            ...(facts.notServedRemotely?.has(reference) === true ? { contentUnavailable: 'not served remotely' } : {}),
             ...(checkPath === undefined ? {} : { checkPath }),
             ...(typeof component.clonedFrom === 'string' ? { clonedFrom: component.clonedFrom } : {}),
             ...(typeof component.clonedFromDaemon === 'string' ? { clonedFromDaemon: component.clonedFromDaemon } : {}),
@@ -752,12 +766,20 @@ function unavailableReason(resolved: ResolvedProfile): string | undefined {
 
 const shown = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value));
 
-function conflictView(conflict: Conflict): FleetLayerConflict {
+const secretValue = (name: string, text: string): boolean => looksSecret(name, text) || redactText(text).redacted;
+
+function conflictView(conflict: Conflict, remote: boolean): FleetLayerConflict {
+  const setter = (value: Conflict['winner']): Conflict['winner'] => ({
+    ...value,
+    value: secretValue(conflict.key, shown(value.value)) ? HIDDEN_TEXT : value.value,
+  });
   return {
     harness: conflict.harness,
     field: conflict.field,
     key: conflict.key,
-    sentence: describeConflict(conflict),
+    sentence: describeConflict(
+      remote ? { ...conflict, winner: setter(conflict.winner), overridden: conflict.overridden.map(setter) } : conflict,
+    ),
     winner: layerName(conflict.winner.layer),
     overridden: conflict.overridden.map(setter => layerName(setter.layer)),
   };
@@ -781,7 +803,7 @@ function resolvedFor(
   return result.ok ? result.resolved : undefined;
 }
 
-function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind): FleetStackView {
+function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind, remote = true): FleetStackView {
   if (resolved === undefined) {
     return {
       harness,
@@ -800,7 +822,7 @@ function stackView(resolved: ResolvedProfile | undefined, harness: HarnessKind):
       reference: skip.layer.reference,
       sentence: skippedSentence(skip, harness),
     })),
-    conflicts: resolved.conflicts.map(conflictView),
+    conflicts: resolved.conflicts.map(conflict => conflictView(conflict, remote)),
     partial: resolved.partial.map(entry => ({ reference: entry.reference, reason: describePartialSupport(entry) })),
   };
 }
@@ -827,7 +849,9 @@ export function profileCatalog(model: AccountModel, facts: CatalogFacts): FleetL
             .filter(other => wouldIncludeItself(model.profiles, name, other))
             .toSorted(byName),
           scope: scopeView(profileScope(model, name), name),
-          harnesses: HARNESSES.map(harness => stackView(resolvedFor(model, name, harness, facts, partial), harness)),
+          harnesses: HARNESSES.map(harness =>
+            stackView(resolvedFor(model, name, harness, facts, partial), harness, facts.remote !== false),
+          ),
           remove: act(
             usage.direct.length === 0
               ? undefined
@@ -964,7 +988,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
         // A login that drives both CLIs runs the one this runtime is for.
         const harness = runtimeHarness(model, runtime) as HarnessKind;
         const resolved = resolvedFor(model, runtime.profile, harness, facts, partial);
-        const stack = stackView(resolved, harness);
+        const stack = stackView(resolved, harness, facts.remote !== false);
         const fixed = runtime.agent ? fixedLayerView(model, harness, resolved, facts) : {};
         const status = facts.credentialStatus?.[runtime.credential];
         const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND, facts.budgetHolds);
@@ -1083,8 +1107,12 @@ export function profileDraftView(
   const refusal = layersRefusal(model, name, request.layers, request.editing !== undefined);
   const stacks = HARNESSES.map(harness => ({ harness, resolved: resolvedFor(draft, name, harness, facts, partial) }));
   return {
-    harnesses: stacks.map(stack => stackView(stack.resolved, stack.harness)),
-    resolved: stacks.flatMap(stack => (stack.resolved === undefined ? [] : resolvedEntries(stack.resolved))),
+    harnesses: stacks.map(stack => stackView(stack.resolved, stack.harness, facts.remote !== false)),
+    resolved: stacks.flatMap(stack =>
+      stack.resolved === undefined
+        ? []
+        : resolvedEntries(stack.resolved, facts.remote === false ? looksSecret : secretValue),
+    ),
     scope: scopeView(layersScope(model, request.layers, name), request.editing),
     ...(refusal === undefined ? {} : { refusal }),
   };

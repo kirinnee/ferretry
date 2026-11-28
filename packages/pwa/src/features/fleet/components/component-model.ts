@@ -160,6 +160,7 @@ export interface ComponentDraft {
   readonly flags: readonly string[];
   /** Instructions or hooks text the daemon cut a secret out of: it cannot be saved from here. */
   readonly redacted: boolean;
+  readonly unavailable?: string;
   /** Hooks read from a folder rather than one file: edited in that folder. */
   readonly directory: boolean;
   /** An MCP server at a web address that signs in with OAuth (docs/mcp-oauth.md). Kept by an edit. */
@@ -235,7 +236,12 @@ const lines = (text: string): readonly string[] =>
 
 /** The form's starting point for an existing component. */
 export function draftFromComponent(component: FleetComponentView): ComponentDraft {
-  const base = { ...blankDraft(component.kind), name: component.name, harness: component.harness };
+  const base = {
+    ...blankDraft(component.kind),
+    name: component.name,
+    harness: component.harness,
+    ...(component.contentUnavailable === undefined ? {} : { unavailable: component.contentUnavailable }),
+  };
   const content = component.content;
   const detail = component.detail;
   switch (detail.kind) {
@@ -311,6 +317,7 @@ export function draftProblem(
   editing?: string,
 ): string | undefined {
   const name = draft.name.trim();
+  if (draft.unavailable !== undefined) return 'This content is not served remotely. Edit it on the machine.';
   if (name === '') return 'Give it a name.';
   if (!FleetComponentNameSchema.safeParse(name).success) return 'Use a name without a slash or "..".';
   if (editing === undefined && existing.some(component => component.kind === draft.kind && component.name === name))
@@ -345,6 +352,7 @@ export const mcpDraftIsUrl = (draft: Pick<ComponentDraft, 'body'>): boolean => U
 
 /** The ONE change a saved form asks for. Call only when {@link draftProblem} says nothing. */
 export function componentChange(draft: ComponentDraft, create: boolean): FleetAccountChange {
+  if (draft.unavailable !== undefined) throw new Error('Unavailable component content cannot be saved.');
   const name = draft.name.trim();
   const put = (component: Extract<FleetAccountChange, { kind: 'component.put' }>['component'], content?: string) =>
     ({

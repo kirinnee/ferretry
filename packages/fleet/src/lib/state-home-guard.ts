@@ -570,6 +570,7 @@ async function openedProblem(
   disk: GuardDisk,
 ): Promise<{ readonly ok: false; readonly rule: GuardRule; readonly home?: string } | undefined> {
   if (opened.kind !== 'file') return refused('not-a-file');
+  if (homes.pinned.some(key => same(key, opened))) return refused('state-home', homes.homes[0]?.named);
   const again = await disk.realpath(real).catch(() => undefined);
   if (again !== real || !same(opened, await disk.identity(real))) return refused('changed');
   const verdict = await stateHomeOf(homes, real, disk);

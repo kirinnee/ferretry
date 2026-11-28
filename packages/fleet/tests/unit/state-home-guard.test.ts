@@ -690,6 +690,37 @@ describe('resolveImmutableRoots — what may hold a tolerated hard link', () => 
 });
 
 describe('pinned key files — a bind mount of one file alone', () => {
+  it('should check pinned identities on the opened handle even when path observations race', async () => {
+    const { disk } = await world();
+    disk.file('/work/component.md', 7, 'benign');
+    const homes = await resolveStateHomes({ homes: ['/fy'], pinned: ['/fy/api-token'] }, disk);
+    const identity = disk.identity.bind(disk);
+    const openRead = disk.openRead.bind(disk);
+    const secret = await identity('/fy/api-token');
+    let afterOpen = false;
+    let observations = 0;
+    let closed = false;
+    disk.openRead = async () => {
+      const handle = await openRead('/fy/api-token');
+      afterOpen = true;
+      return {
+        ...handle,
+        close: async () => {
+          closed = true;
+          await handle.close();
+        },
+      };
+    };
+    disk.identity = async path => {
+      // The post-open comparison sees the opened inode, then a path replacement hides it
+      // from a later path-based pin check. The handle itself remains the credential.
+      if (afterOpen && path === '/work/component.md' && observations++ === 0) return secret;
+      return await identity(path);
+    };
+    const result = await openOutsideStateHomes('/work/component.md', homes, disk);
+    should(rule(result)).equal('state-home');
+    should(closed).equal(true);
+  });
   it('should refuse a key file bound somewhere else, skip one not there yet, and fail closed when one cannot be read', async () => {
     // Arrange
     const { disk } = await world();

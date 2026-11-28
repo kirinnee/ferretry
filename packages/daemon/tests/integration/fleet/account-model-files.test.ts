@@ -47,13 +47,14 @@ import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-sys
 import { FileSecretDocumentStore } from '../../../src/adapters/secrets/file-secret-document-store.ts';
 import { LOGIN_SECRETS_DOCUMENT } from '../../../src/adapters/secrets/file-login-index-store.ts';
 import { FileSecretKey, WebCryptoSecretCipher } from '../../../src/adapters/secrets/webcrypto-secret-cipher.ts';
-import { SecretNameSchema } from '@ferretry/protocol';
+import { LIMITED_DEVICE_GRANTS, SecretNameSchema } from '@ferretry/protocol';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication, PublishedFleetInventory } from '../../../src/lib/fleet/publication.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { CapabilityGrantService, DEFAULT_CAPABILITY_GRANTS } from '../../../src/lib/grants/index.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
 import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
 import { type ConfigHome, configHome, sha256, writeModelFiles } from './config-files-fixture.ts';
@@ -713,9 +714,7 @@ describe('remote component credential boundary', () => {
       // Assert — copies have fresh identities; each unnamed value must still be hidden.
       for (const value of generatedValues) should(remote).not.containEql(value);
       for (const [i] of sources.entries()) {
-        should(await host.deps.readAsset(path.join(destination, `fake${i}.md`))).equal(
-          operation === 'mv' ? undefined : generatedBodies[i],
-        );
+        should(await host.deps.readAsset(path.join(destination, `fake${i}.md`))).equal(generatedBodies[i]);
       }
       if (operation === 'cp') should(local).containEql('‹hidden›');
       else should(local).not.containEql('not served remotely');
@@ -735,13 +734,15 @@ describe('remote component credential boundary', () => {
     await rename(key, oldKey);
     await writeFile(key, values[0] as string);
     // A refresh sees a replacement identity without forgetting the boot identity.
-    await host.deps.readAsset(oldKey);
+    await host.deps.readRemoteAsset?.(oldKey);
     await rename(key, newKey);
 
     // Act + Assert — repeated path misses never drop either identity.
     for (let attempt = 0; attempt < 2; attempt++) {
-      should(await host.deps.readAsset(oldKey)).be.undefined();
-      should(await host.deps.readAsset(newKey)).be.undefined();
+      should(await host.deps.readRemoteAsset?.(oldKey)).be.undefined();
+      should(await host.deps.readRemoteAsset?.(newKey)).be.undefined();
+      should(await host.deps.readAsset(oldKey)).equal(values[1]);
+      should(await host.deps.readAsset(newKey)).equal(values[0]);
     }
   });
 
@@ -773,10 +774,114 @@ describe('remote component credential boundary', () => {
     // Assert — forged Host and peer look local; the carrier says otherwise.
     should(remote).not.containEql('outside private prose');
     should(remote).not.containEql('inside state prose');
+    should(remote).containEql('contentUnavailable');
     should(remote).containEql('not served remotely');
     should(remote).containEql('# Normal component');
     should(local).containEql('outside private prose');
     should(local).not.containEql('not served remotely');
+  });
+
+  it('should use remote bodies for a limited device on a loopback peer, including a caller-chosen conflict', async () => {
+    const fake = values[1] as string;
+    const model = parseAccountModel({
+      version: 2,
+      credentials: { login: { harness: 'claude', store: 'host' } },
+      components: {
+        settings: {
+          moved: { harness: 'claude', file: 'components/moved.json' },
+          copied: { harness: 'claude', file: 'components/copied.json' },
+          other: { harness: 'claude', file: 'components/other.json' },
+        },
+      },
+      profiles: { conflict: { layers: ['settings/moved', 'settings/copied', 'settings/other'] } },
+      runtimes: { worker: { credential: 'login', profile: 'conflict' } },
+    });
+    const host = await machine(model, undefined, async home => {
+      await writeFile(
+        path.join(home.paths.state, 'login-secrets.json'),
+        JSON.stringify({ theme: 'private moved value' }),
+      );
+    });
+    const directory = path.join(host.paths.fleet, 'assets/components');
+    await mkdir(directory, { recursive: true });
+    await rename(path.join(host.paths.state, 'login-secrets.json'), path.join(directory, 'moved.json'));
+    await writeFile(path.join(directory, 'copied.json'), JSON.stringify({ theme: fake }));
+    await writeFile(path.join(directory, 'other.json'), JSON.stringify({ theme: 'light' }));
+    const grants = new CapabilityGrantService({
+      document: { read: async () => DEFAULT_CAPABILITY_GRANTS, written: async () => [], write: async () => undefined },
+      clock: { nowMs: () => Date.parse('2026-11-28T00:00:00.000Z') },
+      audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+      clientName: 'fy',
+    });
+    await grants.refresh();
+    const credentials = { ...CREDENTIALS, devices: { has: () => true, grants: () => LIMITED_DEVICE_GRANTS } };
+    let localReads = 0;
+    let remoteReads = 0;
+    const catalog = new FleetCatalogService({
+      ...host.deps,
+      readAsset: async file => {
+        localReads++;
+        return await host.deps.readAsset(file);
+      },
+      readRemoteAsset: async file => {
+        remoteReads++;
+        return await host.deps.readRemoteAsset?.(file);
+      },
+    });
+    const api = new ApiDispatcher(new ApiRouter(fleetCatalogRoutes(catalog)), credentials, grants);
+    for (const endpoint of ['components', 'profiles', 'runtimes', 'profiles/preview']) {
+      const preview = endpoint.endsWith('preview');
+      const response = await api.dispatch(
+        request({
+          path: `/v1/fleet/${endpoint}`,
+          method: preview ? 'POST' : 'GET',
+          loopback: true,
+          device: { deviceId: 'limited', appSession: 'limited-app' },
+          ...(preview
+            ? {
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ layers: ['settings/moved', 'settings/copied', 'settings/other'] }),
+              }
+            : {}),
+        }),
+      );
+      should(response.status).equal(200);
+      const body = JSON.stringify(jsonBody(response));
+      should(body).not.containEql(fake);
+      should(body).not.containEql('private moved value');
+      if (preview || endpoint === 'profiles') should(body).containEql('overrides');
+    }
+    should(localReads).equal(0);
+    should(remoteReads).be.above(0);
+    const forbidden = await api.dispatch(
+      request({
+        path: '/v1/fleet/proposals',
+        method: 'POST',
+        loopback: true,
+        device: { deviceId: 'limited', appSession: 'limited-app' },
+        body: '{}',
+      }),
+    );
+    should(forbidden.status).equal(403);
+  });
+
+  it('should preserve benign code identifiers and inline Markdown images in local and remote component content', async () => {
+    const benign =
+      'Call `isUserVerifyingPlatformAuthenticatorAvailable()`.\n![dot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)\n';
+    const host = await machine(
+      parseAccountModel({ version: 2, components: { instructions: { benign: { file: 'components/benign.md' } } } }),
+    );
+    const file = path.join(host.paths.fleet, 'assets/components/benign.md');
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, benign);
+    for (const remote of [false, true]) {
+      const catalog = await host.catalog.components(remote);
+      should(catalog.kinds.flatMap(group => group.components).find(row => row.name === 'benign')?.content).deepEqual({
+        form: 'text',
+        text: benign,
+        redacted: false,
+      });
+    }
   });
 });
 
