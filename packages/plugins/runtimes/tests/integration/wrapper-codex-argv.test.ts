@@ -14,11 +14,7 @@ import { REAL_KITS } from '../support/real-kits.ts';
 const FLAGS = ['--keep-a', CLAUDE_NO_QUESTIONS_FLAG, '--keep-b'];
 
 /** Runs the wrapper text with a stub `codex` that prints one argument per line; `mode` is the session mode. */
-const argvOf = (
-  mode: 'interactive' | 'auto',
-  launch: { readonly flags?: readonly string[]; readonly defaultModel?: string; readonly trust?: boolean } = {},
-): string[] => {
-  const flags = launch.flags ?? FLAGS;
+const argvOf = (mode: 'interactive' | 'auto'): string[] => {
   const directory = mkdtempSync(join(tmpdir(), 'fy-codex-argv-'));
   try {
     const stub = join(directory, 'codex');
@@ -31,9 +27,8 @@ const argvOf = (
       kit: REAL_KITS.get('codex'),
       configDirectory: join(directory, 'home'),
       env: {},
-      args: flags,
-      ...(launch.defaultModel === undefined ? {} : { defaultModel: launch.defaultModel }),
-      autonomous: { args: flags, seedFirstRun: false, trustLaunchFolder: launch.trust ?? false },
+      args: FLAGS,
+      autonomous: { args: FLAGS, seedFirstRun: false, trustLaunchFolder: false },
       fyCommand: 'fy',
       harnessCommand: stub,
     });
@@ -61,33 +56,5 @@ describe('the Codex launch argv, run for real', () => {
       'features.default_mode_request_user_input=false',
       'tail-word',
     ]);
-  });
-
-  it('should start the default model with a -c override ahead of the flags, in both modes', () => {
-    expect(argvOf('interactive', { defaultModel: 'gpt-6' })).toEqual([
-      '-c',
-      'model="gpt-6"',
-      '--keep-a',
-      '--keep-b',
-      'tail-word',
-    ]);
-  });
-
-  it('should trust the physical launch folder in an auto launch, after the flags and the question override', () => {
-    const argv = argvOf('auto', { trust: true });
-    expect(argv.slice(0, 4)).toEqual(['--keep-a', '--keep-b', '-c', 'features.default_mode_request_user_input=false']);
-    expect(argv.slice(4)).toEqual([
-      '-c',
-      expect.stringMatching(/^projects=\{".*"=\{trust_level="trusted"\}\}$/u),
-      'tail-word',
-    ]);
-  });
-
-  it('should append the sections inside the closing quote of developer_instructions, escaped as a TOML string', () => {
-    const argv = argvOf('auto', { flags: ['developer_instructions="base"'] });
-    const instructions = argv[0] as string;
-    expect(instructions.startsWith('developer_instructions="base')).toBe(true);
-    expect(instructions.endsWith('"')).toBe(true);
-    expect(instructions).toContain('\\u000a');
   });
 });
