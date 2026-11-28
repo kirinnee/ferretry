@@ -88,8 +88,8 @@ describe('Claude documents and plumbing through the kit', () => {
   });
 });
 
-describe('a runtime without its plugin kit, as data', () => {
-  it('should be a typed refusal, never a throw, naming its own harness', () => {
+describe('a Claude runtime without its plugin kit, as data', () => {
+  it('should be a typed refusal, never a throw, and only for the harness whose kit is missing', () => {
     expect(missingKitRefusal('claude', undefined)).toEqual({
       kind: 'harness-unsupported',
       message: 'claude-code is not supported here',
@@ -99,7 +99,7 @@ describe('a runtime without its plugin kit, as data', () => {
       message: 'codex is not supported here',
     });
     expect(missingKitRefusal('claude', {} as RuntimesHarnessKit)).toBeUndefined();
-    expect(missingKitRefusal('codex', {} as RuntimesHarnessKit)).toBeUndefined();
+    expect(missingKitRefusal('codex', { runtimeExtras: () => ({ env: {} }) })).toBeUndefined();
   });
 });
 
