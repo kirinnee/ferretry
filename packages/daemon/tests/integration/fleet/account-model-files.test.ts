@@ -782,13 +782,15 @@ describe('remote component credential boundary', () => {
   });
 
   it('should use remote bodies for a limited device on a loopback peer, including a caller-chosen conflict', async () => {
-    const fake = values[1] as string;
+    // A seeded 32-byte key that r2 mistook for an identifier. Only synthetic material is used.
+    const fake = '2tsNcUhfv26rC9AIL6wycpLvgsoQGsRqXVQ1OFbhK8A=';
     const projectId = 'StudioProject2026InteractiveToolbarController';
     const otherProjectId = 'StudioProject2027InteractiveToolbarController';
     const model = parseAccountModel({
       version: 2,
       credentials: { login: { harness: 'claude', store: 'host' } },
       components: {
+        instructions: { notes: { file: 'components/notes.md' } },
         settings: {
           moved: { harness: 'claude', file: 'components/moved.json' },
           copied: { harness: 'claude', file: 'components/copied.json' },
@@ -799,6 +801,7 @@ describe('remote component credential boundary', () => {
       runtimes: { worker: { credential: 'login', profile: 'conflict' } },
     });
     const host = await machine(model, undefined, async home => {
+      await writeFile(path.join(home.paths.state, 'secrets.key'), `${fake}\n`);
       await writeFile(
         path.join(home.paths.state, 'login-secrets.json'),
         JSON.stringify({ theme: 'private moved value' }),
@@ -806,8 +809,9 @@ describe('remote component credential boundary', () => {
     });
     const directory = path.join(host.paths.fleet, 'assets/components');
     await mkdir(directory, { recursive: true });
+    await copyFile(path.join(host.paths.state, 'secrets.key'), path.join(directory, 'notes.md'));
     await rename(path.join(host.paths.state, 'login-secrets.json'), path.join(directory, 'moved.json'));
-    await writeFile(path.join(directory, 'copied.json'), JSON.stringify({ theme: fake, projectId }));
+    await writeFile(path.join(directory, 'copied.json'), JSON.stringify({ theme: fake, opaqueValue: fake, projectId }));
     await writeFile(path.join(directory, 'other.json'), JSON.stringify({ theme: 'light', projectId: otherProjectId }));
     const grants = new CapabilityGrantService({
       document: { read: async () => DEFAULT_CAPABILITY_GRANTS, written: async () => [], write: async () => undefined },
@@ -853,11 +857,24 @@ describe('remote component credential boundary', () => {
       should(body).not.containEql('private moved value');
       should(body).containEql(projectId);
       should(body).containEql(otherProjectId);
+      if (endpoint === 'components') {
+        const components = await catalog.components(true);
+        should(
+          components.kinds.flatMap(group => group.components).find(row => row.name === 'notes')?.content,
+        ).deepEqual({
+          form: 'text',
+          text: '‹hidden›\n',
+          redacted: true,
+        });
+      }
       if (preview) should(JSON.stringify(jsonBody(response).resolved)).containEql(otherProjectId);
+      if (preview) should(JSON.stringify(jsonBody(response).resolved)).not.containEql(fake);
       if (preview || endpoint === 'profiles') should(body).containEql('overrides');
     }
     should(localReads).equal(0);
     should(remoteReads).be.above(0);
+    // The copy is readable locally; remote masking, rather than an inode refusal, protects its bytes.
+    should(await host.deps.readAsset(path.join(directory, 'notes.md'))).equal(`${fake}\n`);
     const forbidden = await api.dispatch(
       request({
         path: '/v1/fleet/proposals',

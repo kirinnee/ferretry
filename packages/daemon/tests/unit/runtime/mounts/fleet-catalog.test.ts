@@ -130,21 +130,22 @@ const post = (path: string, body?: string) =>
   });
 
 describe('the fleet catalogue mount', () => {
-  it('should refuse remote empty puts of unavailable text, while keeping loopback and readable clears', async () => {
+  it.each(['', ' \n\t', {}])('should refuse remote unavailable-content clears: %j', async empty => {
+    const kind = typeof empty === 'string' ? 'instructions' : 'settings';
     const catalog: FleetComponentCatalog = {
       format: 'version-2',
       kinds: [
         {
-          kind: 'instructions',
+          kind,
           label: 'Instructions',
           description: 'Guidance',
           components: [
             {
-              kind: 'instructions',
+              kind,
               name: 'private',
-              reference: 'instructions/private',
-              scope: 'generic',
-              detail: { kind: 'instructions', file: 'private.md' },
+              reference: `${kind}/private`,
+              scope: kind === 'settings' ? 'claude' : 'generic',
+              detail: kind === 'settings' ? { kind, file: 'private.json', env: [] } : { kind, file: 'private.md' },
               contentUnavailable: 'not served remotely',
               partial: [],
               warnings: [],
@@ -166,8 +167,8 @@ describe('the fleet catalogue mount', () => {
     const change = {
       kind: 'component.put',
       name: 'private',
-      component: { kind: 'instructions' },
-      content: '',
+      component: typeof empty === 'string' ? { kind } : { kind, harness: 'claude', entries: empty },
+      ...(typeof empty === 'string' ? { content: empty } : {}),
       create: false,
     };
     const send = (loopback: boolean, device?: { deviceId: string; appSession: string }) =>
@@ -193,7 +194,14 @@ describe('the fleet catalogue mount', () => {
         {
           ...catalog.kinds[0],
           components: [
-            { ...row, contentUnavailable: undefined, content: { form: 'text', text: 'Visible text', redacted: false } },
+            {
+              ...row,
+              contentUnavailable: undefined,
+              content:
+                kind === 'settings'
+                  ? { form: 'entries', entries: [{ key: 'theme', value: 'dark' }] }
+                  : { form: 'text', text: 'Visible text', redacted: false },
+            },
           ],
         },
       ],

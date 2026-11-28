@@ -8,6 +8,7 @@
  * accepted by the protocol schema the route will answer with.
  */
 import { describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 
 import {
   type AccountModel,
@@ -1983,7 +1984,10 @@ describe('redactText: a well-known token anywhere', () => {
     'should judge %s after a letter or digit (%s), including unnamed high entropy tails',
     (token, before) => {
       const text = `a ${before}${token} z`;
-      if (token.startsWith('AIza')) {
+      // A missing provider-token boundary does not exempt an unnamed base64url-shaped value.
+      const encoded =
+        token.startsWith('github_pat_') || (before === 'Z' && /^(?:gh[opsur]_|npm_|sk-ant-)/u.test(token));
+      if (token.startsWith('AIza') || encoded) {
         should(redactText(text).text).not.containEql(token);
         should(redactText(text).redacted).equal(true);
       } else {
@@ -2377,6 +2381,69 @@ describe('redactText: a pointer is only a name, and a default is a value', () =>
 });
 
 describe('unnamed high entropy component values', () => {
+  const seededBytes = (sample: number, length: number): Buffer => {
+    const bytes = Buffer.alloc(length);
+    for (let offset = 0; offset < length; offset += 32) {
+      createHash('sha256').update(`v4-redaction-r3:${sample}:${offset}`).digest().copy(bytes, offset);
+    }
+    return bytes;
+  };
+
+  it('should hide all 10,000 seeded keys in the exact FileSecretKey on-disk format', () => {
+    const missed: number[] = [];
+    for (let sample = 0; sample < 10_000; sample++) {
+      const key = seededBytes(sample, 32).toString('base64');
+      if (redactText(`${key}\n`).text !== '‹hidden›\n') missed.push(sample);
+    }
+    should(missed).deepEqual([]);
+    // A key's alphabet may happen to resemble an image header or contain no mixed classes.
+    for (const key of [`iVBORw0KGgo${'A'.repeat(32)}=`, `${'A'.repeat(43)}=`]) {
+      should(redactText(key).text).equal('‹hidden›');
+      should(redactText(`checksum: ${key}`).text).equal('checksum: ‹hidden›');
+    }
+  });
+
+  // Measured over these same seeds on a45817b5d3 (r1): 0, 0 and 14 misses. r2 had 63, 235 and 588.
+  it.each([
+    [148, 0],
+    [616, 0],
+    [2016, 14],
+  ])('should hide seeded AES-GCM %s-byte values at least as well as r1', (length, baseline) => {
+    const missed: number[] = [];
+    for (let sample = 0; sample < 1_000; sample++) {
+      const ciphertext = seededBytes(sample, length).toString('base64');
+      if (redactText(JSON.stringify({ login: { value: ciphertext } })).text.includes(ciphertext)) missed.push(sample);
+    }
+    should(missed.length).be.belowOrEqual(baseline);
+  });
+
+  it('should keep seeded iv:ct misses at the r1 baseline and hide every base64url key', () => {
+    let missedCiphertext = 0;
+    const missedKeys: number[] = [];
+    for (let sample = 0; sample < 1_000; sample++) {
+      const ciphertext = seededBytes(sample, 616).toString('base64');
+      const iv = seededBytes(sample, 12).toString('base64');
+      const key = seededBytes(sample, 32).toString('base64url');
+      if (redactText(`${iv}:${ciphertext}`).text.includes(ciphertext)) missedCiphertext++;
+      if (redactText(key).text.includes(key)) missedKeys.push(sample);
+    }
+    should(missedCiphertext).be.belowOrEqual(14); // r1 baseline; leading-slash path ambiguity remains.
+    should(missedKeys).deepEqual([]);
+  });
+
+  it.each([
+    [32, 6],
+    [40, 2],
+    [64, 0],
+  ])('should keep seeded base62 %s-character misses at the r1 baseline', (length, baseline) => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let missed = 0;
+    for (let sample = 0; sample < 1_000; sample++) {
+      const value = [...seededBytes(sample, length)].map(byte => alphabet[byte % alphabet.length]).join('');
+      if (redactText(value).text.includes(value)) missed++;
+    }
+    should(missed).be.belowOrEqual(baseline);
+  });
   it('should keep a remote refusal outside the editable component content', () => {
     const model = parseAccountModel({ version: 2, components: { instructions: { refused: { file: 'refused.md' } } } });
     const catalog = FleetComponentCatalogSchema.parse(
@@ -2444,6 +2511,12 @@ describe('unnamed high entropy component values', () => {
     'sha256:7b3c91af0826d54e10f9ab7d62483c5e91ad02fb62714c0a8e39b5d62f1c0479',
     'isUserVerifyingPlatformAuthenticatorAvailable()',
     'StudioProject2026InteractiveToolbarController',
+    'buildId20261128InteractiveToolbarController',
+    'projectId: StudioProject2026InteractiveToolbarController',
+    'commitId: 1234567890abcdef1234567890abcdef12345678',
+    'buildId: buildId20261128InteractiveToolbarController',
+    'sessionId: Session2026InteractiveToolbarController',
+    '![dot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==)',
     'data:image/png;base64,aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     '# Markdown\n\n**Read the guide**, then run `bun test`.',

@@ -154,7 +154,14 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
         // Older clients can turn an omitted body into an empty draft. Never let that erase a file
         // this remote caller could not read. Local edits and deliberate clears of visible text still work.
         const change = request.change;
-        if (context.presentation?.loopback !== true && change.kind === 'component.put' && change.content === '') {
+        if (
+          context.presentation?.loopback !== true &&
+          change.kind === 'component.put' &&
+          (change.content?.trim() === '' ||
+            (change.component.kind === 'settings' &&
+              change.component.entries !== undefined &&
+              Object.keys(change.component.entries).length === 0))
+        ) {
           const catalog = await subsystem.components(true);
           const current = catalog.kinds
             .flatMap(group => group.components)
