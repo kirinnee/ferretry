@@ -8,6 +8,7 @@
  */
 import { describe, it } from 'bun:test';
 import { applyFixedLayer, fixedLayerFor } from '../../../daemon/lib/account/fixed-layer.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { expectGolden } from './support/golden.ts';
@@ -111,6 +112,7 @@ describe('fixed-layer precedence goldens', () => {
                 fyCommand: FY_COMMAND,
               }
             : { harness, agentPermissions: permissions, cwd: CWD, fyCommand: FY_COMMAND },
+          REAL_KITS,
         );
         if (!layer.ok) throw new Error('the fixed layer must be available');
         const launch = applyFixedLayer(conflictingProfile(harness), layer.layer);

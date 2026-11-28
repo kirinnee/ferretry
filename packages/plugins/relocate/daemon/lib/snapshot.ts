@@ -1,4 +1,3 @@
-import type { FerretId } from '@ferretry/kernel/contract';
 import {
   FERRET_READABLE_FOLDERS,
   type FerretSummary,
@@ -11,6 +10,7 @@ import { toHex } from './hex.ts';
 import {
   type BundleEntryKind,
   type BundleManifest,
+  type Needs,
   MOVES,
   type PreflightResponse,
   RELOCATE_MAX_BUNDLE_BYTES,
@@ -36,6 +36,7 @@ export interface GatheredEntry {
 
 /** The facts a preflight has proved, and the refusals it found. Reading is all it does: nothing is stopped or written. */
 export interface Plan {
+  readonly secrets: readonly string[];
   readonly refusals: readonly string[];
   readonly files: readonly RelocationFile[];
   /** New files git does not ignore and whose names do not say secret. */
@@ -43,6 +44,8 @@ export interface Plan {
   readonly withheld: readonly string[];
   readonly ignored: readonly string[];
   readonly head?: { readonly head: string; readonly branch?: string };
+  /** `origin` in the spelling two machines compare; absent when the tree has none. */
+  readonly remote?: string;
   readonly bytes: number;
   readonly largest: readonly { readonly path: string; readonly size: number }[];
 }
@@ -60,7 +63,9 @@ const topLevel = (path: string): string => (path.split('/')[0] ?? path).replace(
  */
 export async function plan(inputs: SnapshotInputs): Promise<Plan> {
   const refusals: string[] = [...(await inputs.source.busy())];
+  const secrets = [...new Set(await inputs.source.secretNames())].sort();
   const refusedPlan = (): Plan => ({
+    secrets,
     refusals,
     files: [],
     untracked: [],
@@ -101,13 +106,16 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
   const withheld: string[] = [...untravelled];
   let ignored: string[] = [];
   let head: Plan['head'];
+  let remote: string | undefined;
   const finish = (): Plan => ({
+    secrets,
     refusals,
     files,
     untracked,
     withheld,
     ignored,
     ...(head === undefined ? {} : { head }),
+    ...(remote === undefined ? {} : { remote }),
     bytes,
     largest: refusals.length > 0 ? [...sizes].sort((a, b) => b.size - a.size).slice(0, 5) : [],
   });
@@ -125,6 +133,7 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
     try {
       head = await inputs.tree.head();
       if (head !== undefined) {
+        remote = await inputs.tree.remote();
         ignored = [...new Set((await inputs.tree.ignoredTopLevel()).map(topLevel))].sort();
         for (const path of await inputs.tree.untracked()) {
           if (namesASecret(path)) {
@@ -162,8 +171,21 @@ export async function plan(inputs: SnapshotInputs): Promise<Plan> {
   return finish();
 }
 
+/**
+ * What the other machine must have to run this ferret: names and facts only. `secrets` is the `${secret:NAME}` names the
+ * ferret's composed launch refers to, recorded by Ferrets before the Vault resolves profile, MCP and environment parts.
+ */
+function needsOf(summary: Pick<FerretSummary, 'harness' | 'runtime'>, found: Pick<Plan, 'remote' | 'secrets'>): Needs {
+  return {
+    harness: summary.harness,
+    ...(summary.runtime === undefined ? {} : { runtime: summary.runtime }),
+    ...(found.remote === undefined ? {} : { remote: found.remote }),
+    secrets: [...found.secrets],
+  };
+}
+
 /** The preflight answer: the table, the counts and the refusals, never a file's content. */
-export function preflightView(found: Plan): PreflightResponse {
+export function preflightView(found: Plan, summary: Pick<FerretSummary, 'harness' | 'runtime'>): PreflightResponse {
   return {
     ok: found.refusals.length === 0,
     refusals: [...found.refusals],
@@ -172,6 +194,7 @@ export function preflightView(found: Plan): PreflightResponse {
     files: found.files.length + found.untracked.length,
     bytes: found.bytes,
     largest: found.largest.map(file => ({ ...file })),
+    needs: needsOf(summary, found),
     ignored: [...found.ignored],
     withheld: [...found.withheld],
     ...(found.head?.branch === undefined ? {} : { branch: found.head.branch }),
@@ -241,7 +264,7 @@ export async function gather(inputs: SnapshotInputs, found: Plan): Promise<reado
 /** The manifest of a gathered snapshot: each entry's size and SHA-256, so the target verifies before it writes anything. */
 export async function manifestOf(
   crypto: Pick<CloneCrypto, 'sha256'>,
-  ferret: { readonly id: FerretId; readonly name: string },
+  ferret: Pick<FerretSummary, 'id' | 'name' | 'harness' | 'runtime'>,
   found: Plan,
   entries: readonly GatheredEntry[],
 ): Promise<BundleManifest> {
@@ -256,6 +279,7 @@ export async function manifestOf(
   return {
     v: 1,
     ferret: { id: ferret.id, name: ferret.name },
+    needs: needsOf(ferret, found),
     ...(found.head === undefined
       ? {}
       : {

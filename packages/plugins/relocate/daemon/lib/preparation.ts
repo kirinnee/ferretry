@@ -52,6 +52,7 @@ export class Preparation {
     return {
       ...inputs,
       source: {
+        secretNames: () => this.wait(() => source.secretNames()),
         busy: () => this.wait(() => source.busy()),
         conversation: () => this.wait(() => source.conversation()),
         files: () => this.wait(() => source.files()),
@@ -61,7 +62,9 @@ export class Preparation {
         tree === undefined
           ? undefined
           : {
+              inspect: (check, changes) => this.wait(() => tree.inspect(check, changes)),
               head: () => this.wait(() => tree.head()),
+              remote: () => this.wait(() => tree.remote()),
               ignoredTopLevel: () => this.wait(() => tree.ignoredTopLevel()),
               untracked: () => this.wait(() => tree.untracked()),
               size: path => this.wait(() => tree.size(path)),

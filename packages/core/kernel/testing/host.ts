@@ -510,6 +510,10 @@ function maskScope(secrets: readonly string[]): RedactionScope {
   const text = (s: string): string =>
     secrets.reduce((out, secret) => (secret === '' ? out : out.split(secret).join('*'.repeat(secret.length))), s);
   return {
+    secretNamesIn: bytes =>
+      secrets.flatMap((secret, i) =>
+        secret !== '' && Buffer.from(bytes).includes(Buffer.from(secret)) ? [`TEST_SECRET_${String(i)}`] : [],
+      ),
     text,
     lines: lines => lines.map(text),
     cells: grid => ({ columns: grid.columns, rows: grid.rows.map(row => text(row.join('')).split('')) }),

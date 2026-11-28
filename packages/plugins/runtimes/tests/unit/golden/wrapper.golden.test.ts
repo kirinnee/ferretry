@@ -94,7 +94,7 @@ describe('wrapper goldens', () => {
                 fyCommand: FY_COMMAND,
               } as const)
             : ({ harness, agentPermissions: permissions, cwd: CWD, fyCommand: FY_COMMAND } as const);
-        expectGolden(name, fixedLayerFor(input));
+        expectGolden(name, fixedLayerFor(input, REAL_KITS));
       });
     }
   }
@@ -113,7 +113,10 @@ describe('wrapper goldens', () => {
   it('should refuse a third harness for the fixed layer by name, never answering with Claude or Codex', () => {
     expectGolden('wrapper/third-key', {
       fixedLayer: outcome(() =>
-        fixedLayerFor({ harness: THIRD_KEY, agentPermissions: 'skip', cwd: CWD, fyCommand: FY_COMMAND } as never),
+        fixedLayerFor(
+          { harness: THIRD_KEY, agentPermissions: 'skip', cwd: CWD, fyCommand: FY_COMMAND } as never,
+          REAL_KITS,
+        ),
       ),
     });
   });

@@ -78,6 +78,8 @@ const OUTSIDE_FERRETS: Readonly<Record<string, { readonly capability: string; re
   'POST /v1/lessons/scan': { capability: 'fleet', axis: 'configure' },
   // starts the ferret that rewrites the routing prompt
   'POST /v1/pack/routing/clean-up': { capability: 'fleet', axis: 'configure' },
+  // starts the moved ferret on the target (a person's one-time offer; the manifest declares fleet.configure)
+  'POST /v1/relocate/offers/:offerId/import': { capability: 'fleet', axis: 'configure' },
   // the runtime switch (also on RULING; listed so this list is the whole outside picture)
   'POST /v1/ferrets/:id/runtime': { capability: 'fleet', axis: 'configure' },
   // send: a card act and a skip message a ferret
@@ -96,6 +98,7 @@ const STARTERS: Readonly<Record<string, readonly string[]>> = {
   'packages/plugins/board/daemon/wiring.ts': ['POST /v1/board/cards/:cardId/start'],
   'packages/plugins/lessons/daemon/adapters/miner.ts': ['POST /v1/lessons/run', 'POST /v1/lessons/scan'],
   'packages/plugins/packs/daemon/adapters/ferrets.ts': ['POST /v1/pack/routing/clean-up'],
+  'packages/plugins/relocate/daemon/lib/import.ts': ['POST /v1/relocate/offers/:offerId/import'],
   'packages/plugins/warden/daemon/remedies.ts': ['POST /v1/warden/run'],
   'packages/plugins/warden/daemon/spawner.ts': ['POST /v1/warden/investigate'],
   'packages/plugins/warden/daemon/subsystem.ts': ['POST /v1/warden/run'],

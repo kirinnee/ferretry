@@ -10,19 +10,21 @@ import {
   utf8Bytes,
   X25519_PUBLIC_KEY_BYTES,
 } from '@ferretry/std/sealing';
+import type { IdentitySigner } from '@ferretry/kernel/contract';
 import {
   BUNDLE_KEY_LABEL,
   type BundleHeader,
   chunkAssociatedData,
   offerSignedBytes,
   RELOCATE_FORMAT,
+  RELOCATE_OFFER_TTL_MS,
   type RelocateOffer,
 } from '../../contract/index.ts';
 
 /** How far apart two machines' clocks may be before an offer reads as expired or overlong. */
 const CLOCK_SKEW_MS = 60_000;
 /** The longest an offer may claim to stay open: the target's own bound, plus skew. */
-const OFFER_TTL_MS = 5 * 60_000;
+const OFFER_TTL_MS = RELOCATE_OFFER_TTL_MS;
 
 /** A refusal with one sentence a person can read, and a closed code the app words. */
 export class OfferRefused extends Error {
@@ -108,6 +110,7 @@ export async function sealBundle(
     readonly sourceDaemonId: string;
     readonly parts: readonly Uint8Array[];
     readonly chunkBytes: number;
+    readonly signer: Pick<IdentitySigner, 'signRelocateBundle'>;
   },
 ): Promise<SealedBundle> {
   const ephemeral = await crypto.generateEphemeralKeyPair();
@@ -115,8 +118,8 @@ export async function sealBundle(
   if (shared === null) throw new OfferRefused('offer_invalid', 'the offer carries a key no machine could hold');
   const key = await crypto.deriveKey(shared, utf8Bytes(input.offer.offerId), BUNDLE_KEY_LABEL, AEAD_KEY_BYTES);
   const plain = pieces(input.parts, input.chunkBytes);
-  const header: BundleHeader = {
-    v: RELOCATE_FORMAT,
+  const unsigned = {
+    v: RELOCATE_FORMAT as 1,
     offerId: input.offer.offerId,
     sourceDaemonId: input.sourceDaemonId,
     targetDaemonId: input.offer.daemonId,
@@ -125,6 +128,9 @@ export async function sealBundle(
     chunks: plain.length,
     bytes: plain.reduce((sum, piece) => sum + piece.length, 0),
   };
+  const signed = await input.signer.signRelocateBundle(unsigned);
+  if (signed.daemonId !== input.sourceDaemonId) throw new Error('the bundle signer is not this source');
+  const header: BundleHeader = { ...unsigned, identityKey: signed.identityKey, signature: signed.signature };
   const chunks: Uint8Array[] = [];
   for (const [index, piece] of plain.entries()) {
     const nonce = crypto.randomBytes(AEAD_NONCE_BYTES);

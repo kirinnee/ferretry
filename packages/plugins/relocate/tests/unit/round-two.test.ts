@@ -11,6 +11,8 @@ test('R2 an oversized untracked total refuses using metadata before any content,
     summary: summaryOf('idle'),
     source: fakeSource(),
     tree: {
+      inspect: async () => {},
+      remote: async () => undefined,
       head: async () => ({ head: 'a'.repeat(40) }),
       ignoredTopLevel: async () => [],
       untracked: async () => files,
@@ -44,6 +46,8 @@ test('R2 an oversized session estimate refuses before touching the working tree'
     source: w.source,
     summary: summaryOf('idle'),
     tree: {
+      inspect: async () => {},
+      remote: async () => undefined,
       head: async () => {
         heads++;
         return undefined;

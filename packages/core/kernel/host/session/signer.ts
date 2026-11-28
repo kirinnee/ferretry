@@ -14,6 +14,9 @@ import type {
   LinkStoreSignRequest,
   SignedLinkStoreSignature,
   SecretOfferSignRequest,
+  RelocateOfferSignRequest,
+  RelocateBundleSignRequest,
+  SignedRelocateOffer,
   SignedSecretOffer,
   RelayClaimRequest,
   SignedCatalogSignature,
@@ -27,6 +30,8 @@ import { encodeClaim, signRendezvousClaim } from './wire/claim.ts';
 import { NONCE_BYTES } from './wire/constants.ts';
 import type { DaemonSigningKey } from './wire/crypto.ts';
 import { linkStoreTranscript, parseLinkStoreRequestBody } from './wire/link-store.ts';
+import { relocateOfferSignedBytes } from './wire/relocate-offer.ts';
+import { relocateBundleSignedBytes } from './wire/relocate-bundle.ts';
 import { secretOfferSignedBytes } from './wire/secret-offer.ts';
 import { tunnelTranscript } from './wire/tunnel-request.ts';
 
@@ -53,6 +58,23 @@ export function createIdentitySigner(
   sha256: (bytes: Uint8Array) => Promise<Uint8Array> = webCryptoSha256,
 ): IdentitySigner {
   return Object.freeze({
+    signRelocateBundle: async (request: RelocateBundleSignRequest): Promise<SignedRelocateOffer> => {
+      for (const field of [request.offerId, request.targetDaemonId, request.expiresAt, request.ephemeralKey])
+        if (typeof field !== 'string' || field === '') throw new TypeError('every bundle field must be named');
+      if (
+        request.v !== 1 ||
+        !Number.isSafeInteger(request.chunks) ||
+        request.chunks < 1 ||
+        !Number.isSafeInteger(request.bytes) ||
+        request.bytes < 0
+      )
+        throw new TypeError('invalid bundle bounds');
+      const identityKey = toBase64Url(key.publicKeySpki);
+      const signature = await key.sign(
+        relocateBundleSignedBytes({ ...request, sourceDaemonId: key.daemonId, identityKey }),
+      );
+      return { daemonId: key.daemonId, identityKey, signature: toBase64Url(signature) };
+    },
     sign: async (request: RelayClaimRequest): Promise<SignedRelayClaim> => {
       const context = { daemonId: key.daemonId, relayHost: host(request.host), challenge: nonceBytes(request.nonce) };
       const claim = encodeClaim(await signRendezvousClaim(key, context));
@@ -118,6 +140,23 @@ export function createIdentitySigner(
       const signature = await key.sign(secretOfferSignedBytes(fields));
       return { daemonId: key.daemonId, identityKey, signature: toBase64Url(signature) };
     },
+    signRelocateOffer: async (request: RelocateOfferSignRequest): Promise<SignedRelocateOffer> => {
+      for (const field of [request.offerId, request.publicKey, request.expiresAt])
+        if (typeof field !== 'string' || field === '') throw new TypeError('every offer field must be named');
+      if (!Number.isInteger(request.v)) throw new TypeError('the offer version must be a whole number');
+      const identityKey = toBase64Url(key.publicKeySpki);
+      const signature = await key.sign(
+        relocateOfferSignedBytes({
+          v: request.v,
+          offerId: request.offerId,
+          daemonId: key.daemonId,
+          identityKey,
+          publicKey: request.publicKey,
+          expiresAt: request.expiresAt,
+        }),
+      );
+      return { daemonId: key.daemonId, identityKey, signature: toBase64Url(signature) };
+    },
   });
 }
 
@@ -132,6 +171,8 @@ export const SIGNER_USERS = Object.freeze({
   signCatalog: ['catalogs'],
   signLinkStoreRequest: ['catalogs'],
   signSecretOffer: ['vault'],
+  signRelocateOffer: ['relocate'],
+  signRelocateBundle: ['relocate'],
 } as const satisfies Record<keyof IdentitySigner, readonly string[]>);
 
 /** The signer as one plugin receives it: each method refuses (`TypeError`) unless {@link SIGNER_USERS} names it. */
@@ -141,6 +182,7 @@ export function signerFor(plugin: string, signer: IdentitySigner): IdentitySigne
       throw new TypeError(`${plugin} may not ask the daemon identity for that signature.`);
   };
   return Object.freeze<IdentitySigner>({
+    signRelocateBundle: async request => (allowed('signRelocateBundle'), await signer.signRelocateBundle(request)),
     sign: async request => (allowed('sign'), await signer.sign(request)),
     signTunnel: async request => (allowed('signTunnel'), await signer.signTunnel(request)),
     signCatalog: async request => (allowed('signCatalog'), await signer.signCatalog(request)),
@@ -148,5 +190,6 @@ export function signerFor(plugin: string, signer: IdentitySigner): IdentitySigne
       allowed('signLinkStoreRequest'), await signer.signLinkStoreRequest(request)
     ),
     signSecretOffer: async request => (allowed('signSecretOffer'), await signer.signSecretOffer(request)),
+    signRelocateOffer: async request => (allowed('signRelocateOffer'), await signer.signRelocateOffer(request)),
   });
 }

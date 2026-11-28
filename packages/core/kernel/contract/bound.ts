@@ -237,6 +237,8 @@ export const InputHoldsPort = defineBoundPort<InputHolds>('input-holds', 'vault'
 
 /** The composed redactor for one read (§7.3). */
 export interface RedactionScope {
+  /** Daemon-only byte inspection for outbound transfers: names only, never matched values or digests. */
+  secretNamesIn?(bytes: Uint8Array): readonly string[];
   text(s: string): string;
   /** Same-width `*` over exactly the matched cells. */
   cells(grid: CellGrid): CellGrid;

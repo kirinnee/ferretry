@@ -4,6 +4,7 @@
  */
 import { componentCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const MODEL = parseAccountModel({ version: 1, components: { instructions: { notes: { file: 'notes.md' } } } });
 
@@ -17,6 +18,7 @@ export function shownFor(text: string): { text: string; redacted: boolean } {
     runningSessions: 0,
     userHome: '/home/person',
     acceptsAutoPermissionMode: true,
+    kits: REAL_KITS,
     instructionBodies: { notes: text },
   });
   const content = catalog.kinds[0]?.components[0]?.content;
