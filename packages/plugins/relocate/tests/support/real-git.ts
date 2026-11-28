@@ -12,6 +12,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KernelPorts } from '@ferretry/kernel/contract';
+import { afterAll } from 'bun:test';
+
+const fixtureRoots = new Set<string>();
+afterAll(() => {
+  for (const root of fixtureRoots) rmSync(root, { recursive: true, force: true });
+});
 
 /** A hermetic git: no user config, no system config, a fixed identity, so a fixture is the same on every machine. */
 const GIT_ENV = {
@@ -176,6 +182,7 @@ export interface Fixture {
  */
 export function makeRepository(): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'relocate-fixture-'));
+  fixtureRoots.add(root);
   const remote = join(root, 'remote.git');
   const folder = join(root, 'work');
   mkdirSync(folder, { recursive: true });

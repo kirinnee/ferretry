@@ -50,6 +50,48 @@ describe('a moved-away source is read-only at the shared admission seam', () => 
     return w;
   };
 
+  test('malformed parameter is a 400; shared-draft sockets and their subsequent writes are fenced', () => {
+    const w = protectedWorld();
+    const malformed = w.gate.admit({
+      table: 'route',
+      descriptor: descriptor({ method: 'POST' }),
+      request: request({ bearer: ADMIN, method: 'POST' }),
+      params: new Map([['ferretId', '%ZZ']]),
+    });
+    expect(malformed.outcome).toBe('refused');
+    if (malformed.outcome === 'refused') expect(malformed.response.status).toBe(400);
+    const call = request({ bearer: ADMIN, path: '/v1/ferrets/f1/shared-draft/stream' });
+    expect(
+      w.gate.admit({ table: 'socket', descriptor: fleetUse, request: call, params: new Map([['ferretId', 'f1']]) })
+        .outcome,
+    ).toBe('refused');
+    expect(w.gate.readmit(call, fleetUse)).toBe(false);
+  });
+
+  test('an unavailable fence returns its own retryable code for mutations while reads remain admitted', () => {
+    const w = world();
+    Object.assign(w.ferrets, { mutationReady: () => false });
+    const answer = w.gate.admit({
+      table: 'route',
+      descriptor: descriptor({ method: 'POST' }),
+      request: request({ bearer: ADMIN, method: 'POST' }),
+      params: new Map([['ferretId', 'f1']]),
+    });
+    expect(answer.outcome).toBe('refused');
+    if (answer.outcome === 'refused') {
+      expect(answer.response.status).toBe(503);
+      expect(JSON.parse(String(answer.response.body)).code).toBe('fence_unavailable');
+    }
+    expect(
+      w.gate.admit({
+        table: 'route',
+        descriptor: fleetUse,
+        request: request({ bearer: ADMIN }),
+        params: new Map([['ferretId', 'f1']]),
+      }).outcome,
+    ).toBe('admitted');
+  });
+
   test('refuses every mutation method before its body is read, even for the host owner', () => {
     const w = protectedWorld();
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {

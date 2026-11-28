@@ -63,12 +63,15 @@ export function MoveMachine({
 }): ReactNode {
   const ref = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
-  const { onKeyDown } = useDialogFocus(true, ref, onClose);
   const [phase, setPhase] = useState<Phase>({ kind: 'pick' });
+  const [retrying, setRetrying] = useState(false);
   const [picked, setPicked] = useState<string | undefined>(candidates.find(each => each.online)?.daemon);
   const [folder, setFolder] = useState('');
   const hrefOf = useScreenHref();
-  const busy = phase.kind === 'looking' || phase.kind === 'moving';
+  const busy = retrying || phase.kind === 'looking' || phase.kind === 'moving';
+  const { onKeyDown } = useDialogFocus(true, ref, () => {
+    if (!busy) onClose();
+  });
 
   const look = async (to: DaemonReach, cloneInto: string): Promise<void> => {
     setPhase({ kind: 'looking', to });
@@ -129,7 +132,7 @@ export function MoveMachine({
             disabled={busy}
             onClick={onClose}
           >
-            <X aria-hidden="true" size={18} />
+            {busy ? <span className="text-meta">Moving…</span> : <X aria-hidden="true" size={18} />}
           </button>
         </header>
 
@@ -260,10 +263,12 @@ export function MoveMachine({
             <p className="m-0 text-cell">
               {phase.moved.received.recovery === undefined
                 ? `${name} is now running on ${phase.to.machine}.`
-                : `${name} needs recovery on ${phase.to.machine}; its state is ${phase.moved.received.recovery.state}.`}
+                : phase.moved.received.recovery.state === 'stopped'
+                  ? `Moved, not started: ${name} is stopped on ${phase.to.machine}.`
+                  : `${name} needs recovery on ${phase.to.machine}; its state is ${phase.moved.received.recovery.state}.`}
               {phase.moved.stub === 'marked'
                 ? ` ${from.machine} keeps every file and shows where it went.`
-                : ` ${from.machine} could not leave its note (${phase.moved.stubNote ?? 'no reason given'}); the ferret there is stopped.`}
+                : ` ${from.machine}’s read-only fence could not be confirmed.`}
             </p>
             {phase.moved.received.recovery === undefined ? null : (
               <div className="flex flex-col gap-xs text-cell" data-move-recovery="" role="alert">
@@ -276,8 +281,29 @@ export function MoveMachine({
                 </p>
               </div>
             )}
-            <div className="flex justify-end gap-sm">
-              <button type="button" className="kt-btn" onClick={onClose}>
+            <div className="flex flex-wrap justify-end gap-sm">
+              {phase.moved.retryComplete === undefined ? null : (
+                <button
+                  type="button"
+                  className="kt-btn"
+                  disabled={busy}
+                  onClick={async () => {
+                    setRetrying(true);
+                    try {
+                      const moved = await phase.moved.retryComplete?.();
+                      if (moved !== undefined) {
+                        setPhase({ kind: 'done', to: phase.to, moved });
+                        onMoved();
+                      }
+                    } finally {
+                      setRetrying(false);
+                    }
+                  }}
+                >
+                  Retry completion and start
+                </button>
+              )}
+              <button type="button" className="kt-btn" disabled={busy} onClick={onClose}>
                 Close
               </button>
               {(() => {

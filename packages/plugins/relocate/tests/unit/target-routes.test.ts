@@ -1,21 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import { ferret, owner, testHost } from '@ferretry/kernel/testing';
 import { toBase64Url } from '@ferretry/std/sealing';
-import { RelocateOfferSchema, TargetPreflightResponseSchema } from '../../contract/index.ts';
+import { RelocateOfferSchema, TargetPreflightResponseSchema, RECEIVED_STATE } from '../../contract/index.ts';
 import relocate from '../../daemon/index.ts';
 import { verifiedOfferKey } from '../../daemon/lib/seal.ts';
-import { fakeFerrets, fakeSource } from '../support/fake-ferrets.ts';
+import { fakeFerrets, fakeSource, FERRET } from '../support/fake-ferrets.ts';
 import { crypto, newIdentity } from '../support/identity.ts';
 
 const NEEDS = { harness: 'claude-code', remote: 'https://example.invalid/acme/project', secrets: ['API_TOKEN'] };
 
-async function started(over: { readonly secrets?: readonly string[] } = {}) {
+async function started(over: { readonly secrets?: readonly string[]; readonly resumeRefuses?: boolean } = {}) {
   const ferrets = fakeFerrets({ state: 'idle', source: fakeSource(), folder: undefined });
   const host = await testHost({
     plugins: [relocate],
     fakes: {
       ferrets: {
         ...ferrets.port,
+        ...(over.resumeRefuses
+          ? { resume: async () => ({ ok: false, error: { code: 'refused', reason: 'the login is unavailable' } }) }
+          : {}),
         harnesses: () => ['claude-code'],
         start: async () => ({ ok: false, error: { code: 'refused', reason: 'no' } }),
       },
@@ -37,6 +40,26 @@ async function started(over: { readonly secrets?: readonly string[] } = {}) {
 }
 
 describe('the target routes', () => {
+  for (const resumeRefuses of [false, true])
+    test(`starting an imported record requires its origin and the owner; resume refusal is honest (${String(resumeRefuses)})`, async () => {
+      const { host, ferrets } = await started({ resumeRefuses });
+      const route = `/v1/relocate/imports/${FERRET}/start`;
+      expect((await host.request('POST', route, { as: owner() })).status).toBe(409);
+      expect(ferrets.calls).not.toContain('resume');
+      const source = await newIdentity();
+      await host
+        .state('relocate')
+        .port([RECEIVED_STATE])
+        .write(RECEIVED_STATE, {
+          received: { [FERRET]: { daemonId: source.daemonId, ferretId: 'source-ferret', at: host.clock.now() } },
+        });
+      expect((await host.request('POST', route, { as: ferret('other') })).status).toBe(403);
+      const result = await host.request('POST', route, { as: owner() });
+      expect(result.status).toBe(resumeRefuses ? 409 : 200);
+      if (resumeRefuses) expect(result.json()).toMatchObject({ code: 'start_refused' });
+      else expect(ferrets.calls).toContain('resume');
+      await host.stop();
+    });
   test('an opened offer is signed by this daemon, and the source accepts it', async () => {
     const { host } = await started();
     const opened = await host.request('POST', '/v1/relocate/offers', { as: owner() });

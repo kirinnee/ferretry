@@ -98,6 +98,7 @@ async function world(options: { targetRefuses?: string; completeFails?: boolean 
   });
   void served;
   const to = scripted(targetIdentity.daemonId, 'Laptop', route => {
+    if (route === 'POST /v1/relocate/imports/:ferretId/start') return {};
     if (route === 'POST /v1/relocate/offers') return opened.offer;
     if (route === 'POST /v1/relocate/offers/:offerId/preflight')
       return {
@@ -186,13 +187,15 @@ describe('carrying', () => {
     expect(steps.filter(step => step.chunk !== undefined).at(-1)?.chunk).toEqual({ done: 2, of: 2 });
   });
 
-  it('leaves the ferret on the target and says so when the source cannot leave its note', async () => {
+  it('keeps the target stopped when the source cannot confirm its fence', async () => {
     const w = await world({ completeFails: true });
     const reviewed = await review(FERRET, w.source.machine, w.to.machine);
     const moved = await carry(FERRET, w.source.machine, w.to.machine, reviewed);
     expect(moved.stub).toBe('unmarked');
     expect(moved.stubNote).toContain('the ledger could not be written');
     expect(moved.received.ferretId).toBe('g9');
+    expect(moved.received.recovery).toMatchObject({ code: 'source_unconfirmed', state: 'stopped' });
+    expect(w.to.calls.some(call => call.route.endsWith('/start'))).toBe(false);
   });
 
   it('does not complete the source when the target refuses the import', async () => {

@@ -1,4 +1,5 @@
 import type { FencedPath, FerretId, RootEntry, RootHandle } from '@ferretry/kernel/contract';
+import { posix } from 'node:path';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { ApiError } from '@ferretry/kernel/contract';
 import type { FerretsService } from '../lib/ferrets/service.ts';
@@ -27,6 +28,11 @@ const MAX_DEPTH = 6;
 const MAX_NAMES = 20_000;
 
 type Destination = { readonly daemonId: string; readonly ferretId: string; readonly machine: string };
+const within = (base: string, path: string): boolean => {
+  const root = posix.resolve(base);
+  const candidate = posix.resolve(path);
+  return candidate === root || candidate.startsWith(root === '/' ? '/' : `${root}/`);
+};
 
 /** The daemon's one durable moved-away decision, shared by Gate, launches and the fleet's reads. */
 export class RelocationFence {
@@ -36,11 +42,18 @@ export class RelocationFence {
   readonly #marked = new WeakMap<FerretSummary, FerretSummary>();
   constructor(
     private readonly state: StatePort,
-    private readonly records: () => readonly { id: FerretId; name?: string; folder: string; state: FerretState }[],
+    private readonly records: () => readonly {
+      id: FerretId;
+      name?: string;
+      folder: string;
+      state: FerretState;
+      runtime?: string;
+    }[],
   ) {
     this.loaded = (async () => {
       const read = await state.read(RelocationStubsFile);
-      if (!read.ok) throw new Error('the moved-away stubs could not be read');
+      if (!read.ok || (read.value === undefined && (await state.version(RelocationStubsFile)) !== undefined))
+        throw new Error('the moved-away stubs could not be read');
       this.#moved = read.value?.moved ?? {};
       this.#readable = true;
     })();
@@ -48,6 +61,20 @@ export class RelocationFence {
   }
   destination(id: string): Destination | undefined {
     return this.#moved[id];
+  }
+  get available(): boolean {
+    return this.#readable;
+  }
+  assert(reference: string, folder?: string): void {
+    const reason = this.refusal(reference, folder);
+    if (reason !== undefined)
+      throw new ApiError(this.#readable ? 409 : 503, reason, this.#readable ? 'moved_away' : 'fence_unavailable');
+  }
+  assertFolder(folder: string, parents = false): void {
+    this.assert('', folder);
+    if (parents)
+      for (const record of this.records())
+        if (this.#moved[record.id] !== undefined && within(folder, record.folder)) this.assert(record.id);
   }
   mark(summary: FerretSummary): FerretSummary {
     const movedTo = this.destination(summary.id);
@@ -79,10 +106,18 @@ export class RelocationFence {
         const member = Reflect.get(target, key);
         if (typeof member !== 'function') return member;
         return (...args: unknown[]) => {
+          try {
+            if (key === 'withWorktreeMove') this.assertFolder(String(args[0]), true);
+          } catch (error) {
+            return Promise.reject(error);
+          }
           if (writes.has(String(key))) {
             const start = key === 'start' ? (args[0] as { folder: string }) : undefined;
-            const reason = start === undefined ? this.refusal(String(args[0])) : this.refusal('', start.folder);
-            if (reason !== undefined) return Promise.reject(new ApiError(409, reason, 'moved_away'));
+            try {
+              this.assert(start === undefined ? String(args[0]) : '', start?.folder);
+            } catch (error) {
+              return Promise.reject(error);
+            }
           }
           return Reflect.apply(member, target, args);
         };
@@ -96,19 +131,22 @@ export class RelocationFence {
       reference,
       records.map(each => ({ ...each, status: each.state })),
     );
+    const ownId = resolved.kind === 'session' ? resolved.id : reference;
+    const known = records.some(each => each.id === ownId);
     const id =
-      folder === undefined
-        ? resolved.kind === 'session'
-          ? resolved.id
-          : reference
-        : records.find(each => each.folder === folder)?.id;
+      known || folder === undefined
+        ? ownId
+        : records.find(each => this.#moved[each.id] !== undefined && within(each.folder, folder))?.id;
     const to = id === undefined ? undefined : this.#moved[id];
     return to === undefined ? undefined : `This ferret moved to ${to.machine} and is read-only here.`;
   }
   async protect(id: FerretId, to: Destination): Promise<void> {
     await this.loaded;
-    if (this.records().find(each => each.id === id)?.state !== 'stopped')
-      throw new Error('only a stopped ferret can become a moved-away stub');
+    const records = this.records();
+    const source = records.find(each => each.id === id);
+    if (source?.state !== 'stopped') throw new Error('only a stopped ferret can become a moved-away stub');
+    if (records.some(each => each.id !== id && posix.resolve(each.folder) === posix.resolve(source.folder)))
+      throw new Error('another ferret shares this folder; no source fence was written');
     const saved = await this.state.update(RelocationStubsFile, current => ({ moved: { ...current?.moved, [id]: to } }));
     if (!saved.ok) throw new Error('the moved-away stub could not be protected');
     this.#moved = saved.value.moved;
@@ -226,6 +264,12 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         const record = registry.get(ferret);
         const reasons: string[] = [];
         if (record === undefined) return ['this machine does not know the ferret'];
+        if (
+          registry
+            .list()
+            .some(other => other.id !== ferret && posix.resolve(other.folder) === posix.resolve(record.folder))
+        )
+          reasons.push('another ferret shares this folder; move it to a separate folder before moving machines');
         if (record.state !== 'idle' && record.state !== 'stopped')
           reasons.push('the ferret is still working; let it finish its turn first');
         const jobs = (
@@ -256,7 +300,7 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     port: {
       relocationProtect: async (ferret, to) => {
         await ready();
-        await f.relocations.protect(ferret, to);
+        await f.service.exclusive(ferret, async () => await f.relocations.protect(ferret, to));
         f.publishChanged(ferret);
       },
       relocationSource: async ferret => {

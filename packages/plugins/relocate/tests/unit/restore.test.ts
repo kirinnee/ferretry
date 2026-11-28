@@ -27,7 +27,7 @@ describe('restoring the session a moved ferret had', () => {
     expect(t.restored.some(file => file.path === 'history.jsonl')).toBe(false);
   });
 
-  test('a refused restore leaves the ferret running and says what did not arrive, not that nothing did', async () => {
+  test('a refused restore leaves the imported ferret stopped and says what did not arrive', async () => {
     const w = await world();
     const t = await targetWorld({ restoreFails: true }, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
@@ -35,7 +35,7 @@ describe('restoring the session a moved ferret had', () => {
 
     expect(done.ferretId).toBe(NEW_FERRET);
     expect(done.recovery?.code).toBe('session_unrestored');
-    expect(done.recovery?.state).toBe('running');
+    expect(done.recovery?.state).toBe('stopped');
     expect(done.recovery?.message).toContain('not all restored');
     expect(t.stopped).toEqual([]);
     // where it came from is still kept

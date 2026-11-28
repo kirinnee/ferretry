@@ -275,7 +275,7 @@ export class Importer {
             state,
             message: [
               unrecorded
-                ? 'the ferret started in this folder; its origin could not be saved; keep this receipt to recover it'
+                ? 'the ferret was imported stopped in this folder; its origin could not be saved; keep this receipt to recover it'
                 : undefined,
               unrestored === undefined
                 ? undefined
@@ -317,7 +317,7 @@ export class Importer {
       ...(runtime === undefined ? {} : { runtime }),
       folder,
       by: 'owner',
-      relocated: packed,
+      relocated: { ...packed, pending: true },
       options: {
         teammateFallback: true,
         ...(record.mode === undefined ? {} : { mode: record.mode }),

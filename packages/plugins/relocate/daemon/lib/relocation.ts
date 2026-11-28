@@ -71,6 +71,9 @@ interface OpenExport {
   readonly createdAtMs: number;
   readonly resumeOnExpiry: boolean;
   completing?: boolean;
+  /** Once completion begins, its fence may be durable even if its answer is lost. Never recover by expiry. */
+  handoff?: boolean;
+  warned?: boolean;
 }
 
 const newId = (crypto: CloneCrypto, prefix: string): string => `${prefix}${toBase64Url(crypto.randomBytes(16))}`;
@@ -218,13 +221,15 @@ export class Relocation {
       throw new RelocateRefused(404, 'no such export here: it timed out or was completed', 'export_unknown');
     const chunk = open.chunks[index];
     if (chunk === undefined) throw new RelocateRefused(404, 'no such chunk in this export', 'chunk_unknown');
+    // A lost reply can still reach B. Once bytes leave A, expiry must never resume it.
+    open.handoff = true;
     return chunk;
   }
 
   async complete(exportId: string, request: CompleteRequest): Promise<CompleteResponse> {
     await this.expire();
     const open = this.#exports.get(exportId);
-    if (open === undefined || this.deps.clock.nowMs() - open.createdAtMs >= RELOCATE_EXPORT_TTL_MS)
+    if (open === undefined || (!open.handoff && this.deps.clock.nowMs() - open.createdAtMs >= RELOCATE_EXPORT_TTL_MS))
       throw new RelocateRefused(404, 'no such export here: it timed out or was completed', 'export_unknown');
     if (request.to.daemonId !== open.header.targetDaemonId)
       throw new RelocateRefused(403, 'this export was sealed for another machine', 'wrong_target');
@@ -237,6 +242,7 @@ export class Relocation {
       ...(request.to.machine === undefined ? {} : { machine: request.to.machine }),
     };
     open.completing = true;
+    open.handoff = true;
     try {
       await this.deps.protect(open.ferret, { ...request.to, machine: request.to.machine ?? request.to.daemonId });
       await this.deps.moved.record(open.ferret, entry);
@@ -309,6 +315,15 @@ export class Relocation {
     const nowMs = this.deps.clock.nowMs();
     for (const [id, open] of this.#exports) {
       if (open.completing === true || nowMs - open.createdAtMs < RELOCATE_EXPORT_TTL_MS) continue;
+      if (open.handoff) {
+        if (!open.warned)
+          this.deps.log.warn(
+            'move expired after handing out ciphertext; source stays held stopped; check the destination and retry completion',
+            { ferret: open.ferret },
+          );
+        open.warned = true;
+        continue;
+      }
       if (!open.resumeOnExpiry || (await this.#resume(open.ferret))) this.#exports.delete(id);
     }
     for (const [ferret, preparation] of [...this.#recovery]) {

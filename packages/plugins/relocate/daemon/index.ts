@@ -220,6 +220,20 @@ export default implementDaemon(manifest, {
         if (!body.success) throw new ApiError(400, 'import takes the header the source sealed with', 'bad_request');
         return jsonResponse(await importer.import(param(call, 'offerId'), body.data).catch(refused));
       },
+      'POST /v1/relocate/imports/:ferretId/start': async (call: CallContext) => {
+        mayReadTree(call);
+        const id = param(call, 'ferretId');
+        const received = await kernel.state.read(RECEIVED_STATE);
+        if (!received.ok || received.value?.received[id] === undefined)
+          throw new ApiError(
+            409,
+            'the imported origin could not be confirmed; keep the receipt and recover explicitly',
+            'import_unconfirmed',
+          );
+        const resumed = await needs.ferrets.resume(id as never, undefined, { origin: { kind: 'person' } });
+        if (!resumed.ok) throw new ApiError(409, resumed.error.reason, 'start_refused');
+        return jsonResponse({});
+      },
     } satisfies Record<string, RouteHandler>;
 
     return { routes };

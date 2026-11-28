@@ -196,7 +196,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
   );
   const ready = async (): Promise<void> => {
-    await Promise.all([loaded, relocations.loaded]);
+    await loaded;
   };
   // The owner's sidebar pins (agent-pins.json): the service marks `pinnedAt` on each summary from them.
   const pinClock = { now: () => kernel.clock.now() };
@@ -506,8 +506,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     harnessKeys: () => [...hooks.providers(Harnesses).keys()] as HarnessKey[],
     runner: runnerOf,
     decide: async input => {
-      const moved = relocations.refusal(input.ferret, input.realFolder ?? input.folder);
-      if (moved !== undefined) return { allow: false, reason: moved };
+      relocations.assert(input.ferret, input.realFolder ?? input.folder);
       // RULING #43: today's pack.admit was mandatory for a child start, and Packs owns that answer on start.decide. A
       // child start or resume is admitted only when Packs ITSELF answered (its yes, or its no with its reason); no
       // answer from Packs (absent, failed, a hang, a throw, garbage) is 503 `helper_admission_unavailable`, before
@@ -517,6 +516,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (decision === 'unanswered') throw noHelperAdmission();
       return decision;
     },
+    mutationAllowed: id => relocations.assert(id),
     // Bounds Runtimes' answers below on the kernel clock (RUNTIME_START_DEADLINE_MS).
     after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
     // Which harness and login a runtime starts with: Runtimes alone answers. With no Runtimes a start that names a
@@ -949,6 +949,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       // Lineage for the agenda: who exists and who started whom (Asks refuses a helper's item on it).
       'agenda.context:ferrets': ferretsAgendaContext(registry, ready),
       'bearers:ferret': {
+        mutationReady: () => relocations.available,
         mutationRefusal: reference => relocations.refusal(reference),
         judgeable: () => settled,
         ferretFor: (digest: BearerDigest) => {

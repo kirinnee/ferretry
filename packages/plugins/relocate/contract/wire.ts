@@ -313,7 +313,7 @@ export const ImportResponseSchema = z.strictObject({
   /** A launch succeeded but its origin could not be saved, or its turns and attachments were not all restored. The ferret and its files are kept. */
   recovery: z
     .strictObject({
-      code: z.enum(['provenance_unrecorded', 'session_unrestored']),
+      code: z.enum(['provenance_unrecorded', 'session_unrestored', 'source_unconfirmed', 'start_unconfirmed']),
       state: z.enum(['running', 'stopped', 'unknown']),
       message: z.string(),
     })

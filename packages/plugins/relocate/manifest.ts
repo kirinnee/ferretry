@@ -105,6 +105,14 @@ export default definePlugin({
         audit: { record: RELOCATE_AUDIT.imported },
         guard: { none: 'a header and a folder; every hash is verified before anything is written' },
       }),
+      route('POST /v1/relocate/imports/:ferretId/start', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: cap('fleet', 'configure'),
+        noStore: true,
+        audit: { record: RELOCATE_AUDIT.imported },
+        guard: { none: 'starts only an imported ferret after the app confirms the source fence; returns no content' },
+      }),
     ],
   },
 

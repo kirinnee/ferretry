@@ -134,7 +134,7 @@ export async function targetWorld(options: TargetOptions = {}, remoteBare?: stri
     ferrets: {
       get: async () => {
         if (options.actualState === 'unavailable') throw new Error('state unavailable');
-        return { state: options.actualState ?? 'idle' } as never;
+        return { state: options.actualState ?? 'stopped' } as never;
       },
       harnesses: () => (options.harnesses ?? ['claude-code']) as readonly HarnessKey[],
       start: async request => {

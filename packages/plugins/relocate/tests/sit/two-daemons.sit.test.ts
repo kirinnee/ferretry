@@ -30,6 +30,9 @@ const STAMP = '2026-11-27T00:00:00.000Z';
 const CONVERSATION = '0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21';
 /** Synthetic values: the secret B's login holds, and an attachment that is not text. */
 const LOGIN_SECRET = 'SYNTHETIC-LOGIN-VALUE-u16-5c1e9a';
+// DIRECT authenticates with a key, not a bearer; seed a token canary in the sandbox Vault as well.
+const DEVICE_TOKEN = 'SYNTHETIC-DEVICE-TOKEN-u16-82fc1a';
+const seededCredentials = new Set([LOGIN_SECRET, DEVICE_TOKEN]);
 const ATTACHMENT = Buffer.from([0, 1, 2, 250, 251, 252, 0, 80, 78, 71, 13, 10, 26, 10, 255]);
 const TURN_ONE = 'the assigned task\n';
 const TURN_TWO = 'a second turn with “unicode” and a plain line\n';
@@ -184,6 +187,7 @@ async function boot(m: Sandbox, extra: Record<string, string> = {}): Promise<voi
   }
   if (!ready) throw new Error(`daemon ${m.name} did not become ready: ${m.logs.slice(-3000)}`);
   m.admin = (await readFile(path.join(m.home, 'state/gate/admin-token'), 'utf8')).trim();
+  seededCredentials.add(m.admin);
 }
 
 /** The owner's own loopback token: only for seeding and for reading what is on disk, never for the move. */
@@ -306,6 +310,8 @@ beforeAll(async () => {
 
   // ── A: one stopped Claude Code ferret in the fixture's working tree, with its conversation, turns and an attachment ──
   const folder = fixture.folder;
+  await mkdir(path.join(folder, 'subfolder'), { recursive: true });
+  await symlink(folder, path.join(base, 'source-link'));
   const spelling = folder.replaceAll(/[^a-zA-Z0-9]/gu, '-');
   const pool = path.join(a.home, 'state/claude-code/history-pool/projects');
   const agentHome = path.join(a.home, 'state/claude-code/agent-homes/f1');
@@ -434,6 +440,8 @@ beforeAll(async () => {
   }
   const stored = await admin(b, 'POST', '/v1/secrets', { name: 'SIT_LOGIN_TOKEN', value: LOGIN_SECRET });
   expect(stored.status, stored.text).toBe(200);
+  expect((await admin(b, 'POST', '/v1/secrets', { name: 'SIT_DEVICE_TOKEN', value: DEVICE_TOKEN })).status).toBe(200);
+  for (const value of Object.values(fixture.secrets)) seededCredentials.add(value);
   // The login names a secret, so the owner confirms it (the loosening is held for them): as the owner would at the machine.
   const held = (await admin(b, 'GET', '/v1/config/status')).json.pending as { path: string; etag: string }[];
   for (const pending of held.filter(item => item.path.startsWith('logins/'))) {
@@ -462,6 +470,7 @@ afterAll(async () => {
       await Bun.spawn(['tmux', '-S', socket, 'kill-server'], { stdout: 'ignore', stderr: 'ignore' }).exited;
   }
   if (base !== '') await rm(base, { recursive: true, force: true });
+  if (fixture !== undefined) await rm(path.dirname(fixture.folder), { recursive: true, force: true });
 }, 60_000);
 
 describe('moving a ferret between two real daemons, driven by the app’s own flow (SIT)', () => {
@@ -592,11 +601,19 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
       ['POST', '/v1/ferrets/f1/send', { message: 'should not run' }],
       ['POST', '/v1/ferrets/f1/stop', {}],
       ['POST', '/v1/ferrets', { folder: fixture.folder, harness: 'claude-code', mode: 'interactive' }],
+      ['POST', '/v1/ferrets', { folder: `${fixture.folder}/.`, harness: 'claude-code', mode: 'interactive' }],
+      ['POST', '/v1/ferrets', { folder: path.join(base, 'source-link'), harness: 'claude-code', mode: 'interactive' }],
+      [
+        'POST',
+        '/v1/ferrets',
+        { folder: path.join(fixture.folder, 'subfolder'), harness: 'claude-code', mode: 'interactive' },
+      ],
       ['POST', '/v1/ferrets/f1/terminals', { name: 'should-not-open' }],
       ['PATCH', '/v1/ferrets/f1/terminals/t1', { name: 'should-not-rename' }],
       ['DELETE', '/v1/ferrets/f1/terminals/t1', undefined],
       ['POST', '/v1/ferrets/f1/console/input', { text: 'should-not-type' }],
       ['GET', '/v1/ferrets/f1/terminals/t1/stream', undefined],
+      ['GET', '/v1/ferrets/f1/shared-draft/stream', undefined],
       ['POST', '/v1/ferrets/MOVER/send', { message: 'should-not-run' }],
     ] as const) {
       const refused = await admin(a, method, route, body);
@@ -633,11 +650,52 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
     expect((await admin(a, 'GET', '/v1/ferrets/f1')).json.movedTo).toMatchObject({ machine: 'beta' });
   });
 
+  it('a corrupt fence refuses mutations with fence_unavailable while ferret, transcript and terminal reads survive', async () => {
+    const file = path.join(a.home, 'state/ferrets/relocation-stubs.json');
+    const saved = await readFile(file);
+    const stop = async () => {
+      for (const [key, device] of devices)
+        if (key.startsWith(`${a.name}:`)) {
+          device.close();
+          devices.delete(key);
+        }
+      a.child?.kill('SIGTERM');
+      await a.child?.exited;
+      a.logs = '';
+    };
+    await stop();
+    try {
+      await writeFile(file, '{');
+      await boot(a);
+      expect((await admin(a, 'GET', '/v1/ferrets/f1')).status).toBe(200);
+      expect(await messages(a, 'f1')).toEqual(EXPECTED_TRANSCRIPT);
+      expect((await admin(a, 'GET', '/v1/terminals')).status).toBe(200);
+      const refused = await admin(a, 'POST', '/v1/ferrets/f1/rename', { name: 'must-not-change' });
+      expect(refused.status).toBe(503);
+      expect(refused.json.code).toBe('fence_unavailable');
+    } finally {
+      await stop();
+      await writeFile(file, saved);
+      await boot(a);
+    }
+  });
+
+  const captureSafe = (everything: string): boolean => {
+    for (const value of seededCredentials) {
+      if (everything.includes(value)) return false;
+      for (const encoding of ['hex', 'base64', 'base64url'] as const)
+        if (everything.includes(createHash('sha256').update(value).digest(encoding))) return false;
+    }
+    return !/fys_[A-Za-z0-9_-]{43}|\b[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}\b|BEGIN (PRIVATE|OPENSSH) /u.test(
+      everything,
+    );
+  };
+
   const noSecrets = () => {
     const everything = traffic.map(line => `${line.sent}\n${line.got}`).join('\n');
     expect(traffic.length).toBeGreaterThan(8);
-    for (const value of [LOGIN_SECRET, ...Object.values(fixture.secrets)])
-      expect(everything.includes(value)).toBe(false);
+    // Boolean-only diagnostics: never print a credential, token, digest or captured body on failure.
+    expect(captureSafe(everything), 'captured move/refusal bodies contain no credential or digest').toBe(true);
     // the app carries ciphertext only: not a word of the transcript, the turns, the diff or the attachment
     for (const plain of ['hello there', 'one more answer', 'the assigned task', 'a new file', 'changed'])
       expect(everything.includes(plain)).toBe(false);
@@ -679,4 +737,21 @@ describe('moving a ferret between two real daemons, driven by the app’s own fl
   });
 
   it('no secret value, key or plaintext crossed, including every refusal body', noSecrets);
+
+  it('each synthetic credential/digest/shape planted in a refusal capture makes the final scan fail', () => {
+    const plants = [...seededCredentials].flatMap(value => [
+      value,
+      ...(['hex', 'base64', 'base64url'] as const).map(encoding => createHash('sha256').update(value).digest(encoding)),
+    ]);
+    plants.push(`fys_${'s'.repeat(43)}`, ['2345', '6789'].join('-'));
+    for (const plant of plants) {
+      traffic.push({ machine: 'synthetic', method: 'POST', path: '/refusal', sent: '', got: plant });
+      try {
+        expect(noSecrets, 'each synthetic planted capture must make the final assertion fail').toThrow();
+      } finally {
+        traffic.pop();
+      }
+    }
+    noSecrets();
+  });
 });

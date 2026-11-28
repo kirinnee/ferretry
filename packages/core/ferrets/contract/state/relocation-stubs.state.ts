@@ -8,6 +8,9 @@ export const RelocationStubsFile = defineState({
   store: 'json',
   format: 1,
   mode: 0o600,
+  onDamaged: {
+    narrower: 'a damaged relocation fence refuses ferret mutations; reads and other features remain available',
+  },
   schema: z.strictObject({
     moved: z.record(
       z.string(),

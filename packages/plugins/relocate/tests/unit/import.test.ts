@@ -226,7 +226,7 @@ describe('a failure at any step leaves the target with nothing new', () => {
     const t = await targetWorld({ recordFails: true }, w.fixture.remote);
     const { offerId, header } = await t.carry(w);
     const done = await t.importer.import(offerId, { header, sourceDaemonId: w.sourceIdentity.daemonId });
-    expect(done.recovery).toMatchObject({ code: 'provenance_unrecorded', state: 'running' });
+    expect(done.recovery).toMatchObject({ code: 'provenance_unrecorded', state: 'stopped' });
     expect(t.stopped).toEqual([]);
     expect(await Bun.file(join(done.folder, 'new.txt')).exists()).toBe(true);
   });

@@ -36,6 +36,7 @@ export async function world(
     readonly profileSecrets?: readonly string[];
     readonly runtime?: string;
     readonly redaction?: Redaction;
+    readonly recordFails?: boolean;
   } = {},
 ): Promise<World> {
   const fixture = makeRepository();
@@ -52,6 +53,7 @@ export async function world(
   const moved: MovedLedger = {
     get: async ferret => movedLedger.get(ferret),
     record: async (ferret, entry) => {
+      if (options.recordFails) throw new Error('moved ledger unavailable');
       movedLedger.set(ferret, entry);
     },
   };

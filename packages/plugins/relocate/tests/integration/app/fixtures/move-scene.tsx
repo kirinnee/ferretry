@@ -7,6 +7,7 @@
  */
 import { ScreenHrefProvider, type DaemonReach } from '@ferretry/app';
 import { createRoot } from 'react-dom/client';
+import { useState } from 'react';
 import { MoveMachine } from '../../../../app/features/move-machine.tsx';
 import { MovedMark } from '../../../../app/features/moved-mark.tsx';
 
@@ -18,6 +19,15 @@ if (style !== null) root.dataset.style = style;
 const hold = params.get('hold') === '1';
 const refuse = params.get('refuse') === '1';
 const recovery = params.get('recovery') === '1';
+let completions = 0;
+let release: (() => void) | undefined;
+Object.assign(window, {
+  finishMove: () => {
+    if (release === undefined) return false;
+    release();
+    return true;
+  },
+});
 document.body.style.fontFamily = 'DejaVu Sans';
 
 const SOURCE = `fy_daemon_${'A'.repeat(43)}`;
@@ -102,12 +112,19 @@ const answerOf = (daemon: string) => async (route: string, init?: { params?: Rec
     if (route === 'POST /v1/relocate/:ferretId/preflight') return PREFLIGHT;
     if (route === 'POST /v1/relocate/:ferretId/export') return EXPORT;
     if (route === 'GET /v1/relocate/exports/:exportId/chunks/:index') {
+      if (params.get('interrupt') === '1' && init?.params?.index === '1')
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
       if (hold && init?.params?.index === '1') return await forever();
       return new Uint8Array([1, 2, 3]);
     }
-    if (route === 'POST /v1/relocate/exports/:exportId/complete')
+    if (route === 'POST /v1/relocate/exports/:exportId/complete') {
+      if (params.get('unconfirmed') === '1' && completions++ === 0) throw new Error('Desk did not answer');
       return { ferretId: 'f1', movedTo: { daemonId: TARGET, ferretId: 'g9', at: new Date().toISOString() } };
+    }
   } else {
+    if (route === 'POST /v1/relocate/imports/:ferretId/start') return {};
     if (route === 'POST /v1/relocate/offers') return OFFER;
     if (route === 'POST /v1/relocate/offers/:offerId/preflight')
       return refuse
@@ -160,22 +177,23 @@ const MOVED = {
 const movedStore = { snapshot: () => MOVED, subscribe: () => () => undefined, refresh: async () => undefined };
 
 function Dialog() {
+  const [open, setOpen] = useState(true);
   return (
     <ScreenHrefProvider href={(daemon, _plugin, _screen, ids) => `/d/${daemon}/chat/${ids?.ferret ?? ''}`}>
       {params.get('moved') === '1' ? (
         <div data-stub-scene="" style={{ padding: 24 }}>
           <MovedMark ferret="f1" store={movedStore} />
         </div>
-      ) : (
+      ) : open ? (
         <MoveMachine
           candidates={CANDIDATES}
           ferret="f1"
           from={FROM}
           name="Zoe"
-          onClose={() => undefined}
+          onClose={() => setOpen(false)}
           onMoved={() => undefined}
         />
-      )}
+      ) : null}
     </ScreenHrefProvider>
   );
 }

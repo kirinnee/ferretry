@@ -148,6 +148,38 @@ async function states(width: number, scheme: string, style: string): Promise<voi
     expect(receipt).not.toContain('now running');
     await settle(recovery, 'recovery');
 
+    const unconfirmed = await open('&unconfirmed=1');
+    await unconfirmed.click('text=Check what would move');
+    await unconfirmed.click('text=Move to Laptop');
+    await unconfirmed.waitForSelector('[data-move-recovery]');
+    expect(await unconfirmed.textContent('[data-move-step="done"]')).toContain('Moved, not started');
+    expect(await unconfirmed.textContent('[data-move-recovery]')).toContain(
+      'Confirm Desk is fenced read-only, then Start on Laptop',
+    );
+    await settle(unconfirmed, 'not-started');
+    await unconfirmed.click('text=Retry completion and start');
+    await unconfirmed.waitForFunction(() =>
+      document.querySelector('[data-move-step="done"]')?.textContent?.includes('now running'),
+    );
+
+    const interrupted = await open('&interrupt=1&recovery=1');
+    await interrupted.click('text=Check what would move');
+    await interrupted.click('text=Move to Laptop');
+    await interrupted.waitForFunction(() =>
+      document.querySelector('[data-move-step="moving"]')?.textContent?.includes('(1 of 3)'),
+    );
+    await interrupted.keyboard.press('Escape');
+    expect(await interrupted.locator('[data-move-machine]').count()).toBe(1);
+    expect(await interrupted.textContent('[data-move-machine]')).toContain('Moving…');
+    expect(await interrupted.locator('button[aria-label="Close"]').first().isDisabled()).toBe(true);
+    await interrupted.locator('button[aria-label="Close"]').first().dispatchEvent('click');
+    expect(await interrupted.locator('[data-move-machine]').count()).toBe(1);
+    await interrupted.waitForFunction(() => (window as unknown as { finishMove: () => boolean }).finishMove());
+    await interrupted.waitForSelector('[data-move-recovery]');
+    expect(await interrupted.textContent('[data-move-recovery]')).toContain(
+      'Turns and attachments could not be restored.',
+    );
+
     const refused = await open('&refuse=1');
     await refused.click('text=Check what would move');
     await refused.waitForSelector('[data-move-refusals]');

@@ -113,9 +113,11 @@ export interface Progress {
 
 export interface Moved {
   readonly received: ImportResponse;
-  /** The stub on the source could not be marked: the ferret runs on the target and the source is stopped. */
+  /** Whether the source confirmed its durable fence. An unmarked source NEVER permits starting the target. */
   readonly stub: 'marked' | 'unmarked';
   readonly stubNote?: string;
+  /** Retries the source's durable completion before attempting any target start. */
+  readonly retryComplete?: () => Promise<Moved>;
 }
 
 const octets = (answer: unknown): Uint8Array => {
@@ -124,10 +126,8 @@ const octets = (answer: unknown): Uint8Array => {
 };
 
 /**
- * Seals on the source, carries every chunk to the target and imports. The source's `complete` runs only after the target
- * has the ferret; any failure before it leaves the source's ferret stopped, kept whole, and its own timer resumes it (the
- * source says so in its answer). The source daemon id the target is told is the app's OWN knowledge of that machine, never
- * the header's claim.
+ * Imports a stopped target, confirms the source's durable fence, then starts the target. A missing fence answer leaves
+ * the target stopped with an actionable receipt. Once completion may have committed, source expiry never resumes it.
  */
 export async function carry(
   ferret: string,
@@ -170,7 +170,7 @@ export async function carry(
   say({ step: 'carrying', chunk: { done: total, of: total } });
 
   say({ step: 'receiving' });
-  const received = ImportResponseSchema.parse(
+  let received = ImportResponseSchema.parse(
     await on(to, () =>
       to.client.call('POST /v1/relocate/offers/:offerId/import', {
         params: { offerId: reviewed.offer.offerId },
@@ -184,18 +184,55 @@ export async function carry(
   );
 
   say({ step: 'finishing' });
+  const moved = await finishMove(from, to, sealed.exportId, received);
+  say({ step: 'done' });
+  return moved;
+}
+
+async function finishMove(from: Machine, to: Machine, exportId: string, imported: ImportResponse): Promise<Moved> {
+  let received = imported;
   let moved: Moved = { received, stub: 'marked' };
   try {
     await on(from, () =>
       from.client.call('POST /v1/relocate/exports/:exportId/complete', {
-        params: { exportId: sealed.exportId },
+        params: { exportId },
         body: { to: { daemonId: to.daemon, ferretId: received.ferretId, machine: to.name } },
       }),
     );
   } catch (error) {
-    moved = { received, stub: 'unmarked', stubNote: sentenceOf(error) };
+    const why = sentenceOf(error);
+    received = {
+      ...received,
+      recovery: {
+        code: 'source_unconfirmed',
+        state: 'stopped',
+        message: `Moved, not started: ${why}. ${from.name} has not confirmed its fence; the transfer will not automatically resume it. Confirm ${from.name} is fenced read-only, then Start on ${to.name}. Retry completion to confirm the fence before starting. Keep this receipt; do not resume both copies.${received.recovery === undefined ? '' : ` ${received.recovery.message}`}`,
+      },
+    };
+    moved = {
+      received,
+      stub: 'unmarked',
+      stubNote: why,
+      retryComplete: async () => await finishMove(from, to, exportId, imported),
+    };
   }
-  say({ step: 'done' });
+  if (moved.stub === 'marked' && received.recovery === undefined) {
+    try {
+      await on(to, () =>
+        to.client.call('POST /v1/relocate/imports/:ferretId/start', { params: { ferretId: received.ferretId } }),
+      );
+    } catch (error) {
+      received = {
+        ...received,
+        recovery: {
+          code: 'start_unconfirmed',
+          state: 'unknown',
+          message: `The source is fenced read-only. ${sentenceOf(error)}. Open ${to.name} to check whether it started before explicitly resuming it; keep this receipt.`,
+        },
+      };
+      moved = { received, stub: 'marked' };
+    }
+  }
   return moved;
 }
 

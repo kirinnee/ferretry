@@ -10,6 +10,33 @@ const refusal = async (promise: Promise<unknown>) =>
   );
 
 describe('export stops the ferret politely, and complete turns the source into a stub that keeps every file', () => {
+  test('one handed-out chunk holds A past +16 minutes and completion can still be retried', async () => {
+    const w = await world();
+    const result = await w.relocation.export(FERRET, (await w.offer()).offer);
+    w.relocation.chunk(result.exportId, 0);
+    w.now += 16 * 60_000;
+    await w.relocation.expire();
+    expect(w.ferrets.state).toBe('stopped');
+    expect(w.ferrets.calls).not.toContain('resume');
+    const completed = await w.relocation.complete(result.exportId, {
+      to: { daemonId: w.targetIdentity.daemonId, ferretId: 'f-on-b' },
+    });
+    expect(completed.movedTo.ferretId).toBe('f-on-b');
+  });
+  test('expiry never resumes A after its durable fence when the moved-ledger answer fails', async () => {
+    const w = await world({ recordFails: true });
+    const result = await w.relocation.export(FERRET, (await w.offer()).offer);
+    await expect(
+      w.relocation.complete(result.exportId, {
+        to: { daemonId: w.targetIdentity.daemonId, ferretId: 'f-on-b' },
+      }),
+    ).rejects.toThrow('moved ledger unavailable');
+    w.now += 20 * 60_000;
+    await w.relocation.expire();
+    expect(w.ferrets.state).toBe('stopped');
+    expect(w.ferrets.calls).not.toContain('resume');
+  });
+
   test('an idle ferret is stopped politely before it is read, and a stopped one is not stopped again', async () => {
     const idle = await world();
     await idle.relocation.export(FERRET, (await idle.offer()).offer);
