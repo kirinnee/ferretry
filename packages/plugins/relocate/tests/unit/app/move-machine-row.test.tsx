@@ -92,7 +92,6 @@ describe('the move-machine row', () => {
           f1: {
             daemonId: `fy_daemon_${'B'.repeat(43)}`,
             ferretId: 'g9',
-            machine: 'Laptop',
             at: '2026-11-27T00:00:00.000Z',
           },
         },
@@ -105,7 +104,8 @@ describe('the move-machine row', () => {
       must(original.querySelector<HTMLButtonElement>('button[aria-label="Close"]'), 'Close').click();
     });
     expect(document.querySelector('[data-move-machine]')).toBeNull();
-    expect(document.querySelector('[data-moved-to]')?.textContent).toContain('Moved to Laptop');
+    expect(document.querySelector('[data-moved-to]')?.textContent).toContain('Moved to another machine');
+    expect(document.querySelector('[data-moved-to]')?.textContent).not.toContain('fy_daemon_');
   });
   it('is offered only for a controlling caller with at least two machines', () => {
     expect(offersMove(true, 2)).toBe(true);
