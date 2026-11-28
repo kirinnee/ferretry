@@ -34,7 +34,10 @@ describe('priorServersOf', () => {
 
 describe('autonomousPreparation', () => {
   it('should have Codex trust the launch folder and seed no first run', () => {
-    expect(autonomousPreparation('codex')).toEqual({ seedFirstRun: false, trustLaunchFolder: true });
+    expect(autonomousPreparation('codex', REAL_KITS.get('codex'))).toEqual({
+      seedFirstRun: false,
+      trustLaunchFolder: true,
+    });
   });
 
   it('should have Claude seed its first run and trust no folder', () => {
