@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { toBase64Url } from '@ferretry/std/sealing';
 import {
   carry,
+  hasHeldMove,
   type Machine,
   MoveStopped,
   type Progress,
@@ -23,7 +24,7 @@ interface Scripted {
 function scripted(
   daemon: string,
   name: string,
-  answer: (route: string, init: { params?: Record<string, string>; body?: unknown }) => unknown,
+  answer: (route: string, init: { params?: Record<string, string>; body?: unknown; quiet?: boolean }) => unknown,
   options: { readonly dismiss?: boolean } = {},
 ): Scripted {
   const calls: Scripted['calls'] = [];
@@ -36,7 +37,7 @@ function scripted(
       return options.dismiss === true ? undefined : await act();
     },
     client: {
-      call: (async (route: string, init?: { params?: Record<string, string>; body?: unknown }) => {
+      call: (async (route: string, init?: { params?: Record<string, string>; body?: unknown; quiet?: boolean }) => {
         (calls as { route: string; params?: unknown; body?: unknown }[]).push({
           route,
           params: init?.params,
@@ -295,4 +296,25 @@ it('release runs only behind the source passkey and names that source ferret, ne
   expect(dismissed.calls).toEqual([]);
   const refused = scripted('source', 'Desk', () => new Error('source has not confirmed stop'));
   await expect(releaseMove(FERRET, refused.machine)).rejects.toThrow('Desk: source has not confirmed stop');
+});
+
+it('recovery checks explicitly request step-up for this ferret and preserve a refusal for the dialog', async () => {
+  for (const held of [false, true]) {
+    const source = scripted('source', 'Desk', (route, init) => {
+      expect(route).toBe('GET /v1/relocate/:ferretId/held');
+      // This must remain a pressed read even during the shell's navigation grace or after a cancelled prompt.
+      expect(init).toEqual({ params: { ferretId: FERRET }, quiet: false });
+      return held ? { held: true, since: '2026-11-27T00:00:00.000Z' } : { held: false };
+    });
+    expect(await hasHeldMove(FERRET, source.machine)).toBe(held);
+    expect(source.pressed.count).toBe(1);
+    expect(source.calls).toHaveLength(1);
+  }
+  const refused = scripted('source', 'Desk', () => new Error('Confirm with your passkey, then try again.'));
+  await expect(hasHeldMove(FERRET, refused.machine)).rejects.toThrow(
+    'Desk: Confirm with your passkey, then try again.',
+  );
+  const dismissed = scripted('source', 'Desk', () => ({ held: true }), { dismiss: true });
+  await expect(hasHeldMove(FERRET, dismissed.machine)).rejects.toThrow('Desk was not unlocked with your passkey');
+  expect(dismissed.calls).toEqual([]);
 });
