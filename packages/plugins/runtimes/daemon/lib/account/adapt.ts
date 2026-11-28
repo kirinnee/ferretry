@@ -14,7 +14,7 @@
  * | Settings     | `settings.json`, deep-merged                       | `config.toml`, deep-merged                     |
  * | Hooks        | the `hooks` block of `settings.json`               | `hooks.json` (link for one, generated for more) |
  *
- * Every destination name is read from `../assets.ts`'s per-harness table, the one owner of where a
+ * Every destination name is read from `../assets.ts`, built from each harness's own plugin: the one owner of where a
  * harness expects a document, so version 1 and version 2 can never disagree about a path.
  *
  * **Link or generate.** A destination with ONE source is a link into the asset tree, so editing the
@@ -46,7 +46,7 @@
  */
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames } from '../foreign.ts';
-import { harnessAsset, HARNESS_ASSETS, ownedSkillEntriesOf, type HarnessAssetTable } from '../assets.ts';
+import { type AssetsKit, harnessAsset, ownedSkillEntriesOf } from '../assets.ts';
 import {
   isSseUrl,
   type KitPlumbingEntry,
@@ -58,6 +58,7 @@ import {
   displayNameOf,
   harnessKeyOfKind,
   kindOf,
+  kitDocumentsOf,
   neededKitMembers,
   supportedKinds,
   UnsupportedHarnessError,
@@ -119,8 +120,6 @@ export interface AdaptInput {
    * `applyFixedLayer(...).settings` (`./fixed-layer.ts`), so the fixed layer's keys are in the file too.
    */
   readonly settings?: SettingsObject;
-  /** Defaults to {@link HARNESS_ASSETS}; injected so a caller can substitute one. */
-  readonly assets?: HarnessAssetTable;
   /** The kit the harness's own plugin gives this runtime (how it spells MCP servers and its documents). */
   readonly kit: RuntimesHarnessKit | undefined;
 }
@@ -240,12 +239,12 @@ export const CLAUDE_JSON_FILE = '.claude.json';
 const HOOK_SCRIPTS_FALLBACK_DEST = 'hooks';
 
 /** Where a hooks document lands as its own file. Claude has none: its hooks live in `settings.json`. */
-const hooksFileDest = (assets: HarnessAssetTable, harness: HarnessKind): string | undefined =>
-  harnessAsset(assets, harness, 'hooks')?.dest;
+const hooksFileDest = (kit: AssetsKit | undefined): string | undefined => harnessAsset(kit, 'hooks')?.dest;
 
-const destOf = (assets: HarnessAssetTable, harness: HarnessKind, field: 'memory' | 'skills' | 'settings') =>
-  // Present for both harnesses by the table's own declaration.
-  harnessAsset(assets, harness, field) as NonNullable<ReturnType<typeof harnessAsset>>;
+/** Where a document lands: what the kit says, or (a kit that names no settings file or instructions file) where the harness has always kept it. */
+const destOf = (harness: HarnessKind, kit: AssetsKit | undefined, field: 'memory' | 'skills' | 'settings') =>
+  // Present for every harness: the kit says them, or `kitDocumentsOf` does, and the skills folder is every harness's.
+  harnessAsset(kit, field, kitDocumentsOf(harness)) as NonNullable<ReturnType<typeof harnessAsset>>;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -454,11 +453,10 @@ interface AdaptedHooks {
 }
 
 function adaptHooks(
-  harness: HarnessKind,
   hooks: ResolvedProfile['hooks'],
   bodies: Readonly<Record<string, SettingsObject>>,
   baseSettings: SettingsObject,
-  assets: HarnessAssetTable,
+  kit: AssetsKit | undefined,
   problems: AdaptProblem[],
 ): AdaptedHooks {
   const entries: AdaptedEntry[] = [];
@@ -467,7 +465,7 @@ function adaptHooks(
   const files = hooks.filter(hook => hook.component.file !== undefined || hook.component.document !== undefined);
   const directories = hooks.filter(hook => hook.component.directory !== undefined);
 
-  const scriptsDest = harnessAsset(assets, harness, 'hooksDir')?.dest ?? HOOK_SCRIPTS_FALLBACK_DEST;
+  const scriptsDest = harnessAsset(kit, 'hooksDir')?.dest ?? HOOK_SCRIPTS_FALLBACK_DEST;
   const newestDirectory = directories.at(-1);
   if (newestDirectory === undefined) absent.push(scriptsDest);
   else {
@@ -487,7 +485,7 @@ function adaptHooks(
     });
   }
 
-  const fileDest = hooksFileDest(assets, harness);
+  const fileDest = hooksFileDest(kit);
   // One hooks document with a file of its own is a link, so only a merge needs the bodies read.
   // A document given as data has no file to link, so it is always merged from its body.
   const needsBodies =
@@ -630,12 +628,11 @@ export const kitlessAdaptation = (harness: HarnessKind): AdaptedRuntime => ({
  */
 export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   const { resolved, plumbing } = input;
-  const assets = input.assets ?? HARNESS_ASSETS;
   const harness = resolved.harness;
   const problems: AdaptProblem[] = [];
   const overrides: AdaptOverride[] = [];
   const launchEnv: Record<string, string> = {};
-  const settingsAsset = destOf(assets, harness, 'settings');
+  const settingsAsset = destOf(harness, input.kit, 'settings');
   const baseSettings = input.settings ?? resolved.settings.value;
 
   if (plumbing.harness !== harness) {
@@ -648,7 +645,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   const entries: AdaptedEntry[] = [];
   const absent: string[] = [];
 
-  const instructionsDest = destOf(assets, harness, 'memory').dest;
+  const instructionsDest = destOf(harness, input.kit, 'memory').dest;
   const instructions = adaptInstructions(
     resolved.instructions,
     input.bodies?.instructions ?? {},
@@ -658,7 +655,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   if (instructions === undefined && resolved.instructions.length === 0) absent.push(instructionsDest);
   if (instructions !== undefined) entries.push(instructions);
 
-  const skillsDest = destOf(assets, harness, 'skills').dest;
+  const skillsDest = destOf(harness, input.kit, 'skills').dest;
   const reserved = ownedSkillEntriesOf(input.kit);
   for (const { item, layer } of resolved.skills) {
     if (input.bodies?.skillItems?.has(item) === false) continue;
@@ -679,7 +676,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
     });
   }
 
-  const hooks = adaptHooks(harness, resolved.hooks, input.bodies?.hooks ?? {}, baseSettings, assets, problems);
+  const hooks = adaptHooks(resolved.hooks, input.bodies?.hooks ?? {}, baseSettings, input.kit, problems);
   entries.push(...hooks.entries);
   absent.push(...hooks.absent);
 

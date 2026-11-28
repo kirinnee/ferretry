@@ -27,7 +27,7 @@ import { type AccountModel, type AccountModelDocument, parseAccountModel } from 
 import type { MachineAuthority } from '../../../contract/index.ts';
 import { shownWords, shownWordsEtag } from '../../../daemon/lib/service/command-line.ts';
 import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
-import { REAL_KITS } from '../../support/real-kits.ts';
+import { REAL_KITS, REAL_SIGN_IN } from '../../support/real-kits.ts';
 
 const DIGEST = `sha256:${'0'.repeat(64)}`;
 const AUTHORITY: MachineAuthority = { mayApply: true, applyRefusal: 'granted' };
@@ -690,7 +690,7 @@ describe('runtimeCatalog', () => {
     });
 
     const withModels: Partial<CatalogFacts> = {
-      modelCatalogs: { catalogs: builtInModelCatalogs(), presets: builtInPresets() },
+      modelCatalogs: { catalogs: builtInModelCatalogs(), presets: builtInPresets(), signIn: REAL_SIGN_IN },
     };
 
     // Assert
@@ -712,7 +712,9 @@ describe('runtimeCatalog', () => {
     const refused = runtime('claude-default');
 
     should(refused.launch).eql({ available: false, reason: 'No model list for Claude Code yet' });
-    should(runtime('claude-default', { modelCatalogs: { catalogs: {}, presets: [] } }).launch).eql(refused.launch);
+    should(
+      runtime('claude-default', { modelCatalogs: { catalogs: {}, presets: [], signIn: REAL_SIGN_IN } }).launch,
+    ).eql(refused.launch);
   });
 
   it('should refuse a runtime when the installed Claude does not accept Auto mode', () => {
@@ -928,7 +930,7 @@ describe('runtimeCatalog', () => {
         'plain-set': { credential: 'claude-b', profile: 'sets' },
       },
     });
-    const sources = { catalogs: builtInModelCatalogs(), presets: builtInPresets() };
+    const sources = { catalogs: builtInModelCatalogs(), presets: builtInPresets(), signIn: REAL_SIGN_IN };
 
     // Act
     const withSet = runtime('plain-set', {}, model);
@@ -963,8 +965,11 @@ describe('runtimeCatalog', () => {
 
     // Assert
     should(
-      runtime('byhand', { modelCatalogs: { catalogs: builtInModelCatalogs(), presets: builtInPresets() } }, model)
-        .models,
+      runtime(
+        'byhand',
+        { modelCatalogs: { catalogs: builtInModelCatalogs(), presets: builtInPresets(), signIn: REAL_SIGN_IN } },
+        model,
+      ).models,
     ).be.undefined();
   });
 
@@ -992,7 +997,12 @@ describe('runtimeCatalog', () => {
       },
       runtimes: { ...documentOf().runtimes, local: { credential: 'ollama', profile: 'plain' } },
     });
-    const sources = { catalogs: builtInModelCatalogs(), presets: builtInPresets(), local: { ollama: local } };
+    const sources = {
+      catalogs: builtInModelCatalogs(),
+      presets: builtInPresets(),
+      signIn: REAL_SIGN_IN,
+      local: { ollama: local },
+    };
 
     // Act
     const actual = runtime('local', { modelCatalogs: sources, tools: { claude: '/c', codex: '/x' } }, model);

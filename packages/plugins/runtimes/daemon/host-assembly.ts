@@ -446,9 +446,13 @@ export function fileAssembly(
     credentials: ctx.needs.logins,
     loginChanges: ctx.needs.loginChanges,
     // The catalogs Logins owns, read live: what each runtime offers, and what an apply pins its tier slots to.
-    modelCatalogs: loginsModelCatalogs(ctx.needs.logins, sentence => {
-      ctx.kernel.log.warn(sentence);
-    }),
+    modelCatalogs: loginsModelCatalogs(
+      ctx.needs.logins,
+      () => harnessKits(hook => ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY)),
+      sentence => {
+        ctx.kernel.log.warn(sentence);
+      },
+    ),
     // Where Logins keeps each Ferretry-kept login, read live: how a person-run wrapper is signed in (the ferret launch hook's own projection).
     loginStores: loginsLaunchStores(ctx.needs.logins),
     configWriter: writeAllConfigWriter(ctx.kernel.config, configDirectory),

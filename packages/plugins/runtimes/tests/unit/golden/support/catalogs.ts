@@ -6,6 +6,7 @@
 import { ModelCatalogFileSchema } from '@ferretry/plugin-logins/contract';
 import type { ModelCatalogSources } from '../../../../daemon/lib/models/catalog.ts';
 import type { ModelCatalog } from '../../../../daemon/lib/models/schema.ts';
+import { REAL_SIGN_IN } from '../../../support/real-kits.ts';
 
 const model = (
   id: string,
@@ -29,6 +30,7 @@ const catalog = (id: string, file: Record<string, unknown>): ModelCatalog => ({
 });
 
 export const GOLDEN_CATALOGS: ModelCatalogSources = {
+  signIn: REAL_SIGN_IN,
   catalogs: {
     anthropic: catalog('anthropic', {
       label: 'Golden Anthropic',

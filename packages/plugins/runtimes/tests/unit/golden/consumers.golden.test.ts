@@ -23,7 +23,7 @@ import { harnessAwareWhich } from '../../../daemon/adapters/harness-lookup.ts';
 import { CommandCache } from '../../../daemon/adapters/command-cache.ts';
 import { toolInstaller } from '../../../daemon/adapters/tool-installer.ts';
 import {
-  BUILTIN_COMPONENTS,
+  builtinComponents,
   builtinDocument,
   builtinProfileLayers,
   starterModelSet,
@@ -38,6 +38,7 @@ import { handOver, type OwnedComponents } from '../../../daemon/lib/service/owne
 import { type AccountChangeFacts, deriveAccountChange } from '../../../daemon/lib/service/mutations.ts';
 import { createRuntimesApi } from '../../../daemon/lib/service/runtimes-api.ts';
 import { expectGolden } from './support/golden.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 // ── runtimes-api: the default runtime's harness preference ──────────────────────────────────────
 
@@ -257,10 +258,10 @@ describe('data-word consumer goldens', () => {
         codexNone: starterModelSet('codex', {}) ?? null,
       },
       components: {
-        instructions: Object.keys(BUILTIN_COMPONENTS.instructions),
-        settings: BUILTIN_COMPONENTS.settings,
+        instructions: Object.keys(builtinComponents(REAL_KITS).instructions),
+        settings: builtinComponents(REAL_KITS).settings,
       },
-      document: builtinDocument(starters),
+      document: builtinDocument(starters, REAL_KITS),
     });
   });
 

@@ -81,6 +81,7 @@ async function freshMachine(options: MachineOptions = {}) {
     ],
     templates: new Map(),
     starters: TEST_STARTERS,
+    kits: REAL_KITS,
     components:
       options.instructionsText === undefined
         ? NO_COMPONENTS

@@ -106,8 +106,10 @@ describe('profile scope', () => {
     });
     should(profileScope(catalogue, 'mixed')).deepEqual({
       kind: 'mixed',
-      claude: 'settings/claude-settings',
-      codex: 'mcp/linear',
+      layers: [
+        { harness: 'claude', layer: 'settings/claude-settings' },
+        { harness: 'codex', layer: 'mcp/linear' },
+      ],
     });
   });
 
@@ -118,8 +120,10 @@ describe('profile scope', () => {
     });
     should(profileScope(catalogue, 'top')).deepEqual({
       kind: 'mixed',
-      claude: 'profile/legacy',
-      codex: 'profile/legacy',
+      layers: [
+        { harness: 'claude', layer: 'profile/legacy' },
+        { harness: 'codex', layer: 'profile/legacy' },
+      ],
     });
   });
 
@@ -142,7 +146,13 @@ describe('describeScopeConflict', () => {
   it('should name the profile and both layers in one sentence', () => {
     should(
       describeScopeConflict(
-        { kind: 'mixed', claude: 'settings/claude-settings', codex: 'modelSets/codex-models' },
+        {
+          kind: 'mixed',
+          layers: [
+            { harness: 'claude', layer: 'settings/claude-settings' },
+            { harness: 'codex', layer: 'modelSets/codex-models' },
+          ],
+        },
         'work',
       ),
     ).equal(
@@ -151,7 +161,15 @@ describe('describeScopeConflict', () => {
   });
 
   it('should say "A profile" for a draft and name a mixed base once', () => {
-    should(describeScopeConflict({ kind: 'mixed', claude: 'profile/legacy', codex: 'profile/legacy' })).equal(
+    should(
+      describeScopeConflict({
+        kind: 'mixed',
+        layers: [
+          { harness: 'claude', layer: 'profile/legacy' },
+          { harness: 'codex', layer: 'profile/legacy' },
+        ],
+      }),
+    ).equal(
       "A profile can't be both Claude only and Codex only: profile legacy already mixes Claude only and Codex only layers.",
     );
   });

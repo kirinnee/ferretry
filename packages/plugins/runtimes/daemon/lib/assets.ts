@@ -1,8 +1,8 @@
 /**
  * Where each harness expects a profile's assets to land inside the home it owns.
  *
- * This is the whole per-harness knowledge base: one table, consulted once, by the plan builder.
- * Nothing else infers a destination, and nothing reads a generated file back to discover one.
+ * Each harness's plugin says so (`kit.settingsFile`, `kit.importSetup.instructionsName` and `kit.assets`; a kit that leaves the first two
+ * out lands them where `harness-kind.ts` says it always did): this is consulted once, by the plan builder. Nothing else infers a destination, and nothing reads a generated file back to discover one.
  *
  * The tool this replaces silently dropped any asset its per-harness table had no destination for —
  * a Claude profile could declare `hooks:` and get no hooks, with no error. Here a field with no
@@ -10,7 +10,6 @@
  * than an absent file nobody notices.
  */
 import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
-import type { HarnessKind } from './manifest.ts';
 import type { SettingsFormat } from './settings.ts';
 
 /** The profile fields that name an asset on disk. `settings` is layered; the rest are paths. */
@@ -73,33 +72,39 @@ export interface HarnessAsset {
   readonly format?: SettingsFormat;
 }
 
-const CLAUDE_ASSETS: readonly HarnessAsset[] = [
-  // Claude rewrites settings.json at runtime (`/effort` persists there), and a stack of layers has no
-  // single source to point at, so this one is composed and written rather than linked.
-  { field: 'settings', dest: 'settings.json', materialization: 'generated', format: 'json' },
-  { field: 'memory', dest: 'CLAUDE.md', materialization: 'link' },
-  { field: 'skills', dest: 'skills', materialization: 'link' },
-  { field: 'mcp', dest: '.mcp.json', materialization: 'link' },
-];
+/** Where the settings and instructions of a harness land when its kit says nothing (`kitDocumentsOf`). */
+export interface AssetsFallback {
+  readonly settings: { readonly file: string; readonly format: SettingsFormat };
+  readonly memory: string;
+}
 
-const CODEX_ASSETS: readonly HarnessAsset[] = [
-  // Codex likewise rewrites config.toml, so its settings are composed rather than linked.
-  { field: 'settings', dest: 'config.toml', materialization: 'generated', format: 'toml' },
-  { field: 'memory', dest: 'AGENTS.md', materialization: 'link' },
-  { field: 'hooks', dest: 'hooks.json', materialization: 'link' },
-  { field: 'hooksDir', dest: 'hooks', materialization: 'link' },
-  { field: 'skills', dest: 'skills', materialization: 'link' },
-];
+/** What a harness's destinations are read from: its settings file and instructions file (always), and its own assets. */
+export type AssetsKit = Pick<RuntimesHarnessKit, 'settingsFile' | 'importSetup' | 'assets'>;
 
-/** Every harness's destinations. Injected rather than imported, so a caller can substitute one. */
-export type HarnessAssetTable = Readonly<Record<HarnessKind, readonly HarnessAsset[]>>;
-
-export const HARNESS_ASSETS: HarnessAssetTable = {
-  claude: CLAUDE_ASSETS,
-  codex: CODEX_ASSETS,
-};
+/**
+ * Every destination of a harness. The three every harness has come from what its plugin already says: the settings document
+ * (composed and written, since each harness rewrites its own settings at runtime and a stack of layers has no single source to
+ * point at), the instructions file (linked) and the `skills` folder (linked); the plugin's `assets` add what is only its own. A kit that
+ * names no settings file or instructions file lands them at `fallback` (`kitDocumentsOf`), as before the kit named them.
+ */
+export function assetsOf(kit: AssetsKit | undefined, fallback?: AssetsFallback): readonly HarnessAsset[] {
+  const settings = kit?.settingsFile ?? fallback?.settings;
+  const memory = kit?.importSetup?.instructionsName ?? fallback?.memory;
+  return [
+    ...(settings === undefined
+      ? []
+      : [{ field: 'settings', dest: settings.file, materialization: 'generated', format: settings.format } as const]),
+    ...(memory === undefined ? [] : [{ field: 'memory', dest: memory, materialization: 'link' } as const]),
+    { field: 'skills', dest: 'skills', materialization: 'link' } as const,
+    ...(kit?.assets ?? []),
+  ];
+}
 
 /** The asset entry for one field, or `undefined` when this harness has no destination for it. */
-export function harnessAsset(table: HarnessAssetTable, kind: HarnessKind, field: AssetField): HarnessAsset | undefined {
-  return table[kind].find(asset => asset.field === field);
+export function harnessAsset(
+  kit: AssetsKit | undefined,
+  field: AssetField,
+  fallback?: AssetsFallback,
+): HarnessAsset | undefined {
+  return assetsOf(kit, fallback).find(asset => asset.field === field);
 }

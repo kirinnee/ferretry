@@ -5,12 +5,28 @@
  * a catalogue read).
  */
 import type { LoginLaunchStore, LoginsApi } from '@ferretry/plugin-logins/contract';
+import type { RuntimesHarnessKit } from '../../contract/harness-kit.ts';
 import { supportedKinds } from '../lib/harness-kind.ts';
+import type { HarnessKind } from '../lib/manifest.ts';
 import type { ModelCatalogSources, ModelSourcePreset } from '../lib/models/catalog.ts';
 
-/** What Logins answers, as the slice of it a runtime reads. */
-export const modelCatalogSourcesOf = (view: Awaited<ReturnType<LoginsApi['modelSources']>>): ModelCatalogSources => ({
+type SignInKits = ReadonlyMap<HarnessKind, Pick<RuntimesHarnessKit, 'signInCatalog'>>;
+
+/** The catalog each harness's sign-in reads, from the plugins that give one. */
+const signInCatalogsOf = (kits: SignInKits): ReadonlyMap<HarnessKind, string> =>
+  new Map(
+    supportedKinds().flatMap(kind =>
+      kits.get(kind)?.signInCatalog === undefined ? [] : [[kind, kits.get(kind)?.signInCatalog as string]],
+    ),
+  );
+
+/** What Logins answers, as the slice of it a runtime reads, with the catalog each sign-in reads from the harness plugins. */
+export const modelCatalogSourcesOf = (
+  view: Awaited<ReturnType<LoginsApi['modelSources']>>,
+  kits: SignInKits,
+): ModelCatalogSources => ({
   catalogs: view.catalogs,
+  signIn: signInCatalogsOf(kits),
   presets: view.presets.map(
     (preset): ModelSourcePreset => ({
       id: preset.id,
@@ -28,14 +44,15 @@ export const modelCatalogSourcesOf = (view: Awaited<ReturnType<LoginsApi['modelS
 
 export function loginsModelCatalogs(
   logins: Pick<LoginsApi, 'modelSources'>,
+  kits: () => SignInKits,
   say: (sentence: string) => void,
 ): () => Promise<ModelCatalogSources> {
   return async () => {
     try {
-      return modelCatalogSourcesOf(await logins.modelSources());
+      return modelCatalogSourcesOf(await logins.modelSources(), kits());
     } catch {
       say('Runtimes could not read the model catalogs from Logins, so runtimes show their model set only.');
-      return { catalogs: {}, presets: [] };
+      return { catalogs: {}, presets: [], signIn: signInCatalogsOf(kits()) };
     }
   };
 }

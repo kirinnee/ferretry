@@ -43,7 +43,7 @@
  *
  * Pure and total throughout: no filesystem, no environment, no clock, and every failure is a value.
  */
-import { displayNameOf } from '../harness-kind.ts';
+import { displayNameOf, modelOwnerOf } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { deepMergeSettings, type SettingsObject } from '../settings.ts';
 import { expandStack, type StackFailure } from '../../../contract/profile-stack.ts';
@@ -61,22 +61,16 @@ import {
 
 // ── Model ids ────────────────────────────────────────────────────────────────────────────────────
 
-/** Claude Code's own model aliases, accepted by `--model` in place of a full id. */
-const CLAUDE_ALIASES: ReadonlySet<string> = new Set(['opus', 'sonnet', 'haiku', 'fable', 'opusplan']);
-
 /**
  * The harness a model id belongs to, or `undefined` for an id neither harness is known to run.
  *
- * The ONE owner of this mapping: a Claude id is `claude-…` or one of Claude Code's aliases (each
- * optionally with a context suffix such as `[1m]`); a Codex id is `gpt-…`, `codex-…` or an `o<n>…`
- * reasoning model. An id that is neither (kimi-k3, glm-5.3, deepseek-…) is a third-party model: it
- * has no harness of its own and belongs to whichever CLI the login drives — see {@link modelFitsHarness}.
+ * The ONE owner of this mapping (`harness-kind.ts` `modelOwnerOf`), read from what holds whether or not a harness's plugin is on,
+ * so one harness's plugin being off never changes what another's runtime does with a model set. An id nobody claims
+ * (kimi-k3, glm-5.3, deepseek-…) is a third-party model: it has no harness of its own and belongs to whichever CLI the
+ * login drives — see {@link modelFitsHarness}.
  */
 export function modelHarness(id: string): HarnessKind | undefined {
-  const bare = id.replace(/\[[^\]]*\]$/, '').toLowerCase();
-  if (bare.startsWith('claude-') || CLAUDE_ALIASES.has(bare)) return 'claude';
-  if (bare.startsWith('gpt-') || bare.startsWith('codex-') || /^o\d/.test(bare)) return 'codex';
-  return undefined;
+  return modelOwnerOf(id.replace(/\[[^\]]*\]$/, '').toLowerCase());
 }
 
 /**

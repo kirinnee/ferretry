@@ -6,7 +6,7 @@
  */
 import { describe, it } from 'bun:test';
 import { REAL_KITS } from '../../support/real-kits.ts';
-import { ASSET_FIELDS, HARNESS_ASSETS, harnessAsset, ownedSkillEntriesOf } from '../../../daemon/lib/assets.ts';
+import { ASSET_FIELDS, harnessAsset, ownedSkillEntriesOf } from '../../../daemon/lib/assets.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import {
   displayNameOf,
@@ -55,7 +55,7 @@ describe('harness word goldens', () => {
       assets: Object.fromEntries(
         supportedKinds().map(kind => [
           kind,
-          Object.fromEntries(ASSET_FIELDS.map(field => [field, harnessAsset(HARNESS_ASSETS, kind, field) ?? null])),
+          Object.fromEntries(ASSET_FIELDS.map(field => [field, harnessAsset(REAL_KITS.get(kind), field) ?? null])),
         ]),
       ),
       ownedEntry: {

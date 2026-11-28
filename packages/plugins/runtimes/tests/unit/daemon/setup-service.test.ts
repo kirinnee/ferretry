@@ -65,6 +65,7 @@ import {
 import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
 import { configText, DEFAULT_WARDEN_CONFIG } from '../lib/fixtures/config-text.ts';
 import { configReading, configTextOf, modelOfWrites } from '../support/config-reading.ts';
+import { REAL_SIGN_IN } from '../../support/real-kits.ts';
 
 /** `setup/import.json`'s name in the fleet directory (private to the service). */
 const IMPORT_RECORD_FILE = 'setup/import.json';
@@ -1052,7 +1053,13 @@ describe('the setup.import executor', () => {
   it("should publish each imported runtime with its login's model catalog (docs/model-catalog.md)", async () => {
     // Arrange
     const { service, applied } = world({
-      catalog: { modelCatalogs: async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() }) },
+      catalog: {
+        modelCatalogs: async () => ({
+          catalogs: builtInModelCatalogs(),
+          presets: builtInPresets(),
+          signIn: REAL_SIGN_IN,
+        }),
+      },
     });
 
     // Act

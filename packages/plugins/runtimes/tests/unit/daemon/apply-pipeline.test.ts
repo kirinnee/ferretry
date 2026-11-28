@@ -27,7 +27,7 @@ import {
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetCatalogServiceDeps } from '../../../daemon/lib/service/catalog-service.ts';
 import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
-import { REAL_KITS } from '../../support/real-kits.ts';
+import { REAL_KITS, REAL_SIGN_IN } from '../../support/real-kits.ts';
 
 const MODEL = parseAccountModel({
   version: 1,
@@ -370,7 +370,11 @@ describe('the apply pipeline over a fake config writer', () => {
     const republishWorld = () => {
       const applied: number[] = [];
       const w = world('fake', undefined, {
-        modelCatalogs: async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() }),
+        modelCatalogs: async () => ({
+          catalogs: builtInModelCatalogs(),
+          presets: builtInPresets(),
+          signIn: REAL_SIGN_IN,
+        }),
         publishedManifest: async () => undefined,
         provisioner: {
           preview: async plan => ({ ...plan, sharedHistory: [] }),
@@ -437,7 +441,11 @@ describe('the apply pipeline over a fake config writer', () => {
     let running = 0;
     let overlapped = false;
     const w = world('fake', undefined, {
-      modelCatalogs: async () => ({ catalogs: builtInModelCatalogs(), presets: builtInPresets() }),
+      modelCatalogs: async () => ({
+        catalogs: builtInModelCatalogs(),
+        presets: builtInPresets(),
+        signIn: REAL_SIGN_IN,
+      }),
       provisioner: {
         preview: async plan => ({ ...plan, sharedHistory: [] }),
         apply: async plan => {

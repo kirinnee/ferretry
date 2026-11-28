@@ -11,6 +11,7 @@ import { builtinDocument } from '../../../daemon/lib/account/builtin-autonomous.
 import { type AccountModel, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { AccountDocumentReading } from '../../../daemon/lib/service/catalog-service.ts';
 import type { FleetDocumentWrite } from '../../../daemon/lib/provisioning.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 /** Where a test machine's configuration directory is. */
 const TEST_CONFIG_DIRECTORY = '/state/config';
@@ -30,7 +31,7 @@ function filesOf(model: AccountModel): { readonly 'machine.yaml': string; readon
  * in its two files, so the built-ins are in them too; the real files never hold one.
  */
 function withBuiltins(model: AccountModel): AccountModel {
-  const builtin = builtinDocument(TEST_STARTERS);
+  const builtin = builtinDocument(TEST_STARTERS, REAL_KITS);
   const components: Record<string, unknown> = { ...model.components };
   for (const [kind, entries] of Object.entries(builtin.components))
     components[kind] = { ...entries, ...(components[kind] as object | undefined) };

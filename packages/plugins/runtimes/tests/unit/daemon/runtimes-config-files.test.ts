@@ -15,6 +15,7 @@ import {
   type StarterPins,
 } from '../../../daemon/adapters/runtimes-config-files.ts';
 import type { ComponentSourceLookup } from '../../../daemon/adapters/profile-components.ts';
+import { KIT_OWNERS } from '../../support/real-kits.ts';
 import type { AccountModel } from '../../../daemon/lib/account/schema.ts';
 
 type Values = Record<string, Record<string, unknown>>;
@@ -31,7 +32,7 @@ const BASE: Values = {
 /** The adapter over in-memory files; `values` can be swapped between reads, as the live config is. */
 function adapter(
   values: { current: Values } = { current: BASE },
-  components: ComponentSourceLookup = () => 'unavailable',
+  components: ComponentSourceLookup = KIT_OWNERS,
   modelSources: () => Promise<ModelCatalogSourcesView> = async () => TEST_MODEL_SOURCES,
   pins: StarterPins = memoryPins(),
 ) {
@@ -153,7 +154,7 @@ describe('the model-in-effect adapter', () => {
           environmentTemplates: async () => state.templates,
           modelSources: async () => state.sources,
         },
-        components: () => 'unavailable',
+        components: KIT_OWNERS,
         within: work => work,
       });
       return { state, files };

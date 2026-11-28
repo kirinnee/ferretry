@@ -2,7 +2,7 @@ import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logi
 import { parseAccountModel } from '../../daemon/lib/account/schema.ts';
 import { unavailableCatalogDeps } from '../../daemon/lib/service/assembly.ts';
 import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../daemon/lib/service/catalog-service.ts';
-import { REAL_KITS } from './real-kits.ts';
+import { REAL_KITS, REAL_SIGN_IN } from './real-kits.ts';
 
 // The catalogue service over fakes of its ports, with a lattice of shared profile bases as its model: shared by the
 // diamond tests of the unit tier (a small lattice) and the perf tier (the 20-deep one).
@@ -73,7 +73,7 @@ export function world(depth: number) {
     claudeStatusline: () => "'fy' statusline",
     fyCommand: '/opt/ferretry/bin/fy',
     kits: () => REAL_KITS,
-    modelCatalogs: async () => ({ catalogs: {}, presets: [] }),
+    modelCatalogs: async () => ({ catalogs: {}, presets: [], signIn: REAL_SIGN_IN }),
     provisioner: {
       preview: async plan => ({ ...plan, sharedHistory: [] }),
       apply: async plan => ({

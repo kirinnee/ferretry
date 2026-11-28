@@ -23,7 +23,7 @@
  * Pure and total: an unknown layer or a loop (which the schema refuses anyway) reads as generic
  * rather than throwing, so a caller holding a draft it built itself always gets an answer.
  */
-import { isSupportedKind, shortNameOf } from '../harness-kind.ts';
+import { isSupportedKind, shortNameOf, supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { credentialHarnesses } from './halves.ts';
 import { modelHarness } from './layering.ts';
@@ -40,12 +40,15 @@ import {
 export type HarnessScope = 'generic' | HarnessKind;
 
 /**
- * A profile's derived scope. `mixed` names the first of its OWN layers that is Claude only and the
- * first that is Codex only — the same layer twice when a base profile is itself mixed.
+ * A profile's derived scope. `mixed` lists, for each harness the profile reaches (in the order Runtimes lists them), the first of
+ * its OWN layers that is only that harness's — the same layer twice when a base profile is itself mixed.
  */
 export type ProfileScope =
   | { readonly kind: 'scoped'; readonly scope: HarnessScope }
-  | { readonly kind: 'mixed'; readonly claude: LayerReferenceText; readonly codex: LayerReferenceText };
+  | {
+      readonly kind: 'mixed';
+      readonly layers: readonly { readonly harness: HarnessKind; readonly layer: LayerReferenceText }[];
+    };
 
 type Catalogue = Pick<AccountModel, 'profiles' | 'components'>;
 
@@ -126,18 +129,20 @@ function foldLayers(
   visiting: ReadonlySet<string>,
   walk: Walk = new Map(),
 ): ProfileScope {
-  let claude: LayerReferenceText | undefined;
-  let codex: LayerReferenceText | undefined;
+  const first = new Map<HarnessKind, LayerReferenceText>();
   for (const text of layers) {
     const reference = text as LayerReferenceText;
     const scope = layerScope(catalogue, reference, visiting, walk);
-    if ((scope === 'claude' || scope === 'mixed') && claude === undefined) claude = reference;
-    if ((scope === 'codex' || scope === 'mixed') && codex === undefined) codex = reference;
+    for (const harness of supportedKinds())
+      if ((scope === harness || scope === 'mixed') && !first.has(harness)) first.set(harness, reference);
   }
-  if (claude !== undefined && codex !== undefined) return { kind: 'mixed', claude, codex };
-  if (claude !== undefined) return { kind: 'scoped', scope: 'claude' };
-  if (codex !== undefined) return { kind: 'scoped', scope: 'codex' };
-  return { kind: 'scoped', scope: 'generic' };
+  const reached = supportedKinds().flatMap(harness => {
+    const layer = first.get(harness);
+    return layer === undefined ? [] : [{ harness, layer }];
+  });
+  if (reached.length > 1) return { kind: 'mixed', layers: reached };
+  const [only] = reached;
+  return { kind: 'scoped', scope: only === undefined ? 'generic' : only.harness };
 }
 
 /**
@@ -169,11 +174,12 @@ export function layerWords(text: string): string {
  */
 export function describeScopeConflict(conflict: Extract<ProfileScope, { kind: 'mixed' }>, name?: string): string {
   const subject = name === undefined ? 'A profile' : `Profile ${name}`;
-  const reason =
-    conflict.claude === conflict.codex
-      ? `${layerWords(conflict.claude)} already mixes Claude only and Codex only layers`
-      : `${layerWords(conflict.claude)} is Claude only and ${layerWords(conflict.codex)} is Codex only`;
-  return `${subject} can't be both Claude only and Codex only: ${reason}.`;
+  const words = conflict.layers.map(({ harness }) => scopeWord(harness)).join(' and ');
+  const [first] = conflict.layers;
+  const reason = conflict.layers.every(({ layer }) => layer === first?.layer)
+    ? `${layerWords(first?.layer ?? '')} already mixes ${words} layers`
+    : conflict.layers.map(({ harness, layer }) => `${layerWords(layer)} is ${scopeWord(harness)}`).join(' and ');
+  return `${subject} can't be both ${words}: ${reason}.`;
 }
 
 /**

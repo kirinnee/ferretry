@@ -738,7 +738,7 @@ export class FleetSetupService {
     }
     let model: AccountModel;
     try {
-      model = mergeImport(existing, plan, touched);
+      model = mergeImport(existing, plan, touched, catalog.kits?.());
     } catch (error) {
       throw new FleetCatalogRefusal(
         'fleet_change_refused',

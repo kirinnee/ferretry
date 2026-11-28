@@ -6,6 +6,7 @@ import { loginModelCatalog } from '../../../daemon/lib/models/catalog.ts';
 import { runtimeModels } from '../../../daemon/lib/models/runtime.ts';
 import type { ModelCatalog } from '../../../daemon/lib/models/schema.ts';
 import { builtInModelCatalogs, builtInPresets } from './fixtures/built-ins.ts';
+import { REAL_SIGN_IN } from '../../support/real-kits.ts';
 
 const CATALOGS = builtInModelCatalogs();
 const PRESETS = builtInPresets();
@@ -189,7 +190,7 @@ describe('runtimeModels', () => {
     it('should hand a login the snapshot only when its catalog detects that server', () => {
       // Arrange
       const local = installed('found', ['gpt-oss:20b']);
-      const sources = { catalogs: CATALOGS, presets: PRESETS, local: { ollama: local } };
+      const sources = { catalogs: CATALOGS, presets: PRESETS, signIn: REAL_SIGN_IN, local: { ollama: local } };
 
       // Act
       const ollamaLogin = loginModelCatalog({ store: 'environment', preset: 'ollama-codex' }, 'codex', sources);
@@ -197,6 +198,7 @@ describe('runtimeModels', () => {
       const unread = loginModelCatalog({ store: 'environment', preset: 'ollama-codex' }, 'codex', {
         catalogs: CATALOGS,
         presets: PRESETS,
+        signIn: REAL_SIGN_IN,
       });
 
       // Assert

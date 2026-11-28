@@ -4,9 +4,8 @@
  */
 import {
   AUTONOMOUS_INSTRUCTIONS,
-  BUILTIN_COMPONENTS,
+  builtinComponents,
   builtinProfileLayers,
-  COMFORT_SETTINGS,
   starterModelSet,
 } from '../../../../daemon/lib/account/builtin-autonomous.ts';
 import { claudeRuntimesKit } from '../../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
@@ -16,6 +15,10 @@ import { type MaterialiseInput, materialiseFleet } from '../../../../daemon/lib/
 import { type AccountModel, type Credential, parseAccountModel } from '../../../../daemon/lib/account/schema.ts';
 import { GOLDEN_CATALOGS } from './catalogs.ts';
 import type { FleetLayout, FleetModelApplyPlan } from '../../../../daemon/lib/provisioning.ts';
+import { REAL_KITS } from '../../../support/real-kits.ts';
+
+/** Claude's comfort settings, as its plugin gives them. */
+const CLAUDE_COMFORT = REAL_KITS.get('claude')?.comfortSettings as unknown as { document: Record<string, unknown> };
 
 const LAYOUT: FleetLayout = {
   stateHome: '/fy',
@@ -134,8 +137,8 @@ function worldModel(
       machine: { agentPermissions: permissions === 'skip' ? 'skip' : 'auto' },
       credentials: { [credentialId]: credentialOf(harness, store, options.catalogs === true) },
       components: {
-        instructions: BUILTIN_COMPONENTS.instructions,
-        settings: BUILTIN_COMPONENTS.settings,
+        instructions: builtinComponents(REAL_KITS).instructions,
+        settings: builtinComponents(REAL_KITS).settings,
         modelSets: { [`ferretry-${harness}`]: starter },
       },
       profiles: { default: { layers: builtinProfileLayers(harness, { [harness]: models[0] as string }) } },
@@ -205,7 +208,10 @@ export function planOf(
     ...(options.catalogs === true ? { modelCatalogs: GOLDEN_CATALOGS } : {}),
     bodies: {
       instructions: { main: 'Be kind.\n', 'ferretry-work-alone': AUTONOMOUS_INSTRUCTIONS },
-      settings: { mine: ownSettings(harness), 'ferretry-claude-comfort': COMFORT_SETTINGS.document },
+      settings: {
+        mine: ownSettings(harness),
+        'ferretry-claude-comfort': CLAUDE_COMFORT.document,
+      },
       skillFrontmatter: { review: ['name', 'description'] },
     },
   });

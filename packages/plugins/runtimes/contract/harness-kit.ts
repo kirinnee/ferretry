@@ -333,6 +333,17 @@ export interface KitPartialSupportNote {
   readonly reason: string;
 }
 
+/** One place inside a harness home that a profile asset lands, beyond the three every harness has (settings, instructions, skills). */
+export interface KitAsset {
+  readonly field: 'settings' | 'memory' | 'skills' | 'hooks' | 'hooksDir' | 'mcp';
+  /** Destination name inside the runtime's home. For `skills` it names the container, and each selected item lands beneath it. */
+  readonly dest: string;
+  /** `link`: the destination IS the source; `copy`: the source's bytes at the last apply; `generated`: composed from a stack of layers. */
+  readonly materialization: 'link' | 'copy' | 'generated';
+  /** Set only for the layered settings field: the format its layers merge into. */
+  readonly format?: KitSettingsFormat;
+}
+
 /** What a harness plugin hands Runtimes for the harness it owns. Every member is optional; see the file comment. */
 export interface RuntimesHarnessKit {
   // Words.
@@ -357,6 +368,17 @@ export interface RuntimesHarnessKit {
   readonly hostOrganization?: true;
   /** Skill folders the harness keeps for itself, which a skills component may not use. */
   readonly ownedSkillEntries?: readonly string[];
+  /**
+   * The settings the harness's built-in profile (`ferretry-<harness>`) holds so it works well alone: a settings component body, with
+   * no permission among them. Absent: the built-in profile holds none.
+   */
+  readonly comfortSettings?: KitSettingsObject;
+  /**
+   * Where a profile's assets land in this harness's home, BEYOND the three every harness has: Runtimes derives the settings document
+   * (`settingsFile`), the instructions file (`importSetup.instructionsName`) and the `skills` folder itself, so a kit that gives none of
+   * these still lands them where the base did; it names only what is its own (Claude's `.mcp.json`, Codex's hooks).
+   */
+  readonly assets?: readonly KitAsset[];
   /** Whether the harness offers fast mode on a model, from the id alone. Claude's is a rule on the id; Codex's is the live account's to say. */
   fastSupport?(model: string): boolean;
 

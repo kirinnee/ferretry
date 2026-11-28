@@ -13,22 +13,19 @@ import type { Credential } from '../account/schema.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { ModelCatalog } from './schema.ts';
 
-/** The catalog a SIGN-IN login reads: its CLI's maker. */
-const SIGN_IN_MODEL_CATALOGS: Readonly<Record<HarnessKind, string>> = { claude: 'anthropic', codex: 'openai' };
-
 /**
- * Which catalog a login reads: a sign-in login its CLI's maker's, an environment login its preset's.
+ * Which catalog a login reads: a sign-in login its CLI's maker's (its plugin's `kit.signInCatalog`), an environment login its preset's.
  * `undefined` for an environment login made by hand or from a preset that names none — its runtimes
  * offer what their profile's model set says, as before catalogs.
  */
 function loginModelCatalogId(
   credential: Pick<Credential, 'store' | 'preset'>,
   harness: HarnessKind,
-  presets: readonly Pick<ModelSourcePreset, 'id' | 'catalog'>[],
+  sources: Pick<ModelCatalogSources, 'presets' | 'signIn'>,
 ): string | undefined {
-  if (credential.store !== 'environment') return SIGN_IN_MODEL_CATALOGS[harness];
+  if (credential.store !== 'environment') return sources.signIn.get(harness);
   if (credential.preset === undefined) return undefined;
-  return presets.find(preset => preset.id === credential.preset)?.catalog;
+  return sources.presets.find(preset => preset.id === credential.preset)?.catalog;
 }
 
 /**
@@ -45,6 +42,8 @@ export interface ModelSourcePreset {
 export interface ModelCatalogSources {
   readonly catalogs: Readonly<Record<string, ModelCatalog>>;
   readonly presets: readonly ModelSourcePreset[];
+  /** The catalog each harness's sign-in reads (`kit.signInCatalog`): a harness whose plugin gives none reads none. */
+  readonly signIn: ReadonlyMap<HarnessKind, string>;
   /** What the last read of each local server found, by the `detect` kind a catalog names. */
   readonly local?: { readonly ollama?: LocalModels };
 }
@@ -63,7 +62,7 @@ export function loginModelCatalog(
   readonly personOwned: ReadonlySet<string>;
   readonly local?: LocalModels;
 } {
-  const id = loginModelCatalogId(credential, harness, sources.presets);
+  const id = loginModelCatalogId(credential, harness, sources);
   const catalog = id === undefined ? undefined : sources.catalogs[id];
   const preset =
     credential.store === 'environment' ? sources.presets.find(entry => entry.id === credential.preset) : undefined;
@@ -82,10 +81,10 @@ export type StarterModels = Readonly<Partial<Record<HarnessKind, string>>>;
 /** No starter for any harness: what a reader that only needs profile NAMES passes. */
 export const NO_STARTERS: StarterModels = {};
 
-export function starterModelsOf(sources: Pick<ModelCatalogSources, 'catalogs'> | undefined): StarterModels {
+export function starterModelsOf(sources: Pick<ModelCatalogSources, 'catalogs' | 'signIn'> | undefined): StarterModels {
   if (sources === undefined) return NO_STARTERS;
   const starters: Partial<Record<HarnessKind, string>> = {};
-  for (const [harness, catalogId] of Object.entries(SIGN_IN_MODEL_CATALOGS) as [HarnessKind, string][]) {
+  for (const [harness, catalogId] of sources.signIn) {
     const half = sources.catalogs[catalogId]?.[harness];
     const model = half?.models.find(candidate => candidate.default);
     if (model !== undefined) starters[harness] = model.id;
