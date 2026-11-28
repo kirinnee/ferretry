@@ -131,7 +131,8 @@ describe('the move-machine row', () => {
     expect(dialog.querySelector('[data-move-step="pick"]')).not.toBeNull();
     expect(dialog.textContent).toContain('beta-box');
     // the machine it is on is not a place to move to
-    expect(dialog.textContent).not.toContain('alpha-box');
+    expect(dialog.querySelector('[role="radiogroup"]')?.textContent).not.toContain('alpha-box');
+    expect(dialog.querySelector('[data-move-release]')?.textContent).toContain('Release this move on alpha-box');
   });
 
   it('is withdrawn for a caller who may not control the ferret, even with two machines', async () => {
