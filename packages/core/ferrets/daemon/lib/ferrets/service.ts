@@ -1,4 +1,5 @@
 import { posix } from 'node:path';
+import { FerretFolderGuard } from '../worktrees/ferret-folders.ts';
 import type { AsksApi } from '@ferretry/core-asks/contract';
 import { secretReferencesIn, type ChildEnvironment, type VaultApi } from '@ferretry/core-vault/contract';
 import type { FencedPath, HookDecision, InstructionEntry, SharedCredential } from '@ferretry/kernel/contract';
@@ -401,12 +402,10 @@ export interface FerretSessionPort {
    * it is up (today's `firstTurnInstruction`). Unbound: no turn document is written and nothing is typed.
    */
   assign?(ferret: FerretId, prompt: string): Promise<string>;
-  /**
-   * Additive (`start -f`, today's `initialAttachments`): the absolute path of THIS ferret's own `attachments/` folder
-   * (one of `FERRET_READABLE_FOLDERS`), where the opening message's files are planned. Names the path only; {@link attach}
-   * makes it. Unbound: a start that carries attachments is refused.
-   */
+  /** This ferret's `attachments/` folder, named before the planner writes it. Unbound: attached starts refuse. */
   attachmentsFolder?(ferret: FerretId): Promise<string>;
+  /** A delivered attachment proved through its own scope's no-follow descriptors; no path from message text. */
+  attachmentFile?(ferret: FerretId, attachmentId: string, filename: string): Promise<string | undefined>;
   /**
    * Additive: writes the planned files into the ferret's `attachments/` folder (`0700`, files `0600`) before `assign`; a bare `name`.
    */
@@ -442,6 +441,8 @@ export interface FerretSessionPort {
    * transport then goes wrong. Unbound: a long queued message is refused, never typed inline.
    */
   queued?(ferret: FerretId, payload: string, sendId?: string): Promise<string>;
+  /** Additive: the message {@link queued} filed under `sendId`, or `undefined` when there is none or it cannot be read. */
+  readQueued?(ferret: FerretId, sendId: string): Promise<string | undefined>;
   /**
    * Additive (#45 BG-051, `FerretTurns.write`): the next numbered turn document of THIS ferret, written durably with its
    * author beside it and counted, as a revive's turn is. Answers its number and absolute path.
@@ -795,13 +796,13 @@ export const RENAME_HTTP: Readonly<Record<RenameFailure, { readonly status: numb
 };
 
 export class FerretsService implements FerretsApi {
+  private readonly worktreeFolders = new FerretFolderGuard();
+  async withWorktreeMove<T>(folder: string, move: () => Promise<T>): Promise<T> {
+    return await this.worktreeFolders.move(folder, move);
+  }
   /** Today's lifecycle gate: read the current record only after acquiring its key. */
   private readonly serial: Pick<SerialExecutor, 'run'>;
-  /**
-   * One write queue per ferret for `details.json`: every read-then-write of the details (a title's rename or adoption, a
-   * move's options, a carried label) runs on it, so two writers that start together each read what the other left. It is
-   * NOT `serial`: a start, stop or resume holds that queue for as long as it runs and some of them write details.
-   */
+  /** Details writes serialize separately: lifecycle operations hold serial while writing details. */
   private readonly detailsQueue = new KeyedSerialExecutor();
   /**
    * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
@@ -1129,7 +1130,7 @@ export class FerretsService implements FerretsApi {
     origin: LaunchOrigin,
     admission: StartAdmission,
   ): Promise<Result<FerretId, StartFailure>> {
-    // A work folder replaces the folder the ferret works in; it is canonical and goes through the same folder check.
+    // A canonical work folder goes through the same check as the anchor.
     const anchor = this.ports.folder(request.folder);
     if (!anchor.ok) return failed('folder', anchor.error);
     if (request.workFolder !== undefined && !canonicalFolder(request.workFolder))
@@ -1161,128 +1162,129 @@ export class FerretsService implements FerretsApi {
       return failed('harness_not_installed', `no harness ${harnessKey} is installed on this machine`);
     const unfit = relocatedRefusal(request, this.ports.harness(harnessKey), harnessKey);
     if (unfit !== undefined) return unfit;
-    // The folder's identity is captured HERE, before any taker is asked, and re-verified as the last step before the
-    // harness starts: a swap in between (a link into the state home put where the project was) cannot be launched in.
+    // Bind before admission; the launch verifies this identity again before the harness starts.
     const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
     if (!bound.ok) return bound;
-    // ONE RULE: a ferret with a parent is never a lead (v4 derived the role from the parent alone). A start that POSTs
-    // `role: lead` beside a parent is recorded as a helper, so lead-only instruction sections never reach a sub-ferret.
-    const role = request.parent !== undefined ? 'helper' : (request.role ?? 'lead');
-    const decided = await decideStart(
-      this.ports.decide.bind(this.ports),
-      {
-        ferret: id,
-        name,
-        role,
-        ...(request.parent === undefined ? {} : { parent: request.parent }),
-        ...(request.pack === undefined ? {} : { pack: request.pack }),
-        harness: harnessKey,
-        ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
-        ...(login === undefined ? {} : { login }),
-        folder: folder.value,
-        ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
-        by: request.by,
-        ...(request.options?.model === undefined ? {} : { model: request.options.model }),
-        ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
-        // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
-        ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
-        ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
-      },
-      request,
-    );
-    // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
-    if (!decided.decision.allow) return refusedBy(decided.decision);
-    request = decided.request;
-    // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
-    const named = admission.conversationInPool === true ? undefined : request.harnessConversation;
-    const staged = await stageConversation(
-      this.ports.conversationStage?.(),
-      harnessKey,
-      named,
-      request.conversationSource,
-      request.by === 'owner' && origin.kind === 'person',
-    );
-    if (!staged.ok) return staged;
-    try {
-      // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
-      const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);
-      if (!opening.ok) return opening;
-      if (request.options !== undefined) {
-        // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
-        const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
-        await this.saveDetails(id, {
-          ...(decided.notice === undefined ? {} : { notice: decided.notice }),
-          ...(Object.keys(options).length === 0 ? {} : { options }),
-          ...(title === undefined ? {} : { title, titleSource: 'owner' as const }),
-        });
-      }
-      const at = this.ports.now();
-      const record: FerretRecord = {
-        format: 1,
-        id,
-        name,
-        ...(request.parent === undefined ? {} : { parent: request.parent }),
-        ...(request.pack === undefined ? {} : { pack: request.pack }),
-        role,
-        harness: harnessKey,
-        mode: launchMode(request.options?.mode),
-        birth: birthOf(origin),
-        runner: 'tmux',
-        ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
-        ...(login === undefined ? {} : { login }),
-        folder: folder.value,
-        state: 'starting',
-        ...(request.harnessConversation === undefined ? {} : { harnessConversation: request.harnessConversation }),
-        createdAt: at,
-        stateAt: at,
-      };
-      // `--detach` answers when the ferret is recorded, not when it has launched: `recorded` settles at that point.
-      let recordedOk: () => void = () => undefined;
-      let recordedFailed: (error: unknown) => void = () => undefined;
-      const recorded = new Promise<void>((resolve, reject) => {
-        recordedOk = resolve;
-        recordedFailed = reject;
-      });
-      recorded.catch(() => undefined); // read below only when detached; otherwise the start's own result carries the failure
-      const launched = this.serial.run(id, async () => {
-        try {
-          await this.write(record, undefined, 'started');
-          this.ports.started?.({
+    return await this.worktreeFolders.launch(
+      bound.value?.realPath ?? folder.value,
+      () => failed('refused', 'a worktree move is in progress in this folder'),
+      async () => {
+        // A parent always makes this a helper, including when the request says lead.
+        const role = request.parent !== undefined ? 'helper' : (request.role ?? 'lead');
+        const decided = await decideStart(
+          this.ports.decide.bind(this.ports),
+          {
             ferret: id,
             name,
             role,
             ...(request.parent === undefined ? {} : { parent: request.parent }),
             ...(request.pack === undefined ? {} : { pack: request.pack }),
+            harness: harnessKey,
+            ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
+            ...(login === undefined ? {} : { login }),
             folder: folder.value,
+            ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
             by: request.by,
-            ...(request.prompt === undefined || request.prompt === '' ? {} : { brief: request.prompt }),
-            ...(request.options?.label === undefined ? {} : { label: request.options.label }),
-            ...(request.options?.card === undefined ? {} : { card: request.options.card }),
+            ...(request.options?.model === undefined ? {} : { model: request.options.model }),
+            ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
+            // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
+            ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
+            ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
+          },
+          request,
+        );
+        if (!decided.decision.allow) return refusedBy(decided.decision);
+        request = decided.request;
+        // A start that names a past conversation REQUIRES its transcript: staged before the first write, or refused here.
+        const named = admission.conversationInPool === true ? undefined : request.harnessConversation;
+        const staged = await stageConversation(
+          this.ports.conversationStage?.(),
+          harnessKey,
+          named,
+          request.conversationSource,
+          request.by === 'owner' && origin.kind === 'person',
+        );
+        if (!staged.ok) return staged;
+        try {
+          // The opening message with its attachments planned, still before the first write: a refusal leaves nothing behind.
+          const opening = await this.openingFor(id, request.prompt, request.options?.initialAttachments);
+          if (!opening.ok) return opening;
+          if (request.options !== undefined) {
+            // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
+            const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
+            await this.saveDetails(id, {
+              ...(decided.notice === undefined ? {} : { notice: decided.notice }),
+              ...(Object.keys(options).length === 0 ? {} : { options }),
+              ...(title === undefined ? {} : { title, titleSource: 'owner' as const }),
+            });
+          }
+          const at = this.ports.now();
+          const record: FerretRecord = {
+            format: 1,
+            id,
+            name,
+            ...(request.parent === undefined ? {} : { parent: request.parent }),
+            ...(request.pack === undefined ? {} : { pack: request.pack }),
+            role,
+            harness: harnessKey,
+            mode: launchMode(request.options?.mode),
+            birth: birthOf(origin),
+            runner: 'tmux',
+            ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
+            ...(login === undefined ? {} : { login }),
+            folder: folder.value,
+            state: 'starting',
+            ...(request.harnessConversation === undefined ? {} : { harnessConversation: request.harnessConversation }),
+            createdAt: at,
+            stateAt: at,
+          };
+          // `--detach` answers when the ferret is recorded, not when it has launched: `recorded` settles at that point.
+          let recordedOk: () => void = () => undefined;
+          let recordedFailed: (error: unknown) => void = () => undefined;
+          const recorded = new Promise<void>((resolve, reject) => {
+            recordedOk = resolve;
+            recordedFailed = reject;
           });
-        } catch (error) {
-          recordedFailed(error);
-          throw error;
+          recorded.catch(() => undefined); // read below only when detached; otherwise the start's own result carries the failure
+          const launched = this.serial.run(id, async () => {
+            try {
+              await this.write(record, undefined, 'started');
+              this.ports.started?.({
+                ferret: id,
+                name,
+                role,
+                ...(request.parent === undefined ? {} : { parent: request.parent }),
+                ...(request.pack === undefined ? {} : { pack: request.pack }),
+                folder: folder.value,
+                by: request.by,
+                ...(request.prompt === undefined || request.prompt === '' ? {} : { brief: request.prompt }),
+                ...(request.options?.label === undefined ? {} : { label: request.options.label }),
+                ...(request.options?.card === undefined ? {} : { card: request.options.card }),
+              });
+            } catch (error) {
+              recordedFailed(error);
+              throw error;
+            }
+            recordedOk();
+            return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
+              attached: opening.value.files,
+              bound: bound.value,
+              ...(request.relocated === undefined ? {} : { relocated: request.relocated }),
+              ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
+            });
+          });
+          if (request.detach !== true) return await launched;
+          // Observe before awaiting recorded: a rejected write must not leave an unhandled launch rejection.
+          // finishDetached settles and reports failures and rejections after acknowledgement.
+          launched.catch(() => undefined);
+          await recorded;
+          void this.finishDetached(id, launched);
+          return ok(id);
+        } finally {
+          staged.value?.release();
         }
-        recordedOk();
-        return await this.launch(record, opening.value.prompt, record.harnessConversation, 'start', undefined, {
-          attached: opening.value.files,
-          bound: bound.value,
-          ...(request.relocated === undefined ? {} : { relocated: request.relocated }),
-          ...(admission.notInWardenTree === true ? { notInWardenTree: true as const } : {}),
-        });
-      });
-      if (request.detach !== true) return await launched;
-      // The ferret is recorded and acknowledged; the launch is no caller's to await any more, so its END is handled here:
-      // a failed Result and a rejection alike are settled and said (a plain start hands both to its caller).
-      // Observed BEFORE any await: when the record cannot be saved, `launched` rejects with the error `recorded` hands the
-      // caller below, and a rejection nobody had attached to yet would be unhandled (it can end the daemon).
-      launched.catch(() => undefined);
-      await recorded;
-      void this.finishDetached(id, launched);
-      return ok(id);
-    } finally {
-      staged.value?.release();
-    }
+      },
+    );
   }
 
   /**
@@ -1615,9 +1617,7 @@ export class FerretsService implements FerretsApi {
       tellDecided(options, 'running');
       return ok(ferret);
     }
-    // The record the relaunch is on: the move's target when it has one. Everything that can refuse WITHOUT launching —
-    // the target itself, the start gate and the launch's own preconditions — is judged on it BEFORE the live pane is
-    // stopped, so a refusal leaves a working ferret working with the same handle.
+    // Judge the target, admission and launch preconditions before stopping a live pane.
     const target = options.target;
     const retargetedRecord = target === undefined ? found : this.retarget(found, target);
     if (typeof retargetedRecord === 'string') return failed('refused', retargetedRecord);
@@ -1634,91 +1634,91 @@ export class FerretsService implements FerretsApi {
     const onAccount = (record: FerretRecord): FerretRecord =>
       account.value === undefined ? record : withLogin(record, account.value.login);
     const retargeted = onAccount(retargetedRecord);
-    // The folder is bound NOW, and an agent's resume gets the verdict an agent's start gets: `verify()` below only proves
-    // this binding held, which a folder already swapped into the state home satisfies.
+    // Bind and judge the folder now: later verification alone cannot catch an earlier swap into the state home.
     const bound = await this.bindLaunchFolder(retargeted.folder, options.origin, found.birth);
     if (!bound.ok) return bound;
-    const { decision, fast, notice } = await decideResume(
-      input => this.ports.decide(input),
-      {
-        ferret,
-        name: retargeted.name,
-        role: retargeted.role,
-        ...(retargeted.parent === undefined ? {} : { parent: retargeted.parent }),
-        ...(retargeted.pack === undefined ? {} : { pack: retargeted.pack }),
-        harness: retargeted.harness,
-        ...(retargeted.runtime === undefined ? {} : { runtime: retargeted.runtime }),
-        ...(retargeted.login === undefined ? {} : { login: retargeted.login }),
-        folder: retargeted.folder,
-        by: 'resume',
-      },
-      target === undefined
-        ? { live: this.ports.session?.launchFast?.(ferret), recorded: this.registry.detailsOf(ferret)?.options }
-        : undefined,
-    );
-    if (!decision.allow) return refusedBy(decision);
-    let prepared: PreparedLaunch | undefined;
-    if (replacing) {
-      const ready = await this.launchable(retargeted);
-      if (!ready.ok) return ready;
-      if (retargeted.harness === 'opencode') {
-        const staged = await this.prepareLaunch(
-          retargeted,
-          undefined,
-          retargeted.harnessConversation,
-          { value: fast },
-          true,
-          target === undefined ? undefined : movedLaunchOptions(this.registry.detailsOf(ferret)?.options, target),
-        );
-        if (!staged.ok) return staged;
-        prepared = staged.value;
-      }
-    }
-    await options.committed?.();
-    const settled = replacing ? await this.releaseLive(found) : found;
-    // The target is written with the record's `starting` state, then launched: one owner of the runtime, login and harness.
-    const record =
-      target === undefined
-        ? // A plain resume or Restart of a ferret whose harness names its conversation after launch (Codex): the one its
-          // last launch provably wrote is recorded first, so this relaunch resumes it instead of starting anew. A move
-          // names its own conversation (or chose a fresh one) and is never given one this way.
-          await this.withProvedConversation(onAccount(settled))
-        : onAccount(this.retarget(settled, target) as FerretRecord);
-    const { cause: _ended, ...revived } = record;
-    const starting: FerretRecord = { ...revived, state: 'starting', stateAt: this.ports.now() };
-    // The move's model and effort are start options, so details own them (the record keeps the ones it restamped, and the
-    // fast mode is dropped as the move drops it). They are written with the target, and a failed launch leaves them with
-    // it, as the moves module leaves its own document: a plain resume or Restart relaunches on the target.
-    if (target !== undefined) await this.moveOptions(ferret, target);
-    await this.updateDetails(ferret, current => launchDetails(current, fast, notice));
-    await this.write(starting, settled.state, 'state');
-    // Said once the relaunch is committed (the record is `starting`), still under this ferret's queue: the message, if
-    // any, is the relaunch's own turn from here on.
-    tellDecided(options, 'relaunching');
-    const author = resumeTurnAuthor(options.actor ?? 'unknown');
-    const resumed = await this.launch(
-      starting,
-      undefined,
-      record.harnessConversation,
-      'resume',
-      options.noTurn === true
-        ? undefined
-        : {
-            ...(message === undefined ? {} : { message }),
-            mode: launchMode(starting.mode),
-            ...(author === undefined ? {} : { by: author }),
+    return await this.worktreeFolders.launch(
+      bound.value?.realPath ?? retargeted.folder,
+      () => failed('refused', 'a worktree move is in progress in this folder'),
+      async () => {
+        const { decision, fast, notice } = await decideResume(
+          input => this.ports.decide(input),
+          {
+            ferret,
+            name: retargeted.name,
+            role: retargeted.role,
+            ...(retargeted.parent === undefined ? {} : { parent: retargeted.parent }),
+            ...(retargeted.pack === undefined ? {} : { pack: retargeted.pack }),
+            harness: retargeted.harness,
+            ...(retargeted.runtime === undefined ? {} : { runtime: retargeted.runtime }),
+            ...(retargeted.login === undefined ? {} : { login: retargeted.login }),
+            folder: retargeted.folder,
+            by: 'resume',
           },
-      { carried: options.onCarried, bound: bound.value, fast: { value: fast }, prepared },
+          target === undefined
+            ? { live: this.ports.session?.launchFast?.(ferret), recorded: this.registry.detailsOf(ferret)?.options }
+            : undefined,
+        );
+        if (!decision.allow) return refusedBy(decision);
+        let prepared: PreparedLaunch | undefined;
+        if (replacing) {
+          const ready = await this.launchable(retargeted);
+          if (!ready.ok) return ready;
+          if (retargeted.harness === 'opencode') {
+            const staged = await this.prepareLaunch(
+              retargeted,
+              undefined,
+              retargeted.harnessConversation,
+              { value: fast },
+              true,
+              target === undefined ? undefined : movedLaunchOptions(this.registry.detailsOf(ferret)?.options, target),
+            );
+            if (!staged.ok) return staged;
+            prepared = staged.value;
+          }
+        }
+        await options.committed?.();
+        const settled = replacing ? await this.releaseLive(found) : found;
+        // The target is written with the record's `starting` state, then launched: one owner of the runtime, login and harness.
+        const record =
+          target === undefined
+            ? // Resume the proved conversation; a move supplies its own target conversation.
+              await this.withProvedConversation(onAccount(settled))
+            : onAccount(this.retarget(settled, target) as FerretRecord);
+        const { cause: _ended, ...revived } = record;
+        const starting: FerretRecord = { ...revived, state: 'starting', stateAt: this.ports.now() };
+        // Persist the target's model/effort in details, dropping fast; a later retry uses the same target.
+        if (target !== undefined) await this.moveOptions(ferret, target);
+        await this.updateDetails(ferret, current => launchDetails(current, fast, notice));
+        await this.write(starting, settled.state, 'state');
+        // Once committed as starting under the ferret queue, this message belongs to the relaunch.
+        tellDecided(options, 'relaunching');
+        const author = resumeTurnAuthor(options.actor ?? 'unknown');
+        const resumed = await this.launch(
+          starting,
+          undefined,
+          record.harnessConversation,
+          'resume',
+          options.noTurn === true
+            ? undefined
+            : {
+                ...(message === undefined ? {} : { message }),
+                mode: launchMode(starting.mode),
+                ...(author === undefined ? {} : { by: author }),
+              },
+          { carried: options.onCarried, bound: bound.value, fast: { value: fast }, prepared },
+        );
+        if (resumed.ok && options.noTurn !== true) {
+          const text = message?.trim();
+          await this.ports.history?.(ferret, 'session.resumed', {
+            ...(text === undefined || text === '' ? {} : { message: text }),
+            ...(options.automatic === true ? { automatic: true } : {}),
+            ...(options.replaceLiveTerminal === true ? { replacedLiveTerminal: true } : {}),
+          });
+        }
+        return resumed;
+      },
     );
-    if (resumed.ok && options.noTurn !== true) {
-      const text = message?.trim();
-      await this.ports.history?.(ferret, 'session.resumed', {
-        ...(text === undefined || text === '' ? {} : { message: text }),
-        ...(options.automatic === true ? { automatic: true } : {}),
-        ...(options.replaceLiveTerminal === true ? { replacedLiveTerminal: true } : {}),
-      });
-    }
-    return resumed;
   }
 
   /**

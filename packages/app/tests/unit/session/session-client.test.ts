@@ -256,12 +256,12 @@ describe('a relay session reading frames from its carrier', () => {
     should(twice.socket.closed?.reason).match(/second ready/u);
   });
 
-  it('should keep the reason when the rendezvous ends a session or refuses the browser', async () => {
+  it('should keep pre-handshake admission reasons from the rendezvous', async () => {
     const ended = await opened();
     await ended.session.receiveBinary(
-      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.authRejected, reason: 'unknown device' }),
+      controlFrame(sessionId, { t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'daemon absent' }),
     );
-    should((await failure(ended.session.ready())).code).equal(RELAY_CLOSE_CODES.authRejected);
+    should((await failure(ended.session.ready())).code).equal(RELAY_CLOSE_CODES.daemonAbsent);
 
     const refused = await opened();
     await refused.session.receiveBinary(
@@ -306,7 +306,7 @@ describe('a relay session completing its handshake', () => {
     const hello = outOfTurn.socket.sent[0];
     if (hello === undefined) throw new Error('no hello');
     await outOfTurn.session.receiveBinary(await outOfTurn.daemon.answer(hello).catch(() => hello));
-    should((await failure(outOfTurn.session.request({ method: 'GET', path: '/x' }))).message).match(/out of turn/u);
+    should((await failure(outOfTurn.session.request({ method: 'GET', path: '/x' }))).code).equal(1006);
 
     const unreadable = await opened();
     await unreadable.session.receiveBinary(
@@ -344,7 +344,7 @@ describe('a relay session completing its handshake', () => {
     const meddled = Uint8Array.from(record);
     meddled[30] = (meddled[30] ?? 0) ^ 0x01;
     await session.receiveBinary(meddled);
-    should((await failure(session.ready())).code).equal(RELAY_CLOSE_CODES.frameForged);
+    should((await failure(session.ready())).code).equal(1006);
   });
 
   it('should refuse a first record that is not the acceptance §14 requires', async () => {
@@ -418,32 +418,32 @@ describe('a stream session refused for the rendezvous’s session ceiling', () =
 });
 
 describe('a serving relay session', () => {
-  it('R575 a forwarded 4440 while serving keeps the rendezvous close sentence', async () => {
+  it('R575 a plain 4440 while serving is connection loss', async () => {
     for (const reason of ['', 'concluded']) {
       const { session } = await serving();
       const pending = failure(session.request({ method: 'GET', path: '/v1/sessions' }));
       await session.receiveBinary(controlFrame(sessionId, { t: 'closed', code: 4440, reason }));
       const error = await pending;
-      should(error.code).equal(4440);
-      should(error.message).equal(`the rendezvous ended this session: 4440 ${reason}`);
+      should(error.code).equal(1006);
+      should(error.message).equal('the connection was lost');
       // The request raced another request's `endsSession`: no outcome for THIS one, so the client reads a lost carrier.
       should(error.endedWhileServing).be.true();
       should(isCarrierGone(error)).be.true();
     }
   });
 
-  it('R575 a forwarded 4440 while awaiting-credential reports the missing sealed outcome', async () => {
+  it('R575 a plain 4440 after keying before acceptance is connection loss', async () => {
     for (const reason of ['', 'concluded']) {
       const { session, socket, daemon } = await opened();
       await session.receiveBinary(await daemon.answer(socket.sent[0] as Uint8Array));
       const pending = failure(session.ready());
       await session.receiveBinary(controlFrame(sessionId, { t: 'closed', code: 4440, reason }));
       const error = await pending;
-      should(error.code).equal(4440);
-      should(error.message).containEql('without stating an outcome inside the channel');
-      // §14: a 4440 before the daemon accepted this device is a protocol violation, not an outage.
+      should(error.code).equal(1006);
+      should(error.message).equal('the connection was lost');
+      // Only a sealed daemon verdict can terminate the browser's access.
       should(error.endedWhileServing).be.false();
-      should(isCarrierGone(error)).be.false();
+      should(isCarrierGone(error)).be.true();
     }
   });
 
@@ -910,9 +910,16 @@ describe('a relay session proving its device', () => {
   });
 
   it('should say the access lease ended, so a caller can open a new session rather than report a fault', async () => {
-    const { session } = await serving();
+    const { session, daemon } = await serving();
     const waiting = failure(session.request({ method: 'GET', path: '/v1/sessions' }));
-    await session.receiveBinary(controlFrame(sessionId, { t: 'closed', code: 4441, reason: 'the access lease ended' }));
+    await session.receiveBinary(
+      await daemon.record({
+        t: 'session-end',
+        protocol: SESSION_PROTOCOL_ID,
+        code: 4441,
+        reason: 'the access lease on this session ended',
+      }),
+    );
     const reason = await waiting;
     should(reason.code).equal(4441);
     should(reason.message).match(/access lease on this session ended/u);

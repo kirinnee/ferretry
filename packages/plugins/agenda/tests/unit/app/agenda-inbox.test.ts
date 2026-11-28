@@ -538,8 +538,16 @@ describe('the undo window', () => {
     await settled();
     expect(deferred.getSnapshot().failed).toMatchObject([{ key: card('A1').key, message: 'forbidden' }]);
     expect(deferred.hiddenKeys().size).toBe(0);
+    // Answering again does not forget the refusal: an Undo takes the retry back before it ever runs.
     deferred.schedule(card('A1'), DONE_ACTION);
+    expect(deferred.getSnapshot().failed).toMatchObject([{ message: 'forbidden' }]);
+    deferred.undo(card('A1').key);
+    expect(deferred.getSnapshot().failed).toMatchObject([{ message: 'forbidden' }]);
+    // It goes once the retry is really sent.
+    deferred.schedule(card('A1'), DONE_ACTION);
+    advance(UNDO_WINDOW_MS);
     expect(deferred.getSnapshot().failed).toEqual([]);
+    await settled();
     deferred.clearFailure(card('A1').key);
   });
 });

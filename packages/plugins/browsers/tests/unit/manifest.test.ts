@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { showsSomething } from '@ferretry/kernel/contract';
 import { STEP_UP_ACTS } from '@ferretry/core-gate/contract';
+import { AUDIT } from '../../contract/index.ts';
 import manifest from '../../manifest.ts';
 
 const routes = manifest.actions.routes;
@@ -8,7 +9,7 @@ const tools = manifest.actions.agentTools;
 
 describe('browsers manifest', () => {
   test("declares today's browser, login-window, proxy and surface routes, the open-url route (G27) and the page stream", () => {
-    expect(routes).toHaveLength(10);
+    expect(routes).toHaveLength(12);
     expect(manifest.actions.sockets.map(socket => socket.key)).toEqual(['GET /v1/ferrets/:ferretId/browser/stream']);
   });
   test('the page stream and the per-ferret browser are built inside one Redaction.read', () => {
@@ -22,6 +23,13 @@ describe('browsers manifest', () => {
       expect(entry.guard === 'secrets').toBe(showsSomething(entry.op));
     }
     expect(tools.find(entry => entry.name === 'browser_eval')?.op).toBe('script');
+  });
+  test('the identities list and stopping one are a person’s, never a ferret’s', () => {
+    const list = routes.find(route => route.key === 'GET /v1/browser/identities');
+    const stop = routes.find(route => route.key === 'POST /v1/browser/identities/:identity/stop');
+    expect(list?.caller).toBe('person');
+    expect(stop?.caller).toBe('person');
+    expect(stop?.audit).toEqual({ record: AUDIT.surfaceControl });
   });
   test('a ferret may never test the proxy (it dials out with stored credentials)', () => {
     expect(routes.find(route => route.key === 'POST /v1/browser/proxy/test')?.caller).toBe('person');

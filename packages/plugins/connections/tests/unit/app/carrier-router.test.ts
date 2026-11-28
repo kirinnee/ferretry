@@ -705,12 +705,12 @@ describe('a request lost under a session forgets the winner only when the carrie
 
   test('an accepted relay winner closed with the daemon’s refusal of the device under a GET keeps its choice', async () => {
     // Arrange
-    const { r, transport, sockets } = await relayWinner();
+    const { r, transport } = await relayWinner();
 
-    // Act — the relay session ends with `authRejected` while the read waits: the daemon's answer, not the carrier's.
+    // Act — the daemon seals its real refusal while the read waits.
     const read = transport.request({ method: 'GET', path: '/v1/slow' }).catch((error: unknown) => error);
     await pause();
-    sockets.get(RELAY_HOST)?.close(RELAY_CLOSE_CODES.authRejected, 'unknown device');
+    r.fx.layer.endMode('device');
     const failure = await read;
 
     // Assert — the read failed, and the winner was not forgotten for a refusal the carrier did not cause.

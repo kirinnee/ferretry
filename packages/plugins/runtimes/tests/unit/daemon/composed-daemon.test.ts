@@ -8,6 +8,9 @@
  * hold through the routes, and a seam that is unavailable still answers in a sentence.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
+import type { RuntimesHarnessKit } from '../../../contract/index.ts';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { AutoResumeDecide, FerretsChanged } from '@ferretry/core-ferrets/contract';
@@ -28,6 +31,9 @@ import type { Instant } from '@ferretry/std';
 import type { ChildHandle, KernelPorts } from '@ferretry/kernel/contract';
 import {
   type MachineBrowserPorts,
+  PROFILE_COMPONENTS_KEY,
+  ProfileClaudeSettingsSource,
+  ProfileCodexSettingsSource,
   PROFILE_ITEMS,
   RuntimeHomeUnreadable,
   RuntimesPort,
@@ -57,6 +63,43 @@ interface Composed {
   readonly stubbed: string[];
 }
 
+/** A harness plugin's kit per harness; a key present with `undefined` is a plugin that offers none. */
+type HarnessKits = { claude?: RuntimesHarnessKit | undefined; codex?: RuntimesHarnessKit | undefined };
+
+/** Synthetic settings collections carrying the real kits offered by the harness settings sources. */
+function settingsOwners(kits: HarnessKits = {}): DaemonImplementation<any>[] {
+  return (
+    [
+      [
+        'claude-code',
+        ProfileClaudeSettingsSource,
+        'runtimes.components.settings.claude:components',
+        'claude' in kits ? kits.claude : claudeRuntimesKit,
+      ],
+      [
+        'codex',
+        ProfileCodexSettingsSource,
+        'runtimes.components.settings.codex:components',
+        'codex' in kits ? kits.codex : codexRuntimesKit,
+      ],
+    ] as const
+  ).map(
+    ([id, hook, name, kit]) =>
+      implementDaemon(
+        definePlugin({
+          id,
+          title: id,
+          version: '5.0.0',
+          api: 5,
+          core: false,
+          kinds: [],
+          hooks: { takes: [{ hook, key: PROFILE_COMPONENTS_KEY }] },
+        }),
+        { build: () => ({ hooks: { [name]: { kit, list: async () => [], read: async () => undefined } } }) } as never,
+      ) as DaemonImplementation<any>,
+  );
+}
+
 /** The composed daemon over the real roots of a fleet world; `assemble` swaps the composition (the unavailable one). */
 async function compose(
   options: {
@@ -64,6 +107,8 @@ async function compose(
     readonly config?: Record<string, unknown>;
     readonly logins?: ReturnType<typeof sampleLogin>[];
     readonly executables?: readonly string[];
+    /** A harness plugin's kit, when a test wants it partial. */
+    readonly kits?: HarnessKits;
     readonly ferrets?: FakeFerrets;
     readonly vault?: FakeVault;
     readonly sources?: ModelCatalogSourcesView;
@@ -89,7 +134,7 @@ async function compose(
   const real: RuntimesAssembler = ctx =>
     (options.assemble ?? hostAssembly)({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
   const host = await testHost({
-    plugins: [runtimesDaemon(real) as DaemonImplementation<any>],
+    plugins: [...settingsOwners(options.kits), runtimesDaemon(real) as DaemonImplementation<any>],
     fakes: {
       ferrets: options.ferrets ?? new FakeFerrets(),
       logins: composedLogins,
@@ -326,6 +371,99 @@ describe('a real apply through the composed daemon', () => {
       ['claude-code', false],
       ['codex', false],
     ]);
+  });
+
+  describe.each([
+    ['claude', 'claude-code'],
+    ['codex', 'codex'],
+  ] as const)('%s, whose plugin offers no kit at all', (word, key) => {
+    const absent = { kits: { [word]: undefined } };
+
+    it('answers the scan with a typed 409 refusal, not the unreadable one', async () => {
+      const { host } = await compose(absent);
+      const scan = await host.request('GET', '/v1/runtimes/setup/scan');
+      expect(scan.status).toBe(409);
+      expect(scan.json<{ error: string; code: string }>()).toMatchObject({
+        error: `${word} is not supported here`,
+        code: 'fleet_setup_refused',
+      });
+    });
+
+    it('answers a staged import with a typed 409 refusal, not an internal error', async () => {
+      const { host } = await compose(absent);
+      const staged = await host.request('POST', '/v1/runtimes/proposals', {
+        body: { change: { kind: 'setup.import', include: [key] } },
+      });
+      expect(staged.status).toBe(409);
+      expect(staged.json<{ error: string; code: string }>()).toMatchObject({
+        error: `${word} is not supported here`,
+        code: 'fleet_change_refused',
+      });
+    });
+  });
+
+  describe.each([
+    ['claude', 'claude-code', claudeRuntimesKit],
+    ['codex', 'codex', codexRuntimesKit],
+  ] as const)('%s, whose plugin gives no import harvest', (word, key, kit) => {
+    const partial = { kits: { [word]: { ...kit, harvest: undefined } } };
+
+    it('answers the scan with a typed 409 refusal, never an internal error', async () => {
+      const { host } = await compose(partial);
+      const scan = await host.request('GET', '/v1/runtimes/setup/scan');
+      expect(scan.status).toBe(409);
+      expect(scan.json<{ error: string; code: string }>()).toMatchObject({
+        error: `${word} is not supported here`,
+        code: 'fleet_setup_refused',
+      });
+    });
+
+    it('answers a staged import with a typed 409 refusal and stages nothing', async () => {
+      const { host } = await compose(partial);
+      const staged = await host.request('POST', '/v1/runtimes/proposals', {
+        body: { change: { kind: 'setup.import', include: [key] } },
+      });
+      expect(staged.status).toBe(409);
+      expect(staged.json<{ error: string; code: string }>()).toMatchObject({
+        error: `${word} is not supported here`,
+        code: 'fleet_change_refused',
+      });
+    });
+  });
+
+  describe('two harnesses requested, the second one losing its harvest after the scan', () => {
+    /** Claude's real kit with a counter on its harvest; Codex scans fine but cannot harvest. */
+    const counted = () => {
+      const calls = { harvest: 0 };
+      const claude = {
+        ...claudeRuntimesKit,
+        harvest: (...args: Parameters<NonNullable<RuntimesHarnessKit['harvest']>>) => {
+          calls.harvest += 1;
+          return claudeRuntimesKit.harvest!(...args);
+        },
+      };
+      return { calls, kits: { claude, codex: { ...codexRuntimesKit, harvest: undefined } } };
+    };
+
+    it('refuses the scan with the typed 409 and runs no harvest at all', async () => {
+      const { calls, kits } = counted();
+      const { host } = await compose({ kits });
+      const scan = await host.request('GET', '/v1/runtimes/setup/scan');
+      expect(scan.status).toBe(409);
+      expect(scan.json<{ code: string }>().code).toBe('fleet_setup_refused');
+      expect(calls.harvest).toBe(0);
+    });
+
+    it('refuses the staged import with the typed 409 and runs no harvest at all', async () => {
+      const { calls, kits } = counted();
+      const { host } = await compose({ kits });
+      const staged = await host.request('POST', '/v1/runtimes/proposals', {
+        body: { change: { kind: 'setup.import', include: ['claude-code', 'codex'] } },
+      });
+      expect(staged.status).toBe(409);
+      expect(staged.json<{ code: string }>().code).toBe('fleet_change_refused');
+      expect(calls.harvest).toBe(0);
+    });
   });
 
   describe('an install through the registered wiring (route -> host assembly -> installer)', () => {
@@ -888,6 +1026,7 @@ describe('the default composition stands in for the services and keeps a broken 
     const world = await fleetWorld();
     const host = await testHost({
       plugins: [
+        ...settingsOwners(),
         runtimesDaemon(ctx =>
           hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
         ) as DaemonImplementation<any>,
@@ -915,7 +1054,7 @@ describe('the default composition stands in for the services and keeps a broken 
     codexEnded(ferrets);
     const world = await fleetWorld();
     const host = await testHost({
-      plugins: [runtimesDaemon(brokenFleet(world.roots)) as DaemonImplementation<any>],
+      plugins: [...settingsOwners(), runtimesDaemon(brokenFleet(world.roots)) as DaemonImplementation<any>],
       fakes: {
         ferrets,
         logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),

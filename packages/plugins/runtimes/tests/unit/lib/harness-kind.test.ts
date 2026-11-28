@@ -84,20 +84,20 @@ describe.each(UNKNOWN)('a harness Runtimes has no behaviour for (%s)', unknown =
   test('is refused where a credential store was Claude unless it was Codex', () => {
     const credential = { harness: unknown, store: 'ferretry' } as never;
     const paths = { userHome: '/home/x', hostCodexHome: undefined };
-    expect(refused(() => resolveCredentialStore('login', credential, paths))).toBe(refusal(unknown));
-    expect(refused(() => resolveCredentialStore('login', { harness: unknown, store: 'host' } as never, paths))).toBe(
-      refusal(unknown),
-    );
+    expect(refused(() => resolveCredentialStore('login', credential, paths, undefined))).toBe(refusal(unknown));
+    expect(
+      refused(() => resolveCredentialStore('login', { harness: unknown, store: 'host' } as never, paths, undefined)),
+    ).toBe(refusal(unknown));
   });
 
   test('is refused where a resolved credential asked for its launch variables', () => {
     const resolution = { harness: unknown, store: 'host', secureStorage: '', storageDirectory: '/x' } as never;
-    expect(refused(() => credentialLaunchEnvironment(resolution))).toBe(refusal(unknown));
+    expect(refused(() => credentialLaunchEnvironment(resolution, undefined))).toBe(refusal(unknown));
   });
 
   test('is refused where MCP servers were rendered in Claude’s shape unless Codex’s', () => {
     const servers = { s: { command: 'x' } } as never;
-    expect(refused(() => renderMcpComponents(unknown as never, servers))).toBe(refusal(unknown));
+    expect(refused(() => renderMcpComponents(unknown as never, servers, undefined))).toBe(refusal(unknown));
   });
 
   test('is refused where a host scan read Claude’s MCP document unless Codex’s', () => {

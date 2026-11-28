@@ -419,6 +419,7 @@ function setup(options: {
       writes.push(key);
       store.set(key, value);
     },
+    removeItem: (key: string) => void store.delete(key),
   };
   const harness = deviceViewHarness({ plugin: 'onboarding', fragments: [] });
   harness.setRows(
@@ -1777,6 +1778,38 @@ describe('the flow ends in project setup (C59 O8-13)', () => {
     expect(Object.keys(later.steps)).toEqual(['projects.folders']);
   });
 
+  const DRAFT = `fy.projects.setup-folders.${A}`;
+
+  it('Skip for now leaves no folder draft behind on this device (E-257 MUST 3)', async () => {
+    const run = setup({ machines: [atlas()], storage: ledgerWithAppearance() });
+    run.store.set(DRAFT, JSON.stringify({ picks: ['/home/k/atlas'], madeIds: [] }));
+    view = await mount(run.tree);
+    await settle();
+    await click('Skip for now');
+    await settle();
+    expect(run.store.has(DRAFT)).toBe(false);
+  });
+
+  it('a run that reaches its end leaves no folder draft behind (E-257 MUST 3)', async () => {
+    const run = setup({ machines: [atlas()], storage: ledgerWithAppearance() });
+    run.store.set(DRAFT, JSON.stringify({ picks: ['/home/k/atlas'], madeIds: [] }));
+    view = await mount(run.tree);
+    await settle();
+    await next();
+    await settle();
+    expect(view.container.querySelector('[data-flow-end]')).not.toBeNull();
+    expect(run.store.has(DRAFT)).toBe(false);
+  });
+
+  it('opening the flow on project setup keeps the draft: only Skip for now and the end of the run forget it (E-257 MUST 3)', async () => {
+    const run = setup({ machines: [atlas()], storage: ledgerWithAppearance() });
+    run.store.set(DRAFT, JSON.stringify({ picks: ['/home/k/atlas'], madeIds: [] }));
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+    expect(run.store.has(DRAFT)).toBe(true);
+  });
+
   it('resumes in project setup: with everything else answered, the run starts on it, not at machine setup', async () => {
     view = await mount(setup({ machines: [atlas()], storage: ledgerWithAppearance() }).tree);
     await settle();
@@ -1957,6 +1990,19 @@ describe('Connect GitHub never pulls a finished setup back (O9-10)', () => {
     await press('[data-step-back]');
     await settle();
     expect(progressText()).toBe('Projects · page 2 of 3');
+  });
+
+  it('Skip for now on project setup forgets the folder draft at once, before the next page (E-257 MUST 3)', async () => {
+    const run = setup({ machines: [upgraded()], search: GUIDED_REPAIR, storage: ledgerOf('onboarding.appearance') });
+    const draft = `fy.projects.setup-folders.${A}`;
+    run.store.set(draft, JSON.stringify({ picks: ['/home/k/atlas'], madeIds: [] }));
+    view = await mount(run.tree);
+    await settle();
+    expect(pageKey()).toBe('projects.folders');
+    await click('Skip for now');
+    await settle();
+    expect(pageKey()).toBe('projects.github');
+    expect(run.store.has(draft)).toBe(false);
   });
 
   it('a machine with a project still offers it to a run that drew an earlier page', async () => {

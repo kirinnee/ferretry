@@ -41,6 +41,15 @@ export function useConnectionCardOnScreen(daemon: string | undefined): void {
   }, [daemon]);
 }
 
+/** Whether a Connection card for `daemon` is on screen now: the frame's own lines about that machine stay quiet. */
+export function useConnectionCardShown(daemon: string): boolean {
+  return useSyncExternalStore(
+    subscribeCards,
+    () => cardsOnScreen.has(daemon),
+    () => false,
+  );
+}
+
 /**
  * The line itself, as a QUIET status: the connection works, so it is not an error (no red, no warning tone). It is a
  * note about which way in is being used and why.

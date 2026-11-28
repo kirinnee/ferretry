@@ -1,0 +1,77 @@
+/* Settings › Browser › Identities: one row per identity, written for the highest rounding (docs/standards/theme). */
+.fy-browser-identities {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  min-width: 0;
+  max-width: 40rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-browser-identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-width: 0;
+  padding: var(--pad-row-y) calc(var(--pad-panel) + 4px);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--panel-bg);
+}
+.fy-browser-identity--waits {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+.fy-browser-identity__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-width: 0;
+}
+.fy-browser-identity__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  color: var(--fg);
+}
+.fy-browser-identity__badge {
+  padding: 0 var(--pad-badge-x);
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-badge);
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+.fy-browser-identity__state {
+  min-width: 0;
+  margin-inline-end: auto;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-browser-identity__line {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+.fy-browser-identity__fact {
+  display: inline-block;
+  max-width: 100%;
+  margin-inline-end: 0.25em;
+}
+.fy-browser-identities__add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  min-width: 0;
+  max-width: 28rem;
+}
+.fy-browser-identities__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-width: 0;
+}

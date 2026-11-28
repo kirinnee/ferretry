@@ -135,7 +135,7 @@ test('R575 latches the sealed outcome before a close arriving during decryption'
   }
 });
 
-test('R575 a 4440 without a sealed outcome is a protocol violation, even with a close reason', async () => {
+test('R575 a plain 4440 without a sealed outcome is connection loss, even with a close reason', async () => {
   for (const [reason, inBand] of [
     ['', false],
     ['', true],
@@ -144,7 +144,7 @@ test('R575 a 4440 without a sealed outcome is a protocol violation, even with a 
   ] as const) {
     const attempt = await pairing();
     attempt.end(inBand, reason);
-    await expect(attempt.pending).rejects.toThrow('without stating an outcome inside the channel');
+    await expect(attempt.pending).rejects.toThrow('the connection was lost');
     expect(attempt.saved.size).toBe(0);
     expect(attempt.writes).toEqual([]);
   }

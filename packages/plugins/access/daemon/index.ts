@@ -47,7 +47,7 @@ export default implementDaemon(manifest, {
     const route = (key: string) => access.handler(key);
     const askBuzzer = new AskBuzzer({
       ledger: new StateAskBuzzLedger(ctx.kernel.state),
-      buzz: async words => await access.port.buzz(words),
+      buzz: async (words, cancelled) => await access.buzzUnlessCancelled(words, cancelled),
       now: () => ctx.kernel.clock.now(),
       warn: message => ctx.kernel.log.warn(message),
     });

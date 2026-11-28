@@ -54,6 +54,7 @@ function processes(alive: boolean): IDaemonProcessPort {
     spawnDetached: async () => await Promise.reject(new Error('unused')),
     signal: () => false,
     alive: () => alive,
+    identify: async () => (alive ? 'start-A' : undefined),
     holdsOpen: async () => await Promise.resolve(undefined),
   };
 }

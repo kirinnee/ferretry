@@ -17,6 +17,7 @@
  */
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema } from './view/common.ts';
+import { WorktreeMoveOfferSchema } from './worktree-move.ts';
 
 const Text = z.string().min(1);
 
@@ -394,6 +395,7 @@ const RepoWorktreeFerretSchema = z.object({ id: Text, active: z.boolean() });
 
 /** One row of `git worktree list`, with what Git says about it right now and who stands in it. */
 const RepoWorktreeSchema = z.object({
+  move: WorktreeMoveOfferSchema.optional(),
   path: Text,
   /** The repository's main checkout (Git lists it first). It is never removable. */
   main: z.boolean(),

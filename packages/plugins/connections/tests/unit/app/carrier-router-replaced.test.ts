@@ -78,26 +78,25 @@ const world = async (hosts: Record<string, ScriptedHost>, carriers: readonly unk
 };
 
 describe('C-80 a replaced daemon identity at the paired address', () => {
-  for (const closeOnly of [true, false])
-    test(`a relay ${closeOnly ? 'close' : 'control message'} carrying 4405 keeps the backoff, never replaced`, async () => {
-      const w = await world({ [RELAY_HOST]: { kind: 'absent', code: 4405, closeOnly } }, [
-        { kind: 'relay', url: RELAY },
-      ]);
-      const transport = await w.r.connect();
-      try {
-        if (transport === undefined) throw new Error('no transport');
-        const refused: string[] = [];
-        const client = new DaemonClient({ transport, surfaces: [] });
-        client.onRefused(reason => refused.push(reason));
-        await client.start();
-        expect(refused).toEqual([]);
-        expect(w.health.state(w.r.fx.daemonId).kind).toBe('reconnecting');
-        expect(w.held.pending().length).toBeGreaterThan(0);
-      } finally {
-        transport?.close?.();
-        w.r.fx.layer.close();
-      }
-    });
+  for (const code of [4403, 4405])
+    for (const closeOnly of [true, false])
+      test(`a relay ${closeOnly ? 'close' : 'control message'} carrying ${code} keeps the backoff, never refused or replaced`, async () => {
+        const w = await world({ [RELAY_HOST]: { kind: 'absent', code, closeOnly } }, [{ kind: 'relay', url: RELAY }]);
+        const transport = await w.r.connect();
+        try {
+          if (transport === undefined) throw new Error('no transport');
+          const refused: string[] = [];
+          const client = new DaemonClient({ transport, surfaces: [] });
+          client.onRefused(reason => refused.push(reason));
+          await client.start();
+          expect(refused).toEqual([]);
+          expect(w.health.state(w.r.fx.daemonId).kind).toBe('reconnecting');
+          expect(w.held.pending().length).toBeGreaterThan(0);
+        } finally {
+          transport?.close?.();
+          w.r.fx.layer.close();
+        }
+      });
 
   test('one failure, no loop: the walk ends 4405, the loop stops, and the old identity is dialled once', async () => {
     const w = await world(

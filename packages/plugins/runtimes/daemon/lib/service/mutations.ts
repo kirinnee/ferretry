@@ -826,7 +826,8 @@ function renameRuntime(
     facts.machineName,
   );
   delete draft.runtimes[name];
-  draft.runtimes[to] = runtime;
+  // A new name is one the owner typed: it is shown as typed, never as the words a generated name gets.
+  draft.runtimes[to] = { ...runtime, namedByOwner: true };
   if (model.machine.defaultRuntime === name) {
     draft.machine.defaultRuntime = to;
     consequences.push(`${to} stays this machine's default runtime for new agents.`);
@@ -925,6 +926,9 @@ function putRuntime(
     ...(model.runtimes[change.name]?.compactAt === undefined
       ? {}
       : { compactAt: model.runtimes[change.name]?.compactAt }),
+    ...((exists ? model.runtimes[change.name]?.namedByOwner : change.namedByOwner) === undefined
+      ? {}
+      : { namedByOwner: true }),
     ...cloneLinkOf(model.runtimes[change.name]),
   };
   // The first runtime on a machine becomes its default for new agents (and the Warden's login).

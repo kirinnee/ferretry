@@ -6,6 +6,7 @@
  * that) and the build seam: the shell's `vite.config.ts` imports a plugin's
  * `app/vite-<name>.ts`. Type-only imports count: a type edge is still an edge.
  */
+import { dirname, resolve } from 'node:path';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import type { Area, ImportEdge } from '../gen/lib/imports.ts';
 
@@ -198,20 +199,57 @@ export function refusal(edge: ImportEdge): string | undefined {
     return undefined;
 
   // SEVENTH EXEMPTION: E-276's import goldens and threading proof must use the REAL harness kits, just as the settings
-  // sources supply them. Only these three Runtimes tests may import exactly the two kit entry points; no other half.
+  // sources supply them. Only these named Runtimes tests may import exactly the two kit entry points; no other half.
   if (
     from === 'tests' &&
     edge.fromPkg.name === '@ferretry/plugin-runtimes' &&
     [
       'tests/unit/golden/host-import.golden.test.ts',
       'tests/unit/golden/setup-import.golden.test.ts',
+      'tests/unit/golden/consumers.golden.test.ts',
       'tests/unit/lib/import-kit-threading.test.ts',
+      'tests/unit/daemon/host-harness-scan.test.ts',
+      'tests/unit/daemon/host-harness-scan-projects.test.ts',
+      'tests/integration/host-harness-scan.test.ts',
+      'tests/integration/daemon/host-harness-scan-roots.test.ts',
+      'tests/integration/daemon/file-deps.test.ts',
+      'tests/unit/daemon/composed-daemon.test.ts',
+      'tests/unit/daemon/generic-runtime.test.ts',
+      'tests/unit/daemon/import-fresh-home.test.ts',
+      'tests/unit/lib/account-import.test.ts',
+      'tests/unit/lib/account-import-skip.test.ts',
+      'tests/unit/lib/account-import-retry.test.ts',
+      'tests/unit/lib/account-import-login-env.test.ts',
+      'tests/unit/lib/account-import-branches.test.ts',
+      'tests/unit/daemon/setup-service.test.ts',
+      'tests/unit/golden/credentials.golden.test.ts',
+      'tests/unit/golden/support/world.ts',
+      'tests/support/real-kits.ts',
     ].includes(edge.from.slice(edge.fromPkg.dir.length + 1)) &&
     to === 'daemon' &&
-    ((toPkg.name === '@ferretry/plugin-claude-code' &&
-      edge.specifier === '../../../../claude-code/daemon/lib/runtimes-kit/index.ts') ||
-      (toPkg.name === '@ferretry/plugin-codex' &&
-        edge.specifier === '../../../../codex/daemon/lib/runtimes-kit/index.ts'))
+    ['@ferretry/plugin-claude-code', '@ferretry/plugin-codex'].includes(toPkg.name) &&
+    resolve(dirname(edge.from), edge.specifier) === resolve(toPkg.dir, 'daemon/lib/runtimes-kit/index.ts')
+  )
+    return undefined;
+
+  // EIGHTH EXEMPTION: E-276 PR 12 moved three Codex-only modules into the Codex plugin, and the two frozen Runtimes goldens
+  // that exercise them still do. Only these two named golden tests may import only these named modules, by path; no glob.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/plugin-runtimes' &&
+    to === 'daemon' &&
+    toPkg.name === '@ferretry/plugin-codex' &&
+    (
+      {
+        'tests/unit/golden/supervision.golden.test.ts': [
+          'daemon/lib/runtimes-kit/codex-runtime.ts',
+          'daemon/lib/runtimes-kit/runtime-end-supervision.ts',
+        ],
+        'tests/unit/golden/mcp.golden.test.ts': ['daemon/lib/runtimes-kit/model-catalog.ts'],
+      } as Readonly<Record<string, readonly string[]>>
+    )[edge.from.slice(edge.fromPkg.dir.length + 1)]?.some(
+      module => resolve(dirname(edge.from), edge.specifier) === resolve(toPkg.dir, module),
+    ) === true
   )
     return undefined;
 

@@ -10,6 +10,9 @@ import {
   type WorktreeRemovalDecision,
   type WorktreeRemovalRequest,
   WorktreeRemovalRequestSchema,
+  type MoveProjectWorktreeRequest,
+  type MovedProjectWorktree,
+  MoveProjectWorktreeRequestSchema,
 } from '../../../../contract/index.ts';
 import {
   ApiError,
@@ -53,6 +56,7 @@ type RouteContext = CallContext;
 
 /** The whole surface, as the routes need it. The composition root supplies the real implementation. */
 export interface WorktreeSubsystem {
+  moveProject(request: MoveProjectWorktreeRequest): Promise<MovedProjectWorktree>;
   adopt(request: AdoptWorktreeRequest): Promise<CreatedWorktree>;
   list(): Promise<WorktreeListResponse>;
   checkRemoval(path: string, currentWorkingDirectory?: string): Promise<WorktreeRemovalDecision>;
@@ -60,6 +64,8 @@ export interface WorktreeSubsystem {
   create(request: CreateWorktreeRequest): Promise<CreatedWorktree>;
   /** Every worktree of the repository whose git common directory this is, hand-made ones included. */
   listRepo(commonDirectory: string): Promise<RepoWorktreeListResponse>;
+  /** The same list for the repository a REGISTERED project records, named by the project's id. */
+  listProjectRepo(project: string, commonDirectory?: string): Promise<RepoWorktreeListResponse>;
 }
 
 /**
@@ -74,6 +80,7 @@ const STATUS: Readonly<Record<WorktreeErrorCode, number>> = {
   unknown_worktree: 404,
   no_managed_root: 409,
   unsafe_remove: 409,
+  unsafe_move: 409,
   branch_in_use: 409,
   destination_exists: 409,
   registry_damaged: 500,
@@ -135,8 +142,25 @@ async function remove(worktrees: WorktreeSubsystem, context: RouteContext): Prom
  */
 async function listRepo(worktrees: WorktreeSubsystem, context: RouteContext): Promise<ApiResponse> {
   const commonDirectory = queryValue(context.request, 'commonDir')?.trim();
+  const project = queryValue(context.request, 'project')?.trim();
+  const moveProject = queryValue(context.request, 'moveProject')?.trim();
+  if (moveProject !== undefined && moveProject !== '') {
+    if (project !== undefined || commonDirectory === undefined || commonDirectory === '')
+      throw new ApiError(
+        400,
+        'moveProject needs exactly one registered repository commonDir',
+        'invalid_common_directory',
+      );
+    return jsonResponse(await worktrees.listProjectRepo(moveProject, commonDirectory).catch(refuse));
+  }
+  if (project !== undefined && project !== '') {
+    // A project is named by its id and its directory is the registry's, so a path beside it would be a second answer.
+    if (commonDirectory !== undefined && commonDirectory !== '')
+      throw new ApiError(400, 'name a project or a "commonDir", not both', 'invalid_common_directory');
+    return jsonResponse(await worktrees.listProjectRepo(project).catch(refuse));
+  }
   if (commonDirectory === undefined || commonDirectory === '') {
-    throw new ApiError(400, 'query parameter "commonDir" is required', 'invalid_common_directory');
+    throw new ApiError(400, 'query parameter "commonDir" or "project" is required', 'invalid_common_directory');
   }
   return jsonResponse(await worktrees.listRepo(commonDirectory).catch(refuse));
 }
@@ -148,6 +172,7 @@ async function create(worktrees: WorktreeSubsystem, context: RouteContext): Prom
 
 /** The five route keys, exactly as `manifest.ts` declares them (R-… rows of the parity table, paths unchanged). */
 export const WORKTREE_ROUTE_KEYS = [
+  'POST /v1/worktrees/move',
   'POST /v1/worktrees/adopt',
   'GET /v1/worktrees/removal',
   'GET /v1/worktrees/repo',
@@ -164,6 +189,10 @@ export type WorktreeRouteKey = (typeof WORKTREE_ROUTE_KEYS)[number];
  */
 export function worktreeRoutes(worktrees: WorktreeSubsystem): { readonly [K in WorktreeRouteKey]: RouteHandler } {
   return {
+    'POST /v1/worktrees/move': async context =>
+      jsonResponse(
+        await worktrees.moveProject(await parseBody(context.request, MoveProjectWorktreeRequestSchema)).catch(refuse),
+      ),
     'POST /v1/worktrees/adopt': async context =>
       jsonResponse(await worktrees.adopt(await parseBody(context.request, AdoptWorktreeRequestSchema)).catch(refuse)),
     'GET /v1/worktrees/removal': async context => await checkRemoval(worktrees, context),

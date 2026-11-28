@@ -127,8 +127,9 @@ export default definePlugin({
   // Moves and forks (copying today's reach): a harness home is read through the read-only `harness-history` root, a
   // pane's process tree through `ps` and procfs (tmux joins when the pane preflight is bound, through Terminals' runner).
   // `git`: the file browser's status, listing and diff, and the managed worktrees (today's Git runner).
+  // `imports` (read-only): the repository worktree list of a REGISTERED project reads the folders that project's own record names.
   permissions: {
-    roots: ['worktrees', 'work', 'harness-history', 'sessions'],
+    roots: ['worktrees', 'work', 'harness-history', 'sessions', 'imports'],
     spawn: ['git', 'ps'],
     // `fy history claim` names the runtime it is claiming for in the refusal another claimant reads (FY_RUNTIME).
     cliEnvReads: ['FY_RUNTIME'],

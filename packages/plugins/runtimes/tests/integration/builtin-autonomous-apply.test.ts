@@ -21,6 +21,7 @@ import { unavailableSharedHistory } from '../../daemon/adapters/shared-history-u
 import { AUTONOMOUS_INSTRUCTIONS } from '../../daemon/lib/account/builtin-autonomous.ts';
 import { EMPTY_RUNTIME_IDS } from '../../daemon/lib/account/ids.ts';
 import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
+import { REAL_KITS } from '../support/real-kits.ts';
 import { assembleRuntimesModel, NO_COMPONENTS } from '../../daemon/lib/account/runtimes-model.ts';
 import type { FleetApplyResult, FleetLayout } from '../../daemon/lib/provisioning.ts';
 import { fleetWorld } from '../unit/support/fleet-world.ts';
@@ -127,6 +128,7 @@ async function freshMachine(options: MachineOptions = {}) {
     claudeStatusline: () => "'fy' statusline",
     fyCommand: fakeFy,
     acceptsAutoPermissionMode: true,
+    kits: REAL_KITS,
     loginStores,
   });
   const result: FleetApplyResult = await world.provisioner({ sharedHistory: unavailableSharedHistory }).apply(plan);

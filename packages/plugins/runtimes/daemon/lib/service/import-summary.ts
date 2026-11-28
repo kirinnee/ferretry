@@ -55,6 +55,7 @@ function importedWords(machine: string, plan: ImportPlan, existing: AccountModel
             harness: harnessKey(credential.harness),
             credential: { id: runtime.credential, store: credential.store, label: credential.label },
             profile: runtime.profile,
+            ...(runtime.namedByOwner === undefined ? {} : { namedByOwner: true as const }),
           },
         ];
   });

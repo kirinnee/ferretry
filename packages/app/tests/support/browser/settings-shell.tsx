@@ -27,6 +27,7 @@ import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { App } from '../../../src/shell/app.tsx';
 import { ShellContext } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
+import { ShapeMemory } from '../../../src/shell/shape-memory.ts';
 import { WithViewPlace } from '../../../src/shell/view-place.tsx';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { PlacedPanel } from '../../../src/testing/slot-panels.tsx';
@@ -42,6 +43,9 @@ import {
   ThemePreferenceStore,
 } from '../../../src/theme/preferences.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../../unit/client/fixtures.ts';
+
+/** The core surfaces every fake machine has, for a scene that builds its own list for {@link renderSettingsShellOf}. */
+export { CORE };
 
 export interface SettingsShellScene {
   /** The plugin's real manifest (`manifest.ts`'s default export). */
@@ -124,6 +128,12 @@ export interface ShellOptions {
   readonly daemonVersion?: string | undefined;
   /** Plugins the fake machine predates: absent from its plugin list, as an older daemon's is. */
   readonly without?: readonly string[] | undefined;
+  /** The paired record's stored carrier set (none by default: a pairing that names no direct or tunnel address). */
+  readonly carriers?: readonly unknown[] | undefined;
+  /** The plugin list this device remembers of the machine from an earlier visit (its shape), before the live read answers. */
+  readonly remembered?: boolean | undefined;
+  /** The look the device has chosen (`studio` by default), for a scene that measures another. */
+  readonly style?: string | undefined;
 }
 
 /** The real `App` over one fake machine whose plugins are `surfaces` (the core ones included by the caller). */
@@ -150,17 +160,26 @@ export function renderSettingsShellOf(
     subscribe: () => () => undefined,
   };
   const provision = { handler, Prompts: () => null } as unknown as PasskeyProvision;
-  const list = new DaemonList({ storage: memoryStore(), now: () => 1 });
+  const held = memoryStore();
+  const list = new DaemonList({ storage: held, now: () => 1 });
   list.add({
     daemon: 'ws',
     machine: 'workshop-host',
     deviceId: options.deviceId ?? 'dev',
     address: 'http://127.0.0.1:40245',
-  });
+    ...(options.carriers === undefined ? {} : { carriers: [...options.carriers] }),
+  } as never);
+  const shape = new ShapeMemory(held);
+  if (options.remembered === true)
+    shape.saveInventory('ws', options.deviceId ?? 'dev', {
+      kind: 'read',
+      entries: new Map(surfaces.map(entry => [entry.id, { on: true, contract: entry.contract }])),
+    });
   const runtime = new ShellRuntime({
     appVersion: '5.0.0',
     surfaces,
     daemons: list,
+    shape,
     connect: async () => transport,
     passkey: () => provision,
     daemonless: {
@@ -169,16 +188,24 @@ export function renderSettingsShellOf(
     },
   });
   const storage = memoryStore();
-  if (root !== null)
-    createRoot(root).render(
-      <App
-        runtime={runtime}
-        themes={new ThemePreferenceStore(storage)}
-        layouts={new DeviceLayoutStore(storage)}
-        browser={window}
-        scroll={new ScrollMemory(null)}
-      />,
-    );
+  const themes = new ThemePreferenceStore(storage);
+  if (options.style !== undefined) themes.setStyle(options.style as never);
+  const rendered = root === null ? null : createRoot(root);
+  rendered?.render(
+    <App
+      runtime={runtime}
+      themes={themes}
+      layouts={new DeviceLayoutStore(storage)}
+      browser={window}
+      scroll={new ScrollMemory(null)}
+    />,
+  );
+  return {
+    /** Takes the app down. */
+    unmount: (): void => rendered?.unmount(),
+    /** Unpairs the fake machine, so a failed read's retry timer stops (unmounting the view does not). */
+    forget: (): void => list.remove('ws'),
+  };
 }
 
 /**

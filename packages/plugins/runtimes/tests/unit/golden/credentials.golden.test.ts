@@ -17,10 +17,16 @@ import {
 import { organizationTypeOfAccountDocument } from '../../../daemon/lib/account-organization-type.ts';
 import { loginOrganizationType } from '../../../daemon/lib/login-organization-type.ts';
 import type { LoginLaunchStore, LoginsApi } from '@ferretry/plugin-logins/contract';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import type { Credential } from '../../../daemon/lib/account/schema.ts';
 import { expectGolden } from './support/golden.ts';
 import { outcome, THIRD_KEY } from './support/thrown.ts';
 
+const kits = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 const HOME = '/home/person';
 const PATHS = { userHome: HOME, hostCodexHome: `${HOME}/.codex` } as const;
 const RUNTIME_HOME = '/fy/fleet/homes/golden';
@@ -99,12 +105,13 @@ describe('credential store goldens', () => {
         entry.id,
         entry.credential,
         paths,
+        kits,
         entry.credential.harness,
         entry.stores,
       );
       const follow = (resolved: CredentialStoreResolution) => ({
         resolution: resolved,
-        launchEnvironment: credentialLaunchEnvironment(resolved),
+        launchEnvironment: credentialLaunchEnvironment(resolved, kits),
         launchArguments: credentialLaunchArguments(resolved),
         launchArgumentsWhenProfileNamesModel: credentialLaunchArguments(resolved, true),
         homeLink: codexCredentialLink(RUNTIME_HOME, resolved) ?? null,
@@ -175,10 +182,10 @@ describe('credential store goldens', () => {
 
   it('should refuse a third harness by name', () => {
     expectGolden('credentials/third-key', {
-      kept: outcome(() => resolveCredentialStore('x', { harness: THIRD_KEY, store: 'ferretry' } as never, PATHS)),
-      host: outcome(() => resolveCredentialStore('x', { harness: THIRD_KEY, store: 'host' } as never, PATHS)),
+      kept: outcome(() => resolveCredentialStore('x', { harness: THIRD_KEY, store: 'ferretry' } as never, PATHS, kits)),
+      host: outcome(() => resolveCredentialStore('x', { harness: THIRD_KEY, store: 'host' } as never, PATHS, kits)),
       launchEnvironment: outcome(() =>
-        credentialLaunchEnvironment({ harness: THIRD_KEY, store: 'host', secureStorage: '' } as never),
+        credentialLaunchEnvironment({ harness: THIRD_KEY, store: 'host', secureStorage: '' } as never, kits),
       ),
     });
   });

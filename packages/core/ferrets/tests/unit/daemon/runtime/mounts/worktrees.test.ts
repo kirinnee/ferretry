@@ -10,6 +10,7 @@ import type {
   WorktreeListResponse,
   WorktreeRemovalDecision,
   WorktreeRemovalRequest,
+  MoveProjectWorktreeRequest,
 } from '../../../../../contract/index.ts';
 import should from 'should';
 import actions from '../../../../../manifest/actions/90-worktrees.actions.ts';
@@ -50,6 +51,13 @@ const REMOVED: RemovedWorktree = {
 
 /** A subsystem that answers with fixtures and records what the routes asked of it. */
 class FakeWorktrees implements WorktreeSubsystem {
+  readonly moves: MoveProjectWorktreeRequest[] = [];
+  readonly nestedProjectListings: string[] = [];
+  async moveProject(request: MoveProjectWorktreeRequest): Promise<{ from: string; to: string }> {
+    this.moves.push(request);
+    if (this.failure) throw this.failure;
+    return { from: PATH, to: '/managed/project/checkout' };
+  }
   readonly adoptions: AdoptWorktreeRequest[] = [];
   async adopt(request: AdoptWorktreeRequest): Promise<CreatedWorktree> {
     this.adoptions.push(request);
@@ -60,6 +68,7 @@ class FakeWorktrees implements WorktreeSubsystem {
   readonly removals: WorktreeRemovalRequest[] = [];
   readonly creations: CreateWorktreeRequest[] = [];
   readonly listings: string[] = [];
+  readonly projectListings: string[] = [];
 
   constructor(private readonly failure?: WorktreeError) {}
 
@@ -91,6 +100,13 @@ class FakeWorktrees implements WorktreeSubsystem {
     if (this.failure) throw this.failure;
     return { commonDirectory, worktrees: [], total: 0, truncated: false };
   }
+
+  async listProjectRepo(project: string, commonDirectory?: string): Promise<RepoWorktreeListResponse> {
+    this.projectListings.push(project);
+    if (commonDirectory !== undefined) this.nestedProjectListings.push(commonDirectory);
+    if (this.failure) throw this.failure;
+    return { commonDirectory: '/recorded/.git', worktrees: [], total: 0, truncated: false };
+  }
 }
 
 /** Calls one handler directly; the route spine (operator, capability, no-store) is the kernel's. */
@@ -111,6 +127,67 @@ const thrownBy = async (work: Promise<unknown>): Promise<unknown> =>
   );
 
 describe('the managed-worktree mount', () => {
+  it('should parse one reviewed move without accepting client paths, force flags or missing identity', async () => {
+    const worktrees = new FakeWorktrees();
+    const body = { project: 'p1', worktreeId: 'tracked-1', reviewedIdentity: 'a'.repeat(64) };
+    const moved = await call(worktrees, 'POST /v1/worktrees/move', { body });
+    should(moved.status).equal(200);
+    should(jsonOf(moved)).eql({ from: PATH, to: '/managed/project/checkout' });
+    should(worktrees.moves).eql([body]);
+    for (const invalid of [
+      { ...body, path: PATH },
+      { ...body, destination: '/client/path' },
+      { ...body, force: true },
+      { project: 'p1', worktreeId: 'tracked-1' },
+    ]) {
+      should((await refusalOf(call(worktrees, 'POST /v1/worktrees/move', { body: invalid })))?.status).equal(400);
+    }
+    should(worktrees.moves).have.length(1);
+    const refused = await thrownBy(
+      call(new FakeWorktrees(new WorktreeError('unsafe_move', 'a live ferret arrived')), 'POST /v1/worktrees/move', {
+        body,
+      }),
+    );
+    should(refused).match({ status: 409, code: 'unsafe_move', message: 'a live ferret arrived' });
+  });
+
+  it('should put moves behind operator and filesystem.configure admission without caching', () => {
+    should(actions.routes?.find(route => route.path === '/v1/worktrees/move')).match({
+      method: 'POST',
+      minimum: 'operator',
+      caller: 'any',
+      noStore: true,
+      capability: { capability: 'filesystem', axis: 'configure' },
+    });
+  });
+
+  it('should resolve a nested moveProject repository only through the registered project lookup', async () => {
+    const worktrees = new FakeWorktrees();
+    const response = await call(worktrees, 'GET /v1/worktrees/repo', {
+      query: { moveProject: ' p1 ', commonDir: ' /recorded/nested/.git ' },
+    });
+    should(response.status).equal(200);
+    should(worktrees.projectListings).eql(['p1']);
+    should(worktrees.nestedProjectListings).eql(['/recorded/nested/.git']);
+    should(worktrees.listings).be.empty();
+    const invalidQueries: readonly Readonly<Record<string, string>>[] = [
+      { moveProject: 'p1' },
+      { moveProject: 'p1', commonDir: ' ' },
+      { moveProject: 'p1', project: 'p1', commonDir: '/recorded/nested/.git' },
+    ];
+    for (const query of invalidQueries) {
+      should(await refusalOf(call(worktrees, 'GET /v1/worktrees/repo', { query }))).match({
+        status: 400,
+        code: 'invalid_common_directory',
+      });
+    }
+    const failed = await refusalOf(
+      call(new FakeWorktrees(new WorktreeError('invalid_common_directory', 'not recorded')), 'GET /v1/worktrees/repo', {
+        query: { moveProject: 'p1', commonDir: '/not-recorded/.git' },
+      }),
+    );
+    should(failed).match({ status: 422, code: 'invalid_common_directory' });
+  });
   it('should parse adoption through its strict path-only schema and preserve domain refusals', async () => {
     const worktrees = new FakeWorktrees();
     const response = await call(worktrees, 'POST /v1/worktrees/adopt', { body: { path: PATH } });
@@ -146,6 +223,7 @@ describe('the managed-worktree mount', () => {
     // Assert
     should(Object.keys(routes)).eql([...WORKTREE_ROUTE_KEYS]);
     should(Object.keys(routes)).eql([
+      'POST /v1/worktrees/move',
       'POST /v1/worktrees/adopt',
       'GET /v1/worktrees/removal',
       'GET /v1/worktrees/repo',
@@ -214,6 +292,23 @@ describe('the managed-worktree mount', () => {
     should(response.status).equal(200);
     should(jsonOf(response)).match({ commonDirectory: '/work/ferretry/.git', total: 0, truncated: false });
     should(worktrees.listings).eql(['/work/ferretry/.git']);
+  });
+
+  it('should list a repository named by a project id, and take no directory beside it', async () => {
+    // Arrange
+    const worktrees = new FakeWorktrees();
+
+    // Act
+    const response = await call(worktrees, 'GET /v1/worktrees/repo', { query: { project: ' p1 ' } });
+    const both = await refusalOf(
+      call(worktrees, 'GET /v1/worktrees/repo', { query: { project: 'p1', commonDir: '/etc/.git' } }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(worktrees.projectListings).eql(['p1']);
+    should(both).match({ status: 400, code: 'invalid_common_directory' });
+    should(worktrees.listings).be.empty();
   });
 
   it('should refuse a repository listing that names no common directory, before asking anyone', async () => {
@@ -383,6 +478,7 @@ describe('the managed-worktree mount', () => {
   it('should let an error that is not this domain answer as the defect it is', async () => {
     // Arrange
     const worktrees: WorktreeSubsystem = {
+      moveProject: async () => ({ from: PATH, to: '/managed/project/checkout' }),
       list: async () => {
         throw new Error('the disk fell off');
       },
@@ -391,6 +487,7 @@ describe('the managed-worktree mount', () => {
       create: async () => ({ worktree: VIEW, cwd: PATH }),
       adopt: async () => ({ worktree: VIEW, cwd: PATH }),
       listRepo: async () => ({ commonDirectory: '/r/.git', worktrees: [], total: 0, truncated: false }),
+      listProjectRepo: async () => ({ commonDirectory: '/r/.git', worktrees: [], total: 0, truncated: false }),
     };
 
     // Act

@@ -70,7 +70,16 @@ async function scriptedDaemon(
             presences.push(record.presence);
             const code = options.closes?.[requests++];
             if (code !== undefined) {
-              events.onClose(code, 'the session ended');
+              if (code >= 4000)
+                await deliver(
+                  await daemon.record({
+                    t: 'session-end',
+                    protocol: SESSION_PROTOCOL_ID,
+                    code,
+                    reason: 'the session ended',
+                  }),
+                );
+              events.onClose(code >= 4000 ? 4440 : code, 'the session ended');
               return;
             }
             const { status, body } = answer(request);

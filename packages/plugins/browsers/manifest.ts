@@ -126,6 +126,22 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
+      route('GET /v1/browser/identities', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: USE.browser,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE,
+      }),
+      route('POST /v1/browser/identities/:identity/stop', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: USE.browser,
+        noStore: true,
+        audit: { record: AUDIT.surfaceControl },
+        guard: GUARD_NONE,
+      }),
       route('GET /v1/ferrets/:ferretId/browser', {
         minimum: 'operator',
         caller: 'any',

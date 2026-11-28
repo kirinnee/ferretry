@@ -8,6 +8,8 @@
  * Fake ports only: Logins' views are literals, the owners' writer is a function, the kernel's command lookup records its calls.
  */
 import { describe, it } from 'bun:test';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import type { ProfileFile, RuntimeFile } from '../../../contract/index.ts';
 import { fileFleetSetupDeps } from '../../../daemon/adapters/setup-files.ts';
@@ -412,6 +414,11 @@ describe('data-word consumer goldens', () => {
         claimFor: () => ({ acquire: async () => 'token', release: async () => undefined, path: '/fy/fleet/.lock' }),
       } as never,
       catalog: {
+        kits: () =>
+          new Map([
+            ['claude', claudeRuntimesKit],
+            ['codex', codexRuntimesKit],
+          ] as const),
         layout: {
           stateHome: '/fy',
           userHome: HOST_HOME,

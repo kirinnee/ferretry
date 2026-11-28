@@ -272,10 +272,13 @@ export const BrowserCaptchaSettingSchema = z.strictObject({
 });
 export type BrowserCaptchaSetting = z.infer<typeof BrowserCaptchaSettingSchema>;
 
+const SpendMonthSchema = z.string().regex(/^\d{4}-\d{2}$/u);
 /** What the solver has spent this month (`captcha-spend.json`): a calendar month (`2026-11`, UTC) and millionths of a dollar. */
 export const CaptchaSpendSchema = z.strictObject({
-  month: z.string().regex(/^\d{4}-\d{2}$/u),
+  month: SpendMonthSchema,
   micros: NonNegativeIntegerSchema,
+  /** The months before `month` that still hold spend, so a clock that moves back does not erase one. */
+  earlier: z.record(SpendMonthSchema, NonNegativeIntegerSchema).optional(),
 });
 export type CaptchaSpend = z.infer<typeof CaptchaSpendSchema>;
 /** The state file that keeps it (declared in the manifest; the solver reads and writes it through `kernel.state`). */

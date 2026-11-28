@@ -7,6 +7,8 @@
  * an apply is handed is what a real apply would be.
  */
 import { afterEach, describe, it } from 'bun:test';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -66,6 +68,10 @@ import { configReading, configTextOf, modelOfWrites } from '../support/config-re
 
 /** `setup/import.json`'s name in the fleet directory (private to the service). */
 const IMPORT_RECORD_FILE = 'setup/import.json';
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 /** The most document text one Clone bundle carries (private to the service). */
 const CLONE_BUNDLE_MAX_BYTES = 384 * 1024;
 
@@ -253,6 +259,7 @@ function world(
   let baseTurn: Promise<unknown> = Promise.resolve();
   const deps: FleetSetupServiceDeps = {
     catalog: {
+      kits: () => IMPORT_KITS,
       document: async () => {
         if (state.documentError !== undefined) throw state.documentError;
         return state.reading;
@@ -1085,10 +1092,13 @@ describe('the setup.import executor', () => {
     const named = world();
     await importOnce(named.service, IMPORT({ names: { 'claude-code': 'my-claude', codex: 'unused' } }));
     should(configTextOf(named.applied[0]?.documents ?? [])).containEql('my-claude');
+    // E-296: the name the person typed is recorded as theirs, so it is shown as typed.
+    should(configTextOf(named.applied[0]?.documents ?? [])).containEql('"namedByOwner": true');
 
     const same = world();
     await importOnce(same.service, IMPORT({ names: { 'claude-code': 'claude-default' } }));
     should(configTextOf(same.applied[0]?.documents ?? [])).containEql('claude-default');
+    should(configTextOf(same.applied[0]?.documents ?? [])).not.containEql('namedByOwner');
 
     const invalid = await catalogRefusal(
       world().service.executors.setup.describe(IMPORT({ names: { 'claude-code': 'no spaces' } }), MACHINE),

@@ -8,6 +8,11 @@ import type { SendLedger, SessionQueueStore } from './stores.ts';
 
 /** The stored original of one attachment of a ferret, its digest re-checked (Conversation's store). */
 export interface AttachmentSource {
+  /** Manifest metadata only: never reads or hashes the original bytes. */
+  lookup(
+    ferret: string,
+    id: string,
+  ): Promise<{ readonly id: string; readonly filename: string; readonly mime: string }>;
   download(
     ferret: string,
     id: string,

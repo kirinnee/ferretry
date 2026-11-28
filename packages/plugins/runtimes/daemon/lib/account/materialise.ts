@@ -46,13 +46,13 @@ import {
   type HarnessKind,
 } from '../manifest.ts';
 import { loginModelCatalog, type ModelCatalogSources } from '../models/catalog.ts';
-import { CODEX_CATALOG_FORMAT, CODEX_MODEL_CATALOG_FILE } from '../models/codex-catalog.ts';
 import { type RuntimeModels, runtimeModels } from '../models/runtime.ts';
 import { expandAssetPath, expandHomePath, joinPath } from '../paths.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation, MaterialisedRecord } from '../provisioning.ts';
 import { type SettingsObject, serializeSettings } from '../settings.ts';
 import { sharedHistoryPoolRequests } from '../shared-history.ts';
 import { CREDENTIAL_ENV } from '../foreign.ts';
+import { harnessKeyOfKind, isKind, unsupportedHarnessSentence } from '../harness-kind.ts';
 import {
   MANAGED_MARKER,
   RUNTIME_NAME_ENV,
@@ -67,6 +67,9 @@ import {
   CLAUDE_JSON_FILE,
   type ClaudeStatuslineCommand,
   componentPartialSupport,
+  type KitRefusal,
+  kitlessAdaptation,
+  missingKitRefusal,
   plumbingOf,
   priorServersOf,
   SKILLS_STORE_DIRECTORY,
@@ -331,7 +334,14 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     // A derived runtime whose pinned model is gone, or whose pins nobody could read, is refused by name: never moved to the live default.
     if (runtime.refused !== undefined) reasons.push(runtime.refused);
 
-    const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness, loginStores);
+    const store = resolveCredentialStore(
+      runtime.credential,
+      credential,
+      credentialStorePaths,
+      input.kits,
+      harness,
+      loginStores,
+    );
     if ('unavailable' in store)
       reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
     if (store.store === 'environment' && store.problem !== undefined) {
@@ -370,6 +380,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     let fixed: FixedLayer | undefined;
     // What this harness's own plugin hands Runtimes (absent when its plugin is off); every group below is given it.
     const kit = input.kits?.get(harness);
+    // A runtime whose plugin gives no kit is published unavailable and writes nothing; every other runtime is planned as usual.
+    // ...and so is one whose kit gives no launch line (E-276 PR 8), in the same words.
+    const kitMissing: KitRefusal | undefined =
+      missingKitRefusal(harness, kit) ??
+      (isKind(harness, 'claude') && kit?.wrapper === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
+        : undefined);
+    // (A login whose own store already says so is not said twice.)
+    if (kitMissing !== undefined && !('unavailable' in store)) reasons.push(kitMissing.message);
     const result = fixedLayerOf(
       harness,
       {
@@ -386,18 +405,26 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const autoRefusal = result.ok ? undefined : result.refusal.message;
     const launch = fixed === undefined ? undefined : applyFixedLayer(resolved, fixed);
 
-    const adapted = adaptProfile({
-      resolved,
-      plumbing: plumbingOf(harness, { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome }, kit),
-      bodies: {
-        ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
-        ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
-        // A skill item whose `SKILL.md` the caller could not read has no copy in the asset tree: nothing to link.
-        ...(input.bodies?.skillFrontmatter === undefined
-          ? {}
-          : { skillItems: new Set(Object.keys(input.bodies.skillFrontmatter)) }),
-      },
-    });
+    const adapted =
+      kitMissing !== undefined
+        ? kitlessAdaptation(harness)
+        : adaptProfile({
+            resolved,
+            plumbing: plumbingOf(
+              harness,
+              { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome },
+              kit,
+            ),
+            kit,
+            bodies: {
+              ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
+              ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),
+              // A skill item whose `SKILL.md` the caller could not read has no copy in the asset tree: nothing to link.
+              ...(input.bodies?.skillFrontmatter === undefined
+                ? {}
+                : { skillItems: new Set(Object.keys(input.bodies.skillFrontmatter)) }),
+            },
+          });
     for (const problem of adapted.problems) problems.push({ runtime: name, message: problem.message });
 
     // The launch environment: the credential's, the profile's, the MCP servers' forwarded secrets,
@@ -412,7 +439,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       Object.entries(resolved.env).map(([variable, { value }]) => [variable, value]),
     );
     const env: Record<string, string> = {
-      ...credentialLaunchEnvironment(store),
+      ...credentialLaunchEnvironment(store, input.kits),
       ...derived.env,
       ...profileEnv,
       ...adapted.launchEnv,
@@ -444,34 +471,36 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       kit,
     );
     Object.assign(env, extras.env);
-    const codexCatalog = extras.catalog?.text;
+    const codexCatalog = extras.catalog;
 
-    operations.push(
-      ...configDirectoryOperations({
-        home,
-        harness,
-        codexCatalog,
-        entries: adapted.entries,
-        absent: adapted.absent,
-        settings: adapted.settings,
-        claudeJson: adapted.claudeJson,
-        // A callback: a harness whose document keeps no prior servers never filters them.
-        priorServers: priorServersOf(
+    // An unavailable runtime for want of its kit writes nothing into its home.
+    if (kitMissing === undefined)
+      operations.push(
+        ...configDirectoryOperations({
+          home,
           harness,
-          () =>
-            Object.fromEntries(
-              Object.entries(model.components.mcp).filter(
-                ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+          codexCatalog,
+          entries: adapted.entries,
+          absent: adapted.absent,
+          settings: adapted.settings,
+          claudeJson: adapted.claudeJson,
+          // A callback: a harness whose document keeps no prior servers never filters them.
+          priorServers: priorServersOf(
+            harness,
+            () =>
+              Object.fromEntries(
+                Object.entries(model.components.mcp).filter(
+                  ([serverName]) => !resolved.mcp.some(contribution => contribution.layer.name === serverName),
+                ),
               ),
-            ),
-          kit,
-        ),
-        overlay: fixed?.claudeSettingsOverlay,
-        codexRules: fixed?.codexRules,
-        credentialLink: codexCredentialLink(home, store),
-        layout,
-      }),
-    );
+            kit,
+          ),
+          overlay: fixed?.claudeSettingsOverlay,
+          codexRules: fixed?.codexRules,
+          credentialLink: codexCredentialLink(home, store),
+          layout,
+        }),
+      );
 
     const fixedSettingsArgs =
       fixed?.claudeSettingsOverlay === undefined
@@ -499,7 +528,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         defaultModel: defaultModel ?? undefined,
         // What a ferret started in auto mode gets instead (the wrapper runs it only for FY_SESSION_MODE=auto).
         autonomous:
-          launch === undefined
+          launch === undefined || kitMissing !== undefined
             ? { refusal: result.ok ? '' : result.refusal.message }
             : {
                 args: [...launchPrefix, ...launch.args, ...fixedSettingsArgs],
@@ -508,6 +537,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
         harnessCommand: input.harnessCommands?.[harness],
+        kit,
         signInLink: codexWrapperLink(home, store),
         refusal: wrapperBlocked,
       }),
@@ -524,7 +554,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       wrapper,
       models,
       ...(modelCatalog === undefined ? {} : { modelCatalog }),
-      ...(codexCatalog === undefined ? {} : { codexCatalog: CODEX_CATALOG_FORMAT }),
+      ...(codexCatalog === undefined ? {} : { codexCatalog: codexCatalog.format }),
       defaultModel,
       ...(compactAt === undefined ? {} : { compactAt }),
       secretEnv: sorted(
@@ -614,8 +644,8 @@ interface ConfigDirectoryInput {
   readonly overlay: SettingsObject | undefined;
   /** The text of the rules file a Codex agent runtime's home holds (`rules/ferretry.rules`: the commands it forbids). */
   readonly codexRules: string | undefined;
-  /** The text of the model catalog file a Codex runtime on a third-party provider reads. */
-  readonly codexCatalog: string | undefined;
+  /** The model catalog file a Codex runtime on a third-party provider reads: its name and text. */
+  readonly codexCatalog: { readonly file: string; readonly text: string } | undefined;
   readonly credentialLink: ReturnType<typeof codexCredentialLink>;
   readonly layout: FleetLayout;
 }
@@ -645,7 +675,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       keep: [
         MATERIALISED_RECORD_FILE,
         ...(input.overlay === undefined ? [] : [FIXED_SETTINGS_FILE]),
-        ...(input.codexCatalog === undefined ? [] : [CODEX_MODEL_CATALOG_FILE]),
+        ...(input.codexCatalog === undefined ? [] : [input.codexCatalog.file]),
       ],
       record,
       recordedAs: RUNTIME_STATE_DIRECTORY,
@@ -728,10 +758,10 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
   if (input.codexCatalog !== undefined) {
     operations.push({
       kind: 'file',
-      path: joinPath(state, CODEX_MODEL_CATALOG_FILE),
-      content: input.codexCatalog,
+      path: joinPath(state, input.codexCatalog.file),
+      content: input.codexCatalog.text,
       mode: PRIVATE_FILE_MODE,
-      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`, byName: true },
+      unlessUnrecorded: { record, key: `${RUNTIME_STATE_DIRECTORY}/${input.codexCatalog.file}`, byName: true },
     });
   }
   if (input.credentialLink !== undefined) {
@@ -754,7 +784,7 @@ function configDirectoryOperations(input: ConfigDirectoryInput): readonly FleetW
       ...new Set([
         ...[...ownEntries, ...skillEntries].map(entry => entry.dest),
         ...(input.overlay === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${FIXED_SETTINGS_FILE}`]),
-        ...(input.codexCatalog === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${CODEX_MODEL_CATALOG_FILE}`]),
+        ...(input.codexCatalog === undefined ? [] : [`${RUNTIME_STATE_DIRECTORY}/${input.codexCatalog.file}`]),
         ...(input.codexRules === undefined ? [] : [CODEX_KILL_RULES_FILE]),
         ...(input.credentialLink === undefined ? [] : [CODEX_CREDENTIAL_FILE]),
       ]),

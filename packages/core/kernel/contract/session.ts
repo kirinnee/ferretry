@@ -71,9 +71,8 @@ export interface SealedFrame {
 }
 
 /**
- * How a session ended: the close code and the one public reason a carrier may put on the wire (a relay's
- * `closed` control, a direct socket's close frame). Never a description of a holder; `4440` always carries the
- * shared "the session concluded", because the real outcome already crossed inside the channel.
+ * Carrier teardown, following a keyed session's sealed `session-end` record: always `4440` and "the session
+ * concluded". Only a pre-handshake end may carry a specific code and public reason in the plain carrier.
  */
 export interface SessionEnd {
   readonly code: number;

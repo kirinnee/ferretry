@@ -114,7 +114,9 @@ describe('the Browser tab', () => {
 
   it('reads browsers.yaml and the browser state through its own client, by route key', async () => {
     const { calls, view } = await tab({ state: { state: 'running' } });
-    expect(calls.map(call => call.route).sort()).toEqual([CONFIG_GET, STATE, GRANTS, 'GET /v1/secrets'].sort());
+    expect(calls.map(call => call.route).sort()).toEqual(
+      [CONFIG_GET, STATE, GRANTS, 'GET /v1/secrets', 'GET /v1/browser/identities'].sort(),
+    );
     expect(calls.find(call => call.route === CONFIG_GET)?.init?.query).toEqual({ path: 'browsers.yaml' });
     expect(text(view.container, '[data-browser-state]')).toBe('Running · direct, no proxy.');
     expect(text(view.container, '[data-browser-user-agent]')).toBe(BROWSER_USER_AGENT_WORDS);

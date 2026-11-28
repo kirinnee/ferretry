@@ -81,7 +81,6 @@ import { itemHistory, withDeviceEvents } from '../../lib/agenda-history.ts';
 import { pendingAnswerEvents } from '../../lib/pending-answer-history.ts';
 import { inboxOpenCard } from '../../lib/inbox-open-card.ts';
 import {
-  actionSentence,
   agendaConversationPath,
   DISMISS_ACTION,
   type FailedAgendaAction,
@@ -145,6 +144,7 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { ownsKeys } from './agenda-swipe-gesture.ts';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
+import { OrphanedFailures } from './orphaned-failures.tsx';
 import { CardKindChip } from './card-kind-chip.tsx';
 import { CardMetaLine, hasWords, joinMeta } from './card-meta-line.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
@@ -770,33 +770,6 @@ function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonl
         </button>
       </div>
     </div>
-  );
-}
-
-/** Refusals whose task is no longer on the deck: said once, until the reader dismisses them. */
-function OrphanedFailures({ inbox }: { readonly inbox: AgendaInbox }) {
-  const onDeck = new Set(inbox.cards.map(card => card.key));
-  const orphans = inbox.deferredState.failed.filter(failure => !onDeck.has(failure.key));
-  if (orphans.length === 0) return null;
-  return (
-    <ul className="fy-attn-inbox__failures" data-agenda-failures="">
-      {orphans.map(failure => (
-        <li className="fy-attn-inbox__failure" key={failure.key} role="alert">
-          <span className="min-w-0 flex-1">
-            Not sent — {actionSentence(failure.action, failure.card.item.id)}: {failure.message}
-          </span>
-          <button
-            aria-label={`Dismiss: ${actionSentence(failure.action, failure.card.item.id)} was not sent`}
-            className="kt-btn kt-btn--sm"
-            data-variant="ghost"
-            onClick={() => inbox.deferred.clearFailure(failure.key)}
-            type="button"
-          >
-            <X aria-hidden="true" size={14} />
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -1976,7 +1949,7 @@ export function AgendaInboxPage({
             ) : null}
           </header>
         )}
-        <OrphanedFailures inbox={inbox} />
+        <OrphanedFailures inbox={inbox} shown={deck.slice(0, 1).map(card => card.key)} />
         {atEnd ? (
           // The end sits where the task did, at its height: the deck's peek gap and hint line are kept.
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">

@@ -47,8 +47,9 @@
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { mcpOAuthSecretNames } from '../foreign.ts';
 import { harnessAsset, HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, type HarnessAssetTable } from '../assets.ts';
-import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
-import { byHarness, isKind } from '../harness-kind.ts';
+import { isSseUrl, type KitServerEnvironment, type RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
+import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
+import { byHarness, harnessKeyOfKind, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { isAssetTreeReference } from '../paths.ts';
 import { deepMergeSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
@@ -108,6 +109,8 @@ export interface AdaptInput {
   readonly settings?: SettingsObject;
   /** Defaults to {@link HARNESS_ASSETS}; injected so a caller can substitute one. */
   readonly assets?: HarnessAssetTable;
+  /** The kit the harness's own plugin gives this runtime (how it spells MCP servers and its documents). */
+  readonly kit: RuntimesHarnessKit | undefined;
 }
 
 // ── Outputs ──────────────────────────────────────────────────────────────────────────────────────
@@ -301,23 +304,9 @@ function adaptInstructions(
 
 // ── MCP servers ──────────────────────────────────────────────────────────────────────────────────
 
-/**
- * Whether a server reached at `url` speaks the older SSE transport rather than streamable HTTP. Read
- * from the path's last segment (`…/sse`), the convention every SSE server Ferretry has seen follows.
- */
-export function isSseUrl(url: string): boolean {
-  const pathname = new URL(url).pathname.replace(/\/+$/, '');
-  return pathname.split('/').at(-1)?.toLowerCase() === 'sse';
-}
+export { isSseUrl };
 
-interface ServerEnvironment {
-  /** Variables written as literal values. */
-  readonly literal: Readonly<Record<string, string>>;
-  /** Variables forwarded from the launch environment by name, because their value names a secret. */
-  readonly forwarded: readonly string[];
-}
-
-const splitEnvironment = (env: Readonly<Record<string, string>>): ServerEnvironment => {
+const splitEnvironment = (env: Readonly<Record<string, string>>): KitServerEnvironment => {
   const literal: Record<string, string> = {};
   const forwarded: string[] = [];
   for (const [name, value] of Object.entries(env)) {
@@ -327,29 +316,8 @@ const splitEnvironment = (env: Readonly<Record<string, string>>): ServerEnvironm
   return { literal, forwarded };
 };
 
-/**
- * One server as Claude's `mcpServers` entry. A server signed in to from Ferretry carries its token as an
- * `Authorization` header that names a launch variable — Claude expands `${VAR}` in a server's headers
- * (INFERRED, docs/mcp-oauth.md) — so the document holds a variable name, never a value.
- */
-function claudeServer(server: McpComponent, env: ServerEnvironment, bearer: string | undefined): SettingsObject {
-  if (server.url !== undefined)
-    return {
-      type: isSseUrl(server.url) ? 'sse' : 'http',
-      url: server.url,
-      ...(bearer === undefined ? {} : { headers: { Authorization: `Bearer \${${bearer}}` } }),
-    };
-  const variables = { ...env.literal, ...Object.fromEntries(env.forwarded.map(name => [name, `\${${name}}`])) };
-  return {
-    type: 'stdio',
-    command: server.command,
-    args: server.args ?? [],
-    ...(Object.keys(variables).length > 0 ? { env: variables } : {}),
-  };
-}
-
 /** One server as Codex's `[mcp_servers.<name>]` table; a signed-in one names its token's variable. */
-function codexServer(server: McpComponent, env: ServerEnvironment, bearer: string | undefined): SettingsObject {
+function codexServer(server: McpComponent, env: KitServerEnvironment, bearer: string | undefined): SettingsObject {
   if (server.url !== undefined)
     return { url: server.url, ...(bearer === undefined ? {} : { bearer_token_env_var: bearer }) };
   return {
@@ -367,6 +335,7 @@ function codexServer(server: McpComponent, env: ServerEnvironment, bearer: strin
 export function renderMcpComponents(
   harness: HarnessKind,
   components: Readonly<Record<string, McpComponent>>,
+  kit: RuntimesHarnessKit | undefined,
 ): Readonly<Record<string, SettingsObject>> {
   const contributions = Object.entries(components).map(([name, component]) => ({
     layer: {
@@ -378,7 +347,7 @@ export function renderMcpComponents(
     },
     component,
   }));
-  return adaptMcp(harness, contributions, {}, []);
+  return adaptMcp(harness, contributions, {}, [], kit);
 }
 
 function adaptMcp(
@@ -386,6 +355,7 @@ function adaptMcp(
   servers: readonly Contribution<McpComponent>[],
   launchEnv: Record<string, string>,
   problems: AdaptProblem[],
+  kit: RuntimesHarnessKit | undefined,
 ): Readonly<Record<string, SettingsObject>> {
   const owners = new Map<string, LayerReferenceText>();
   const reported = new Set<string>();
@@ -419,7 +389,10 @@ function adaptMcp(
       launchEnv[bearer] = secretReference(names.access);
     }
     rendered[layer.name] = byHarness(harness, {
-      claude: () => claudeServer(component, env, bearer),
+      claude: () => {
+        if (kit?.renderMcpServer === undefined) throw new UnsupportedHarnessError(harness);
+        return kit.renderMcpServer(component, env, bearer);
+      },
       codex: () => codexServer(component, env, bearer),
     });
   }
@@ -553,24 +526,19 @@ function adaptHooks(
 
 // ── Plumbing ─────────────────────────────────────────────────────────────────────────────────────
 
-/** The person's own statusLine command, when their settings name one Claude would run. */
-function ownStatuslineCommand(settings: SettingsObject): string | undefined {
-  const statusLine = settings.statusLine;
-  if (!isPlainObject(statusLine)) return undefined;
-  const command = statusLine.command;
-  return typeof command === 'string' && command.trim() !== '' ? command : undefined;
-}
-
-const plumbingFor = (plumbing: AdaptPlumbing, settings: SettingsObject): readonly PlumbingEntry[] =>
+const plumbingFor = (
+  plumbing: AdaptPlumbing,
+  settings: SettingsObject,
+  kit: RuntimesHarnessKit | undefined,
+): readonly PlumbingEntry[] =>
   byHarness<readonly PlumbingEntry[]>(plumbing.harness, {
-    claude: () => [
-      { key: 'statusLine.type', path: ['statusLine', 'type'], value: 'command' },
-      {
-        key: 'statusLine.command',
-        path: ['statusLine', 'command'],
-        value: (plumbing as Extract<AdaptPlumbing, { harness: 'claude' }>).statusLine(ownStatuslineCommand(settings)),
-      },
-    ],
+    claude: () => {
+      if (kit?.plumbing === undefined) throw new UnsupportedHarnessError(plumbing.harness);
+      return kit.plumbing({
+        settings,
+        statusLine: (plumbing as Extract<AdaptPlumbing, { harness: 'claude' }>).statusLine,
+      });
+    },
     codex: () => [
       { key: CODEX_CREDENTIAL_STORE_KEY, path: [CODEX_CREDENTIAL_STORE_KEY], value: CODEX_CREDENTIAL_STORE_FILE },
       {
@@ -601,6 +569,43 @@ const replacedLeaves = (
   });
 
 // ── Adapting a runtime ───────────────────────────────────────────────────────────────────────────
+
+/** A typed refusal: a runtime that cannot be planned, said as data and never thrown. */
+export interface KitRefusal {
+  readonly kind: 'harness-unsupported';
+  readonly message: string;
+}
+
+/**
+ * The typed refusal for a runtime of `harness` that cannot be planned without its plugin's kit, or `undefined` when it can. Claude's MCP
+ * servers and config documents are the Claude kit's (E-276 PR 6) and Codex's variables and files are the Codex kit's (PR 12), so a
+ * runtime whose plugin is off is published unavailable with this refusal (`claude-code is not supported here`), whatever its
+ * credential store. Only that runtime is affected: the rest of the plan is made as usual.
+ */
+export const missingKitRefusal = (harness: string, kit: RuntimesHarnessKit | undefined): KitRefusal | undefined =>
+  byHarness<KitRefusal | undefined>(harness, {
+    claude: () =>
+      kit === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('claude')) }
+        : undefined,
+    codex: () =>
+      kit?.runtimeExtras === undefined
+        ? { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind('codex')) }
+        : undefined,
+  });
+
+/** What a runtime that cannot be planned for want of its kit writes: nothing. Never reaches a file. */
+export const kitlessAdaptation = (harness: HarnessKind): AdaptedRuntime => ({
+  harness,
+  entries: [],
+  absent: [],
+  settings: { dest: '', format: 'json', value: {} },
+  launchEnv: {},
+  harnessOwned: [],
+  plumbing: [],
+  overrides: [],
+  problems: [],
+});
 
 /**
  * Turn a profile resolved for one harness into that harness's files (§8.3). Total: a runtime that
@@ -661,14 +666,18 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   entries.push(...hooks.entries);
   absent.push(...hooks.absent);
 
-  const servers = adaptMcp(harness, resolved.mcp, launchEnv, problems);
+  const servers = adaptMcp(harness, resolved.mcp, launchEnv, problems, input.kit);
 
   // Where the servers go: Claude's `.claude.json` (and its hooks block in settings), Codex's `mcp_servers` table in config.toml.
   const documents = byHarness<{ readonly settings: SettingsObject; readonly claudeJson?: SettingsObject }>(harness, {
-    claude: () => ({
-      settings: hooks.settingsBlock === undefined ? baseSettings : { ...baseSettings, hooks: hooks.settingsBlock },
-      claudeJson: { mcpServers: servers },
-    }),
+    claude: () => {
+      if (input.kit?.configDocuments === undefined) throw new UnsupportedHarnessError(harness);
+      return input.kit.configDocuments({
+        settings: baseSettings,
+        servers,
+        ...(hooks.settingsBlock === undefined ? {} : { hooksBlock: hooks.settingsBlock }),
+      });
+    },
     codex: () => {
       let written = baseSettings;
       for (const { layer } of resolved.mcp) {
@@ -686,7 +695,7 @@ export function adaptProfile(input: AdaptInput): AdaptedRuntime {
   const { claudeJson } = documents;
 
   // Another harness's plumbing would put its keys in the wrong document, so none is written.
-  const plumbingEntries = plumbing.harness === harness ? plumbingFor(plumbing, baseSettings) : [];
+  const plumbingEntries = plumbing.harness === harness ? plumbingFor(plumbing, baseSettings, input.kit) : [];
   for (const entry of plumbingEntries) {
     // Claude's statusLine is chained, never replaced: the person's own command still runs.
     if (isKind(harness, 'codex')) {
@@ -820,10 +829,10 @@ export function plumbingOf(
 export function priorServersOf(
   harness: string,
   servers: () => Readonly<Record<string, McpComponent>>,
-  _kit?: RuntimesHarnessKit,
+  kit?: RuntimesHarnessKit,
 ): Readonly<Record<string, SettingsObject>> {
   return byHarness<Readonly<Record<string, SettingsObject>>>(harness, {
-    claude: () => renderMcpComponents('claude', servers()),
+    claude: () => renderMcpComponents('claude', servers(), kit),
     codex: () => ({}),
   });
 }

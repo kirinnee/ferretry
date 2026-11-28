@@ -1,9 +1,23 @@
 import { defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 
+/** The repository a registered project records: the project's own folder and its git COMMON directory. */
+export interface ProjectRepository {
+  readonly folder: string;
+  readonly commonDirectory: string;
+  /** The same opaque group Projects supplies for new worktrees. */
+  readonly worktreeGroup?: string;
+}
+
 /** The project folders a governed device may start a ferret in without terminal access (absolute paths). */
 export interface LaunchRootsSource {
   roots(): Promise<readonly string[]>;
+  /**
+   * The repository a REGISTERED project records, found by the project's id in the registry's own records, or none (no
+   * such project, or one that is no git repository). The repository worktree list asks it so a caller names a project
+   * and never a path: Ferrets reads the answer, it never takes a directory from the caller.
+   */
+  repository?(project: string, commonDirectory?: string): Promise<ProjectRepository | undefined>;
 }
 
 /** The one key `launch.roots` is provided under. */

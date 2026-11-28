@@ -1287,7 +1287,11 @@ command says so at the moment somebody might be tempted to do that instead.
   common directory and answers the paths, branches, heads and ferret ids of every worktree Git lists for it, so it maps the
   disk the way an outside-home folder read does and asks the same axis: a use-only or `--limited` device is refused, and a
   remote device needs the passkey step-up. The absolute common directory must be inside the managed root or a ferret's
-  folder, without a symlink escape or redirected `commondir`. Its device/inode identity is held before Git reads it;
+  folder, without a symlink escape or redirected `commondir`. A REGISTERED project is asked about as `?project=<id>`
+  instead (never together with `commonDir`): the daemon looks the id up in its own project registry (Projects, through
+  `launch.roots`) and reads only the folders that record names (the project folder, its common directory and the main
+  checkout beside it) through the read-only `imports` root; an unknown id is `422`, a path nobody registered stays
+  refused, and the caller never names a directory for it. Its device/inode identity is held before Git reads it;
   Git must also prove it is a common directory (`422 invalid_common_directory` otherwise, a missing query `400`).
   Each checkout's metadata must belong to that same repository before inspection or a managed label. At most 500 rows.
   A row whose folder this daemon may not reach (outside

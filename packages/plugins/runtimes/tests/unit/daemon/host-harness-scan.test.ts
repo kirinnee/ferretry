@@ -1,9 +1,16 @@
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import { describe, expect, it } from 'bun:test';
 import { fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { LoginsApi, LoginView } from '@ferretry/plugin-logins/contract';
 import { HostHarnessScanner } from '../../../daemon/adapters/host-harness-scan.ts';
 import { planImport } from '../../../daemon/lib/account/import-plan.ts';
 import type { HostEntry, HostFiles } from '../../../daemon/adapters/ports.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 type FixtureEntry =
   | { readonly kind: 'file'; readonly text: string }
@@ -68,6 +75,7 @@ const fixtureScan = async (entries: Readonly<Record<string, FixtureEntry>>, clau
     ...entries,
   });
   const scanner = new HostHarnessScanner({
+    kits: () => IMPORT_KITS,
     userHome: '/fixture/home',
     ...(claudeConfigDir === undefined ? {} : { claudeConfigDir }),
     files: fixture.files,
@@ -184,6 +192,7 @@ const scan = async (logins: Pick<LoginsApi, 'list'>) => {
     return undefined;
   };
   const scanner = new HostHarnessScanner({
+    kits: () => IMPORT_KITS,
     userHome: '/fixture/home',
     files: {
       stat: async path => touch(path),
@@ -239,7 +248,7 @@ describe('opaque host sign-in scan', () => {
       },
     });
     expect(scans.map(row => row.login.state)).toEqual(['unknown', 'unknown']);
-    const plan = planImport(scans, { digest: text => text });
+    const plan = planImport(scans, { kits: IMPORT_KITS, digest: text => text });
     expect(Object.values(plan.credentials).map(login => login.store)).toEqual(['host', 'host']);
     expect(JSON.stringify(plan.notes)).toContain('unknown');
   });
