@@ -3,7 +3,17 @@ import { assignedTaskDocument, messageWithAttachments } from '../../../contract/
 import should from 'should';
 import { handoffFolders, handoffReadArguments, handoffView } from '../../../contract/index.ts';
 
-const context = { reminder: 'Keep the protocol.', attachmentRoot: '/state/attachments/d/s1' };
+const context = {
+  reminder: 'Keep the protocol.',
+  attachments: [
+    {
+      path: '/state/attachments/d/s1/att_1/shot.png',
+      attachmentId: 'att_1',
+      filename: 'shot.png',
+      mime: 'image/png',
+    },
+  ],
+};
 
 describe('a hand-off read back', () => {
   it('should carry who Ferretry wrote it as, when it says, and nothing when it does not', () => {

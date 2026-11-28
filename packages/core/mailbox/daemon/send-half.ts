@@ -1,4 +1,3 @@
-import { basename, dirname } from 'node:path';
 import { ApiError, type KernelPorts } from '@ferretry/kernel/contract';
 import { type AttachmentSource, EntriesRetractionProof, harnessEntries, statusOf } from '../contract/index.ts';
 import {
@@ -10,7 +9,6 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { milliseconds } from '@ferretry/std';
 import {
-  parseMessageAttachments,
   PEER_MESSAGE_LABELS,
   combinedDelivery,
   peerSender,
@@ -31,7 +29,6 @@ import {
   defaultSendTrackerSettings,
   defaultSessionSendSettings,
   dispositionOf,
-  handoffView,
   isDirectSend,
   isFileBackedQueue,
   isUnconfirmedTyping,
@@ -81,14 +78,8 @@ import { harnessFamily, hasClaudeChannel } from '../contract/index.ts';
 import { KeyedSerialExecutor } from '../contract/index.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from '../contract/index.ts';
 import type { ClockPort } from '../contract/index.ts';
-import type { SessionHandoff, SessionView } from '../contract/index.ts';
-
-/**
- * The note Ferrets ended every revive's turn document with before it stopped writing one (its old `turnProtocolReminder` default); older documents still carry it. Taken off the words a hand-off
- * shows, because it is the daemon's, not the owner's. GAP: Ferrets owns this fact and offers no read of it, so it is
- * mirrored here; a changed Ferrets setting would show the note until that read exists (end-list).
- */
-const TURN_PROTOCOL_REMINDER = 'Continue using the same completion and interaction protocol.';
+import type { SessionView } from '../contract/index.ts';
+import { handoffReader } from './handoff.ts';
 
 const pending = (sentence: string): never => {
   throw new ApiError(503, sentence, 'conversation_terminal_unavailable');
@@ -296,37 +287,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const unwiredTyping = (): never => pending(SEND_PATH_UNWIRED);
   /** The ferret's turn documents and the files Ferrets writes for it; none when Ferrets offers none (or refuses the look). */
   const turnsOf = async (ferret: SessionId) => await ferrets.turns?.(ferret).catch(() => undefined);
-  /**
-   * WHAT THE OWNER SENT behind a pointer the transcript records (v4's `handoff` route). The words are read from the very
-   * turn document Ferrets wrote (its `turns().list()`, a best-effort read of the ferret's own folder) and shown by
-   * the document's written shapes (`handoffView`); a document that is not there is a 404, so the chat says the file
-   * is gone only when it is. A queued message (`queued-<send id>`) lives in the ferret's `channel/` folder, which
-   * Ferrets offers no read of yet, so it stays unread (GAP, end-list).
-   */
-  const handoffOf = async (id: string, name: string): Promise<SessionHandoff> => {
-    const gone = (): never => {
-      throw new SessionSendError('not_found', 'that hand-off document is not there');
-    };
-    const ferret = tryParseSessionId(id);
-    const turn = /^turn-(\d{1,9})$/u.exec(name)?.[1];
-    if (ferret === undefined || turn === undefined) return gone();
-    const found = (await (await turnsOf(ferret))?.list())?.find(document => document.turn === Number(turn));
-    if (found === undefined) return gone();
-    // A delivered copy sits at `<session folder>/attachments/<attachment id>/<file name>`: only such a listed file is
-    // this ferret's stored attachment (and so a thumbnail); any other keeps its name as a plain chip.
-    const delivered = parseMessageAttachments(found.text.replace(/\n$/u, '')).files.find(
-      file => basename(dirname(dirname(file.path))) === 'attachments',
-    );
-    return handoffView(
-      name,
-      found.text,
-      {
-        reminder: TURN_PROTOCOL_REMINDER,
-        attachmentRoot: delivered === undefined ? '' : dirname(dirname(delivered.path)),
-      },
-      found.by,
-    );
-  };
+  const handoffOf = handoffReader(ferrets, ledger, deps.attachments);
   /**
    * The send path's turn store, over Ferrets' writer: the act that presses Enter (a person's, the Warden's, the tracker's
    * re-submit) starts the turn a typed pointer named, and that clears the markers the turn that ended left. The numbered
@@ -854,6 +815,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
       path: shape.path,
       // What the agent reads, banner and all, as today's ledger keeps it: the row is the record of what was typed.
       message: text,
+      ...(request.attachmentIds === undefined ? {} : { attachmentIds: [...request.attachmentIds] }),
       ...(shape.matchText === undefined ? {} : { matchText: shape.matchText }),
       ...(shape.turn === undefined ? {} : { turn: shape.turn }),
       fate: 'accepted',
@@ -1377,6 +1339,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
         await typeMessage(request.id, {
           sendId: request.sendId,
           message: request.message,
+          ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
           origin: AGENT_ORIGIN,
           ...(request.by === undefined ? {} : { by: request.by }),
           ...(request.by?.kind === 'ferretry' && request.by.feature === 'Warden'
