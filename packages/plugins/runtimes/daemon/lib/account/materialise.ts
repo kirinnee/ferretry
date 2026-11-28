@@ -38,6 +38,8 @@ import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { looksSecret, namesCredential } from '@ferretry/std/credential-words';
 import type { z } from 'zod';
 import type { CompactAtSchema, RuntimesHarnessKit } from '../../../contract/index.ts';
+import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
+import { harnessKeyOfKind } from '../harness-kind.ts';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
 import {
   buildFleetManifest,
@@ -339,10 +341,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       harness,
       loginStores,
     );
-    if ('unavailable' in store)
-      reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
-    if (store.store === 'environment' && store.problem !== undefined) {
-      reasons.push(`its login "${runtime.credential}" cannot launch: ${store.problem}`);
+    // A harness whose plugin gives no kit refuses the WHOLE runtime, whatever store its login is in (environment, stored or
+    // host); its credential has nothing further to say.
+    if (input.kits?.get(harness) === undefined) reasons.push(unsupportedHarnessSentence(harnessKeyOfKind(harness)));
+    else {
+      if ('unavailable' in store)
+        reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
+      if (store.store === 'environment' && store.problem !== undefined) {
+        reasons.push(`its login "${runtime.credential}" cannot launch: ${store.problem}`);
+      }
     }
 
     const availableModels = input.availableModels?.[runtime.credential];
