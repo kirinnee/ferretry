@@ -18,6 +18,7 @@ import {
   wouldIncludeItself,
 } from '../account/schema.ts';
 import { applyFixedLayer, type FixedEntry, fixedLayerOf } from '../account/fixed-layer.ts';
+import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import {
   COMPONENT_KIND_WORDS,
   componentScope,
@@ -204,6 +205,8 @@ export interface CatalogFacts {
   readonly now?: number;
   /** The logins their spend budget holds now (docs/budgets.md); absent, none. */
   readonly budgetHolds?: BudgetHolds;
+  /** What each harness's own plugin hands Runtimes, read live; a harness whose plugin gives none is shown as unsupported. */
+  readonly kits?: ReadonlyMap<HarnessKind, RuntimesHarnessKit>;
 }
 
 const HARNESSES: readonly HarnessKind[] = supportedKinds();
@@ -1337,7 +1340,11 @@ function fixedLayerView(
   facts: CatalogFacts,
 ): { readonly view?: FixedLayerView; readonly refusal?: string } {
   const shared = { agentPermissions: model.machine.agentPermissions, cwd: VIEW_FOLDER, fyCommand: VIEW_FY_COMMAND };
-  const result = fixedLayerOf(harness, { ...shared, acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode });
+  const result = fixedLayerOf(
+    harness,
+    { ...shared, acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode },
+    facts.kits?.get(harness),
+  );
   if (!result.ok) return { refusal: result.refusal.message };
   const fixed = result.layer;
   const overridden =

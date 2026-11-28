@@ -400,9 +400,10 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       kit,
     );
     if (result.ok) fixed = withoutLaunchFolder(result.layer);
-    // An auto launch the harness cannot honour refuses THAT launch only: the person's own run and an interactive ferret
-    // never get the fixed layer, so they are not stopped by it.
-    const autoRefusal = result.ok ? undefined : result.refusal.message;
+    // A missing kit (`harness-unsupported`) refuses the WHOLE runtime above, so it is never also an auto refusal. Any other
+    // refusal is an auto launch the harness cannot honour: it refuses THAT launch only, so the person's own run and an
+    // interactive ferret never get the fixed layer and are not stopped by it.
+    const autoRefusal = result.ok || result.refusal.kind === 'harness-unsupported' ? undefined : result.refusal.message;
     const launch = fixed === undefined ? undefined : applyFixedLayer(resolved, fixed);
 
     const adapted =
