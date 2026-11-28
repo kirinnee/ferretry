@@ -112,6 +112,8 @@ export interface KitDocuments {
   readonly settings: KitSettingsObject;
   /** A second document whose top-level keys are each replaced whole before launch (Claude's `.claude.json`). */
   readonly claudeJson?: KitSettingsObject;
+  /** Where in `settings` the servers were written, so Runtimes can name which of the person's own settings one replaced. */
+  readonly serversAt?: readonly string[];
 }
 
 /** One setting a plumbing key writes: a settings path and its value. */
@@ -119,6 +121,8 @@ export interface KitPlumbingEntry {
   readonly key: string;
   readonly path: readonly string[];
   readonly value: unknown;
+  /** Set when the entry replaces the person's own value at its path (Codex's); unset when it chains it (Claude's status line). */
+  readonly replacesOwn?: true;
 }
 
 /** What a plugin is asked for to name the plumbing keys a runtime's settings always carry. */
@@ -126,7 +130,9 @@ export interface KitPlumbingInput {
   /** The settings the runtime would write, so a command the person already set can be chained. */
   readonly settings: KitSettingsObject;
   /** The status line command for this runtime, given the person's own command when their settings name one. */
-  readonly statusLine: (ownCommand?: string) => string;
+  readonly statusLine?: (ownCommand?: string) => string;
+  /** The shared history pool's SQLite directory, for a runtime that keeps one (Codex). */
+  readonly sqliteHome?: string;
 }
 
 /**

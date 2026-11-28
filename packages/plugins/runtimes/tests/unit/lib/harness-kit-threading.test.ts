@@ -1,9 +1,8 @@
 /**
  * The kit a harness's own plugin hands Runtimes reaches every group a materialisation asks about that harness (E-276 PR 1):
  * each group function is given the kit of the runtime's own harness, and a harness whose plugin gives none is given none —
- * never another harness's. Claude's MCP and document members are read now (E-276 PR 6), so a Claude runtime without its kit is
- * published UNAVAILABLE by name instead of written in another shape, and the rest of the plan still publishes; Codex still
- * branches in Runtimes, so its fake kit is only handed through.
+ * never another harness's. The MCP and document members are read now (E-276 PR 6 Claude, PR 7 Codex), so a runtime without its
+ * kit is published UNAVAILABLE by name instead of written in another shape, and the rest of the plan still publishes.
  *
  * It is also the startup order: the settings sources can answer `unavailable` while plugins are still starting, so the
  * kit is read live with each plan and the first plan after a source comes online carries it.
@@ -37,7 +36,7 @@ const accountOf = (accounts: readonly { readonly displayName: string }[], name: 
 };
 
 const CLAUDE_KIT = REAL_KITS.get('claude') as RuntimesHarnessKit;
-const CODEX_KIT: RuntimesHarnessKit = { command: 'codex' };
+const CODEX_KIT = REAL_KITS.get('codex') as RuntimesHarnessKit;
 const GROUPS = ['fixedLayerOf', 'plumbingOf', 'priorServersOf', 'runtimeExtras', 'autonomousPreparation'] as const;
 
 const source = (kit: RuntimesHarnessKit): ProfileComponentSource => ({
@@ -125,7 +124,68 @@ describe('the kit threaded to the groups of a materialisation', () => {
     expect(written).toEqual([]);
   });
 
-  it('should hand no group a kit when nothing supplies kits, and publish the Codex runtime all the same', async () => {
+  it('should make a Codex runtime unavailable by name when its plugin gives no kit, and only that runtime', async () => {
+    spies.calls.length = 0;
+    const { service, plans } = twoHarnessWorld({ kits: () => new Map([['claude', CLAUDE_KIT]] as const) });
+    await expect(service.publishFromFiles()).resolves.toBe('applied');
+    expect(kitsOf('plumbingOf', 'codex')).toEqual([undefined]);
+    expect(kitsOf('plumbingOf', 'claude').every(kit => kit === CLAUDE_KIT)).toBe(true);
+    const accounts = plans[0]?.manifest.accounts ?? [];
+    expect(accountOf(accounts, 'codex-default')).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringContaining('codex is not supported here'),
+    });
+    expect(accountOf(accounts, 'claude-default').unavailableReason ?? '').not.toContain('is not supported here');
+    expect(wrapperText(plans[0] as FleetApplyPlan, 'codex-default')).toContain('is not supported here');
+    expect(wrapperText(plans[0] as FleetApplyPlan, 'claude-default')).not.toContain('is not supported here');
+  });
+
+  it('should make an environment-backed Codex runtime unavailable runtime-wide when its plugin gives no kit', async () => {
+    const model = parseAccountModel({
+      version: 1,
+      credentials: {
+        'codex-key': { harness: 'codex', store: 'environment', env: { OPENAI_API_KEY: 'sk-synthetic-not-a-key' } },
+        'claude-you': { harness: 'claude', store: 'host' },
+      },
+      components: { instructions: { notes: { file: 'components/instructions/notes.md' } } },
+      profiles: { default: { layers: ['instructions/notes'] } },
+      runtimes: {
+        'codex-env': { credential: 'codex-key', profile: 'default' },
+        'claude-default': { credential: 'claude-you', profile: 'default' },
+      },
+    });
+    const { service, plans } = twoHarnessWorld({
+      kits: () => new Map([['claude', CLAUDE_KIT]] as const),
+      document: async () => ({
+        format: 'present',
+        model,
+        revision: 'rev-1',
+        unreadable: [],
+        stoodInLogins: [],
+        documents: () => [],
+      }),
+    });
+    await expect(service.publishFromFiles()).resolves.toBe('applied');
+    const plan = plans[0] as FleetApplyPlan;
+    expect(accountOf(plan.manifest.accounts, 'codex-env')).toMatchObject({
+      available: false,
+      unavailableReason: 'codex is not supported here',
+    });
+    expect(wrapperText(plan, 'codex-env')).toContain('codex is not supported here');
+    expect(wrapperText(plan, 'claude-default')).toContain('claude-default');
+  });
+
+  it('should write nothing into the home of a Codex runtime whose plugin gives no kit', async () => {
+    const { service, plans } = twoHarnessWorld({ kits: () => new Map([['claude', CLAUDE_KIT]] as const) });
+    await service.publishFromFiles();
+    const codexHome = accountOf(plans[0]?.manifest.accounts ?? [], 'codex-default').home;
+    const written = (plans[0]?.operations ?? []).filter(
+      operation => 'path' in operation && operation.path.startsWith(`${codexHome}/`),
+    );
+    expect(written).toEqual([]);
+  });
+
+  it('should hand no group a kit when nothing supplies kits, and publish both runtimes unavailable by name', async () => {
     spies.calls.length = 0;
     const { service, plans } = twoHarnessWorld({ kits: undefined });
     await expect(service.publishFromFiles()).resolves.toBe('applied');
@@ -133,8 +193,7 @@ describe('the kit threaded to the groups of a materialisation', () => {
     expect(spies.calls.every(call => call.kit === undefined)).toBe(true);
     const accounts = plans[0]?.manifest.accounts ?? [];
     expect(accountOf(accounts, 'claude-default').available).toBe(false);
-    // The Codex runtime is still planned and its wrapper still written: a missing kit refuses its own runtime only.
-    expect(wrapperText(plans[0] as FleetApplyPlan, 'codex-default')).toContain('codex-default');
+    expect(accountOf(accounts, 'codex-default').available).toBe(false);
   });
 
   it('should give the first plan after a settings source comes online the kit, and the plan before it none', async () => {
