@@ -29,8 +29,14 @@ import {
 } from '../account/scope.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from '../account/layering.ts';
 import type { HarnessKind } from '../manifest.ts';
-import { byHarness, isSupportedKind } from '../harness-kind.ts';
-import { parseSettings, type SettingsFormat, type SettingsObject, serializeSettings } from '../settings.ts';
+import { isSupportedKind, kindOf } from '../harness-kind.ts';
+import {
+  parseSettings,
+  SETTINGS_FORMAT,
+  type SettingsFormat,
+  type SettingsObject,
+  serializeSettings,
+} from '../settings.ts';
 import { refusedIndexes, type ShownWord, shownWords, shownWordsEtag } from './command-line.ts';
 import { slugName } from '../account/document.ts';
 import { holdsControlCharacter, INSTRUCTIONS_TEXT_LIMIT } from '../../../contract/index.ts';
@@ -149,8 +155,7 @@ export interface AccountChangeFacts {
 
 /** The document format each harness's settings file is in. */
 /** The document format a harness's settings file is written in; a harness Runtimes has no behaviour for is refused. */
-const settingsFormatOf = (harness: string): SettingsFormat =>
-  byHarness<SettingsFormat>(harness, { claude: () => 'json', codex: () => 'toml' });
+const settingsFormatOf = (harness: string): SettingsFormat => SETTINGS_FORMAT[kindOf(harness)];
 
 /** The extension each kind's file is written with. */
 const componentExtension = (input: ComponentInput): string | undefined => {

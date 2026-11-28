@@ -41,20 +41,23 @@ interface SourceDefinition {
   readonly harness?: HarnessKind;
 }
 
+/**
+ * A harness's own source: the harness is the one its hook's taker (the plugin that owns it) names, so no table here says which
+ * hook belongs to which harness.
+ */
+const ownedBy = (hook: SourceHook): SourceDefinition => {
+  const harness = supportedKindOfKey(hook.takers?.[0] ?? '');
+  return harness === undefined ? { hook } : { hook, harness };
+};
+
 /** Which sources make up each kind. A kind is read only when every one of its sources answers. */
 const SOURCES: Readonly<Record<ProfileComponentKind, readonly SourceDefinition[]>> = {
   // No other plugin owns the `instructions` files, so Runtimes does: its own source, passed in by the caller.
   instructions: [{}],
   mcp: [{ hook: ProfileMcpSource }],
   skills: [{ hook: ProfileSkillsSource }],
-  settings: [
-    { hook: ProfileClaudeSettingsSource, harness: 'claude' },
-    { hook: ProfileCodexSettingsSource, harness: 'codex' },
-  ],
-  hooks: [
-    { hook: ProfileClaudeHooksSource, harness: 'claude' },
-    { hook: ProfileCodexHooksSource, harness: 'codex' },
-  ],
+  settings: [ownedBy(ProfileClaudeSettingsSource), ownedBy(ProfileCodexSettingsSource)],
+  hooks: [ownedBy(ProfileClaudeHooksSource), ownedBy(ProfileCodexHooksSource)],
 };
 
 /** Every hook an owner takes to give a component source: what Runtimes listens to for a change (`watchOwners`). */

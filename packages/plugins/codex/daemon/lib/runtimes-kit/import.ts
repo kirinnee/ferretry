@@ -16,6 +16,31 @@ const importSetup = { settingsFormat: 'toml', settingsFile: 'config.toml', instr
 /** Keys a runtime's plumbing sets itself (§8.3), dropped from an imported settings file. */
 const PLUMBING_KEYS = ['cli_auth_credentials_store', 'sqlite_home'] as const;
 
+/** Where Codex keeps its MCP servers: the `mcp_servers` table of `config.toml`; a server marked `enabled = false` is left out. */
+const mcpImport = {
+  document: 'settings',
+  format: 'toml',
+  file: 'config.toml',
+  table: 'mcp_servers',
+  knownKeys: ['command', 'args', 'env', 'url', 'enabled'],
+  skipDisabled: true,
+} as const;
+
+/** The profiles a `config.toml` declares: names, and the two keys an import would keep. Never anything else. */
+function profileHints(settings: Readonly<Record<string, unknown>>): NonNullable<KitHarvestParts['profileHints']> {
+  const table = settings.profiles;
+  if (!isRecord(table)) return [];
+  return Object.entries(table).flatMap(([name, value]) => {
+    if (name === '' || !isRecord(value)) return [];
+    const model = typeof value.model === 'string' && value.model !== '' ? value.model : undefined;
+    const effort =
+      typeof value.model_reasoning_effort === 'string' && value.model_reasoning_effort !== ''
+        ? value.model_reasoning_effort
+        : undefined;
+    return [{ name, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }];
+  });
+}
+
 async function scanHost(input: KitHostScanInput): Promise<KitHostSetup> {
   const named = input.configuredHome?.trim() ?? '';
   if (named !== '' && !isAbsolute(named)) {
@@ -44,6 +69,7 @@ async function scanHost(input: KitHostScanInput): Promise<KitHostSetup> {
 
 function harvest(input: KitHarvestInput): KitHarvestParts {
   const { rest } = input;
+  const profiles = profileHints(rest);
   delete rest.mcp_servers;
   for (const key of PLUMBING_KEYS) delete rest[key];
   let envImport: KitHarvestParts['envImport'];
@@ -65,7 +91,7 @@ function harvest(input: KitHarvestInput): KitHarvestParts {
           count: input.countHooks(isRecord(hooks.document.hooks) ? hooks.document.hooks : hooks.document),
         }
       : undefined;
-  return { hooks: counted, envImport, mcpSource: input.source };
+  return { hooks: counted, envImport, mcpSource: input.source, profileHints: profiles };
 }
 
 function loginNote(login: KitHostLogin): string {
@@ -89,4 +115,4 @@ function loginNote(login: KitHostLogin): string {
 }
 
 /** Codex's host scan, import decisions and login notes; host reads and secret handling remain guarded by Runtimes. */
-export const codexImportKit: RuntimesHarnessKit = { scanHost, importSetup, harvest, loginNote };
+export const codexImportKit: RuntimesHarnessKit = { scanHost, importSetup, mcpImport, harvest, loginNote };

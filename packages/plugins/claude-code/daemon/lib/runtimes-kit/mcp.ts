@@ -65,4 +65,4 @@ function plumbing(input: KitPlumbingInput): readonly KitPlumbingEntry[] {
 }
 
 /** How Claude spells MCP servers and config documents. */
-export const claudeMcpKit: RuntimesHarnessKit = { renderMcpServer, configDocuments, plumbing };
+export const claudeMcpKit: RuntimesHarnessKit = { renderMcpServer, configDocuments, keepsPriorServers: true, plumbing };

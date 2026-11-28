@@ -913,7 +913,7 @@ describe('declaredModelIds', () => {
 describe('scannedMcpServers', () => {
   it('should read no servers from a Claude scan with no .claude.json', () => {
     const { mcp: _mcp, ...withoutMcp } = claude();
-    should(scannedMcpServers(withoutMcp)).deepEqual([]);
+    should(scannedMcpServers(withoutMcp, claudeRuntimesKit)).deepEqual([]);
   });
 
   it('should drop the env of a url server and the args of an empty list', () => {
@@ -927,6 +927,7 @@ describe('scannedMcpServers', () => {
             }),
           ),
         }),
+        claudeRuntimesKit,
       ),
     ).deepEqual([
       { name: 'a', url: 'https://x.test', ignored: [] },

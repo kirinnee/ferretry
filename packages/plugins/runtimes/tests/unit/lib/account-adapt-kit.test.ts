@@ -39,6 +39,7 @@ const adapt = (kit: RuntimesHarnessKit | undefined) =>
 
 /** A kit that answers with marker words, so the test can see which bytes came from it. */
 const MARKED: RuntimesHarnessKit = {
+  keepsPriorServers: true,
   renderMcpServer: () => ({ marker: 'server' }),
   configDocuments: ({ servers }) => ({ settings: { marker: 'settings' }, claudeJson: { servers } }),
   plumbing: () => [{ key: 'marker.key', path: ['marker', 'plumbing'], value: 1 }],
@@ -60,8 +61,9 @@ describe('Claude MCP rendering through the kit', () => {
 
   it('should render the prior servers of the machine through the kit, and none for Codex', () => {
     expect(priorServersOf('claude', () => SERVERS, MARKED)).toEqual({ files: { marker: 'server' } });
-    expect(() => priorServersOf('claude', () => SERVERS, undefined)).toThrow(REFUSAL);
-    expect(priorServersOf('codex', () => SERVERS, MARKED)).toEqual({});
+    // No kit, no answer: the runtime is already refused for want of its kit and never asks.
+    expect(priorServersOf('claude', () => SERVERS, undefined)).toEqual({});
+    expect(priorServersOf('codex', () => SERVERS, { renderMcpServer: MARKED.renderMcpServer })).toEqual({});
   });
 });
 
@@ -98,11 +100,12 @@ describe('a Claude runtime without its plugin kit, as data', () => {
       kind: 'harness-unsupported',
       message: 'codex is not supported here',
     });
+    // Claude is refused only for want of a kit, as it always was; Codex's kit must also give what it adds to a launch and its fixed layer.
     expect(missingKitRefusal('claude', {} as RuntimesHarnessKit)).toBeUndefined();
     expect(
       missingKitRefusal('codex', {
         runtimeExtras: () => ({ env: {} }),
-        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [] } }),
+        fixedLayer: () => ({ ok: true, layer: { entries: [], args: [], supersededFlags: {} } }),
       }),
     ).toBeUndefined();
     expect(missingKitRefusal('codex', { runtimeExtras: () => ({ env: {} }) })).toEqual({

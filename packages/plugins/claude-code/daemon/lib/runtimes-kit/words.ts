@@ -8,6 +8,7 @@ import { claudeFastSupport } from '../harness/fast-mode.ts';
 export const claudeWordsKit: RuntimesHarnessKit = {
   command: 'claude',
   homeEnv: 'CLAUDE_CONFIG_DIR',
+  hostOrganization: true,
   ownedSkillEntries: [],
   fastSupport: claudeFastSupport,
 };

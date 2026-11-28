@@ -81,7 +81,7 @@ import {
 import type { RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
 import { FERRETRY_MCP_SERVER, tomlString } from '../../../contract/tools-server.ts';
 import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
-import { byHarness, harnessKeyOfKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import { harnessKeyOfKind, kindOf } from '../harness-kind.ts';
 import type { AgentPermissions } from './schema.ts';
 import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
@@ -141,23 +141,16 @@ export type FixedLayerResult =
   | { readonly ok: true; readonly layer: FixedLayer }
   | { readonly ok: false; readonly refusal: FixedLayerRefusal };
 
-export type FixedLayerInput =
-  | {
-      readonly harness: 'claude';
-      readonly agentPermissions: AgentPermissions;
-      /** The folder the agent is launched in. */
-      readonly cwd: string;
-      /** Whether the installed Claude accepts `--permission-mode auto` (O4). */
-      readonly acceptsAutoPermissionMode: boolean;
-      /** The `fy` executable the tools server runs as. */
-      readonly fyCommand: string;
-    }
-  | {
-      readonly harness: 'codex';
-      readonly agentPermissions: AgentPermissions;
-      readonly cwd: string;
-      readonly fyCommand: string;
-    };
+export interface FixedLayerInput {
+  readonly harness: HarnessKind;
+  readonly agentPermissions: AgentPermissions;
+  /** The folder the agent is launched in. */
+  readonly cwd: string;
+  /** The `fy` executable the tools server runs as. */
+  readonly fyCommand: string;
+  /** Whether the installed harness accepts `--permission-mode auto` (O4); only a harness that asks reads it. */
+  readonly acceptsAutoPermissionMode?: boolean;
+}
 
 /** The Codex home file the kill-deny rules (Codex's plugin writes their text, `rules` of its fixed layer) are written to (beside `default.rules`, which Codex keeps for itself). */
 export const CODEX_KILL_RULES_FILE = 'rules/ferretry.rules';
@@ -472,93 +465,49 @@ export const binaryName = (fyCommand: string): string => fyCommand.split('/').po
 
 /**
  * The fixed layer for an agent runtime of `input.harness`, or the reason it cannot launch (O4). `kits` is what each
- * harness's own plugin hands Runtimes: Claude's layer is its plugin's, so a Claude runtime whose plugin gives no layer is
- * refused by name and never handed another harness's answer.
+ * harness's own plugin hands Runtimes: a harness's layer is its plugin's, so a runtime whose plugin gives no layer is
+ * refused by name and never handed another harness's answer. Runtimes adds only the words every agent is told.
  */
 export function fixedLayerFor(
   input: FixedLayerInput,
   kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined,
 ): FixedLayerResult {
-  switch (input.harness) {
-    case 'claude':
-      return claudeFixedLayer(kits?.get('claude'), input);
-    case 'codex':
-      return codexFixedLayer(kits?.get('codex'), input);
-    default:
-      throw new UnsupportedHarnessError(String((input as { harness: string }).harness));
-  }
-}
-
-/** A Codex agent runtime's fixed layer, as Codex's own plugin builds it; Runtimes adds the words every agent is told. */
-function codexFixedLayer(
-  kit: RuntimesHarnessKit | undefined,
-  input: Extract<FixedLayerInput, { readonly harness: 'codex' }>,
-): FixedLayerResult {
+  const harness = kindOf(input.harness);
+  const kit = kits?.get(harness);
   if (kit?.fixedLayer === undefined)
     return {
       ok: false,
-      refusal: {
-        kind: 'harness-unsupported',
-        message: unsupportedHarnessSentence(harnessKeyOfKind('codex')),
-      },
+      refusal: { kind: 'harness-unsupported', message: unsupportedHarnessSentence(harnessKeyOfKind(harness)) },
     };
   const { agentPermissions, cwd, fyCommand } = input;
   const result = kit.fixedLayer({
     agentPermissions,
     cwd,
     fyCommand,
-    acceptsAutoPermissionMode: false,
+    acceptsAutoPermissionMode: input.acceptsAutoPermissionMode ?? false,
     instruction: AGENT_BASE_INSTRUCTION(binaryName(fyCommand)),
   });
   if (!result.ok) return result;
   const { layer } = result;
-  return {
-    ok: true,
-    layer: {
-      harness: 'codex',
-      agentPermissions,
-      entries: layer.entries.map(fixed => entry(fixed.purpose, fixed.target, fixed.path, fixed.value)),
-      args: layer.args,
-      ...(layer.rules === undefined ? {} : { codexRules: layer.rules }),
-    },
+  const made: FixedLayer = {
+    harness,
+    agentPermissions,
+    entries: layer.entries.map(fixed => entry(fixed.purpose, fixed.target, fixed.path, fixed.value)),
+    args: layer.args,
+    ...(layer.settingsOverlay === undefined ? {} : { claudeSettingsOverlay: layer.settingsOverlay }),
+    ...(layer.rules === undefined ? {} : { codexRules: layer.rules }),
+    ...(layer.configJson === undefined ? {} : { claudeJson: layer.configJson }),
   };
+  SUPERSEDED_FLAGS.set(made, layer.supersededFlags);
+  return { ok: true, layer: made };
 }
 
-/** A Claude agent runtime's fixed layer, as Claude's own plugin builds it; Runtimes adds the words every agent is told. */
-function claudeFixedLayer(
-  kit: RuntimesHarnessKit | undefined,
-  input: Extract<FixedLayerInput, { readonly harness: 'claude' }>,
-): FixedLayerResult {
-  if (kit?.fixedLayer === undefined)
-    return {
-      ok: false,
-      refusal: {
-        kind: 'harness-unsupported',
-        message: unsupportedHarnessSentence(harnessKeyOfKind('claude')),
-      },
-    };
-  const { agentPermissions, cwd, fyCommand, acceptsAutoPermissionMode } = input;
-  const result = kit.fixedLayer({
-    agentPermissions,
-    cwd,
-    fyCommand,
-    acceptsAutoPermissionMode,
-    instruction: AGENT_BASE_INSTRUCTION(binaryName(fyCommand)),
-  });
-  if (!result.ok) return result;
-  const { layer } = result;
-  return {
-    ok: true,
-    layer: {
-      harness: 'claude',
-      agentPermissions,
-      entries: layer.entries.map(fixed => entry(fixed.purpose, fixed.target, fixed.path, fixed.value)),
-      args: layer.args,
-      ...(layer.settingsOverlay === undefined ? {} : { claudeSettingsOverlay: layer.settingsOverlay }),
-      ...(layer.configJson === undefined ? {} : { claudeJson: layer.configJson }),
-    },
-  };
-}
+/**
+ * The permission flags a layer's harness replaces, from its plugin's kit (the `supersededFlags` of the layer its `fixedLayer` returns, so a kit cannot give a layer without them), by the layer `fixedLayerFor` made.
+ * Kept beside the layer and not on it, so the layer stays the plain data it always was (the wrapper golden pins it whole). A layer
+ * nobody made through `fixedLayerFor` replaces no flag of a profile's.
+ */
+const SUPERSEDED_FLAGS = new WeakMap<FixedLayer, Readonly<Record<string, 'bare' | 'value' | 'config'>>>();
 
 // ── Applying it ──────────────────────────────────────────────────────────────────────────────────
 
@@ -590,31 +539,6 @@ export interface AgentLaunch {
   readonly overridden: readonly FixedOverride[];
 }
 
-/**
- * The permission flags each harness's fixed layer replaces. `value` flags take the next token as
- * their value unless written `--flag=value`; `config` is Codex's `-c key=value`, superseded only for
- * the keys the fixed layer sets.
- */
-const SUPERSEDED_FLAGS: Readonly<Record<HarnessKind, Readonly<Record<string, 'bare' | 'value' | 'config'>>>> = {
-  claude: {
-    '--permission-mode': 'value',
-    '--dangerously-skip-permissions': 'bare',
-    '--allow-dangerously-skip-permissions': 'bare',
-    // The person's own instruction is APPENDED to, not replaced: see `appendedInstructions`.
-    '--append-system-prompt': 'value',
-  },
-  codex: {
-    '--dangerously-bypass-approvals-and-sandbox': 'bare',
-    '--full-auto': 'bare',
-    '--ask-for-approval': 'value',
-    '-a': 'value',
-    '--sandbox': 'value',
-    '-s': 'value',
-    '--config': 'config',
-    '-c': 'config',
-  },
-};
-
 const CODEX_FIXED_CONFIG_KEYS: ReadonlySet<string> = new Set([
   'approval_policy',
   'sandbox_mode',
@@ -629,11 +553,10 @@ const isFixedCodexKey = (key: string): boolean =>
 
 /** Split a profile's flags into the ones the launch keeps and the ones the fixed layer replaces. */
 function partitionFlags(
-  harness: HarnessKind,
+  table: Readonly<Record<string, 'bare' | 'value' | 'config'>>,
   flags: readonly FlagContribution[],
   fixedArgs: readonly string[],
 ): { readonly kept: readonly string[]; readonly dropped: readonly FixedOverride[] } {
-  const table = SUPERSEDED_FLAGS[harness];
   const fixedTokens = new Set(fixedArgs.filter(arg => CARRIED_FLAGS.has(arg)));
   const kept: string[] = [];
   const dropped: FixedOverride[] = [];
@@ -699,7 +622,7 @@ export function applyFixedLayer(resolved: ResolvedProfile, given: FixedLayer): A
       });
     }
   }
-  const flags = partitionFlags(fixed.harness, resolved.flags, fixed.args);
+  const flags = partitionFlags(SUPERSEDED_FLAGS.get(given) ?? {}, resolved.flags, fixed.args);
   return {
     fixed,
     settings: deepMergeSettings(resolved.settings.value, fixedSettingsDocument(fixed.entries)),
@@ -710,9 +633,10 @@ export function applyFixedLayer(resolved: ResolvedProfile, given: FixedLayer): A
 
 /**
  * The person's own instruction, KEPT: Ferretry's tools instruction is appended after it rather than
- * replacing it. Claude takes one `--append-system-prompt` and Codex one `developer_instructions`, so
- * the two texts become one value, the person's first; and the person's value, now carried inside
- * Ferretry's, is not reported as overridden.
+ * replacing it. A harness takes ONE instruction (Claude's `--append-system-prompt`, Codex's `developer_instructions`), so the
+ * two texts become one value, the person's first; and the person's value, now carried inside Ferretry's, is not reported as
+ * overridden. Where the person's own copy sits is read from the layer's own instruction entry, never from a harness word: a
+ * `launch` entry is a flag, a `settings` entry is a settings key that a `-c key=value` override can also set.
  */
 function appendedInstructions(
   resolved: ResolvedProfile,
@@ -720,58 +644,50 @@ function appendedInstructions(
 ): { readonly fixed: FixedLayer; readonly absorbed: (entry: FixedOverride) => boolean } {
   const own = fixed.entries.find(entry => entry.purpose === 'instructions');
   if (own === undefined) return { fixed, absorbed: () => false };
+  kindOf(fixed.harness); // a harness Runtimes has no behaviour for is refused by name, never folded as one of the two
+  const name = own.path[0] as string;
+  const asFlag = own.target === 'launch';
   const theirs: string[] = [];
   const flagOf = (flag: string): string => flag.split('=')[0] as string;
-  switch (fixed.harness) {
-    case 'claude': {
-      resolved.flags.forEach((contribution, index) => {
-        const { flag } = contribution;
-        if (flag.startsWith('--append-system-prompt=')) theirs.push(flag.slice('--append-system-prompt='.length));
-        else if (flag === '--append-system-prompt' && resolved.flags[index + 1] !== undefined)
-          theirs.push((resolved.flags[index + 1] as FlagContribution).flag);
-      });
-      break;
-    }
-    case 'codex': {
-      for (const leaf of resolved.settings.leaves)
-        if (leaf.path.length === 1 && leaf.path[0] === 'developer_instructions' && typeof leaf.value === 'string')
-          theirs.push(leaf.value);
-      resolved.flags.forEach((contribution, index) => {
-        const { flag } = contribution;
-        const assignment = flag.startsWith('--config=')
-          ? flag.slice('--config='.length)
-          : (flag === '-c' || flag === '--config') && resolved.flags[index + 1] !== undefined
-            ? (resolved.flags[index + 1] as FlagContribution).flag
-            : '';
-        if (assignment.trim().startsWith('developer_instructions='))
-          theirs.push(unquoted(assignment.slice(assignment.indexOf('=') + 1)));
-      });
-      break;
-    }
-    default:
-      throw new UnsupportedHarnessError(String((fixed as { harness: string }).harness));
+  if (asFlag) {
+    resolved.flags.forEach((contribution, index) => {
+      const { flag } = contribution;
+      if (flag.startsWith(`${name}=`)) theirs.push(flag.slice(name.length + 1));
+      else if (flag === name && resolved.flags[index + 1] !== undefined)
+        theirs.push((resolved.flags[index + 1] as FlagContribution).flag);
+    });
+  } else {
+    for (const leaf of resolved.settings.leaves)
+      if (leaf.path.length === 1 && leaf.path[0] === name && typeof leaf.value === 'string') theirs.push(leaf.value);
+    resolved.flags.forEach((contribution, index) => {
+      const { flag } = contribution;
+      const assignment = flag.startsWith('--config=')
+        ? flag.slice('--config='.length)
+        : (flag === '-c' || flag === '--config') && resolved.flags[index + 1] !== undefined
+          ? (resolved.flags[index + 1] as FlagContribution).flag
+          : '';
+      if (assignment.trim().startsWith(`${name}=`))
+        theirs.push(unquoted(assignment.slice(assignment.indexOf('=') + 1)));
+    });
   }
   if (theirs.length === 0) return { fixed, absorbed: () => false };
   const combined = [...theirs, own.value as string].join('\n\n');
   const args = fixed.args.map(arg =>
-    arg.startsWith('--append-system-prompt=')
-      ? `--append-system-prompt=${combined}`
-      : arg.startsWith('developer_instructions=')
-        ? `developer_instructions=${tomlString(combined)}`
-        : arg,
+    arg.startsWith(`${name}=`) ? `${name}=${asFlag ? combined : tomlString(combined)}` : arg,
   );
   const entries = fixed.entries.map(entry => (entry === own ? { ...entry, value: combined } : entry));
   return {
     fixed: { ...fixed, args, entries },
     absorbed: entry =>
       entry.kind === 'flag'
-        ? flagOf(entry.tokens[0] as string) === '--append-system-prompt' ||
-          entry.tokens.some(token =>
-            token
-              .replace(/^--config=/u, '')
-              .trim()
-              .startsWith('developer_instructions='),
-          )
+        ? asFlag
+          ? flagOf(entry.tokens[0] as string) === name
+          : entry.tokens.some(token =>
+              token
+                .replace(/^--config=/u, '')
+                .trim()
+                .startsWith(`${name}=`),
+            )
         : entry.fixed.purpose === 'instructions',
   };
 }
@@ -801,16 +717,6 @@ export interface FixedLayerRequest {
  * harness's own plugin's hand to Runtimes; Claude's layer is its, Codex's is still decided here (E-276 PR 3).
  */
 export function fixedLayerOf(harness: string, request: FixedLayerRequest, kit?: RuntimesHarnessKit): FixedLayerResult {
-  const { agentPermissions, cwd, fyCommand } = request;
-  return byHarness<FixedLayerResult>(harness, {
-    claude: () =>
-      claudeFixedLayer(kit, {
-        harness: 'claude',
-        agentPermissions,
-        cwd,
-        acceptsAutoPermissionMode: request.acceptsAutoPermissionMode,
-        fyCommand,
-      }),
-    codex: () => codexFixedLayer(kit, { harness: 'codex', agentPermissions, cwd, fyCommand }),
-  });
+  const kind = kindOf(harness);
+  return fixedLayerFor({ ...request, harness: kind }, new Map(kit === undefined ? [] : [[kind, kit]]));
 }

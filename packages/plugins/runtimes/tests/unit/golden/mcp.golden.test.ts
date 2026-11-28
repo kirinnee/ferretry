@@ -96,6 +96,7 @@ describe('mcp goldens', () => {
       } as never,
       skillFrontmatter: { review: ['name', 'allowed-tools', 'model', 'context'], deploy: ['name', 'description'] },
       instructionBodies: { imports: 'See\n@docs/guide.md\n', plain: 'Be kind.\n', claudeOnly: '@x.md\n' },
+      kits: REAL_KITS,
     });
     expectGolden('mcp/partial-support', { notes, described: notes.map(describePartialSupport) });
   });

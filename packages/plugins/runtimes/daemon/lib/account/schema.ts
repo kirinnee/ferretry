@@ -35,7 +35,7 @@ import { z } from 'zod';
 import { ITEM_NAME_PATTERN } from '../../../contract/config.ts';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { isLoopbackHost } from '../foreign.ts';
-import { isKind } from '../harness-kind.ts';
+import { kindOrUndefined } from '../harness-kind.ts';
 import { HarnessKindSchema } from '../manifest.ts';
 import { BudgetSchema, TimeZoneSchema } from './budget.ts';
 import { DisabledSchema } from './disabled.ts';
@@ -380,7 +380,7 @@ const CredentialSchema = z
           credential.claude.codexProvider,
         );
       }
-    } else if (credential.codexProvider !== undefined && !isKind(credential.harness, 'codex')) {
+    } else if (credential.codexProvider !== undefined && kindOrUndefined(credential.harness) !== 'codex') {
       push(
         '"codexProvider" points Codex at a model provider — this login is for Claude Code',
         'codexProvider',

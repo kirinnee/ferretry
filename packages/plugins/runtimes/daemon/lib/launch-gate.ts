@@ -25,7 +25,7 @@ import {
   type StartDecideInput,
 } from '@ferretry/core-ferrets/contract';
 import type { HookDecision } from '@ferretry/kernel/contract';
-import type { HarnessKind } from './harness-kind.ts';
+import { type HarnessKind, kindOrUndefined } from './harness-kind.ts';
 import { FleetManifestUnreadableError } from './manifest-reading.ts';
 import { launchContextWindow, type ModelWindows, resolveLaunchCompactAt } from './launch-compact-at.ts';
 
@@ -126,7 +126,7 @@ export class LaunchGate {
           `the login settings of runtime ${spec.runtime} were not checked for this launch, so the ferret was not started`,
         );
       const facts = checked.facts;
-      if (facts === undefined || facts.kind !== 'claude') return [];
+      if (facts === undefined || facts.kind !== kindOrUndefined(spec.harness)) return [];
       // v4's `resolveCompactAt`: the ferret's own value over the login's default, and nothing the model cannot honour.
       const at = resolveLaunchCompactAt({
         own: spec.compactAt,

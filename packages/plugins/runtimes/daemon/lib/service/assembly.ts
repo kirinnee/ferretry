@@ -8,6 +8,7 @@
  * `fleet/` folder, the user's home or a harness's own home; nothing here can read or write a runtime's files yet.
  */
 import { createHash, randomBytes } from 'node:crypto';
+import { supportedKinds } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { type FleetCatalogServiceDeps, FleetCatalogService } from './catalog-service.ts';
 import { createFleetSetupSubsystem, type FleetSetupService, type FleetSetupServiceDeps } from './setup-service.ts';
@@ -50,7 +51,10 @@ export function unavailableCatalogDeps(
       homesDirectory: nowhere,
       assetsDirectory: nowhere,
       manifestPath: nowhere,
-      defaultHomeDirectories: { claude: nowhere, codex: nowhere } satisfies Record<HarnessKind, string>,
+      defaultHomeDirectories: Object.fromEntries(supportedKinds().map(kind => [kind, nowhere])) as Record<
+        HarnessKind,
+        string
+      >,
     },
     mint: () => crypto.randomUUID(),
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),

@@ -29,7 +29,7 @@ import {
   type RuntimeFile,
   type RuntimesFile,
 } from '../../../contract/index.ts';
-import { supportedKindOfKey, unsupportedHarnessSentence } from '../harness-kind.ts';
+import { supportedKindOfKey, supportedKinds, unsupportedHarnessSentence } from '../harness-kind.ts';
 import { harnessKindOfKey, type HarnessKind } from '../manifest.ts';
 import type { ModelCatalogSources, StarterModels } from '../models/catalog.ts';
 import { launchModelsOf } from '../models/runtime.ts';
@@ -174,6 +174,9 @@ export const NO_COMPONENTS: ComponentReading = Object.fromEntries(
 /** The word a stand-in carries where a document would name a file, so nothing mistakes it for one. */
 const STAND_IN = 'not-read';
 
+/** The harness a stand-in settings or hooks document names: the first Runtimes lists. */
+const STAND_IN_HARNESS = supportedKinds()[0];
+
 const standIn = (kind: ProfileComponentKind): unknown => {
   switch (kind) {
     case 'instructions':
@@ -184,9 +187,9 @@ const standIn = (kind: ProfileComponentKind): unknown => {
     case 'skills':
       return { items: [STAND_IN] };
     case 'settings':
-      return { harness: 'claude', flags: [STAND_IN] };
+      return { harness: STAND_IN_HARNESS, flags: [STAND_IN] };
     case 'hooks':
-      return { harness: 'claude', directory: STAND_IN };
+      return { harness: STAND_IN_HARNESS, directory: STAND_IN };
   }
 };
 

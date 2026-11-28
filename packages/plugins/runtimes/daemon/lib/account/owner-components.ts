@@ -11,6 +11,7 @@
  * Nothing here holds a value: a document is the component in the model's shape, whose `env` entries are plain values or
  * `${secret:NAME}` references exactly as the import made them.
  */
+import { harnessKeyOfKind } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { parseSettings, SETTINGS_FORMAT } from '../settings.ts';
 import { foreignComponentRefs } from './runtimes-edits.ts';
@@ -67,8 +68,6 @@ function changedRefs(
   }
   return changed;
 }
-
-const SETTINGS_DIRECTORY = { claude: 'claude-code', codex: 'codex' } as const satisfies Record<HarnessKind, string>;
 
 /** Whether any segment of a path starts with a dot: a hidden file or folder never crosses to an owner. */
 const isHidden = (path: string): boolean => path.split('/').some(segment => segment.startsWith('.'));
@@ -127,7 +126,7 @@ export function ownerWrites(
       continue;
     }
     const settings = value as { readonly harness: HarnessKind; readonly file?: string } & Record<string, unknown>;
-    const file = `${SETTINGS_DIRECTORY[settings.harness]}/settings/${name}.yaml`;
+    const file = `${harnessKeyOfKind(settings.harness)}/settings/${name}.yaml`;
     const base = { kind: ownerKind, name, reference, harness: settings.harness, file, ...replaces(reference) } as const;
     if (settings.file === undefined) {
       writes.push({ ...base, text: documentText(value) });
