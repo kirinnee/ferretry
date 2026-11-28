@@ -18,7 +18,7 @@ import { GrantRowSchema, type GrantRow } from './grants-cache.ts';
  *   nothing for a plugin until the LIVE plugin list has answered (`DaemonClient` admits on the live read only).
  * - **Keyed by daemon AND device.** One record per daemon, holding the device id it was learned under: another device
  *   id (a re-pair) reads as nothing, and the next live answer replaces the record. It is removed on unpair, on a re-pair and whenever the daemon answers anything but
- *   a plugin list or a grants list (refused, protocol mismatch, locked, unreadable).
+ *   a plugin list or a grants list (refused, protocol mismatch, locked, unreadable). An unauthenticated `4426` preserves both.
  * - **Storage may be refused** (a private window, a sandbox): every call is total and falls back to "nothing remembered".
  */
 const RememberedSchema = z.strictObject({
@@ -70,8 +70,10 @@ export class ShapeMemory {
     };
   }
 
-  /** A live plugin list: a `read` is remembered, anything else forgets the whole shape of that machine. */
+  /** A live list is remembered; an unauthenticated 4426 preserves it; other failed reads forget the shape. */
   saveInventory(daemon: string, deviceId: string, inventory: Inventory): void {
+    // A pre-handshake 4426 is unauthenticated: it may draw an update page, but cannot erase stored grants.
+    if (inventory.kind === 'unreadable' && inventory.versionUnsupported === true) return;
     if (inventory.kind !== 'read') {
       this.clear(daemon);
       return;
