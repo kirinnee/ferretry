@@ -49,7 +49,7 @@ import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-
 import { loginsLaunchStores, loginsModelCatalogs } from './adapters/model-sources.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
-import { supportedKinds } from './lib/harness-kind.ts';
+import { hostFolderOf, supportedKinds } from './lib/harness-kind.ts';
 import type { AccountModel } from './lib/account/schema.ts';
 import { type FleetManifest, type HarnessKind, harnessKindOfKey } from './lib/manifest.ts';
 import { claudeStatuslineFor } from './lib/account/statusline.ts';
@@ -264,7 +264,8 @@ export function checkEnvironmentSource(
 }
 
 /** The harness homes a first run may read and a component may come from: the person's own, by the OS's home. */
-const harnessHomesOf = (userHome: string): readonly string[] => [`${userHome}/.claude`, `${userHome}/.codex`];
+const harnessHomesOf = (userHome: string): readonly string[] =>
+  supportedKinds().map(kind => `${userHome}/${hostFolderOf(kind)}`);
 
 /** Text files of the fleet folder (the clone record, the export keys), written atomically at `0600`. */
 function fleetTexts(disk: FleetDisk): AdapterHost['texts'] {

@@ -37,7 +37,7 @@ import {
   type ProjectInstructionHint,
   scannedMcpServers,
 } from '../lib/account/import.ts';
-import { isHarnessOwnedSkillEntry } from '../lib/assets.ts';
+import { ownedSkillEntriesOf } from '../lib/assets.ts';
 import { harnessKeyOfKind, supportedKinds, UnsupportedHarnessError } from '../lib/harness-kind.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 import type { HostEntry, HostFiles } from './ports.ts';
@@ -112,7 +112,7 @@ export class HostHarnessScanner {
               configuredHome: homes[harness],
               read: (home, path) => this.#read(home, path),
               readUserMcp: () => this.#readUserClaudeJson(),
-              skills: (home, directory) => this.#skills(harness, home, directory),
+              skills: (home, directory) => this.#skills(ownedSkillEntriesOf(kit), home, directory),
               login: () => this.#login(harness),
               projectInstructions: mcp => this.#projectInstructions(kit, mcp),
             })),
@@ -287,7 +287,7 @@ export class HostHarnessScanner {
 
   /** Every skill folder: one per item, each with a digest of its whole content. */
   async #skills(
-    harness: HarnessKind,
+    owned: readonly string[],
     home: string,
     directory: string,
   ): Promise<{ found: HostSkill[]; problems: string[] }> {
@@ -298,7 +298,7 @@ export class HostHarnessScanner {
       const found: HostSkill[] = [];
       const problems: string[] = [];
       for (const item of [...((await this.deps.files.list(directory)) ?? [])].toSorted()) {
-        if (item.startsWith('.') || isHarnessOwnedSkillEntry(harness, item)) continue;
+        if (item.startsWith('.') || owned.includes(item)) continue;
         const source = join(directory, item);
         try {
           if ((await this.#inspect(home, source))?.kind !== 'directory') continue;

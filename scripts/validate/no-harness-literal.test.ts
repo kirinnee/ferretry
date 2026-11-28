@@ -218,11 +218,9 @@ describe('the harness-literal gate', () => {
       'lib/account/layering.ts::2',
       'lib/account/materialise.ts::tables::1',
       'lib/account/scope.ts::4',
-      'lib/assets.ts::tables::2',
+      'lib/assets.ts::tables::1',
       'lib/harness-kind.ts::tables::2',
       'lib/models/catalog.ts::tables::4',
-      'lib/provisioning.ts::tables::1',
-      'lib/service/assembly.ts::tables::1',
       'lib/service/catalog.ts::tables::1',
       'lib/service/harness-facts.ts::tables::1',
       'lib/service/setup-service.ts::tables::1',
@@ -292,10 +290,6 @@ describe('the harness-literal gate', () => {
 
   /** The per-harness things the list names but the gate cannot count (values, not harness-keyed types): each must still be there. */
   const NAMED_GAPS: readonly (readonly [file: string, needle: string])[] = [
-    [`${DAEMON}/adapters/account-model-files.ts`, 'defaultHomeDirectories: {'],
-    [`${DAEMON}/host-assembly.ts`, 'const harnessHomesOf ='],
-    [`${DAEMON}/lib/account/fixed-layer.ts`, 'const CODEX_FIXED_CONFIG_KEYS'],
-    [`${DAEMON}/lib/account/fixed-layer.ts`, 'const CARRIED_FLAGS'],
     [`${DAEMON}/adapters/profile-components.ts`, 'const SOURCES'],
     [`${DAEMON}/lib/account/credentials.ts`, 'const SIGN_IN_FILES'],
     ['packages/plugins/runtimes/contract/display-name.ts', 'const HARNESS_WORD'],

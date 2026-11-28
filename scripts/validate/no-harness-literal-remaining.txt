@@ -71,11 +71,9 @@ packages/plugins/runtimes/daemon/lib/account/halves.ts::tables::2
 packages/plugins/runtimes/daemon/lib/account/import-plan.ts::tables::2
 packages/plugins/runtimes/daemon/lib/account/import.ts::tables::1
 packages/plugins/runtimes/daemon/lib/account/materialise.ts::tables::1
-packages/plugins/runtimes/daemon/lib/assets.ts::tables::2
+packages/plugins/runtimes/daemon/lib/assets.ts::tables::1
 packages/plugins/runtimes/daemon/lib/harness-kind.ts::tables::2
 packages/plugins/runtimes/daemon/lib/models/catalog.ts::tables::4
-packages/plugins/runtimes/daemon/lib/provisioning.ts::tables::1
-packages/plugins/runtimes/daemon/lib/service/assembly.ts::tables::1
 packages/plugins/runtimes/daemon/lib/service/catalog.ts::tables::1
 packages/plugins/runtimes/daemon/lib/service/harness-facts.ts::tables::1
 packages/plugins/runtimes/daemon/lib/service/setup-service.ts::tables::1

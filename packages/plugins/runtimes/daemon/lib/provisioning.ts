@@ -25,7 +25,7 @@ export interface FleetLayout {
   readonly assetsDirectory: string;
   readonly manifestPath: string;
   /** Where the bare upstream CLI of each harness reads its configuration from. */
-  readonly defaultHomeDirectories: Readonly<Record<HarnessKind, string>>;
+  readonly defaultHomeDirectories: Readonly<Record<string, string>>;
 }
 
 /**

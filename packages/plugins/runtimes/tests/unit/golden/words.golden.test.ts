@@ -6,13 +6,7 @@
  */
 import { describe, it } from 'bun:test';
 import { REAL_KITS } from '../../support/real-kits.ts';
-import {
-  HARNESS_OWNED_SKILL_ENTRIES,
-  ASSET_FIELDS,
-  HARNESS_ASSETS,
-  harnessAsset,
-  isHarnessOwnedSkillEntry,
-} from '../../../daemon/lib/assets.ts';
+import { ASSET_FIELDS, HARNESS_ASSETS, harnessAsset, ownedSkillEntriesOf } from '../../../daemon/lib/assets.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import {
   displayNameOf,
@@ -57,7 +51,7 @@ describe('harness word goldens', () => {
           { npm: kit.install?.npm, cask: kit.install?.cask, nixpkgs: kit.install?.nixpkgs },
         ]),
       ),
-      ownedSkillEntries: HARNESS_OWNED_SKILL_ENTRIES,
+      ownedSkillEntries: Object.fromEntries([...REAL_KITS].map(([kind, kit]) => [kind, ownedSkillEntriesOf(kit)])),
       assets: Object.fromEntries(
         supportedKinds().map(kind => [
           kind,
@@ -65,9 +59,9 @@ describe('harness word goldens', () => {
         ]),
       ),
       ownedEntry: {
-        '.system': isHarnessOwnedSkillEntry('codex', '.system'),
-        claudeSystem: isHarnessOwnedSkillEntry('claude', '.system'),
-        mine: isHarnessOwnedSkillEntry('codex', 'mine'),
+        '.system': ownedSkillEntriesOf(REAL_KITS.get('codex')).includes('.system'),
+        claudeSystem: ownedSkillEntriesOf(REAL_KITS.get('claude')).includes('.system'),
+        mine: ownedSkillEntriesOf(REAL_KITS.get('codex')).includes('mine'),
       },
       fastMode: Object.fromEntries(
         ['claude-opus-5-5', 'claude-opus-4-8', 'Claude-OPUS-5', 'claude-sonnet-5-5', 'gpt-6'].map(id => [

@@ -198,8 +198,6 @@ export { SESSION_MODE_ENV };
 
 export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 
-const CARRIED_FLAGS: ReadonlySet<string> = new Set([CLAUDE_NO_QUESTIONS_FLAG, CODEX_NO_ALT_SCREEN_FLAG]);
-
 /**
  * THE PER-FERRET SECTIONS of the appended system prompt: hypermedia ({@link HYPERMEDIA_ENV}), Pack mode
  * ({@link PACK_ENV}) and the agenda ({@link AGENDA_ENV}). The notify and board rules (Agenda and Board's
@@ -498,16 +496,33 @@ export function fixedLayerFor(
     ...(layer.rules === undefined ? {} : { codexRules: layer.rules }),
     ...(layer.configJson === undefined ? {} : { claudeJson: layer.configJson }),
   };
-  SUPERSEDED_FLAGS.set(made, layer.supersededFlags);
+  FLAG_RULES.set(made, {
+    superseded: layer.supersededFlags,
+    carried: new Set(layer.carriedFlags ?? []),
+    fixedConfigKeys: new Set(layer.fixedConfigKeys ?? []),
+  });
   return { ok: true, layer: made };
 }
 
 /**
- * The permission flags a layer's harness replaces, from its plugin's kit (the `supersededFlags` of the layer its `fixedLayer` returns, so a kit cannot give a layer without them), by the layer `fixedLayerFor` made.
- * Kept beside the layer and not on it, so the layer stays the plain data it always was (the wrapper golden pins it whole). A layer
- * nobody made through `fixedLayerFor` replaces no flag of a profile's.
+ * What a layer says about the flags of a profile, from its plugin's kit (the layer its `fixedLayer` returns carries them, so a kit cannot give
+ * a layer without them): the permission flags it replaces, the bare flags it passes itself, the `-c` keys it decides.
  */
-const SUPERSEDED_FLAGS = new WeakMap<FixedLayer, Readonly<Record<string, 'bare' | 'value' | 'config'>>>();
+interface FlagRules {
+  readonly superseded: Readonly<Record<string, 'bare' | 'value' | 'config'>>;
+  /** Bare flags the layer passes itself. */
+  readonly carried: ReadonlySet<string>;
+  /** The `-c` keys the layer decides. */
+  readonly fixedConfigKeys: ReadonlySet<string>;
+}
+
+const NO_FLAG_RULES: FlagRules = { superseded: {}, carried: new Set(), fixedConfigKeys: new Set() };
+
+/**
+ * The rules by the layer `fixedLayerFor` made. Kept beside the layer and not on it, so the layer stays the plain data it always was
+ * (the wrapper golden pins it whole). A layer nobody made through `fixedLayerFor` replaces no flag of a profile's.
+ */
+const FLAG_RULES = new WeakMap<FixedLayer, FlagRules>();
 
 // ── Applying it ──────────────────────────────────────────────────────────────────────────────────
 
@@ -539,32 +554,26 @@ export interface AgentLaunch {
   readonly overridden: readonly FixedOverride[];
 }
 
-const CODEX_FIXED_CONFIG_KEYS: ReadonlySet<string> = new Set([
-  'approval_policy',
-  'sandbox_mode',
-  'developer_instructions',
-]);
-
-/** A Codex `-c` key the fixed layer decides: its own, or anything under the tools server's table. */
-const isFixedCodexKey = (key: string): boolean =>
-  CODEX_FIXED_CONFIG_KEYS.has(key) ||
+/** A `-c` key the fixed layer decides: its own (the kit's `fixedConfigKeys`), or anything under the tools server's table. */
+const isFixedConfigKey = (rules: FlagRules, key: string): boolean =>
+  rules.fixedConfigKeys.has(key) ||
   key === `mcp_servers.${FERRETRY_MCP_SERVER}` ||
   key.startsWith(`mcp_servers.${FERRETRY_MCP_SERVER}.`);
 
 /** Split a profile's flags into the ones the launch keeps and the ones the fixed layer replaces. */
 function partitionFlags(
-  table: Readonly<Record<string, 'bare' | 'value' | 'config'>>,
+  rules: FlagRules,
   flags: readonly FlagContribution[],
   fixedArgs: readonly string[],
 ): { readonly kept: readonly string[]; readonly dropped: readonly FixedOverride[] } {
-  const fixedTokens = new Set(fixedArgs.filter(arg => CARRIED_FLAGS.has(arg)));
+  const fixedTokens = new Set(fixedArgs.filter(arg => rules.carried.has(arg)));
   const kept: string[] = [];
   const dropped: FixedOverride[] = [];
   for (let index = 0; index < flags.length; index++) {
     const { flag, layer } = flags[index] as FlagContribution;
     const equals = flag.indexOf('=');
     const name = equals > 0 ? flag.slice(0, equals) : flag;
-    const shape = table[name];
+    const shape = rules.superseded[name];
     if (shape === undefined) {
       // A flag the fixed layer passes itself would be passed twice, which a strict parser refuses.
       if (!fixedTokens.has(flag)) kept.push(flag);
@@ -577,7 +586,7 @@ function partitionFlags(
     if (shape === 'config') {
       const assignment = inline ? flag.slice(equals + 1) : (next?.flag ?? '');
       const key = assignment.split('=')[0]?.trim() ?? '';
-      if (!isFixedCodexKey(key)) {
+      if (!isFixedConfigKey(rules, key)) {
         kept.push(...tokens);
         if (takesNext) index++;
         continue;
@@ -622,7 +631,7 @@ export function applyFixedLayer(resolved: ResolvedProfile, given: FixedLayer): A
       });
     }
   }
-  const flags = partitionFlags(SUPERSEDED_FLAGS.get(given) ?? {}, resolved.flags, fixed.args);
+  const flags = partitionFlags(FLAG_RULES.get(given) ?? NO_FLAG_RULES, resolved.flags, fixed.args);
   return {
     fixed,
     settings: deepMergeSettings(resolved.settings.value, fixedSettingsDocument(fixed.entries)),

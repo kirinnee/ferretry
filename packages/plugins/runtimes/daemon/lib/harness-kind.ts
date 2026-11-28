@@ -117,3 +117,6 @@ export const displayNameOf = (kind: HarnessKind): string => harnessName(KEY_OF_K
 
 /** The short name of a harness for mid-sentence use ("Claude"), from the same table of words. */
 export const shortNameOf = (kind: HarnessKind): string => harnessWords(KEY_OF_KIND[kind])?.short ?? KEY_OF_KIND[kind];
+
+/** The folder in the person's home that a harness keeps its own setup in (`.claude`), from the contract's one table of words. */
+export const hostFolderOf = (kind: HarnessKind): string => harnessWords(KEY_OF_KIND[kind])?.hostFolder ?? `.${kind}`;

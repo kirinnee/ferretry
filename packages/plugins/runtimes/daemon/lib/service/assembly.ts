@@ -9,7 +9,6 @@
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { supportedKinds } from '../harness-kind.ts';
-import type { HarnessKind } from '../manifest.ts';
 import { type FleetCatalogServiceDeps, FleetCatalogService } from './catalog-service.ts';
 import { createFleetSetupSubsystem, type FleetSetupService, type FleetSetupServiceDeps } from './setup-service.ts';
 import { refusingConfigWriter } from './ports.ts';
@@ -51,10 +50,7 @@ export function unavailableCatalogDeps(
       homesDirectory: nowhere,
       assetsDirectory: nowhere,
       manifestPath: nowhere,
-      defaultHomeDirectories: Object.fromEntries(supportedKinds().map(kind => [kind, nowhere])) as Record<
-        HarnessKind,
-        string
-      >,
+      defaultHomeDirectories: Object.fromEntries(supportedKinds().map(kind => [kind, nowhere])),
     },
     mint: () => crypto.randomUUID(),
     mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),

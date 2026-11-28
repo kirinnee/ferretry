@@ -108,6 +108,7 @@ function fixedLayer(input: KitFixedLayerInput): KitFixedLayerResult {
         projects: { [cwd]: { hasTrustDialogAccepted: true } },
       },
       supersededFlags: SUPERSEDED_FLAGS,
+      carriedFlags: [CLAUDE_NO_QUESTIONS_FLAG],
     },
   };
 }
