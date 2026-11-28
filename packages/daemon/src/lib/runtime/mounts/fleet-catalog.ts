@@ -151,6 +151,21 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
         const request = await parseBody(context.request, FleetAccountChangeRequestSchema, {
           maxBytes: MAX_CHANGE_BODY_BYTES,
         });
+        // Older clients can turn an omitted body into an empty draft. Never let that erase a file
+        // this remote caller could not read. Local edits and deliberate clears of visible text still work.
+        const change = request.change;
+        if (context.presentation?.loopback !== true && change.kind === 'component.put' && change.content === '') {
+          const catalog = await subsystem.components(true);
+          const current = catalog.kinds
+            .flatMap(group => group.components)
+            .find(row => row.kind === change.component.kind && row.name === change.name);
+          if (current !== undefined && (current.contentUnavailable !== undefined || current.content === undefined))
+            throw new ApiError(
+              409,
+              'This content is unavailable. Edit it on the machine.',
+              'fleet_content_unavailable',
+            );
+        }
         // Staging a clone describes it for THIS caller: a settings document the caller may not write is refused now.
         const caller = {
           governance: context.governance,

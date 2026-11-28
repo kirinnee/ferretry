@@ -783,6 +783,8 @@ describe('remote component credential boundary', () => {
 
   it('should use remote bodies for a limited device on a loopback peer, including a caller-chosen conflict', async () => {
     const fake = values[1] as string;
+    const projectId = 'StudioProject2026InteractiveToolbarController';
+    const otherProjectId = 'StudioProject2027InteractiveToolbarController';
     const model = parseAccountModel({
       version: 2,
       credentials: { login: { harness: 'claude', store: 'host' } },
@@ -805,8 +807,8 @@ describe('remote component credential boundary', () => {
     const directory = path.join(host.paths.fleet, 'assets/components');
     await mkdir(directory, { recursive: true });
     await rename(path.join(host.paths.state, 'login-secrets.json'), path.join(directory, 'moved.json'));
-    await writeFile(path.join(directory, 'copied.json'), JSON.stringify({ theme: fake }));
-    await writeFile(path.join(directory, 'other.json'), JSON.stringify({ theme: 'light' }));
+    await writeFile(path.join(directory, 'copied.json'), JSON.stringify({ theme: fake, projectId }));
+    await writeFile(path.join(directory, 'other.json'), JSON.stringify({ theme: 'light', projectId: otherProjectId }));
     const grants = new CapabilityGrantService({
       document: { read: async () => DEFAULT_CAPABILITY_GRANTS, written: async () => [], write: async () => undefined },
       clock: { nowMs: () => Date.parse('2026-11-28T00:00:00.000Z') },
@@ -849,6 +851,9 @@ describe('remote component credential boundary', () => {
       const body = JSON.stringify(jsonBody(response));
       should(body).not.containEql(fake);
       should(body).not.containEql('private moved value');
+      should(body).containEql(projectId);
+      should(body).containEql(otherProjectId);
+      if (preview) should(JSON.stringify(jsonBody(response).resolved)).containEql(otherProjectId);
       if (preview || endpoint === 'profiles') should(body).containEql('overrides');
     }
     should(localReads).equal(0);

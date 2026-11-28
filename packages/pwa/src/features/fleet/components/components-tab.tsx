@@ -282,7 +282,13 @@ function ComponentPages(props: SharedProps & { reference: string; editing: boole
       </>
     );
   return props.editing ? (
-    <FormPage {...props} kind={component.kind} component={component} />
+    // Losing content discards the open draft synchronously, including its pending Save action.
+    <FormPage
+      key={`${component.reference}:${component.contentUnavailable ?? component.content?.form ?? 'unavailable'}`}
+      {...props}
+      kind={component.kind}
+      component={component}
+    />
   ) : (
     <DetailPage {...props} component={component} />
   );

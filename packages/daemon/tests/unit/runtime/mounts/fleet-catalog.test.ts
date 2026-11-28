@@ -9,6 +9,7 @@
 import { describe, it } from 'bun:test';
 import type {
   FleetAccountChange,
+  FleetComponentCatalog,
   FleetAccountChangeView,
   FleetMachineView,
   FleetProfileDraftRequest,
@@ -129,6 +130,82 @@ const post = (path: string, body?: string) =>
   });
 
 describe('the fleet catalogue mount', () => {
+  it('should refuse remote empty puts of unavailable text, while keeping loopback and readable clears', async () => {
+    const catalog: FleetComponentCatalog = {
+      format: 'version-2',
+      kinds: [
+        {
+          kind: 'instructions',
+          label: 'Instructions',
+          description: 'Guidance',
+          components: [
+            {
+              kind: 'instructions',
+              name: 'private',
+              reference: 'instructions/private',
+              scope: 'generic',
+              detail: { kind: 'instructions', file: 'private.md' },
+              contentUnavailable: 'not served remotely',
+              partial: [],
+              warnings: [],
+              usedBy: { profiles: [], runtimes: [] },
+              editNote: 'Nothing uses it yet.',
+              remove: { available: true },
+            },
+          ],
+        },
+      ],
+    };
+    const reads: (boolean | undefined)[] = [];
+    const { subsystem, calls } = stub({
+      components: async remote => {
+        reads.push(remote);
+        return catalog;
+      },
+    });
+    const change = {
+      kind: 'component.put',
+      name: 'private',
+      component: { kind: 'instructions' },
+      content: '',
+      create: false,
+    };
+    const send = (loopback: boolean, device?: { deviceId: string; appSession: string }) =>
+      dispatcher(subsystem).dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/fleet/proposals',
+          headers: device === undefined ? human : {},
+          loopback,
+          device,
+          body: JSON.stringify({ change }),
+        }),
+      );
+    should((await send(false)).status).equal(409);
+    should((await send(true, { deviceId: 'paired', appSession: 'paired-app' })).status).equal(409);
+    should(calls.proposed).have.length(0);
+    should(reads).deepEqual([true, true]);
+    should((await send(true)).status).equal(200);
+    const row = catalog.kinds[0]?.components[0];
+    const readable = {
+      ...catalog,
+      kinds: [
+        {
+          ...catalog.kinds[0],
+          components: [
+            { ...row, contentUnavailable: undefined, content: { form: 'text', text: 'Visible text', redacted: false } },
+          ],
+        },
+      ],
+    } as FleetComponentCatalog;
+    const visible = stub({ components: async () => readable });
+    const cleared = await dispatcher(visible.subsystem).dispatch(
+      post('/v1/fleet/proposals', JSON.stringify({ change })),
+    );
+    should(cleared.status).equal(200);
+    should(visible.calls.proposed).deepEqual([change]);
+  });
+
   it('should answer all four reads through the shared schema and never let one be cached', async () => {
     // Arrange
     const { subsystem } = stub();

@@ -244,11 +244,18 @@ export function draftFromComponent(component: FleetComponentView): ComponentDraf
   };
   const content = component.content;
   const detail = component.detail;
+  // Older daemons omit unreadable content without the explicit refusal field. Absence is never an empty file.
+  const missing =
+    ((detail.kind === 'instructions' || (detail.kind === 'hooks' && detail.directory === undefined)) &&
+      content?.form !== 'text') ||
+    (detail.kind === 'settings' && content?.form !== 'entries');
+  const unavailable = component.contentUnavailable ?? (missing ? 'unavailable' : undefined);
   switch (detail.kind) {
     case 'instructions':
     case 'hooks':
       return {
         ...base,
+        ...(unavailable === undefined ? {} : { unavailable }),
         body: content?.form === 'text' ? content.text : '',
         redacted: content?.form === 'text' && content.redacted,
         directory: detail.kind === 'hooks' && detail.directory !== undefined,
@@ -266,6 +273,7 @@ export function draftFromComponent(component: FleetComponentView): ComponentDraf
       const entries = content?.form === 'entries' ? content.entries : [];
       return {
         ...base,
+        ...(unavailable === undefined ? {} : { unavailable }),
         body: entries.flatMap(entry => ('hidden' in entry ? [] : [`${entry.key} = ${entry.value}`])).join('\n'),
         hiddenKeys: entries.flatMap(entry => ('hidden' in entry ? [entry.key] : [])),
         keptEnv: detail.env.map(entry => entry.name),
@@ -317,7 +325,10 @@ export function draftProblem(
   editing?: string,
 ): string | undefined {
   const name = draft.name.trim();
-  if (draft.unavailable !== undefined) return 'This content is not served remotely. Edit it on the machine.';
+  if (draft.unavailable !== undefined)
+    return draft.unavailable === 'not served remotely'
+      ? 'This content is not served remotely. Edit it on the machine.'
+      : 'This content is unavailable. Edit it on the machine.';
   if (name === '') return 'Give it a name.';
   if (!FleetComponentNameSchema.safeParse(name).success) return 'Use a name without a slash or "..".';
   if (editing === undefined && existing.some(component => component.kind === draft.kind && component.name === name))

@@ -79,7 +79,11 @@ export function ComponentForm({ draft, onChange, editing, problem }: ComponentFo
       ) : null}
 
       {draft.unavailable !== undefined ? (
-        <p role="status">This content is not served remotely. Edit it on the machine.</p>
+        <p role="status">
+          {draft.unavailable === 'not served remotely'
+            ? 'This content is not served remotely. Edit it on the machine.'
+            : 'This content is unavailable. Edit it on the machine.'}
+        </p>
       ) : draft.directory ? null : (
         <label className="flex min-w-0 flex-col gap-1" htmlFor={`${id}-body`}>
           <span className="text-cell font-medium text-fg">{BODY_LABEL[draft.kind]}</span>

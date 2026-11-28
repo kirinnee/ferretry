@@ -2443,6 +2443,7 @@ describe('unnamed high entropy component values', () => {
     'uses: some/action@1234567890abcdef1234567890abcdef12345678',
     'sha256:7b3c91af0826d54e10f9ab7d62483c5e91ad02fb62714c0a8e39b5d62f1c0479',
     'isUserVerifyingPlatformAuthenticatorAvailable()',
+    'StudioProject2026InteractiveToolbarController',
     'data:image/png;base64,aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     '# Markdown\n\n**Read the guide**, then run `bun test`.',

@@ -342,10 +342,12 @@ function highEntropy(value: string): boolean {
     const probability = count / value.length;
     entropy -= probability * Math.log2(probability);
   }
-  // Short hex IDs and 40-character Git SHAs are public references. Base64 needs mixed classes.
+  // Short hex IDs and 40-character Git SHAs are public references. Base64 needs mixed classes;
+  // long wordlike camel/Pascal runs inside an identifier (even with a year) are ordinary content.
+  const identifier = [...value.matchAll(/[A-Za-z]{16,}/gu)].some(([run]) => /[a-z]{4,32}[A-Z][a-z]{3,32}/u.test(run));
   return /^[a-fA-F0-9]+$/u.test(value)
     ? value.length >= 64 && entropy >= 3
-    : entropy >= 4 && /[A-Z]/u.test(value) && /[a-z]/u.test(value) && /[0-9]/u.test(value);
+    : entropy >= 4 && /[A-Z]/u.test(value) && /[a-z]/u.test(value) && /[0-9]/u.test(value) && !identifier;
 }
 
 function redactEncoded(text: string, hide: () => void): string {
