@@ -11284,7 +11284,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
       const fleetCatalogDeps = {
-        ...fileFleetCatalogDeps({
+        ...(await fileFleetCatalogDeps({
           paths,
           userHome,
           ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
@@ -11302,7 +11302,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             bootNotices.state(
               `unreadable fleet manifest regenerated from configuration; previous file kept at ${backup}`,
             ),
-        }),
+        })),
         modelCatalogs: async () => await models.provides.catalogs.sources(),
         publishedManifest: async () => await publishedManifest(),
         lastAutoResume: async () => await autoResumeSummary.read(),

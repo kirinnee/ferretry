@@ -10,11 +10,13 @@
  */
 
 import { lstat, readFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import {
   ABSENT_DOCUMENT_REVISION,
   type AccountModel,
   type StateHomeFence,
+  openOutsideStateHomes,
+  stateHomeFence,
   claudeStatuslineCommand,
   type FleetDocumentWrite,
   type FleetLayout,
@@ -34,6 +36,7 @@ import {
   FileSharedHistoryFileSystem,
   readFencedSource,
   resolveSourceFence,
+  type SourceFence,
 } from '@ferretry/fleet/adapters';
 import { configFilePath, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
 import type { ConfigFilesService } from '../../lib/config-files/index.ts';
@@ -133,9 +136,11 @@ export async function readDeclaredAccountModel(
  */
 export const componentSourceFence = (
   paths: Pick<FoundationPaths, 'home' | 'state' | 'config' | 'fleet'>,
-): StateHomeFence => ({
+): SourceFence => ({
   homes: [paths.home, paths.state, paths.config],
   open: [join(paths.fleet, 'assets')],
+  pinned: stateHomeFence(paths.home).pinned,
+  pinnedTrees: [join(paths.fleet, 'credentials')],
 });
 
 /**
@@ -143,9 +148,23 @@ export const componentSourceFence = (
  * behind the fence, which reads exactly like a document that is not there: the configuration check has
  * already said why (an error at the field), and a body that is never read is never in a runtime.
  */
-export async function readComponentText(path: string, fence: StateHomeFence): Promise<string | undefined> {
+export async function readComponentText(
+  path: string,
+  fence: StateHomeFence,
+  remote = false,
+): Promise<string | undefined> {
   try {
-    return await readFencedSource(await resolveSourceFence(fence), path, MAX_COMPONENT_BYTES);
+    const resolved = await resolveSourceFence(fence);
+    if (!remote) return await readFencedSource(resolved, path, MAX_COMPONENT_BYTES);
+    // The declared file's directory is its root. Check and read the same descriptor.
+    const inside = await resolved.disk.realpath(dirname(path));
+    const opened = await openOutsideStateHomes(path, resolved.homes, resolved.disk, { ...resolved.links, inside });
+    if (!opened.ok) return undefined;
+    try {
+      return await opened.value.readText(MAX_COMPONENT_BYTES);
+    } finally {
+      await opened.value.close();
+    }
   } catch {
     return undefined;
   }
@@ -257,13 +276,15 @@ async function wrappersCurrent(binDirectory: string, operations: FleetModelApply
  * Its own provisioner, over this daemon's state home and the user's home: the apply claim is a file
  * beside the manifest, so two provisioners in one daemon still apply one at a time.
  */
-export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCatalogServiceDeps {
+export async function fileFleetCatalogDeps(options: FileFleetCatalogOptions): Promise<FleetCatalogServiceDeps> {
   const { paths, userHome, sessionRecords: records } = options;
   const allowedRoots = [paths.home, userHome];
   const sourceFence = {
     ...componentSourceFence(paths),
     ...(options.pinned === undefined ? {} : { pinned: options.pinned }),
   };
+  // Pin before boot publishes any route, before any file can be moved out of its old name.
+  await resolveSourceFence(sourceFence);
   const layout: FleetLayout = {
     stateHome: paths.home,
     userHome,
@@ -297,6 +318,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
         fresh,
       ),
     readAsset: async path => await readComponentText(path, sourceFence),
+    readRemoteAsset: async path => await readComponentText(path, sourceFence, true),
     documentRevision,
     ids,
     locate: options.locate,

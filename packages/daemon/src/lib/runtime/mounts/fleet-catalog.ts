@@ -46,7 +46,7 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
   FleetCatalogFreshStepUpRequired,
   FleetCatalogRefusal,
-  FleetCatalogService,
+  type FleetCatalogService,
 } from '../../fleet/catalog-service.ts';
 
 /** The machine, its components, profiles and runtimes, and every change to them. */
@@ -100,7 +100,8 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       caller: 'any',
       capability: USE,
       noStore: true,
-      handle: async () => await answer(FleetComponentCatalogSchema, () => subsystem.components()),
+      handle: async context =>
+        await answer(FleetComponentCatalogSchema, () => subsystem.components(!context.request.loopback)),
     },
     {
       method: 'GET',

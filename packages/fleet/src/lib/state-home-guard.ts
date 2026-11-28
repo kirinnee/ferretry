@@ -386,10 +386,11 @@ export async function stateHomeOf(
   for (let current = absolute(real, 'the path'); ; current = dirname(current)) {
     const entry = await disk.identity(current);
     if (entry === undefined) return { inside: true, home: homes.homes[0]?.named ?? current };
+    // Pinned identities take precedence even when a credential replaces an opening itself.
+    if (homes.pinned.some(key => same(key, entry))) return { inside: true, home: homes.homes[0]?.named ?? current };
     if (homes.openings.some(opening => same(opening, entry))) return OUTSIDE;
     const home = homes.homes.find(directory => same(directory, entry));
     if (home !== undefined) return { inside: true, home: home.named };
-    if (homes.pinned.some(key => same(key, entry))) return { inside: true, home: homes.homes[0]?.named ?? current };
     if (dirname(current) === current) return OUTSIDE;
   }
 }

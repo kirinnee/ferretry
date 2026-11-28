@@ -95,7 +95,7 @@ export async function machine(
       throw new Error('not exercised');
     },
   };
-  const catalogDeps = fileFleetCatalogDeps({
+  const catalogDeps = await fileFleetCatalogDeps({
     paths: home.paths,
     userHome,
     config: home.service,

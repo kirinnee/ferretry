@@ -177,6 +177,8 @@ export interface CatalogFacts {
   readonly skillFrontmatter?: Readonly<Record<string, readonly string[]>>;
   /** Each hooks component's file text, for the edit screen and E30. */
   readonly hooksTexts?: Readonly<Record<string, string>>;
+  /** A file the remote body reader refused, shown with a plain reason instead of its body. */
+  readonly notServedRemotely?: ReadonlySet<string>;
   /** This machine's user home: a path under it is not one to check (E30). */
   readonly userHome: string;
   /** MCP commands this machine does not have (K6, E8). */
@@ -326,6 +328,37 @@ const CONTEXT_FREE_SECRET = new RegExp(
   `-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[A-Za-z0-9+/=\\s]*(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?|${SECRET_TOKEN_SOURCE}`,
   'gu',
 );
+
+/** Unnamed encoded values, including a vault key printed without a field name. */
+const ENCODED_RUN = /[A-Za-z0-9+/]{32,}={0,2}/gu;
+
+function highEntropy(value: string): boolean {
+  const counts = new Map<string, number>();
+  for (const char of value) counts.set(char, (counts.get(char) ?? 0) + 1);
+  let entropy = 0;
+  for (const count of counts.values()) {
+    const probability = count / value.length;
+    entropy -= probability * Math.log2(probability);
+  }
+  // Hex has a four-bit ceiling; base64 has six.
+  return entropy >= (/^[a-fA-F0-9]+$/u.test(value) ? 3 : 4);
+}
+
+function redactEncoded(text: string, hide: () => void): string {
+  return text.replace(WORD, word => {
+    // Ordinary paths and URLs are references, not unnamed encoded values.
+    if (
+      !/^[A-Za-z0-9+/]{32,}={1,2}$/u.test(word) &&
+      (/^(?:[a-z][a-z0-9+.-]*:\/\/|\.?\.?\/|~\/)/iu.test(word) || /\/[\w.-]+\.[a-z]{1,8}(?:[?#].*)?$/iu.test(word))
+    )
+      return word;
+    return word.replace(ENCODED_RUN, value => {
+      if (!highEntropy(value)) return value;
+      hide();
+      return HIDDEN_TEXT;
+    });
+  });
+}
 
 /** A line that ends in a name and its separator (`password =`), or opens a block value (`password: |`, `token: >-`). */
 const OPENS_VALUE = /(?:^|[^A-Za-z0-9_.-])["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=]([ \t]*[|>][-+0-9]*)?[ \t]*$/u;
@@ -536,7 +569,10 @@ export function redactText(
     redacted = true;
     return HIDDEN_TEXT;
   });
-  return { text: cut, redacted: redacted || lines.redacted };
+  const encoded = redactEncoded(cut, () => {
+    redacted = true;
+  });
+  return { text: encoded, redacted: redacted || lines.redacted };
 }
 
 const isTable = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -568,11 +604,13 @@ export const settingsValueText = (value: unknown): string =>
 function settingsEntries(settings: SettingsObject): FleetSettingsEntry[] {
   return flattenSettings(settings).map(([key, value]) => {
     const text = settingsValueText(value);
-    return looksSecret(key, text) ? { key, hidden: true as const } : { key, value: text };
+    return looksSecret(key, text) || redactText(text).redacted ? { key, hidden: true as const } : { key, value: text };
   });
 }
 
 function componentContent(kind: ComponentKind, name: string, facts: CatalogFacts): FleetComponentContent | undefined {
+  if (facts.notServedRemotely?.has(`${kind}/${name}`) === true)
+    return { form: 'text', text: 'not served remotely', redacted: false };
   if (kind === 'settings') {
     const body = facts.settingsBodies?.[name];
     return body === undefined ? undefined : { form: 'entries', entries: settingsEntries(body) };

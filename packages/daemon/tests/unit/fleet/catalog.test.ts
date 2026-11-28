@@ -8,6 +8,7 @@
  * accepted by the protocol schema the route will answer with.
  */
 import { describe, it } from 'bun:test';
+
 import {
   type AccountModel,
   builtInModelCatalogs,
@@ -1979,11 +1980,25 @@ describe('redactText: a well-known token anywhere', () => {
   );
 
   it.each(TOKENS.flatMap(token => GLUED.map(before => [token, before] as const)))(
-    'should leave %s after a letter or digit (%s) as a word that only ends the way a token starts',
+    'should judge %s after a letter or digit (%s), including unnamed high entropy tails',
     (token, before) => {
-      should(redactText(`a ${before}${token} z`)).deepEqual({ text: `a ${before}${token} z`, redacted: false });
+      const text = `a ${before}${token} z`;
+      if (token.endsWith('abcdefghijklmnopqrstuvwxyz0123456789') || token.startsWith('AIza')) {
+        should(redactText(text).text).not.containEql(token);
+        should(redactText(text).redacted).equal(true);
+      } else {
+        should(redactText(text)).deepEqual({ text, redacted: false });
+      }
     },
   );
+
+  it.each(GLUED)('should hide an unnamed high-entropy Google-shaped run even after %s', before => {
+    // Act + Assert — the new unnamed-value rule applies even without a token boundary.
+    should(redactText(`a ${before}AIzaSyabcdefghijklmnopqrstuvwxyz012345 z`)).deepEqual({
+      text: 'a ‹hidden› z',
+      redacted: true,
+    });
+  });
 
   it('should hide every token of a text and stop at the end of each', () => {
     should(redactText('x<&ghp_abcdefghijklmnop12{(sk-qrstuvwxyz012345)plain!').text).equal(
@@ -2358,5 +2373,33 @@ describe('redactText: a pointer is only a name, and a default is a value', () =>
     should(redactText('${A_TOKEN-hunter2hunter2xyz} and ${B_TOKEN+hunter2hunter2xyz}').text).equal(
       '${A_TOKEN-‹hidden›} and ${B_TOKEN+‹hidden›}',
     );
+  });
+});
+
+describe('unnamed high entropy component values', () => {
+  it.each([
+    '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb',
+    'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
+    '/Z9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
+    'FAKEopaque0123456789abcdefXYZ123456789',
+  ])('should hide a bare key %s without a secret name', value => {
+    // Act + Assert
+    should(redactText(`value: "${value}"`).text).not.containEql(value);
+    should(redactText(value).redacted).equal(true);
+  });
+
+  it.each([
+    'Ordinary prose describes how to write useful instructions.',
+    '# Markdown\n\n**Read the guide**, then run `bun test`.',
+    '/home/person/projects/ordinary-component/instructions.md',
+    '/home/person/docs/7b3c91af0826d54e10f9ab7d62483c5e91ad02fb/guide.md',
+    'components/instructions/ordinary-component-name.md',
+    'components/7b3c91af0826d54e10f9ab7d62483c5e91ad02fb/instructions.md',
+    'https://example.com/documentation/ordinary-component-name?view=all',
+    '[Guide](https://example.com/docs/7b3c91af0826d54e10f9ab7d62483c5e91ad02fb)',
+    'supercalifragilisticexpialidocious',
+  ])('should preserve ordinary prose, markdown, paths and URLs: %s', text => {
+    // Act + Assert
+    should(redactText(text)).deepEqual({ text, redacted: false });
   });
 });

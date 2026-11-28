@@ -11,7 +11,19 @@
  * together, inside one rollback boundary. No real harness, account or home is touched.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -35,6 +47,11 @@ import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-sys
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../../src/lib/fleet/catalog-service.ts';
 import { FleetPublication, PublishedFleetInventory } from '../../../src/lib/fleet/publication.ts';
+import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { fleetCatalogRoutes } from '../../../src/lib/runtime/mounts/fleet-catalog.ts';
+import { jsonBody, request } from '../../unit/api/support.ts';
+import { CREDENTIALS, GRANTED, human } from '../../unit/runtime/mounts/support.ts';
 import { type ConfigHome, configHome, sha256, writeModelFiles } from './config-files-fixture.ts';
 
 const directories: string[] = [];
@@ -89,12 +106,14 @@ const locations = (home: ConfigHome) => ({ configDirectory: home.paths.config, f
 async function machine(
   model = MODEL,
   sessionRecords?: Required<Pick<FleetCatalogServiceDeps, 'sessionRecords' | 'renameSessions'>>,
+  beforeBoot?: (home: ConfigHome) => Promise<void>,
 ): Promise<Machine> {
   const root = await temporary();
   const home = await configHome(path.join(root, 'state'));
   const userHome = path.join(root, 'person');
   await mkdir(userHome, { recursive: true });
   await writeModelFiles(home.paths.config, model);
+  await beforeBoot?.(home);
   const acknowledged: { path: string; text: string }[] = [];
   const handle: Machine = {
     ...home,
@@ -107,7 +126,7 @@ async function machine(
     acknowledged,
     states: [],
   };
-  const deps = fileFleetCatalogDeps({
+  const deps = await fileFleetCatalogDeps({
     paths: home.paths,
     userHome,
     hostCodexHome: path.join(userHome, '.codex'),
@@ -600,6 +619,137 @@ describe('a reviewed change applied by the real provisioner', () => {
 
     // Assert
     should((error as NodeJS.ErrnoException).code).equal('EISDIR');
+  });
+});
+
+describe('remote component credential boundary', () => {
+  const values = [
+    '7b3c91af0826d54e10f9ab7d62483c5e91ad02fb',
+    'aZ9kL2mN8pQ4rS6tU0vW3xY5zA7bC1dE9fG2hI4jK6M=',
+    'FAKEopaque0123456789abcdefXYZ123456789',
+  ];
+  const sources = ['fleet/credentials/C1/auth.json', 'state/secrets.key', 'state/login-secrets.json'];
+  const bodies = [
+    JSON.stringify({ tokens: { access_token: values[0] } }),
+    values[1] as string,
+    JSON.stringify({ github: { value: values[2] } }),
+  ];
+
+  const answer = async (host: Machine, loopback: boolean): Promise<string> => {
+    const api = new ApiDispatcher(new ApiRouter(fleetCatalogRoutes(host.catalog)), CREDENTIALS, GRANTED);
+    const response = await api.dispatch(
+      request({
+        path: '/v1/fleet/components',
+        loopback,
+        clientAddress: '127.0.0.1',
+        headers: { ...human, host: '127.0.0.1' },
+      }),
+    );
+    should(response.status).equal(200);
+    return JSON.stringify(jsonBody(response));
+  };
+
+  for (const operation of ['mv', 'cp'] as const) {
+    it(`should hide every fake credential after ${operation} into a declared component directory`, async () => {
+      // Arrange — files exist before boot; no catalogue read precedes the move.
+      const model = parseAccountModel({
+        version: 2,
+        components: {
+          instructions: Object.fromEntries(sources.map((_, i) => [`fake${i}`, { file: `components/fake${i}.md` }])),
+          settings: {
+            auth: { harness: 'claude', file: 'components/fake0.md' },
+            login: { harness: 'claude', file: 'components/fake2.md' },
+          },
+          hooks: { auth: { harness: 'claude', file: 'components/fake0.md' } },
+        },
+      });
+      const host = await machine(model, undefined, async home => {
+        for (const [i, source] of sources.entries()) {
+          const file = path.join(home.paths.home, source);
+          await mkdir(path.dirname(file), { recursive: true });
+          await writeFile(file, bodies[i] as string);
+        }
+      });
+      const destination = path.join(host.paths.fleet, 'assets/components');
+      await mkdir(destination, { recursive: true });
+      for (const [i, source] of sources.entries()) {
+        const from = path.join(host.paths.home, source);
+        const to = path.join(destination, `fake${i}.md`);
+        if (operation === 'mv') await rename(from, to);
+        else await copyFile(from, to);
+      }
+
+      // Act
+      const remote = await answer(host, false);
+      const local = await answer(host, true);
+
+      // Assert — copies have fresh identities; each unnamed value must still be hidden.
+      for (const value of values) should(remote).not.containEql(value);
+      for (const [i] of sources.entries()) {
+        should(await host.deps.readAsset(path.join(destination, `fake${i}.md`))).equal(
+          operation === 'mv' ? undefined : bodies[i],
+        );
+      }
+      if (operation === 'cp') should(local).containEql('‹hidden›');
+      else should(local).not.containEql('not served remotely');
+    });
+  }
+
+  it('should retain boot and rotated key identities after both source paths disappear', async () => {
+    // Arrange
+    const host = await machine(MODEL, undefined, async home => {
+      await writeFile(path.join(home.paths.state, 'secrets.key'), values[1] as string);
+    });
+    const directory = path.join(host.paths.fleet, 'assets');
+    await mkdir(directory, { recursive: true });
+    const key = path.join(host.paths.state, 'secrets.key');
+    const oldKey = path.join(directory, 'old.md');
+    const newKey = path.join(directory, 'new.md');
+    await rename(key, oldKey);
+    await writeFile(key, values[0] as string);
+    // A refresh sees a replacement identity without forgetting the boot identity.
+    await host.deps.readAsset(oldKey);
+    await rename(key, newKey);
+
+    // Act + Assert — repeated path misses never drop either identity.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      should(await host.deps.readAsset(oldKey)).be.undefined();
+      should(await host.deps.readAsset(newKey)).be.undefined();
+    }
+  });
+
+  it('should refuse an escaping symlink remotely, preserve local text and serve a normal sibling', async () => {
+    // Arrange
+    const model = parseAccountModel({
+      version: 2,
+      components: {
+        instructions: {
+          escape: { file: 'components/escape.md' },
+          normal: { file: 'components/normal.md' },
+          state: { file: 'components/state.md' },
+        },
+      },
+    });
+    const host = await machine(model);
+    const directory = path.join(host.paths.fleet, 'assets/components');
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(host.root, 'outside.md'), 'outside private prose');
+    await writeFile(path.join(host.paths.state, 'other.md'), 'inside state prose');
+    await symlink(path.join(host.root, 'outside.md'), path.join(directory, 'escape.md'));
+    await symlink(path.join(host.paths.state, 'other.md'), path.join(directory, 'state.md'));
+    await writeFile(path.join(directory, 'normal.md'), '# Normal component\nUseful instructions.');
+
+    // Act
+    const remote = await answer(host, false);
+    const local = await answer(host, true);
+
+    // Assert — forged Host and peer look local; the carrier says otherwise.
+    should(remote).not.containEql('outside private prose');
+    should(remote).not.containEql('inside state prose');
+    should(remote).containEql('not served remotely');
+    should(remote).containEql('# Normal component');
+    should(local).containEql('outside private prose');
+    should(local).not.containEql('not served remotely');
   });
 });
 
