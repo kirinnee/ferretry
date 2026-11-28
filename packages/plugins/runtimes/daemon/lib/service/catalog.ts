@@ -40,7 +40,7 @@ import {
   resolveProfile,
   type SkippedLayer,
 } from '../account/layering.ts';
-import { componentPartialSupport, describePartialSupport } from '../account/adapt.ts';
+import { componentPartialSupport, describePartialSupport, runtimeKitRefusal } from '../account/adapt.ts';
 import { freeName } from '../account/import.ts';
 import { findFlagSecrets, looksSecret, rawTextHoldsSecret, SECRET_TOKEN_SOURCE } from '@ferretry/std/credential-words';
 import { hooksDocumentRefusedLines } from './hooks-document-net.ts';
@@ -1279,6 +1279,7 @@ function modelsView(
   harness: HarnessKind,
   credential: AccountModel['credentials'][string],
   sources: ModelCatalogSources | undefined,
+  kit: RuntimesHarnessKit | undefined,
 ): { readonly models?: RuntimeModels } {
   if (sources === undefined) return {};
   const derived = runtimeModels({
@@ -1294,7 +1295,7 @@ function modelsView(
         ...model,
         efforts: [...model.efforts],
         // Claude's fast mode is a rule on the model id; Codex's is the live account's to say.
-        ...fastSupportOf(harness, model.id),
+        ...fastSupportOf(harness, model.id, kit),
       })),
       ...(derived.default === undefined ? {} : { default: derived.default }),
       ...(derived.local === undefined ? {} : { local: derived.local }),
@@ -1394,16 +1395,20 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
         const fixed = fixedLayerView(model, harness, resolved, facts);
         const status = facts.credentialStatus?.[runtime.credential];
         const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND, facts.budgetHolds);
+        // The runtime-wide kit refusal the account plan makes (one decision), read before the install, Auto and login checks.
+        const kitRefusal = runtimeKitRefusal(harness, facts.kits?.get(harness));
         const blocked =
           off !== undefined
             ? off.clauses.join('. ')
-            : facts.tools[harness] === undefined
-              ? `Install ${HARNESS_DISPLAY_NAMES[harness]} to launch`
-              : status === 'needs_sign_in'
-                ? 'Sign in to launch'
-                : stack.available.available
-                  ? (fixed.refusal ?? noModelReason(resolved?.modelSet, harness, credential, facts.modelCatalogs))
-                  : stack.available.reason;
+            : kitRefusal !== undefined
+              ? kitRefusal.message
+              : facts.tools[harness] === undefined
+                ? `Install ${HARNESS_DISPLAY_NAMES[harness]} to launch`
+                : status === 'needs_sign_in'
+                  ? 'Sign in to launch'
+                  : stack.available.available
+                    ? (fixed.refusal ?? noModelReason(resolved?.modelSet, harness, credential, facts.modelCatalogs))
+                    : stack.available.reason;
         // A runtime whose apply never landed has no id yet; its name stands in, and it cannot have
         // a session for any other id to name.
         const id = facts.runtimeIds?.[name] ?? name;
@@ -1425,7 +1430,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
             profile: runtime.profile,
             stack,
             modelSet: modelSetView(resolved),
-            ...modelsView(resolved, harness, credential, facts.modelCatalogs),
+            ...modelsView(resolved, harness, credential, facts.modelCatalogs, facts.kits?.get(harness)),
             ...(fixed.view === undefined ? {} : { fixedLayer: fixed.view }),
             launch: act(blocked),
             // A budget alone is no switch: the runtime cannot launch (its `launch` says why), but nothing is off.
