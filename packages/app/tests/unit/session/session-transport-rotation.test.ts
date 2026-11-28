@@ -240,7 +240,7 @@ describe('R252 a stream session the old key is refused on', () => {
     });
     await settle();
 
-    expect(events).toEqual(['closed the rendezvous ended this session: 4403 unknown device credential']);
+    expect(events).toEqual(['closed unknown device credential']);
     expect(test.recorded.calls).toEqual(['pending', 'discard']);
     expect(test.route.credentials).toHaveLength(2);
   });

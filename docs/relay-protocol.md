@@ -180,10 +180,14 @@ the server; asking for the daemon role against a direct address is an error, not
 
 **The direct carrier, exactly.** `fyd` serves `GET /v1/rendezvous/<its own daemonId>/client` as a
 WebSocket upgrade on its own listener. **One socket is one session**: on upgrade the daemon mints the
-16-byte `sessionId` and sends the client the same `ready` a rendezvous sends (`limits` included), and
-that is the only control frame on the socket — the daemon never sends `challenge`, accepts no
-`claim`, and refuses with `4400` a client that sends any control frame at all. The session's end is
-the socket's close, with the code the session ended with. A wrong `daemonId` is answered over the socket, not with an HTTP status a browser
+16-byte `sessionId` and sends the client the same `ready` a rendezvous sends (`limits` included).
+The daemon never sends `challenge`, accepts no `claim`, and refuses with `4400` a client that sends
+any control frame at all. After keying, the daemon sends the real terminal code and reason in a sealed
+`session-end` data record, then a generic `closed` control and WebSocket close, both carrying only
+`4440` / `the session concluded`. The client authenticates the sealed verdict; a plain close after
+the verified handshake means only connection loss, including one racing asynchronous handshake
+verification, and cannot become replacement proof on a later carrier leg. A wrong `daemonId` before
+the handshake is answered over the socket, not with an HTTP status a browser
 cannot read: the upgrade is accepted and the socket closed `4404` ("this daemon does not answer for that
 fingerprint"), holding no slot and naming nothing of this daemon's own identity — the words the `404` carried.
 The client reads that as proof of a replaced daemon (§13, "A replaced daemon"). An upgrade is
@@ -332,8 +336,26 @@ The **relay** mints the 16-byte `sessionId` and tells the client what it is. A c
 only that identifier; using another session's is a protocol error that ends its session.
 
 Either endpoint may end one session without dropping its socket by sending
-`{ "t":"closed", "code":…, "reason":… }` addressed to that session. That is how a daemon rejects a
-client whose device proof it does not accept.
+`{ "t":"closed", "code":…, "reason":… }` addressed to that session. This is **carrier teardown**, never
+an authenticated daemon verdict. Once §6's handshake has verified, every plain `closed`, `error`, other
+control or socket close — **any code**, including `4403`, `4404`, `4405`, `4426` and `4440` — means only
+**connection lost**. The browser reconnects with its normal backoff; it never enters a refused,
+replaced, update-required or other stop page from that input. A plain `4403` is connection loss at
+**every phase**, including before `ready` or the handshake answer: device refusal now exists only
+inside authenticated ciphertext, so an unsealed `4403` can never discard a pending rotation key.
+Pre-handshake `4404` admission and the direct/tunnel replacement proof below stay unchanged.
+
+**Residual before keying:** a plain `4426` still draws the update-required page, since a daemon
+refusing an unsupported hello cannot establish session keys. A relay can forge that page, but it
+changes **no stored state**: device keys, pending rotation keys, pairing records and remembered
+grants remain intact. Background retries continue with backoff; a later genuine handshake and
+inventory read clear the page automatically. `packages/app/tests/unit/session/plain-close.test.ts`
+proves the stored pairing and grant bytes stay identical across repeated forged refusals, that no
+key mutation runs, and that the genuine reconnect clears the page without a reload or re-pair.
+
+The daemon's actual code and reason travel in the sealed `session-end` record (§7). The carrier
+teardown that follows it always uses `4440`, `the session concluded`. A browser likewise acknowledges
+that record with generic teardown; it never echoes the inner code or reason into the plain carrier.
 
 ### Limits
 
@@ -435,7 +457,7 @@ half of a freshly generated key and proving it holds the private half:
 proof = Ed25519-Sign( new device key, "ferretry-device-pair-v2" ‖ 0x00 ‖ TH ‖ LP(deviceKey) )
 ```
 
-The daemon verifies the proof against the SPKI it stored at pairing, or sends `{"t":"closed",…}`
+The daemon verifies the proof against the SPKI it stored at pairing, or sends a sealed `session-end`
 for the session — unknown device, idle-expired device and bad proof are ONE refusal, `4403`, so the
 answer is not an oracle for which ids exist. None of it appears outside the encrypted channel, so a
 relay sees neither the device id nor the code; this is why the credential travels after keying rather
@@ -469,7 +491,36 @@ traffic on one session.
 
 **On any failure — a bad tag, a sequence that is not the next one, a record for another session —
 the session ends.** There is no recovery path and that is intentional. A carrier that silently loses
-frames would otherwise produce a session that looks healthy and is missing data.
+frames would otherwise produce a session that looks healthy and is missing data. The browser treats
+an unauthenticated, replayed or misaddressed record as connection loss, never as a daemon stop verdict.
+
+### Authenticated session termination
+
+The daemon ends a keyed session with this strict UTF-8 JSON record, inside an ordinary `data` frame:
+
+```json
+{ "t": "session-end", "protocol": "ferretry-relay/2", "code": 4403, "reason": "unknown device credential" }
+```
+
+`code` is an integer from 1000 through 4999; `reason` is a string of at most 200 characters. The record
+is daemon-to-client only and applies in **every mode**, including after keying but before credential
+acceptance. It uses the current daemon-to-client key, session id, sequence, nonce and associated data
+exactly as any other record. No separate counter or replay exception exists. Another session's record,
+a duplicate, a changed header or a changed ciphertext fails the normal session checks.
+
+The daemon discards unsent application records, releases the session's resources, then seals this one
+final record at the next **unspent** send sequence, serialized behind any seal already in flight.
+Discarded ciphertext is never handed to the carrier. A carrier pulls the final frame before it can pull
+the generic `4440` end. The final record needs remaining send credit, like every other record. If
+credit is exhausted, sealing fails, sequence space is exhausted, or the carrier drops the record,
+the browser has no authenticated verdict and reports connection loss. Shutdown drains these final
+records before stopping carriers and listeners. No payload or session data is migrated or deleted.
+
+The browser processes previously delivered frames in order and waits for their decryption **in every
+mode** before applying a subsequent socket close. A valid `session-end` supplies the daemon's code and
+reason: `4403` is device refusal, `4441` is lease expiry, and `4500` with `the daemon is going away` is
+shutdown. A previously latched pairing, join or stream outcome remains final; later teardown cannot
+overwrite it. A plain close without an authenticated outcome stays connection loss.
 
 ---
 
@@ -655,6 +706,10 @@ shared one, and the daemon was refused `4429` for as long as the clients kept tr
 
 ### Close codes
 
+After keying, daemon verdicts in this table are carried by sealed `session-end`, not by a plain close.
+Plain relay codes still describe pre-handshake admission and carrier failures; none authenticates a
+post-handshake daemon decision.
+
 | Code   | Meaning                                                                                         |
 | ------ | ----------------------------------------------------------------------------------------------- |
 | `4400` | protocol error: unparseable, or right message in the wrong state                                |
@@ -700,7 +755,7 @@ worse than disclosing it.
 - **How many clients** are connected to a daemon, and when each arrived and left.
 - **That a first pairing happened, and — from one record's size — how it ended**, when the exchange
   crosses a relay (§14): a pre-auth session opened for fingerprint X at time T from IP Y and ended
-  seconds later. Success and refusal each send exactly one sealed record and then the same close, so
+  seconds later. Success and refusal each send one sealed outcome and one sealed `session-end`, then the same close, so
   the exchange is uniform in **frame count** and in close code. It is **not** uniform in **size**,
   and this document used to claim the outcome could not be inferred at all. It can. There is no
   padding (above), so a record's length is its plaintext's length: a `paired` record embeds the
@@ -1376,7 +1431,8 @@ A machine reinstalled or replaced AT the address a device paired over answers th
 identity, and the old fingerprint then reaches nobody. A walk that cannot tell this from a machine that is
 asleep retries it forever, so one case is proved and every other stays an outage:
 
-- **The proof** is a `direct` or `tunnel` leg that OPENED and was closed `4404` by the daemon behind it (above).
+- **The proof** is a `direct` or `tunnel` leg that OPENED and was closed `4404` **before a verified handshake**
+  by the daemon behind it (above).
   A relay's `4404` ("no daemon holds this rendezvous"), a socket that never opened, a timeout and every other
   close prove nothing: an asleep or restarting machine says the same, so they keep the backoff and never offer
   to pair again.
@@ -1824,9 +1880,10 @@ same `4403`. The daemon accepts by answering, inside the channel:
 key is due for replacement (see "Replacing the device key" below). A daemon that sends none asks for no
 rotation, which is what an older one means.
 
-The proof and the acceptance travel inside the encrypted channel; the refusal is a close, and a close
-code is in the clear, so a relay sees `4403` (and later `4441`) and learns WHEN a session was refused
-— never which device, and never why. An unknown device id is verified against a fixed dummy key, so
+The proof, acceptance and refusal all travel inside the encrypted channel. Refusal and lease expiry
+are sealed `session-end` records (§7); the relay sees generic `4440` teardown, never their inner code
+or reason. Record lengths and timing remain visible, so this is not a promise to hide traffic shape.
+An unknown device id is verified against a fixed dummy key, so
 it costs what a known one does. The daemon resolves the claim against its **device** grants only: a host
 admin token is not resolvable here, deliberately — it is a host-local secret, and a daemon that
 honoured it over the internet would turn a leaked file into remote authority. Every request the
@@ -2372,7 +2429,7 @@ for an oversized frame, `1011` for evidence the daemon could not produce, `1013`
 fell behind — a relayed viewer reads the same codes a direct one does, and the code travels inside
 the channel because it is content: a relay that could read close reasons could read why viewers
 leave. The client latches the sealed close first; the `4440` that follows is expected teardown, and
-a `4440` with **no** sealed close having crossed in either direction is a protocol violation
+a plain `4440` with **no** sealed outcome having crossed is connection loss
 reported as one, never reinterpreted as a quiet end. Every conclusion exposes the same unsealed
 pair — code `4440`, reason `the session concluded` — regardless of who ended the stream or why. The
 actual stream code and reason exist only in the sealed `stream-close`; interpolating either into the
@@ -2577,8 +2634,8 @@ exactly one sealed outcome:
 { "t": "pair-refused", "protocol": "ferretry-relay/2", "reason": "pairing_refused" }
 ```
 
-and then ends the session with `4440`. One attempt per session, success or failure; there is no
-second record, no retry on the same channel, and **no edge from a pairing session to serving**. A
+and then sends `session-end` and tears down with `4440`. One attempt per session, success or failure; there is no
+second pairing attempt, no retry on the same channel, and **no edge from a pairing session to serving**. A
 device that paired reconnects as an ordinary request session, proving the key it just registered.
 
 - **`paired.response` is the redemption response of the pairing API, verbatim** — validated by the
@@ -2588,8 +2645,8 @@ device that paired reconnects as an ordinary request session, proving the key it
   sealed record is what a relay-paired device navigates by, so an envelope that lost it would mint a
   device that can reach its daemon by nothing at all, with no error anywhere.
 - **The client latches the outcome before the close.** The `4440` after `paired` is expected
-  teardown, not a failure that overwrites a pairing that succeeded; a `4440` with no sealed outcome
-  before it is a protocol violation. Same rule as a stream's close, same reason.
+  teardown, not a failure that overwrites a pairing that succeeded; a plain `4440` with no sealed outcome
+  before it is connection loss. Same rule as a stream's close, same reason.
 - **Refusal is uniform on purpose.** One machine reason, `pairing_refused`, for every cause — no
   active code, a wrong code, an expired one, a spent budget, a body the schema refused, a proof that
   did not verify. A pre-auth surface the whole internet can reach must not be
@@ -2597,7 +2654,7 @@ device that paired reconnects as an ordinary request session, proving the key it
   session early when no code is active. It accepts, keys the channel, runs the same constant-time
   comparison against a dummy code, and refuses identically. An observer —
   relay operator included — cannot distinguish "no code exists" from "wrong guess", and success and
-  refusal have the **same frame count**: one sealed record, then the same close.
+  refusal have the **same frame count**: one sealed outcome, one sealed `session-end`, then the same close.
 - **Uniform is not indistinguishable, and the difference is stated rather than glossed.** The frame
   count, the close code and the refusal's own wording are uniform; the record **size** is not, and
   §3 pads nothing. `paired` embeds a whole redemption response and `pair-refused` embeds one machine
@@ -2702,7 +2759,7 @@ stopped new codes from existing — with nothing minted there is nothing to rede
 
 **What a relay operator sees of a pairing** is §10's list, with the parts specific to this exchange
 restated once: a pre-auth session for fingerprint X at time T from IP Y, a handshake, one sealed
-record each way, a `4440` close — never the code, the key or the device name, and never the outcome
+credential, one sealed outcome, one sealed `session-end`, a `4440` close — never the code, the key or the device name, and never the outcome
 as anything it can read, but the sealed answer's SIZE infers the outcome and this document says so
 rather than claiming the exchange is outcome-blind. "Fingerprint X
 gained its first device at T, from Y" is a new operator-visible event that used to happen invisibly
@@ -2767,7 +2824,7 @@ labels is used by anything above, and none of the above is accepted by a link st
 }
 ```
 
-The publisher answers with exactly one sealed outcome and then `4440`, as a pairing session does:
+The publisher answers with exactly one sealed outcome, then `session-end` and `4440`, as a pairing session does:
 
 ```json
 { "t": "joined", "protocol": "ferretry-relay/2", "response": { "memberId": "mbr_…", "keyId": "mk_…", "label": "Alice", "daemonId": "fy_daemon_…", "daemonName": "kirin-box", "catalogCount": 1, "carriers": [], "passkeyWindowEndsAt": "…", "memberUnlockDays": 30 }, "pad": "   …" }
@@ -2872,7 +2929,7 @@ options = Ed25519(member key, "ferretry-member-join-options-v1" ‖ 0x00 ‖ TH 
 
 `origin` is the page's origin, which must be one this machine serves; the passkeys offered are the ones made there.
 The signature proves this session holds `memberKey`, so a stranger cannot make the daemon issue a challenge for a key
-it does not hold. The answer is one sealed, padded outcome (the same `MEMBER_JOIN_OUTCOME_BYTES`), then `4440`:
+it does not hold. The answer is one sealed, padded outcome (the same `MEMBER_JOIN_OUTCOME_BYTES`), then `session-end` and `4440`:
 
 ```json
 { "t": "join-open", "protocol": "ferretry-relay/2", "why": "first-browser", "pad": "   …" }
@@ -2916,8 +2973,8 @@ it does not hold. The answer is one sealed, padded outcome (the same `MEMBER_JOI
 - The publisher verifies the proof against the member key it filed at join. Unknown key, revoked key,
   idle-expired key and bad proof are **one** refusal, `4403`, as for a device. (Phase 5 adds a sealed
   `member-revoked` answered only to a holder whose proof verifies; until then a revoked key gets `4403`.)
-- **`4403` is a cleartext close a relay can forge, so a browser never deletes a member key on it.** It
-  marks the key refused, says so, and keeps it — exactly as a paired device keeps its key on `4403` —
+- **Only a sealed `session-end` with `4403` marks a member key refused.** A plain `4403` is connection loss.
+  The browser marks the key refused, says so, and keeps it — exactly as a paired device keeps its key on a sealed `4403` —
   until the person chooses to join again or to forget it, or a SEALED `member-revoked` arrives (phase 5).
   Joining again with a new code makes a NEW key; the refused one is never discarded silently.
 - **As built.** An unknown id is verified against a dummy key, so a bad id costs what a known one does. The
@@ -3577,9 +3634,9 @@ never learns the daemon fingerprint, the session, or anything inside it.
 - **The daemon plays the direct carrier's part:** on a new channel it mints the session identifier,
   sends `ready` with the same `limits`, and refuses a client control frame with `4400`. `fy-ping` and
   `fy-pong` are text messages on the channel, at the §8 keepalive cadence.
-- **A close carries its code in a frame.** A data channel closes without a code, so before the daemon
-  closes one it sends the session's `closed` control frame (§5), which carries the code and reason a
-  WebSocket close would have. A channel that closes with no `closed` before it is a transport failure,
+- **A close carries its verdict inside the session.** A data channel closes without a code, so before the daemon
+  closes one it sends the sealed `session-end` (§7), followed by a generic `closed` control (§5). The sealed record carries the code and reason a
+  WebSocket close would have. A channel that closes with no authenticated verdict before it is a transport failure,
   never a quiet end.
 
 ### Authority: a WebRTC arrival is remote, always
@@ -3741,7 +3798,7 @@ rendezvous.
   process, the daemon's real carrier and direct session against the protocol's own client half — a
   proven device's request crosses the channel and reaches the route table as `loopback: false`,
   `webrtc-peer:…`, though both peers are on one machine; the heartbeat crosses as text; and a refused
-  device proof reaches the client as `closed` `4403` before the channel closes.
+  device proof reaches the client as sealed `session-end` `4403` before generic teardown and channel close.
 - **Built — the browser carrier.** `packages/pwa/src/lib/webrtc-carrier.ts` (`WebRtcDialer`: the dial,
   bounded gathering, the deadline and the sentence it fails with, renegotiation on a dead path or a new
   network, the signaller that posts through an introducer), wired as the router's `CarrierDialers.webrtc`

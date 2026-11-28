@@ -661,6 +661,8 @@ export const InputRequestSchema = z.strictObject({
   observed: InputTargetFactsSchema.optional(),
   /** The worst of the fields' risk flags; absent while the daemon is re-observing. */
   risk: InputRiskSchema.optional(),
+  /** Independent risks that must remain visible beside the strongest field risk. */
+  risks: z.array(InputRiskSchema).max(16).optional(),
   /** A digest of the facts the card showed; deliver refuses `target_changed` when it no longer matches. */
   observedDigest: Digest.optional(),
   /** The daemon holds a picture of a page's fields, taken before anything was typed: `GET …/shot` serves it. */
