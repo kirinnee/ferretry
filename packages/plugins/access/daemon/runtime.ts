@@ -581,27 +581,7 @@ export class AccessRuntime {
     },
     verifyStoredProof: async (proof, expectedChallenge) =>
       await (await this.ready()).stepUp.verifyStoredProof(proof, expectedChallenge),
-    buzz: async (message: Buzz) => {
-      const { push } = await this.ready();
-      // Parsed here, not trusted: an urgency or a hold time outside the schema is refused at the sender.
-      const buzz = BuzzSchema.parse(message);
-      // The hourly cap on high pushes, for EVERY plugin that buzzes: counted and decided in one synchronous step (no
-      // `await` between them); past a cap the push still goes, at normal priority.
-      const slot = buzz.urgency === 'high' ? this.#highPushes.take(buzz.ferret) : undefined;
-      let delivered = 0;
-      try {
-        const result = await push.notify({
-          payload: buzzPayload(buzz),
-          ...(slot?.high === true ? { urgency: 'high' as const } : {}),
-          ...(buzz.ttlSeconds === undefined ? {} : { ttlSeconds: Math.min(buzz.ttlSeconds, PUSH_URGENT_TTL_SECONDS) }),
-        });
-        delivered = result.delivered;
-        return delivered;
-      } finally {
-        // A slot is spent only on a push that reached a device.
-        if (delivered === 0) slot?.refund();
-      }
-    },
+    buzz: async (message: Buzz) => await this.buzzUnlessCancelled(message, () => false),
     clear: async (tags, except, ferret) => {
       const { push } = await this.ready();
       const payload = clearPayload(tags, ferret);
@@ -610,6 +590,36 @@ export class AccessRuntime {
       return result.delivered;
     },
   };
+
+  /**
+   * One buzz, sent through push. `cancelled` is read by the sender right before it dispatches, after its enrolment lookup:
+   * a buzz whose ask closed meanwhile sends nothing, reaches nobody and gives its high-push slot back.
+   */
+  async buzzUnlessCancelled(message: Buzz, cancelled: () => boolean): Promise<number> {
+    const { push } = await this.ready();
+    // Parsed here, not trusted: an urgency or a hold time outside the schema is refused at the sender.
+    const buzz = BuzzSchema.parse(message);
+    // The hourly cap on high pushes, for EVERY plugin that buzzes: counted and decided in one synchronous step (no
+    // `await` between them); past a cap the push still goes, at normal priority.
+    const slot = buzz.urgency === 'high' ? this.#highPushes.take(buzz.ferret) : undefined;
+    let delivered = 0;
+    try {
+      const result = await push.notify(
+        {
+          payload: buzzPayload(buzz),
+          ...(slot?.high === true ? { urgency: 'high' as const } : {}),
+          ...(buzz.ttlSeconds === undefined ? {} : { ttlSeconds: Math.min(buzz.ttlSeconds, PUSH_URGENT_TTL_SECONDS) }),
+        },
+        undefined,
+        cancelled,
+      );
+      delivered = result.delivered;
+      return delivered;
+    } finally {
+      // A slot is spent only on a push that reached a device.
+      if (delivered === 0) slot?.refund();
+    }
+  }
 
   #verifierProxy(): PasskeyVerifier {
     return {
