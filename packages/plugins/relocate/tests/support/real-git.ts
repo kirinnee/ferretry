@@ -12,22 +12,17 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { KernelPorts } from '@ferretry/kernel/contract';
-import { afterAll, afterEach } from 'bun:test';
+import { afterAll, onTestFinished } from 'bun:test';
 
 const fixtureRoots = new Set<string>();
 afterAll(() => {
   for (const root of fixtureRoots) rmSync(root, { recursive: true, force: true });
 });
 
-const privateWorktrees = new Set<string>();
-afterEach(() => {
-  for (const root of privateWorktrees) rmSync(root, { recursive: true, force: true });
-  privateWorktrees.clear();
-});
-
 function privateWorktreeRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'relocate-private-worktrees-'));
-  privateWorktrees.add(root);
+  // Register against the CALLING test, even when another test file already cached this module.
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }
 

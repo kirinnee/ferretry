@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { afterAll } from 'bun:test';
+import { onTestFinished } from 'bun:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FerretId, HarnessKey, StartRequest } from '@ferretry/core-ferrets/contract';
@@ -16,10 +16,6 @@ import type { World } from './world.ts';
 import { FERRET } from './fake-ferrets.ts';
 
 const NORMAL_REMOTE = normalizeRemote(REMOTE_URL) as string;
-const targetRoots = new Set<string>();
-afterAll(() => {
-  for (const root of targetRoots) rmSync(root, { recursive: true, force: true });
-});
 export const NEW_FERRET = 'f-on-b' as FerretId;
 
 export interface TargetOptions {
@@ -85,7 +81,7 @@ export interface TargetWorld {
 /** One target machine: its own clone of the project on a real disk, real git, and fakes for the neighbours it asks. */
 export async function targetWorld(options: TargetOptions = {}, remoteBare?: string): Promise<TargetWorld> {
   const root = mkdtempSync(join(tmpdir(), 'relocate-target-'));
-  targetRoots.add(root);
+  onTestFinished(() => rmSync(root, { recursive: true, force: true }));
   const machine = join(root, 'machine');
   mkdirSync(machine, { recursive: true });
   const repo = join(machine, 'project');
