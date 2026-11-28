@@ -15,6 +15,7 @@ import {
   type ProfileComponentSource,
   type RuntimesHarnessKit,
 } from '../../../contract/index.ts';
+import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
 import { harnessKits } from '../../../daemon/adapters/profile-components.ts';
 import { installGroupSpies } from '../../support/group-spies.ts';
@@ -77,6 +78,41 @@ describe('the kit threaded to the groups of a materialisation', () => {
     expect(accountOf(accounts, 'codex-default').unavailableReason ?? '').not.toContain('is not supported here');
     expect(wrapperText(plans[0] as FleetApplyPlan, 'codex-default')).not.toContain('is not supported here');
     expect(wrapperText(plans[0] as FleetApplyPlan, 'claude-default')).toContain('is not supported here');
+  });
+
+  it('should make an environment-backed Claude runtime unavailable runtime-wide when its plugin gives no kit', async () => {
+    const model = parseAccountModel({
+      version: 1,
+      credentials: {
+        'claude-key': { harness: 'claude', store: 'environment', env: { ANTHROPIC_API_KEY: 'sk-synthetic-not-a-key' } },
+        'codex-you': { harness: 'codex', store: 'host' },
+      },
+      components: { instructions: { notes: { file: 'components/instructions/notes.md' } } },
+      profiles: { default: { layers: ['instructions/notes'] } },
+      runtimes: {
+        'claude-env': { credential: 'claude-key', profile: 'default' },
+        'codex-default': { credential: 'codex-you', profile: 'default' },
+      },
+    });
+    const { service, plans } = twoHarnessWorld({
+      kits: () => new Map([['codex', CODEX_KIT]] as const),
+      document: async () => ({
+        format: 'present',
+        model,
+        revision: 'rev-1',
+        unreadable: [],
+        stoodInLogins: [],
+        documents: () => [],
+      }),
+    });
+    await expect(service.publishFromFiles()).resolves.toBe('applied');
+    const plan = plans[0] as FleetApplyPlan;
+    expect(accountOf(plan.manifest.accounts, 'claude-env')).toMatchObject({
+      available: false,
+      unavailableReason: 'claude-code is not supported here',
+    });
+    expect(wrapperText(plan, 'claude-env')).toContain('claude-code is not supported here');
+    expect(wrapperText(plan, 'codex-default')).toContain('codex-default');
   });
 
   it('should write nothing into the home of a Claude runtime whose plugin gives no kit', async () => {
