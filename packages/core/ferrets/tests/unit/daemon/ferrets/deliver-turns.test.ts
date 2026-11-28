@@ -1,6 +1,6 @@
 import { PERSON_ORIGIN, START_EXPLAINED_MAX } from '../../../../contract/index.ts';
 import { describe, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { RootHandle } from '@ferretry/kernel/contract';
 import { err, ok } from '@ferretry/std';
@@ -1166,6 +1166,72 @@ describe('ruling #45 BG-051 / BG-053: Conversation writes a send’s turn docume
       await expect(turns.writeQueued!(sendId, 'FIXTURE words')).rejects.toThrow('queued-message grammar');
 
     await expect(readdir(`${w.folderOf(id)}/channel`)).rejects.toThrow();
+  });
+
+  test('D-22 FerretTurns.readQueued reads back what writeQueued filed, and nothing for an unfiled or out-of-grammar id', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+    await turns.writeQueued!('send-mw7a-0008', 'FIXTURE long words\nsecond line');
+
+    expect(await turns.readQueued!('send-mw7a-0008')).toBe('FIXTURE long words\nsecond line');
+    expect(await turns.readQueued!('send-mw7a-0009')).toBeUndefined();
+    for (const sendId of ['../../escape', 'Send-Upper', '']) expect(await turns.readQueued!(sendId)).toBeUndefined();
+  });
+
+  test('MUST 1: a queued leaf link cannot read a sibling session file outside channel', async () => {
+    const w = await world();
+    const id = await started(w, 'FIXTURE private task');
+    const turns = (await w.service.turns(id as never))!;
+    await turns.writeQueued!('safe', 'safe');
+    await symlink(turnFile(w, id, 1), `${w.folderOf(id)}/channel/queued-link.md`);
+    expect(await turns.readQueued!('link')).toBeUndefined();
+  });
+
+  test('MUST 1: queued reads reject a linked channel, cross-session links and path-shaped ids, and retain the 4 MiB bound', async () => {
+    const w = await world();
+    const id = await started(w);
+    const other = await started(w, 'FIXTURE other task');
+    const turns = (await w.service.turns(id as never))!;
+    await turns.writeQueued!('limit', 'x'.repeat(4_194_303));
+    expect((await turns.readQueued!('limit'))?.length).toBe(4_194_303);
+    await turns.writeQueued!('oversize', 'x'.repeat(4_194_304));
+    expect(await turns.readQueued!('oversize')).toBeUndefined();
+    await symlink(turnFile(w, other, 1), `${w.folderOf(id)}/channel/queued-other.md`);
+    expect(await turns.readQueued!('other')).toBeUndefined();
+    for (const sendId of ['..', '../turns/turn-001', 'nested/name', 'queued-../escape', '%2e%2e', 'x\\y'])
+      expect(await turns.readQueued!(sendId)).toBeUndefined();
+    // A channel pointing to a sibling inside THIS session must also be refused.
+    const fresh = await started(w, 'FIXTURE task');
+    await writeFile(`${w.folderOf(fresh)}/turns/queued-link.md`, 'FIXTURE sibling');
+    await symlink(`${w.folderOf(fresh)}/turns`, `${w.folderOf(fresh)}/channel`);
+    expect(await (await w.service.turns(fresh as never))!.readQueued!('link')).toBeUndefined();
+  });
+
+  test('D-30 FerretTurns.attachmentsFolder names this ferret’s own attachments folder, the root deliverFiles writes under', async () => {
+    const w = await world();
+    const id = await started(w);
+    const turns = (await w.service.turns(id as never))!;
+
+    expect(await turns.attachmentsFolder!()).toBe(`${w.folderOf(id)}/attachments`);
+  });
+
+  test('MUST 2: FerretTurns attachment proof refuses a leaf, per-id folder or scope symlink before promotion', async () => {
+    for (const linked of ['leaf', 'id', 'scope'] as const) {
+      const w = await world();
+      const id = await started(w, 'FIXTURE task');
+      const turns = (await w.service.turns(id as never))!;
+      const root = `${w.folderOf(id)}/attachments`;
+      await w.files.port.attach!(id as never, [{ folder: 'att-1', name: 'shot.png', contents: 'FIXTURE image' }]);
+      expect(await turns.attachmentFile!('att-1', 'shot.png')).toBe(`${root}/att-1/shot.png`);
+      const target = linked === 'leaf' ? `${root}/att-1/shot.png` : linked === 'id' ? `${root}/att-1` : root;
+      const outside = linked === 'leaf' ? turnFile(w, id, 1) : `${w.folderOf(id)}/turns`;
+      await rm(target, { recursive: true });
+      await symlink(outside, target);
+      expect(await turns.attachmentFile!('att-1', 'shot.png')).toBeUndefined();
+      for (const invalid of ['.', '..', '%2e%2e', '../att-1', 'nested/name'])
+        expect(await turns.attachmentFile!(invalid, 'shot.png')).toBeUndefined();
+    }
   });
 
   test('BG-051 a daemon whose session files are unbound offers no writer, so a caller types the message as it is', async () => {

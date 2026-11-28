@@ -11,6 +11,7 @@ import {
 import { binaryNameOf, runtimeDisable, switchedOff } from '../../../daemon/lib/account/disabled-runtime.ts';
 import { EMPTY_RUNTIME_IDS } from '../../../daemon/lib/account/ids.ts';
 import { materialiseFleet } from '../../../daemon/lib/account/materialise.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { FleetLayout } from '../../../daemon/lib/provisioning.ts';
 
@@ -180,6 +181,7 @@ describe('materialiseFleet with a switch off', () => {
       fyCommand: '/opt/ferretry/bin/fy',
       hostCodexHome: '/home/person/.codex',
       acceptsAutoPermissionMode: true,
+      kits: REAL_KITS,
       // cifix-runtime-held: a Ferretry login with no store from Logins is unreachable, so its runtimes publish unavailable
       // on that ground alone; Logins names both stores here so only the SWITCH decides availability in these cases.
       loginStores: [

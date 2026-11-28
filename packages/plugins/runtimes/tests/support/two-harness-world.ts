@@ -7,6 +7,7 @@ import { parseAccountModel } from '../../daemon/lib/account/schema.ts';
 import type { FleetApplyPlan } from '../../daemon/lib/provisioning.ts';
 import { unavailableCatalogDeps } from '../../daemon/lib/service/assembly.ts';
 import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../daemon/lib/service/catalog-service.ts';
+import { REAL_KITS } from './real-kits.ts';
 
 const NOW = 1_794_052_800_000;
 
@@ -54,6 +55,7 @@ export function twoHarnessWorld(overrides: Partial<FleetCatalogServiceDeps> = {}
     loginChanges: changes,
     configWriter: { write: async () => undefined },
     layout: LAYOUT,
+    kits: () => REAL_KITS,
     hostCodexHome: '/home/person/.codex',
     claudeStatusline: () => "'fy' statusline",
     fyCommand: '/opt/ferretry/bin/fy',
