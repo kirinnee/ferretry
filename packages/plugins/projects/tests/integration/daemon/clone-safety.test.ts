@@ -66,7 +66,7 @@ async function world() {
     { home: join(parent, 'fy-home'), plugin: 'projects', worktrees: join(parent, 'worktrees') },
     ['imports'],
     () => undefined,
-    { pins },
+    { pins, pinWrite: () => true }, // The synthetic clone caller holds WRITE authority; no device grant is implied.
   );
   const kernel = {
     roots,

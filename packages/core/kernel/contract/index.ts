@@ -11,6 +11,7 @@ export * from './compare.ts';
 export * from './doctor.ts';
 export * from './define.ts';
 export * from './home.ts';
+export * from './git-read-permissions.ts';
 export * from './hosted-app.ts';
 export * from './http.ts';
 export * from './ids.ts';

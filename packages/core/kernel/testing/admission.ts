@@ -130,6 +130,16 @@ export function standInAdmission(callerOf: (request: ApiRequest) => TestCaller):
   return {
     admit: (input: AdmissionInput & { readonly table: 'route' | 'socket' | 'tool' }) =>
       decide(input.request, input.descriptor),
+    judgeRootWrite: input => {
+      const caller = (input.standing as StandInStanding | undefined)?.caller;
+      if (caller?.kind === 'owner') return true;
+      return (
+        caller?.kind === 'device' &&
+        caller.capabilities !== undefined &&
+        (caller.capabilities.includes(`${input.capability}.configure`) ||
+          caller.capabilities.includes(input.capability))
+      );
+    },
     admitMember: (input: AdmissionInput & { readonly table: 'member' }) => {
       const caller = callerOf(input.request);
       if (caller.kind !== 'member')

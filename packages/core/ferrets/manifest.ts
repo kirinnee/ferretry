@@ -1,7 +1,7 @@
 import { AgendaContext, AsksPort } from '@ferretry/core-asks/contract';
 import { Bearers, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
-import type { ConfigDef } from '@ferretry/kernel/contract';
+import { type ConfigDef, WORKTREE_GIT_READS } from '@ferretry/kernel/contract';
 import { definePlugin, panel, screen } from '@ferretry/kernel/manifest';
 import {
   ArchiveConfigFile,
@@ -131,6 +131,7 @@ export default definePlugin({
   permissions: {
     roots: ['worktrees', 'work', 'harness-history', 'sessions', 'imports'],
     spawn: ['git', 'ps'],
+    readOnlySpawn: WORKTREE_GIT_READS,
     // `fy history claim` names the runtime it is claiming for in the refusal another claimant reads (FY_RUNTIME).
     cliEnvReads: ['FY_RUNTIME'],
     hostFacts: true,
