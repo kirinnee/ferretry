@@ -13,6 +13,29 @@
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { ProcessesPort, RootHandle } from '@ferretry/kernel/contract';
 
+import type {
+  KitHostLogin,
+  KitHostDocumentRead,
+  KitHostSetup,
+  KitHostScanInput,
+  KitImportSetup,
+  KitHarvestInput,
+  KitHarvestParts,
+} from './harness-kit-host.ts';
+
+export type {
+  KitHostLogin,
+  KitHostDocumentRead,
+  KitHostSkill,
+  KitProjectInstructionHint,
+  KitHostSetup,
+  KitHostScanInput,
+  KitImportSetup,
+  KitImportedEnvironment,
+  KitHarvestInput,
+  KitHarvestParts,
+} from './harness-kit-host.ts';
+
 /** A settings or config document as a plain object (a parsed `settings.json` / `config.toml`). */
 export type KitSettingsObject = Readonly<Record<string, unknown>>;
 
@@ -161,100 +184,6 @@ export function isSseUrl(url: string): boolean {
   return pathname.split('/').at(-1)?.toLowerCase() === 'sse';
 }
 
-/** One login a host scan found. Display only. */
-export interface KitHostLogin {
-  readonly state: 'signed-in' | 'refresh-due' | 'not-signed-in' | 'unreadable' | 'not-shareable' | 'unknown';
-  readonly email?: string;
-  readonly reason?: string;
-}
-
-/** One guarded host document read; `source` is its absolute path. */
-export type KitHostDocumentRead =
-  | { readonly kind: 'text'; readonly source: string; readonly text: string; readonly bytes: number }
-  | { readonly kind: 'absent'; readonly source: string }
-  | { readonly kind: 'too-large'; readonly source: string; readonly bytes: number }
-  | { readonly kind: 'unreadable'; readonly source: string; readonly reason: string };
-
-/** A host skill folder and the digest of its whole content. */
-export interface KitHostSkill {
-  readonly item: string;
-  readonly source: string;
-  readonly digest: string;
-}
-
-/** A project instructions file, only checked for existence; its content is never read. */
-export interface KitProjectInstructionHint {
-  readonly path: string;
-  readonly file: string;
-  readonly verified: boolean;
-}
-
-/** Setup documents and safe login facts, before Runtimes locates commands and reports missing MCP commands. */
-export interface KitHostSetup {
-  readonly login: KitHostLogin;
-  readonly instructions: KitHostDocumentRead;
-  readonly settings: KitHostDocumentRead;
-  readonly mcp?: KitHostDocumentRead;
-  /** A separate hooks document, for a harness that keeps its hooks outside its settings. Only counted, never imported. */
-  readonly hooks?: KitHostDocumentRead;
-  readonly projectInstructions?: readonly KitProjectInstructionHint[];
-  readonly skills: readonly KitHostSkill[];
-  readonly problems: readonly string[];
-}
-
-/** Host scan operations remain guarded by Runtimes' kernel roots; the harness chooses its own setup paths. */
-export interface KitHostScanInput {
-  readonly userHome: string;
-  readonly configuredHome?: string;
-  read(home: string, path: string): Promise<KitHostDocumentRead>;
-  readUserMcp(): Promise<KitHostDocumentRead>;
-  skills(
-    home: string,
-    directory: string,
-  ): Promise<{ readonly found: readonly KitHostSkill[]; readonly problems: readonly string[] }>;
-  login(): Promise<KitHostLogin>;
-  projectInstructions(mcp: KitHostDocumentRead): Promise<readonly KitProjectInstructionHint[]>;
-}
-
-/** A harness's own import document names and settings format. */
-export interface KitImportSetup {
-  readonly settingsFormat: KitSettingsFormat;
-  readonly settingsFile: string;
-  readonly instructionsName: string;
-}
-
-/** An imported environment: component references, safe plain values, and secret names only. */
-export interface KitImportedEnvironment {
-  readonly env: Record<string, string>;
-  readonly secretKeys: string[];
-  readonly dropped: string[];
-  readonly gated: string[];
-  readonly plain: { readonly name: string; readonly value: string }[];
-  readonly minted: { readonly name: string; readonly secretName: string }[];
-}
-
-/** Shared import services with the harness's mutable settings copy; secret handling remains in Runtimes. */
-export interface KitHarvestInput {
-  readonly rest: Record<string, unknown>;
-  readonly source: string;
-  readonly mcpSource?: string;
-  readonly parsedEnv?: unknown;
-  /** A separate hooks document the host keeps, already parsed; present only when the host read one and it parsed. */
-  readonly hooks?: { readonly source: string; readonly document: KitSettingsObject };
-  readonly skippedEnv: boolean;
-  readonly skippedModelSet: boolean;
-  countHooks(block: KitSettingsObject): number;
-  importEnvironment(value: unknown, prefix: string, source: string): KitImportedEnvironment;
-}
-
-/** The harness-owned parts of a harvest, before shared component and secret reconciliation. */
-export interface KitHarvestParts {
-  readonly hooks?: { readonly source: string; readonly count: number };
-  readonly envImport?: KitImportedEnvironment;
-  readonly modelEnvironment?: KitSettingsObject;
-  readonly mcpSource: string;
-}
-
 /** One model a runtime offers, as the catalog of its login lists it. */
 export interface KitRuntimeModel {
   readonly id: string;
@@ -374,6 +303,25 @@ export interface KitWrapper {
   promptSnapshotLines?(command: string): readonly string[];
 }
 
+/** What a harness is asked about the components that reach it, to say which it only half reads. */
+export interface KitPartialSupportInput {
+  /** The instructions components that reach the harness and have a body, by name. */
+  readonly instructions: readonly { readonly name: string; readonly body: string }[];
+  /** The MCP servers that reach the harness and are reached at an address, by name. */
+  readonly mcp: readonly { readonly name: string; readonly url: string }[];
+  /** The skills components that reach the harness, by name, with their items. */
+  readonly skills: readonly { readonly name: string; readonly items: readonly string[] }[];
+  /** Each skill item's frontmatter keys, by item name. */
+  readonly skillFrontmatter: Readonly<Record<string, readonly string[]>>;
+}
+
+/** One thing the harness only half reads: which component, and what that means for it, in the product's words. */
+export interface KitPartialSupportNote {
+  readonly kind: 'instructions' | 'mcp' | 'skills';
+  readonly name: string;
+  readonly reason: string;
+}
+
 /** What a harness plugin hands Runtimes for the harness it owns. Every member is optional; see the file comment. */
 export interface RuntimesHarnessKit {
   // Words.
@@ -392,6 +340,10 @@ export interface RuntimesHarnessKit {
   };
   /** The model catalog a sign-in lists models from. */
   readonly signInCatalog?: string;
+  /** Whether every runtime of the harness keeps its state database in one directory they share (the shared history pool). */
+  readonly keepsSharedState?: true;
+  /** Whether a host login of this harness names its organization type in the person's own account file. */
+  readonly hostOrganization?: true;
   /** Skill folders the harness keeps for itself, which a skills component may not use. */
   readonly ownedSkillEntries?: readonly string[];
   /** Whether the harness offers fast mode on a model, from the id alone. Claude's is a rule on the id; Codex's is the live account's to say. */
@@ -404,23 +356,38 @@ export interface RuntimesHarnessKit {
 
   // The credential store.
   credentialStore?(input: KitCredentialInput): KitCredentialResolution;
+  /** Whether the host home the caller names (`KitCredentialInput.hostHome`) is this harness's own; a kit that finds its home itself leaves it out. */
+  readonly namesHostHome?: true;
   credentialEnvironment?(resolution: KitCredentialResolution): Readonly<Record<string, string>>;
   credentialLink?(home: string, resolution: KitCredentialResolution): KitCredentialLink | undefined;
 
   // MCP rendering and config documents.
   renderMcpServer?(server: KitMcpServer, env: KitServerEnvironment, bearer?: string): KitSettingsObject;
+  /** Where the host keeps the harness's MCP servers and how to read each: the document it sits in, the table, the keys a component can carry. */
   readonly mcpImport?: {
+    /** `mcp` is the user-scope account file a scan reads beside the settings; `settings` is the settings document itself. */
+    readonly document: 'mcp' | 'settings';
+    readonly format: KitSettingsFormat;
+    /** The document's name in a sentence. */
+    readonly file: string;
     readonly table: string;
     readonly knownKeys: readonly string[];
+    /** Whether a server the host marks `enabled = false` is left out. */
     readonly skipDisabled: boolean;
   };
   configDocuments?(input: KitDocumentsInput): KitDocuments;
+  /** Whether the config document keeps servers an earlier Ferretry wrote, so an upgrade can prove which were Ferretry's. */
+  readonly keepsPriorServers?: true;
+  /** What the harness reads only in part among the components that reach it. */
+  partialSupport?(input: KitPartialSupportInput): readonly KitPartialSupportNote[];
   plumbing?(input: KitPlumbingInput): readonly KitPlumbingEntry[];
 
   // Login notes and host import.
   loginNote?(login: KitHostLogin): string;
   scanHost?(input: KitHostScanInput): Promise<KitHostSetup>;
   readonly importSetup?: KitImportSetup;
+  /** The project folders the host keeps state for, from the user-scope account file a scan read. Names only. */
+  projectFolders?(mcp: KitHostDocumentRead | undefined): readonly string[];
   harvest?(input: KitHarvestInput): KitHarvestParts;
 
   // The launch line.

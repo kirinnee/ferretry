@@ -194,8 +194,8 @@ export function resolveCredentialStore(
           ...(login?.signInFile === undefined ? {} : { signInFile: login.signInFile }),
         }
       : {}),
-    // The one host home a caller names today is Codex's (`$CODEX_HOME`); Claude finds its own under `userHome`.
-    ...(store === 'host' && kind === 'codex' && paths.hostCodexHome !== undefined
+    // The one host home a caller names today is the one `$CODEX_HOME` says; a kit that finds its own under `userHome` leaves it.
+    ...(store === 'host' && kit.namesHostHome === true && paths.hostCodexHome !== undefined
       ? { hostHome: paths.hostCodexHome }
       : {}),
   });

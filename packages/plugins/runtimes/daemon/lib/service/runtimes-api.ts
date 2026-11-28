@@ -24,7 +24,7 @@ import {
   type RuntimeSummary,
 } from '../../../contract/index.ts';
 import { deriveRuntimes, withDerived } from '../account/derived-runtimes.ts';
-import { isKind, supportedKindOfKey, unsupportedHarnessSentence } from '../harness-kind.ts';
+import { kindOrUndefined, supportedKindOfKey, supportedKinds, unsupportedHarnessSentence } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { disabledUntilMs } from '../account/disabled.ts';
 import type { EnvironmentLoginTemplate, LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
@@ -202,7 +202,7 @@ export function createRuntimesApi(deps: RuntimesApiDeps): Omit<
     // No default named: the first runtime that can launch, Claude Code's before Codex's.
     return (
       fallback ??
-      ready.find(summary => isKind(summary.harness, 'claude') && summary.launch.available) ??
+      ready.find(summary => kindOrUndefined(summary.harness) === supportedKinds()[0] && summary.launch.available) ??
       ready.find(summary => summary.launch.available)
     )?.id;
   };

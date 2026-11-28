@@ -84,19 +84,22 @@ describe('mcp goldens', () => {
   });
 
   it('should list the partial-support notes exactly as the base does', () => {
-    const notes = componentPartialSupport({
-      components: {
-        instructions: {
-          imports: { file: 'a.md' },
-          plain: { file: 'b.md' },
-          claudeOnly: { file: 'c.md', harness: 'claude' },
-        },
-        mcp: { sse: { url: 'https://feed.example.test/sse' }, http: { url: 'https://docs.example.test/mcp' } },
-        skills: { mine: { items: ['review', 'deploy'] } },
-      } as never,
-      skillFrontmatter: { review: ['name', 'allowed-tools', 'model', 'context'], deploy: ['name', 'description'] },
-      instructionBodies: { imports: 'See\n@docs/guide.md\n', plain: 'Be kind.\n', claudeOnly: '@x.md\n' },
-    });
+    const notes = componentPartialSupport(
+      {
+        components: {
+          instructions: {
+            imports: { file: 'a.md' },
+            plain: { file: 'b.md' },
+            claudeOnly: { file: 'c.md', harness: 'claude' },
+          },
+          mcp: { sse: { url: 'https://feed.example.test/sse' }, http: { url: 'https://docs.example.test/mcp' } },
+          skills: { mine: { items: ['review', 'deploy'] } },
+        } as never,
+        skillFrontmatter: { review: ['name', 'allowed-tools', 'model', 'context'], deploy: ['name', 'description'] },
+        instructionBodies: { imports: 'See\n@docs/guide.md\n', plain: 'Be kind.\n', claudeOnly: '@x.md\n' },
+      },
+      REAL_KITS,
+    );
     expectGolden('mcp/partial-support', { notes, described: notes.map(describePartialSupport) });
   });
 });

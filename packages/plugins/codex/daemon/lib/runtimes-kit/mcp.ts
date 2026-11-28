@@ -1,12 +1,15 @@
-import type {
-  KitDocuments,
-  KitDocumentsInput,
-  KitMcpServer,
-  KitPlumbingEntry,
-  KitPlumbingInput,
-  KitServerEnvironment,
-  KitSettingsObject,
-  RuntimesHarnessKit,
+import {
+  isSseUrl,
+  type KitDocuments,
+  type KitDocumentsInput,
+  type KitMcpServer,
+  type KitPartialSupportInput,
+  type KitPartialSupportNote,
+  type KitPlumbingEntry,
+  type KitPlumbingInput,
+  type KitServerEnvironment,
+  type KitSettingsObject,
+  type RuntimesHarnessKit,
 } from '@ferretry/plugin-runtimes/contract';
 
 const isPlainObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -59,5 +62,51 @@ function plumbing(input: KitPlumbingInput): readonly KitPlumbingEntry[] {
   ];
 }
 
-/** How Codex spells MCP servers and config documents. */
-export const codexMcpKit: RuntimesHarnessKit = { renderMcpServer, configDocuments, plumbing };
+/**
+ * Claude skill frontmatter keys Codex does not honour, and what that means, in the product's words.
+ * INFERRED from Codex's skill loader, which reads a skill's name, description and metadata only.
+ */
+export const CODEX_IGNORED_SKILL_KEYS: Readonly<Record<string, (item: string) => string>> = {
+  'allowed-tools': item => `${item} limits which tools it may use. Codex ignores that limit and loads the rest.`,
+  model: item => `${item} picks its own model. Codex ignores that and uses the runtime's model.`,
+  hooks: item => `${item} carries its own hooks. Codex ignores them and loads the rest.`,
+};
+
+/** A line of a Claude instructions file that pulls in another file: `@path/to/file.md`. */
+const CLAUDE_IMPORT_LINE = /^\s*@[^\s@]+\s*$/m;
+
+/** Whether an instructions body pulls in other files the way Claude's `@path` imports do. */
+export const usesClaudeImports = (body: string): boolean => CLAUDE_IMPORT_LINE.test(body);
+
+/** What Codex only half reads among the components that reach it: `@path` imports, SSE servers and some skill frontmatter. */
+function partialSupport(input: KitPartialSupportInput): readonly KitPartialSupportNote[] {
+  const notes: KitPartialSupportNote[] = [];
+  for (const { name, body } of input.instructions) {
+    if (!usesClaudeImports(body)) continue;
+    notes.push({
+      kind: 'instructions',
+      name,
+      reason: `${name} pulls in other files with @path lines. Codex reads those lines as plain text and does not open the files.`,
+    });
+  }
+  for (const { name, url } of input.mcp) {
+    if (!isSseUrl(url)) continue;
+    notes.push({
+      kind: 'mcp',
+      name,
+      reason: `${name} is reached over SSE. Codex connects to servers over streamable HTTP, so it may not reach this one.`,
+    });
+  }
+  for (const { name, items } of input.skills) {
+    for (const item of items) {
+      for (const key of input.skillFrontmatter[item] ?? []) {
+        const reason = CODEX_IGNORED_SKILL_KEYS[key];
+        if (reason !== undefined) notes.push({ kind: 'skills', name, reason: reason(item) });
+      }
+    }
+  }
+  return notes;
+}
+
+/** How Codex spells MCP servers and config documents, and what it only half reads. */
+export const codexMcpKit: RuntimesHarnessKit = { renderMcpServer, configDocuments, partialSupport, plumbing };

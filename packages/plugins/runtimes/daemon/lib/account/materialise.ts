@@ -87,6 +87,7 @@ import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds 
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
 import type { AccountModel } from './schema.ts';
 import { runtimeHarness } from './scope.ts';
+import { kindOrUndefined } from '../harness-kind.ts';
 import { runtimeExtras, sqliteHomeOf, usesSqliteHome } from './runtime-extras.ts';
 
 const DIRECTORY_MODE = 0o700;
@@ -280,17 +281,19 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
   const runtimeNames = Object.keys(model.runtimes).toSorted();
   const ids = assignRuntimeIds(runtimeNames, input.ids, input.mint);
   const fleet = layout.fleetDirectory;
-  const sqliteHome = sqliteHomeOf(fleet);
   const loginStores = new Map((input.loginStores ?? []).map(store => [store.id, store] as const));
   const credentialStorePaths = {
     userHome: layout.userHome,
     ...(input.hostCodexHome === undefined ? {} : { hostCodexHome: input.hostCodexHome }),
   };
-  const partialSupport = componentPartialSupport({
-    components: model.components,
-    ...(input.bodies?.skillFrontmatter === undefined ? {} : { skillFrontmatter: input.bodies.skillFrontmatter }),
-    ...(input.bodies?.instructions === undefined ? {} : { instructionBodies: input.bodies.instructions }),
-  });
+  const partialSupport = componentPartialSupport(
+    {
+      components: model.components,
+      ...(input.bodies?.skillFrontmatter === undefined ? {} : { skillFrontmatter: input.bodies.skillFrontmatter }),
+      ...(input.bodies?.instructions === undefined ? {} : { instructionBodies: input.bodies.instructions }),
+    },
+    input.kits,
+  );
 
   const operations: FleetWriteOperation[] = [
     { kind: 'directory', path: fleet, mode: DIRECTORY_MODE },
@@ -300,10 +303,12 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
   ];
 
   // A Ferretry-kept login's store is Logins' (it makes the directory a sign-in writes into): nothing is created for one here.
-  if (
-    runtimeNames.some(name => usesSqliteHome(model.credentials[model.runtimes[name]?.credential ?? '']?.harness ?? ''))
-  ) {
-    operations.push({ kind: 'directory', path: sqliteHome, mode: DIRECTORY_MODE });
+  // The directory is each such harness's own, made once however many runtimes share it.
+  for (const kind of new Set(
+    runtimeNames.map(name => kindOrUndefined(model.credentials[model.runtimes[name]?.credential ?? '']?.harness ?? '')),
+  )) {
+    if (kind !== undefined && usesSqliteHome(kind, input.kits))
+      operations.push({ kind: 'directory', path: sqliteHomeOf(fleet, kind), mode: DIRECTORY_MODE });
   }
 
   const now = Date.parse(input.generatedAt);
@@ -415,7 +420,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
             resolved,
             plumbing: plumbingOf(
               harness,
-              { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome },
+              { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHomeOf(fleet, harness) },
               kit,
             ),
             kit,
@@ -466,7 +471,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const extras = runtimeExtras(
       harness,
       {
-        sqliteHome,
+        sqliteHome: sqliteHomeOf(fleet, harness),
         statePath: joinPath(home, RUNTIME_STATE_DIRECTORY),
         derived,
         settings: adapted.settings.value,

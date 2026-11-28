@@ -52,10 +52,6 @@ const expectKits = (expected: ReadonlyMap<HarnessKind, RuntimesHarnessKit>) => {
 };
 
 describe('host import kit threading', () => {
-  it('keeps the kit instruction name aligned with the live preview table', () => {
-    expect(claudeRuntimesKit.importSetup?.instructionsName).toBe(real.HOST_INSTRUCTIONS_NAME.claude);
-    expect(codexRuntimesKit.importSetup?.instructionsName).toBe(real.HOST_INSTRUCTIONS_NAME.codex);
-  });
   it('hands harvest and loginNote each harness own real kit and refuses a missing map', () => {
     const withKits = planImport(scans, { digest: text => text, kits });
     expectKits(kits);

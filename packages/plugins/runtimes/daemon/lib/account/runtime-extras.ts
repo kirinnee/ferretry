@@ -7,18 +7,21 @@
  * nothing here.
  */
 import type { KitExtras, RuntimesHarnessKit } from '../../../contract/harness-kit.ts';
-import { byHarness, isKind } from '../harness-kind.ts';
+import { type HarnessKind, kindOf } from '../harness-kind.ts';
 import type { RuntimeModels } from '../models/runtime.ts';
 import { joinPath } from '../paths.ts';
 import type { SettingsObject } from '../settings.ts';
 import { sharedHistoryPoolDirectory } from '../shared-history.ts';
 
-/** The shared history pool's SQLite directory: where every Codex runtime keeps its state database. */
-export const sqliteHomeOf = (fleetDirectory: string): string =>
-  joinPath(sharedHistoryPoolDirectory(fleetDirectory, 'codex'), 'sqlite');
+/** The shared history pool's SQLite directory: where every runtime of `kind` that keeps a state database keeps it. */
+export const sqliteHomeOf = (fleetDirectory: string, kind: HarnessKind): string =>
+  joinPath(sharedHistoryPoolDirectory(fleetDirectory, kind), 'sqlite');
 
-/** Whether runtimes of `harness` keep their state in {@link sqliteHomeOf}, so the directory has to exist. */
-export const usesSqliteHome = (harness: string): boolean => isKind(harness, 'codex');
+/** Whether runtimes of `kind` keep their state in {@link sqliteHomeOf}, so the directory has to exist: its kit says so. */
+export const usesSqliteHome = (
+  kind: HarnessKind,
+  kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined,
+): boolean => kits?.get(kind)?.keepsSharedState === true;
 
 export interface RuntimeExtras {
   /** Variables the runtime's launch environment adds. */
@@ -42,22 +45,17 @@ export function runtimeExtras(
   },
   kit?: RuntimesHarnessKit,
 ): RuntimeExtras {
-  return byHarness<RuntimeExtras>(harness, {
-    claude: () => ({ env: {} }),
-    codex: () => {
-      // No kit (the plugin is off): Codex's variables and files are never guessed. The caller has already refused the runtime
-      // (`missingKitRefusal`) and plans nothing for it.
-      if (kit?.runtimeExtras === undefined) return { env: {} };
-      return kit.runtimeExtras({
-        sqliteHome: input.sqliteHome,
-        statePath: input.statePath,
-        models: {
-          ...(input.derived.catalog === undefined ? {} : { catalog: input.derived.catalog }),
-          entries: input.derived.models,
-          default: input.derived.default,
-        },
-        settings: input.settings,
-      });
+  kindOf(harness);
+  // No kit, or a kit that adds nothing: nothing is guessed. A missing kit has already refused the runtime (`missingKitRefusal`).
+  if (kit?.runtimeExtras === undefined) return { env: {} };
+  return kit.runtimeExtras({
+    sqliteHome: input.sqliteHome,
+    statePath: input.statePath,
+    models: {
+      ...(input.derived.catalog === undefined ? {} : { catalog: input.derived.catalog }),
+      entries: input.derived.models,
+      default: input.derived.default,
     },
+    settings: input.settings,
   });
 }

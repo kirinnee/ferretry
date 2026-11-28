@@ -163,6 +163,7 @@ describe('credential store goldens', () => {
             return hostFile;
           },
           login,
+          kits,
         );
         answers[`${login} (host file says ${hostFile ?? 'nothing'})`] = { type: type ?? null, hostFileReads };
       }

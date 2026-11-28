@@ -1,0 +1,19 @@
+# Harness literals ('claude' / 'codex') that still stand in packages/plugins/runtimes/daemon, one row per file with the exact count.
+#
+# Enforced by scripts/validate/no-harness-literal.sh. It is a NAMED, SHRINKING list, not an exemption: the part of E-276 named in
+# each comment deletes its row; a new literal, a higher count or a row left behind for a file that is now clean all fail (exact
+# both ways), and a row the base ref does not hold is refused (the ratchet). Never add a row to bless new code: put what the
+# harness does in its plugin's kit (packages/plugins/runtimes/contract/harness-kit.ts) and look it up by the runtime's harness.
+#
+# Every row below waits for E-276 PR 17b, because each needs a kit member AND the frozen goldens' SETUP threaded with the real kits:
+#   builtin-autonomous.ts  Claude's comfort settings and the layer that names them (kit `comfortSettings`; BUILTIN_COMPONENTS is read
+#                          with no kit by runtimes-model.ts, derived-runtimes.ts, runtimes-edits.ts and consumers.golden / world.ts)
+#   layering.ts            modelHarness: which harness a model id belongs to (kit `ownsModel`; resolveProfile and scope.ts read it
+#                          with no kit, and precedence.golden calls resolveProfile)
+#   scope.ts               a profile's derived scope names `claude` and `codex` (the `mixed` shape carries a property for each)
+#   foreign.ts             HARNESS_PACKAGES, the install package names (kit `install`; ToolInstallService, tool-install.golden and
+#                          words.golden read the table with no kit)
+packages/plugins/runtimes/daemon/lib/account/builtin-autonomous.ts::2
+packages/plugins/runtimes/daemon/lib/account/layering.ts::2
+packages/plugins/runtimes/daemon/lib/account/scope.ts::4
+packages/plugins/runtimes/daemon/lib/service/foreign.ts::2

@@ -34,4 +34,4 @@ function credentialEnvironment(resolution: KitCredentialResolution): Readonly<Re
 }
 
 /** Where Codex's credential lives, as Runtimes asks for it. */
-export const codexCredentialsKit: RuntimesHarnessKit = { credentialStore, credentialEnvironment };
+export const codexCredentialsKit: RuntimesHarnessKit = { credentialStore, credentialEnvironment, namesHostHome: true };
