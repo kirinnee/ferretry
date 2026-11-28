@@ -1664,7 +1664,7 @@ export class FerretsService implements FerretsApi {
         if (replacing) {
           const ready = await this.launchable(retargeted);
           if (!ready.ok) return ready;
-          if (retargeted.harness === 'opencode') {
+          if (this.ports.harness(retargeted.harness)?.stagesRelaunch === true) {
             const staged = await this.prepareLaunch(
               retargeted,
               undefined,
@@ -2354,12 +2354,12 @@ export class FerretsService implements FerretsApi {
       spec.parts,
       login.value,
       signedIn.value,
-      record.harness,
+      harness.subscriptionRefusal,
     );
     if (!env.ok)
       return typeof env.error === 'string'
         ? failed('login_unavailable', env.error)
-        : failed('refused', 'OpenCode refuses Anthropic subscription credentials; choose an API key or endpoint login');
+        : failed('refused', env.error.sentence);
     return ok({ harness, spec, env: env.value, issued });
   }
 
@@ -2882,8 +2882,8 @@ export class FerretsService implements FerretsApi {
     parts: readonly LaunchPart[],
     login: Readonly<Record<string, string>>,
     signedIn: Readonly<Record<string, string>>,
-    harness: HarnessKey,
-  ): Promise<Result<ChildEnvironment, string | { readonly kind: 'subscription_login' }>> {
+    subscriptionRefusal: string | undefined,
+  ): Promise<Result<ChildEnvironment, string | { readonly kind: 'subscription_login'; readonly sentence: string }>> {
     const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     // What a plugin gives THIS pane (the Git account's ssh-agent and git settings): judged by name, refused naming the plugin.
@@ -2916,11 +2916,11 @@ export class FerretsService implements FerretsApi {
     if (steps !== undefined && !steps.sealed()) return err(LAUNCH_STEPS_UNSEALED);
     Object.assign(env, await paneVariables(steps?.stores() ?? [], ferret));
     await this.ports.recordLaunchSecrets?.(ferret, secretReferencesIn(JSON.stringify([parts, env])));
-    const resolved = await this.ports.vault.childEnvironment(ferret, env, harness);
+    const resolved = await this.ports.vault.childEnvironment(ferret, env, subscriptionRefusal !== undefined);
     if (!resolved.ok)
       return err(
-        resolved.error.code === 'subscription_login'
-          ? { kind: 'subscription_login' as const }
+        resolved.error.code === 'subscription_login' && subscriptionRefusal !== undefined
+          ? { kind: 'subscription_login' as const, sentence: subscriptionRefusal }
           : `unknown secrets: ${resolved.error.unknown.join(', ')}`,
       );
     await this.ports.launchEnvironment?.write(ferret, recordedSwitches(env)).catch(() => undefined);

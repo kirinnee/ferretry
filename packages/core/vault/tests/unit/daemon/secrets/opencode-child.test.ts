@@ -23,28 +23,24 @@ test('the sealed child path refuses Anthropic OAuth material in every OpenCode v
         '${secret:KEY}${secret:OAUTH}',
         '${secret?:OAUTH}',
       ]) {
-        const refused = await api.childEnvironment('test-ferret' as never, { [name]: value }, 'opencode');
+        const refused = await api.childEnvironment('test-ferret' as never, { [name]: value }, true);
         expect(refused).toEqual({ ok: false, error: { unknown: [], code: 'subscription_login' } });
         expect(JSON.stringify(refused)).not.toContain('sk-ant-');
       }
     }
-    const accepted = await api.childEnvironment(
-      'test-ferret' as never,
-      { ANTHROPIC_API_KEY: '${secret:KEY}' },
-      'opencode',
-    );
+    const accepted = await api.childEnvironment('test-ferret' as never, { ANTHROPIC_API_KEY: '${secret:KEY}' }, true);
     expect(accepted.ok).toBe(true);
     expect(JSON.stringify(accepted)).not.toContain('sk-ant-');
     if (!accepted.ok) throw new Error('API key should pass');
     expect(host.provided(ChildEnvironmentPort).open(accepted.value)).toEqual({
       ANTHROPIC_API_KEY: 'sk-ant-api03-SYNTHETIC-NOT-A-CREDENTIAL',
     });
-    const optional = await api.childEnvironment('test-ferret' as never, { OPTIONAL: '${secret?:MISSING}' }, 'opencode');
+    const optional = await api.childEnvironment('test-ferret' as never, { OPTIONAL: '${secret?:MISSING}' }, true);
     expect(optional.ok).toBe(true);
     if (!optional.ok) throw new Error('an absent optional secret should be omitted');
     expect(host.provided(ChildEnvironmentPort).open(optional.value)).toEqual({});
-    for (const harness of ['claude-code', 'codex']) {
-      expect((await api.childEnvironment('test-ferret' as never, { TOKEN: '${secret:OAUTH}' }, harness)).ok).toBe(true);
+    for (const flag of [undefined, false]) {
+      expect((await api.childEnvironment('test-ferret' as never, { TOKEN: '${secret:OAUTH}' }, flag)).ok).toBe(true);
     }
   } finally {
     await host.stop();
