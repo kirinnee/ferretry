@@ -27,6 +27,7 @@ import { type AccountModel, type AccountModelDocument, parseAccountModel } from 
 import type { MachineAuthority } from '../../../contract/index.ts';
 import { shownWords, shownWordsEtag } from '../../../daemon/lib/service/command-line.ts';
 import { builtInModelCatalogs, builtInPresets } from '../lib/fixtures/built-ins.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const DIGEST = `sha256:${'0'.repeat(64)}`;
 const AUTHORITY: MachineAuthority = { mayApply: true, applyRefusal: 'granted' };
@@ -39,6 +40,7 @@ const FACTS: CatalogFacts = {
   runningSessions: 2,
   userHome: '/home/person',
   acceptsAutoPermissionMode: true,
+  kits: REAL_KITS,
 };
 
 /** A document with every kind of component, a stack of profiles and runtimes on different logins. */

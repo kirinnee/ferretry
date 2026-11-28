@@ -21,6 +21,7 @@ import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../daemon/lib/account/schema.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../daemon/lib/provisioning.ts';
 import { fleetWorld, type FleetWorld } from '../unit/support/fleet-world.ts';
+import { REAL_KITS } from '../support/real-kits.ts';
 import {
   HISTORY_CLAIM_HELD_EXIT_CODE,
   type RuntimeWrapperInput,
@@ -135,6 +136,7 @@ async function machine(): Promise<Machine> {
         claudeStatusline: () => "'fy' statusline",
         fyCommand: path.join(root, 'no-such-fy'),
         acceptsAutoPermissionMode: true,
+        kits: REAL_KITS,
       });
       const applied = await provisioner.apply(plan);
       skipped = applied.skipped ?? [];

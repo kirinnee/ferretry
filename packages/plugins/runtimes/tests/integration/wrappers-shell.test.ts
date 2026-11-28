@@ -22,6 +22,7 @@ import {
   TOOLS_SERVER_INSTRUCTIONS,
 } from '../../daemon/lib/account/fixed-layer.ts';
 import type { HarnessKind } from '../../daemon/lib/manifest.ts';
+import { REAL_KITS } from '../support/real-kits.ts';
 import { type RuntimeWrapperInput, renderRuntimeWrapperScript, shellQuote } from '../../daemon/lib/wrappers.ts';
 
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
@@ -341,13 +342,16 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     SWITCHES.filter((_switch, index) => (mask & (1 << index)) !== 0),
   );
   const wrapperFor = (harness: HarnessKind): string => {
-    const layer = fixedLayerFor({
-      harness,
-      agentPermissions: 'auto',
-      cwd: '/w',
-      fyCommand: FY,
-      acceptsAutoPermissionMode: true,
-    });
+    const layer = fixedLayerFor(
+      {
+        harness,
+        agentPermissions: 'auto',
+        cwd: '/w',
+        fyCommand: FY,
+        acceptsAutoPermissionMode: true,
+      },
+      REAL_KITS,
+    );
     if (!layer.ok) throw new Error(layer.refusal.message);
     return render({ ...account({ kind: harness, flags: layer.layer.args }), fyCommand: FY });
   };

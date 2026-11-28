@@ -11,6 +11,7 @@ import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { type CatalogFacts, componentCatalog, runtimeCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const FACTS: CatalogFacts = {
   format: 'present',
@@ -19,6 +20,7 @@ const FACTS: CatalogFacts = {
   runningSessions: 0,
   userHome: '/home/person',
   acceptsAutoPermissionMode: true,
+  kits: REAL_KITS,
 };
 
 /** What one view shows of a line: its text, and whether the view withheld it (said so in words, showed no part). */

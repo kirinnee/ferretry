@@ -24,6 +24,7 @@ import {
 import { loginUsers } from '../../../daemon/lib/service/login-users.ts';
 import { loginChangeOf, movedSentence } from '../../../daemon/lib/service/login-changes.ts';
 import type { AccountChange, RuntimeFile } from '../../../contract/index.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const MODEL = parseAccountModel({
   version: 1,
@@ -66,6 +67,7 @@ function world(
   const base = unavailableCatalogDeps(() => 1_794_052_800_000, logins, changes);
   const deps: FleetCatalogServiceDeps = {
     ...base,
+    kits: () => REAL_KITS,
     warn: (message, fields) => {
       warnings.push({ message, fields });
     },

@@ -33,8 +33,8 @@ export interface KitServerEnvironment {
   readonly forwarded: readonly string[];
 }
 
-/** The agent-permission words a fixed layer is built for. */
-export type KitAgentPermissions = Readonly<Record<string, unknown>>;
+/** The agent-permission words a fixed layer is built for (Settings › Agent permissions). */
+export type KitAgentPermissions = 'auto' | 'skip';
 
 /** What a plugin is asked for to build the layer a launched agent gets last. */
 export interface KitFixedLayerInput {
@@ -45,14 +45,28 @@ export interface KitFixedLayerInput {
   readonly fyCommand: string;
   /** Whether the installed harness accepts `--permission-mode auto` (only Claude asks). */
   readonly acceptsAutoPermissionMode: boolean;
+  /** What every agent is told: the tools and the settings rules. Runtimes owns the words; the harness only places them. */
+  readonly instruction: string;
 }
 
-/** One locked entry of the fixed layer: a document key, or a bare launch flag. */
+/** What one fixed-layer entry is for, as the read-only lock shows it. */
+export type KitFixedPurpose =
+  | 'permission-mode'
+  | 'skip-prompt'
+  | 'trust'
+  | 'onboarding'
+  | 'remote-control'
+  | 'one-time-prompts'
+  | 'no-questions'
+  | 'no-alt-screen'
+  | 'tools'
+  | 'instructions';
+
+/** One locked entry of the fixed layer: a document key, or a bare launch flag. Runtimes spells its `key` from its `path`. */
 export interface KitFixedEntry {
-  readonly purpose: string;
+  readonly purpose: KitFixedPurpose;
   readonly target: 'settings' | 'claude-json' | 'launch';
   readonly path: readonly string[];
-  readonly key: string;
   readonly value: unknown;
 }
 

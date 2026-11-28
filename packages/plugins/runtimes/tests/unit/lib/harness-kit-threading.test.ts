@@ -16,13 +16,14 @@ import {
 } from '../../../contract/index.ts';
 import { harnessKits } from '../../../daemon/adapters/profile-components.ts';
 import { installGroupSpies } from '../../support/group-spies.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const spies = installGroupSpies();
 afterAll(spies.restore);
 
 const { twoHarnessWorld } = await import('../../support/two-harness-world.ts');
 
-const CLAUDE_KIT: RuntimesHarnessKit = { command: 'claude' };
+const CLAUDE_KIT = REAL_KITS.get('claude') as RuntimesHarnessKit;
 const CODEX_KIT: RuntimesHarnessKit = { command: 'codex' };
 const GROUPS = ['fixedLayerOf', 'plumbingOf', 'priorServersOf', 'runtimeExtras', 'autonomousPreparation'] as const;
 
@@ -62,7 +63,7 @@ describe('the kit threaded to the groups of a materialisation', () => {
 
   it('should hand no group a kit when nothing supplies kits', async () => {
     spies.calls.length = 0;
-    const { service } = twoHarnessWorld();
+    const { service } = twoHarnessWorld({ kits: undefined });
     await service.publishFromFiles();
     expect(spies.calls.length).toBeGreaterThan(0);
     expect(spies.calls.every(call => call.kit === undefined)).toBe(true);
@@ -87,8 +88,8 @@ describe('the kit threaded to the groups of a materialisation', () => {
     online = true;
     await service.publishFromFiles();
     for (const group of GROUPS) {
-      expect(kitsOf(group, 'claude')[1]).toBe(CLAUDE_KIT);
-      expect(kitsOf(group, 'codex')[1]).toBe(CODEX_KIT);
+      expect(kitsOf(group, 'claude').at(-1)).toBe(CLAUDE_KIT);
+      expect(kitsOf(group, 'codex').at(-1)).toBe(CODEX_KIT);
     }
   });
 });

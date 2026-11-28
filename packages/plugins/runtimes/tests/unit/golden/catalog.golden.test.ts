@@ -15,6 +15,7 @@ import {
 import { GOLDEN_CATALOGS } from './support/catalogs.ts';
 import { expectGolden } from './support/golden.ts';
 import { RUNTIME_ID } from './support/world.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const document = (agentPermissions: 'auto' | 'skip') => ({
   version: 1,
@@ -107,6 +108,7 @@ const facts = (accepts: boolean, catalogs: boolean): CatalogFacts => ({
   ),
   userHome: '/home/person',
   acceptsAutoPermissionMode: accepts,
+  kits: REAL_KITS,
   settingsBodies: { claudeSettings: { model: 'claude-opus-5-5' }, codexSettings: { model: 'gpt-6' } },
   instructionBodies: { main: 'Be kind.\n', imports: 'See\n@docs/guide.md\n' },
   skillFrontmatter: { review: ['name', 'allowed-tools', 'model'] },
