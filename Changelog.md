@@ -1,3 +1,20 @@
+## [4.295.1](https://github.com/kirinnee/ferretry/compare/v4.295.0...v4.295.1) (2026-11-28)
+
+### Fixes
+
+* **fleet:** close remote catalogue leaks and protect refused drafts ([30fcd1c](https://github.com/kirinnee/ferretry/commit/30fcd1cb8f05c957becba9b2c7a396978dd3f77c))
+* **fleet:** discard unavailable edits and refuse remote empty overwrites ([144c30e](https://github.com/kirinnee/ferretry/commit/144c30e2ece2bb2c8473855ed7316d0744fbcdd3))
+* **fleet:** mask complete vault keys before identifier exemptions ([5e4f86c](https://github.com/kirinnee/ferretry/commit/5e4f86ca09ba5640dee74135c75f7935468205d6))
+* **fleet:** never serve a moved or out-of-root credential to remote devices ([4409cc6](https://github.com/kirinnee/ferretry/commit/4409cc6cabd96f8aae5ea98fa92a72492e3ee34c))
+* **fleet:** preserve environment and versioned model paths ([be6d066](https://github.com/kirinnee/ferretry/commit/be6d066d702e4269f188990b40ac5793a378bd28))
+* **fleet:** preserve public component references and boot construction order ([8619ba5](https://github.com/kirinnee/ferretry/commit/8619ba52dfa9c145db9388ab67f38ff39f4f8c34))
+* **fleet:** preserve sealed field redaction in remote resolved values ([a45817b](https://github.com/kirinnee/ferretry/commit/a45817b5d30f593698ba819b0b171b96185ffd46))
+* **fleet:** preserve whole-word masking before path scans ([4a53fd8](https://github.com/kirinnee/ferretry/commit/4a53fd8567e03b63efc60b5b608116b554666fec))
+* **fleet:** redact remote fixed-layer override values ([0f6fd8e](https://github.com/kirinnee/ferretry/commit/0f6fd8ee1400741d4b28253d70eb57a47589b12f))
+* **fleet:** refuse masked settings writeback and inline flag leaks ([951eb86](https://github.com/kirinnee/ferretry/commit/951eb86ed57a322ed162e72f187a70fdcb3b640e))
+* **fleet:** scan encoded spans before image and path exemptions ([828f7d9](https://github.com/kirinnee/ferretry/commit/828f7d9267c668825451490f8381b3800c36e23a))
+* **fleet:** scan secret material before preserving paths ([184ba76](https://github.com/kirinnee/ferretry/commit/184ba76fc73e5f42dce3a671efc6ae5f98b78be6))
+
 ## [4.295.0](https://github.com/kirinnee/ferretry/compare/v4.294.3...v4.295.0) (2026-11-25)
 
 ### Features
