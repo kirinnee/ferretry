@@ -1,6 +1,12 @@
 import { join } from 'node:path';
 import type { SpawnPort } from '@ferretry/kernel/contract';
-import { isAgentScope, unifiedCgroupPath } from '../../lib/cgroups/scope.ts';
+import {
+  isAgentScope,
+  safeUnitPart,
+  sessionOfScope,
+  sessionOfSlice,
+  unifiedCgroupPath,
+} from '../../lib/cgroups/scope.ts';
 import { hostPid, hostPlatform, open, readFile, signalProcess } from '../host/fs.ts';
 import { procStatStartTicks } from '../../lib/protocol/process-incarnation.ts';
 import { processIncarnationFor } from '../session/processes/process-incarnation.ts';
@@ -10,6 +16,25 @@ import type { ProcessSnapshot } from './session-tree-end.ts';
 
 /** More parents than any real process chain has: a cycle or a hostile procfs cannot make the walk run for ever. */
 const MAX_ANCESTORS = 64;
+
+/** The nonce varies per launch; the ferret part must be the one the launch builder would emit. */
+export function scopeBelongsTo(unit: string, ferret: string): boolean {
+  return isAgentScope(unit) && sessionOfScope(unit) === safeUnitPart(ferret);
+}
+
+/** A scope's own manager metadata must agree on both its name and its per-ferret parent slice. */
+export function ownedScopePath(unit: string, metadata: string): string | undefined {
+  const properties = new Map(
+    metadata.split('\n').map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+  );
+  const slice = properties.get('Slice') ?? '';
+  const ferret = sessionOfSlice(slice);
+  const path = properties.get('ControlGroup') ?? '';
+  if (properties.get('Id') !== unit || ferret === undefined || !scopeBelongsTo(unit, ferret)) return undefined;
+  if (unifiedCgroupPath(`0::${path}`) !== path || path.split('/').at(-1) !== unit || path.split('/').at(-2) !== slice)
+    return undefined;
+  return path;
+}
 
 /**
  * This daemon and every parent of it, from `/proc/<pid>/stat`'s parent field where there is a procfs (Linux), else the
@@ -94,13 +119,20 @@ export function paneProcessHost(spawn: SpawnPort, platform: string = hostPlatfor
           processOf: async (pid: number) => await processSnapshotOf(pid),
           scopeMembers: async (unit: string) => {
             if (!isAgentScope(unit)) return [];
-            const read = await spawn.run('systemctl', ['--user', 'show', unit, '--property=ControlGroup', '--value']);
+            const read = await spawn.run('systemctl', [
+              '--user',
+              'show',
+              unit,
+              '--property=Id',
+              '--property=Slice',
+              '--property=ControlGroup',
+            ]);
             if (read.exitCode !== 0) {
               if (/could not be found|not loaded/iu.test(read.stderr)) return [];
               throw new Error(`could not read the recorded scope ${unit}, so its processes were not proved stopped`);
             }
-            const path = read.stdout.trim();
-            return path.split('/').at(-1) === unit ? await scopeMembersOf(path) : [];
+            const path = ownedScopePath(unit, read.stdout);
+            return path === undefined ? [] : await scopeMembersOf(path);
           },
         }
       : {}),

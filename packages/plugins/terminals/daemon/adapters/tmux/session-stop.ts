@@ -2,6 +2,7 @@ import type { RunnerHandle } from '@ferretry/core-ferrets/contract';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 import { killSessionArguments } from '../../lib/tmux/commands.ts';
 import { DEFAULT_TREE_END_TIMES, type DoomedProcess, endDoomed, nameDoomed } from './session-tree-end.ts';
+import { scopeBelongsTo } from './pane-process-host.ts';
 import {
   ferretTmuxSession,
   isFerretSession,
@@ -166,7 +167,8 @@ export class SessionStop {
             .map(line => Number(line.trim()))
             .filter(pid => Number.isSafeInteger(pid) && pid > 1)),
     ];
-    const scope = this.#scopes.get(session) ?? (await this.options.scopes?.scopeOf(session));
+    const recorded = this.#scopes.get(session) ?? (await this.options.scopes?.scopeOf(session));
+    const scope = recorded !== undefined && scopeBelongsTo(recorded, session.slice(3)) ? recorded : undefined;
     return await nameDoomed(host, [...new Set(roots)], scope);
   }
 

@@ -6,8 +6,8 @@ import { fenced, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { ChildEnvironment } from '@ferretry/core-vault/contract';
 import { bunSpawn } from '@ferretry/kernel/host';
 import { paneProcessHost } from '../../../../daemon/adapters/tmux/pane-process-host.ts';
-import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
-import { agentScopeCommand, agentScopeName } from '../../../../daemon/lib/cgroups/scope.ts';
+import { TmuxRunner, ferretTmuxSession } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
+import { agentScopeCommand, agentScopeName, sessionOfSlice } from '../../../../daemon/lib/cgroups/scope.ts';
 import { BunTmuxProcess } from '../support/host-spawn.ts';
 import { waitFor } from '../support/wait-for.ts';
 
@@ -27,8 +27,10 @@ test.skipIf(ownSlice === undefined || !ownSlice.includes('_fleet-'))(
     const slice = ownSlice;
     if (slice === undefined || !slice.includes('_fleet-'))
       throw new Error('this proof requires an inherited per-ferret fleet slice');
-    const scope = agentScopeName(`fx2679-${crypto.randomUUID()}`, 'proof');
-    const id = ferretId('owned-scope-proof');
+    const owner = sessionOfSlice(slice);
+    if (owner === undefined) throw new Error('this proof needs its own ferret slice identity');
+    const id = ferretId(owner);
+    const scope = agentScopeName(id, crypto.randomUUID().replaceAll('-', ''));
     const environment = Object.freeze({ names: [] }) as unknown as ChildEnvironment;
     const spawn = bunSpawn(process.env as Record<string, string>, () => ({
       open: env =>
@@ -83,9 +85,9 @@ test.skipIf(ownSlice === undefined || !ownSlice.includes('_fleet-'))(
       await waitFor(async () => Number(await readFile(join(root, 'helper'), 'utf8').catch(() => '')) > 1, 'own orphan');
       const helper = Number(await readFile(join(root, 'helper'), 'utf8'));
       expect((await readFile(`/proc/${helper}/cgroup`, 'utf8')).includes(`/${scope}`)).toBe(true);
-      await tmux.execute(['kill-session', '-t', '=fy-owned-scope-proof']);
+      await tmux.execute(['kill-session', '-t', `=${ferretTmuxSession(id)}`]);
       await waitFor(
-        async () => (await tmux.execute(['has-session', '-t', '=fy-owned-scope-proof'])).code !== 0,
+        async () => (await tmux.execute(['has-session', '-t', `=${ferretTmuxSession(id)}`])).code !== 0,
         'pane ended independently',
       );
       expect((await readFile(`/proc/${helper}/stat`, 'utf8')).includes('sleep')).toBe(true);

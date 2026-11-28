@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import type { SpawnPort } from '@ferretry/kernel/contract';
 import {
   paneProcessHost,
+  ownedScopePath,
   protectedPidsOf,
+  scopeBelongsTo,
   scopeMembersOf,
 } from '../../../../daemon/adapters/tmux/pane-process-host.ts';
 import { agentScopeCommand, agentScopeInCommand } from '../../../../daemon/lib/cgroups/scope.ts';
@@ -123,4 +125,51 @@ test('a refused manager read cannot silently declare an owned scope empty', asyn
   );
   const read = host.scopeMembers?.('ferretry-agent-own-1.scope');
   await expect(read).rejects.toThrow('not proved stopped');
+});
+
+test('R2-2: a recorded unit must agree with its manager Id, owning Slice and exact ControlGroup', async () => {
+  const unit = 'ferretry-agent-own-1.scope';
+  const slice = 'ferretry_fleet-own.slice';
+  const valid = `Id=${unit}\nSlice=${slice}\nControlGroup=/fleet/${slice}/${unit}\n`;
+  expect(ownedScopePath(unit, valid)).toBe(`/fleet/${slice}/${unit}`);
+  for (const metadata of [
+    { Id: 'ferretry-agent-other-1.scope', Slice: slice, ControlGroup: `/fleet/${slice}/${unit}` },
+    { Id: unit, Slice: 'ferretry_fleet-other.slice', ControlGroup: `/fleet/${slice}/${unit}` },
+    { Id: unit, Slice: slice, ControlGroup: `/fleet/ferretry_fleet-other.slice/${unit}` },
+    { Id: unit, Slice: slice, ControlGroup: `/fleet/${slice}/${unit}/nested` },
+  ]) {
+    const text = Object.entries(metadata)
+      .map(([key, value]) => `${key}=${value}`)
+      .join('\n');
+    expect(ownedScopePath(unit, text)).toBeUndefined();
+    const calls: (readonly string[])[] = [];
+    const host = paneProcessHost(
+      {
+        run: async (_command: string, args: readonly string[]) => {
+          calls.push(args);
+          return {
+            exitCode: 0,
+            // The old reader asked for only ControlGroup --value and blindly accepted the forged unit.
+            stdout: args.includes('--value')
+              ? metadata.ControlGroup
+              : Object.entries(metadata)
+                  .map(([key, value]) => `${key}=${value}`)
+                  .join('\n'),
+            stderr: '',
+          };
+        },
+      } as unknown as SpawnPort,
+      'linux',
+    );
+    // A forged unit must be rejected before its nonexistent cgroup is ever read.
+    expect(await host.scopeMembers?.(unit)).toEqual([]);
+    expect(calls[0]).toContain('--property=Id');
+    expect(calls[0]).toContain('--property=Slice');
+  }
+});
+
+test('a scope name must name the exact ferret, including when another id extends its prefix', () => {
+  expect(scopeBelongsTo('ferretry-agent-own-1.scope', 'own')).toBe(true);
+  expect(scopeBelongsTo('ferretry-agent-own-other-1.scope', 'own')).toBe(false);
+  expect(scopeBelongsTo('ferretry-agent-other-1.scope', 'own')).toBe(false);
 });

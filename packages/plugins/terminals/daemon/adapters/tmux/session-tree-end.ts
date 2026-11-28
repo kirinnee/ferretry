@@ -33,7 +33,7 @@ export const DEFAULT_TREE_END_TIMES: TreeEndTimes = Object.freeze({ stepMs: 2_00
 
 /**
  * The recorded launch scope's identities, restricted to that exact membership, minus every pruned subtree. Trees only
- * provide pruning/provenance when a scope was recorded; without a scope they are the source (including on macOS).
+ * provide pruning/provenance when a scope was recorded. Linux needs that ownership proof; macOS uses the tree.
  * An orphan can be found without any roots at all. A live root PID never selects the scope.
  */
 export async function nameDoomed(
@@ -41,6 +41,8 @@ export async function nameDoomed(
   roots: readonly number[],
   scope?: string,
 ): Promise<readonly DoomedProcess[]> {
+  // processOf is the Linux cgroup/identity reader. No recorded owner means no provably owned Linux targets.
+  if (host.processOf !== undefined && scope === undefined) return [];
   const protectedPids = new Set(await host.protectedPids());
   const pruned = new Set(protectedPids);
   const named = new Map<number, DoomedProcess>();
@@ -73,6 +75,7 @@ export async function nameDoomed(
 /** Fresh protection and ancestor proof, followed by ONE last identity/membership read immediately before use. */
 async function eligible(host: PaneProcessHost, target: DoomedProcess): Promise<boolean> {
   if (!Number.isSafeInteger(target.pid) || target.pid <= 1) return false;
+  if (host.processOf !== undefined && target.scope === undefined) return false;
   const protectedChain = await host.protectedPids();
   const protectedPids = new Set(protectedChain);
   if (protectedPids.has(target.pid)) return false;
