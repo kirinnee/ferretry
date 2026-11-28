@@ -38,7 +38,7 @@
 import { isAbsolute, join } from 'node:path';
 import type { KitCredentialResolution, RuntimesHarnessKit } from '../../../contract/index.ts';
 import { unsupportedHarnessSentence } from '../../../contract/harness-words.ts';
-import { byHarness, harnessKeyOfKind, UnsupportedHarnessError } from '../harness-kind.ts';
+import { harnessKeyOfKind, isSupportedKind, supportedKindOfKey, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import {
@@ -83,26 +83,29 @@ export interface CredentialStorePaths {
   readonly hostCodexHome?: string;
 }
 
-/** A Claude credential kept in a store: the person's own (`host`) or Ferretry's (`ferretry`). The Claude plugin's kit says where. */
-interface ClaudeStoreResolution {
-  readonly harness: 'claude';
+/**
+ * A credential shared through ONE secure-storage variable (Claude's): the person's own (`host`) or Ferretry's (`ferretry`). The
+ * harness's own plugin says where it lives.
+ */
+interface SecureStorageResolution {
+  readonly harness: HarnessKind;
   readonly store: 'host' | 'ferretry';
   /** The exact value every runtime on this credential exports as its secure-storage variable. */
   readonly secureStorage: string;
-  /** The directory Claude resolves that value to: the file store, and the `<dir>.lock` refresh lock. */
+  /** The directory the harness resolves that value to: the file store, and the `<dir>.lock` refresh lock. */
   readonly storageDirectory: string;
   /** Where the credential file is, wherever the platform keeps it in a file. */
   readonly credentialFile: string;
 }
 
 /**
- * A Codex credential. A `host` one is ONE canonical `auth.json` every runtime's own `auth.json` links to (the provisioner places
- * the link). A `ferretry` one has no `canonicalFile`: its file is Logins' private one, which the provisioner may not link, so it
- * names it as `signInFile` (what Logins said, never spelled here) and the runtime's WRAPPER links `auth.json` to it each time a
- * person runs it. Nothing reads, copies or shows the file.
+ * A credential shared through a LINK in each runtime's home (Codex's `auth.json`). A `host` one is ONE canonical file every
+ * runtime's own file links to (the provisioner places the link). A `ferretry` one has no `canonicalFile`: its file is Logins'
+ * private one, which the provisioner may not link, so it names it as `signInFile` (what Logins said, never spelled here) and the
+ * runtime's WRAPPER links to it each time a person runs it. Nothing reads, copies or shows the file.
  */
-interface CodexStoreResolution {
-  readonly harness: 'codex';
+interface LinkedFileResolution {
+  readonly harness: HarnessKind;
   readonly store: 'host' | 'ferretry';
   readonly canonicalFile?: string;
   /** A `ferretry` one: the file Logins named, which the wrapper links the runtime home's `auth.json` to. */
@@ -128,8 +131,8 @@ interface EnvironmentStoreResolution {
 }
 
 /**
- * A credential with no store a runtime can reach: a `host` Codex credential on a machine whose Codex home cannot be named,
- * or a `ferretry` one Logins names no store for. Nothing to share (fail closed).
+ * A credential with no store a runtime can reach: its plugin is off or names none, a `host` Codex credential on a machine whose
+ * Codex home cannot be named, or a `ferretry` one Logins names no store for. Nothing to share (fail closed).
  */
 interface UnavailableStoreResolution {
   readonly harness: HarnessKind;
@@ -138,7 +141,7 @@ interface UnavailableStoreResolution {
 }
 
 /** A resolution that has a login on disk (or in a keychain) to read. */
-type StoredCredentialResolution = ClaudeStoreResolution | CodexStoreResolution;
+type StoredCredentialResolution = SecureStorageResolution | LinkedFileResolution;
 
 /** Where one credential's login lives and how a runtime reaches it. */
 export type CredentialStoreResolution =
@@ -176,70 +179,60 @@ export function resolveCredentialStore(
 ): CredentialStoreResolution {
   if (credential.store === 'environment') return environmentResolution(credential, harness, paths.userHome);
   const store = credential.store;
-  if (store === 'ferretry') {
-    return byHarness<CredentialStoreResolution>(credential.harness, {
-      claude: () =>
-        claudeResolution(kits?.get('claude'), store, {
-          store,
-          userHome: paths.userHome,
-          variables: stores.get(id)?.variables ?? {},
-        }),
-      codex: () => {
-        const signInFile = stores.get(id)?.signInFile;
-        return signInFile === undefined || signInFile.length === 0
-          ? { harness: 'codex', store: 'ferretry', unavailable: 'Logins names no store for it' }
-          : { harness: 'codex', store: 'ferretry', signInFile };
-      },
-    });
-  }
-  return byHarness<CredentialStoreResolution>(credential.harness, {
-    claude: () => claudeResolution(kits?.get('claude'), 'host', { store: 'host', userHome: paths.userHome }),
-    codex: () =>
-      paths.hostCodexHome === undefined
-        ? {
-            harness: 'codex',
-            store: 'host',
-            unavailable: 'your own Codex home could not be named, because CODEX_HOME is set to a relative path',
-          }
-        : { harness: 'codex', store: 'host', canonicalFile: join(paths.hostCodexHome, CODEX_CREDENTIAL_FILE) },
+  const kind = isSupportedKind(credential.harness) ? credential.harness : supportedKindOfKey(credential.harness);
+  if (kind === undefined) throw new UnsupportedHarnessError(credential.harness);
+  const kit = kits?.get(kind);
+  if (kit?.credentialStore === undefined)
+    return { harness: kind, store, unavailable: unsupportedHarnessSentence(harnessKeyOfKind(kind)) };
+  const login = stores.get(id);
+  const found = kit.credentialStore({
+    store,
+    userHome: paths.userHome,
+    ...(store === 'ferretry'
+      ? {
+          variables: login?.variables ?? {},
+          ...(login?.signInFile === undefined ? {} : { signInFile: login.signInFile }),
+        }
+      : {}),
+    // The one host home a caller names today is Codex's (`$CODEX_HOME`); Claude finds its own under `userHome`.
+    ...(store === 'host' && kind === 'codex' && paths.hostCodexHome !== undefined
+      ? { hostHome: paths.hostCodexHome }
+      : {}),
   });
+  return storedResolution(kind, store, found);
 }
 
-/**
- * A Claude credential in a store, as Claude's own plugin says where it lives. A plugin that gives Runtimes no answer (it is
- * off, or its kit has no credential store) leaves the credential unreachable and says why; Claude's paths are never guessed.
- */
-function claudeResolution(
-  kit: RuntimesHarnessKit | undefined,
+/** A credential in a store, as its harness's own plugin says where it lives. A kit that names no store leaves it unreachable and says so. */
+function storedResolution(
+  harness: HarnessKind,
   store: 'host' | 'ferretry',
-  input: Parameters<NonNullable<RuntimesHarnessKit['credentialStore']>>[0],
+  found: KitCredentialResolution,
 ): CredentialStoreResolution {
-  if (kit?.credentialStore === undefined)
-    return { harness: 'claude', store, unavailable: unsupportedHarnessSentence(harnessKeyOfKind('claude')) };
-  const found = kit.credentialStore(input);
-  if (found.kind === 'unavailable') return { harness: 'claude', store, unavailable: found.reason };
-  if (
-    found.kind !== 'stored' ||
-    found.directory === undefined ||
-    found.file === undefined ||
-    found.secureStorage === undefined
-  )
-    return { harness: 'claude', store, unavailable: 'its plugin named no store for it' };
-  return {
-    harness: 'claude',
-    store,
-    secureStorage: found.secureStorage,
-    storageDirectory: found.directory,
-    credentialFile: found.file,
-  };
+  if (found.kind === 'unavailable') return { harness, store, unavailable: found.reason };
+  if (found.kind === 'stored' && found.file !== undefined) {
+    // A kit that names a secure-storage value shares by that variable; one that names only a file shares by a link to it.
+    if (found.secureStorage === undefined)
+      return store === 'host'
+        ? { harness, store, canonicalFile: found.file }
+        : { harness, store, signInFile: found.file };
+    if (found.directory !== undefined)
+      return {
+        harness,
+        store,
+        secureStorage: found.secureStorage,
+        storageDirectory: found.directory,
+        credentialFile: found.file,
+      };
+  }
+  return { harness, store, unavailable: 'its plugin named no store for it' };
 }
 
 /**
  * The variables a runtime on this credential exports, beyond its own config dir.
  *
- * Claude gets its one secure-storage value — the empty string included, which is a value and not an
- * absence. Codex gets nothing: its credential arrives through the link in its home. An environment
- * credential gets its own `env`. Never `HOME` (see the module note).
+ * What the harness's kit says: Claude's one secure-storage value (the empty string included, which is a value and not an
+ * absence), nothing for Codex (its credential arrives through the link in its home). An environment credential gets its own
+ * `env`. Never `HOME` (see the module note).
  */
 export function credentialLaunchEnvironment(
   resolution: CredentialStoreResolution,
@@ -247,24 +240,21 @@ export function credentialLaunchEnvironment(
 ): Readonly<Record<string, string>> {
   if (resolution.store === 'environment') return resolution.env;
   if ('unavailable' in resolution) return {};
-  switch (resolution.harness) {
-    case 'claude': {
-      // A stored Claude resolution came from the kit, so a kit with no way to name its variables is a wiring fault.
-      const environment = kits?.get('claude')?.credentialEnvironment;
-      if (environment === undefined) throw new UnsupportedHarnessError(harnessKeyOfKind('claude'));
-      const stored: KitCredentialResolution = {
-        kind: 'stored',
-        directory: resolution.storageDirectory,
-        file: resolution.credentialFile,
-        secureStorage: resolution.secureStorage,
-      };
-      return environment(stored);
-    }
-    case 'codex':
-      return {};
-    default:
-      throw new UnsupportedHarnessError(String((resolution as { harness: string }).harness));
-  }
+  // A stored resolution came from its harness's kit, so a kit with no way to name its variables is a wiring fault.
+  const environment = kits?.get(resolution.harness)?.credentialEnvironment;
+  if (environment === undefined)
+    throw new UnsupportedHarnessError(
+      isSupportedKind(resolution.harness) ? harnessKeyOfKind(resolution.harness) : String(resolution.harness),
+    );
+  const file =
+    'secureStorage' in resolution ? resolution.credentialFile : (resolution.canonicalFile ?? resolution.signInFile);
+  return environment({
+    kind: 'stored',
+    ...(file === undefined ? {} : { file }),
+    ...('secureStorage' in resolution
+      ? { directory: resolution.storageDirectory, secureStorage: resolution.secureStorage }
+      : {}),
+  });
 }
 
 /** The link one Codex runtime's home holds: its own `auth.json`, pointing at the canonical file. */

@@ -20,6 +20,7 @@ import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../daemon/lib/account/schema.ts';
 import type { FleetLayout } from '../../daemon/lib/provisioning.ts';
 import { fleetWorld } from '../unit/support/fleet-world.ts';
+import { REAL_KITS } from '../support/real-kits.ts';
 
 const ID_CLAUDE = '00000000-0000-4000-8000-0000000000d1';
 const ID_CODEX = '00000000-0000-4000-8000-0000000000d2';
@@ -107,6 +108,7 @@ async function machine() {
       claudeStatusline: () => "'fy' statusline",
       fyCommand: fakeFy,
       hostCodexHome,
+      kits: REAL_KITS,
       acceptsAutoPermissionMode: true,
     });
     ids = plan.ids;
