@@ -5,7 +5,6 @@ import {
   isAgentScope,
   safeUnitPart,
   sessionOfScope,
-  sessionOfSlice,
   unifiedCgroupPath,
 } from '../../lib/cgroups/scope.ts';
 import { hostPid, hostPlatform, open, readFile, signalProcess } from '../host/fs.ts';
@@ -24,14 +23,14 @@ export function scopeBelongsTo(unit: string, ferret: string): boolean {
 }
 
 /** A scope's own manager metadata must agree on both its name and its per-ferret parent slice. */
-export function ownedScopePath(unit: string, metadata: string): string | undefined {
+export function ownedScopePath(unit: string, metadata: string, ferret: string): string | undefined {
   const properties = new Map(
     metadata.split('\n').map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
   );
   const slice = properties.get('Slice') ?? '';
-  const ferret = sessionOfSlice(slice);
   const path = properties.get('ControlGroup') ?? '';
-  if (properties.get('Id') !== unit || ferret === undefined || !scopeBelongsTo(unit, ferret)) return undefined;
+  if (properties.get('Id') !== unit || slice !== ferretSliceName(ferret) || !scopeBelongsTo(unit, ferret))
+    return undefined;
   if (unifiedCgroupPath(`0::${path}`) !== path || path.split('/').at(-1) !== unit || path.split('/').at(-2) !== slice)
     return undefined;
   return path;
@@ -114,8 +113,8 @@ export function paneProcessHost(
 ): PaneProcessHost {
   const incarnation = processIncarnationFor(platform, spawn);
   const tree = processTreeFor(spawn, platform);
-  const scopePath = async (unit: string) => {
-    if (!isAgentScope(unit)) return undefined;
+  const scopePath = async (unit: string, ferret: string | undefined) => {
+    if (ferret === undefined || !scopeBelongsTo(unit, ferret)) return undefined;
     const read = await spawn.run('systemctl', [
       '--user',
       'show',
@@ -128,7 +127,7 @@ export function paneProcessHost(
       if (/could not be found|not loaded/iu.test(read.stderr)) return undefined;
       throw new Error(`could not read the recorded scope ${unit}, so its processes were not proved stopped`);
     }
-    return ownedScopePath(unit, read.stdout);
+    return ownedScopePath(unit, read.stdout, ferret);
   };
   return {
     startOf: async pid => await incarnation.startOf(pid),
@@ -144,10 +143,10 @@ export function paneProcessHost(
             const unit = row.scope.split('/').at(-1) ?? '';
             if (!scopeBelongsTo(unit, ferret) || row.scope.split('/').at(-2) !== ferretSliceName(ferret))
               return undefined;
-            return (await scopePath(unit)) === row.scope ? row : undefined;
+            return (await scopePath(unit, ferret)) === row.scope ? row : undefined;
           },
-          scopeMembers: async (unit: string) => {
-            const path = await scopePath(unit);
+          scopeMembers: async (unit: string, ferret?: string) => {
+            const path = await scopePath(unit, ferret);
             return path === undefined ? [] : await scopeMembersOf(path);
           },
         }

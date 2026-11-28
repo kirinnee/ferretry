@@ -71,7 +71,7 @@ export async function nameDoomed(
   }
   if (scope === undefined) return descendants;
   // Scope ownership is an independent launch fact. Never infer it from a root, even when that PID still exists.
-  const members = (await host.scopeMembers?.(scope)) ?? [];
+  const members = (await host.scopeMembers?.(scope, ferret)) ?? [];
   if (members.some(row => protectedPids.has(row.pid))) return [];
   const swept = members
     .filter(row => !pruned.has(row.pid))

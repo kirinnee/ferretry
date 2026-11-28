@@ -123,7 +123,7 @@ test('a refused manager read cannot silently declare an owned scope empty', asyn
     { run: async () => ({ exitCode: 1, stdout: '', stderr: 'Failed to connect to bus' }) } as unknown as SpawnPort,
     'linux',
   );
-  const read = host.scopeMembers?.('ferretry-agent-own-1.scope');
+  const read = host.scopeMembers?.('ferretry-agent-own-1.scope', 'own');
   await expect(read).rejects.toThrow('not proved stopped');
 });
 
@@ -131,7 +131,7 @@ test('R2-2: a recorded unit must agree with its manager Id, owning Slice and exa
   const unit = 'ferretry-agent-own-1.scope';
   const slice = 'ferretry_fleet-own.slice';
   const valid = `Id=${unit}\nSlice=${slice}\nControlGroup=/fleet/${slice}/${unit}\n`;
-  expect(ownedScopePath(unit, valid)).toBe(`/fleet/${slice}/${unit}`);
+  expect(ownedScopePath(unit, valid, 'own')).toBe(`/fleet/${slice}/${unit}`);
   for (const metadata of [
     { Id: 'ferretry-agent-other-1.scope', Slice: slice, ControlGroup: `/fleet/${slice}/${unit}` },
     { Id: unit, Slice: 'ferretry_fleet-other.slice', ControlGroup: `/fleet/${slice}/${unit}` },
@@ -141,7 +141,7 @@ test('R2-2: a recorded unit must agree with its manager Id, owning Slice and exa
     const text = Object.entries(metadata)
       .map(([key, value]) => `${key}=${value}`)
       .join('\n');
-    expect(ownedScopePath(unit, text)).toBeUndefined();
+    expect(ownedScopePath(unit, text, 'own')).toBeUndefined();
     const calls: (readonly string[])[] = [];
     const host = paneProcessHost(
       {
@@ -162,7 +162,7 @@ test('R2-2: a recorded unit must agree with its manager Id, owning Slice and exa
       'linux',
     );
     // A forged unit must be rejected before its nonexistent cgroup is ever read.
-    expect(await host.scopeMembers?.(unit)).toEqual([]);
+    expect(await host.scopeMembers?.(unit, 'own')).toEqual([]);
     expect(calls[0]).toContain('--property=Id');
     expect(calls[0]).toContain('--property=Slice');
   }

@@ -43,7 +43,7 @@ export class SessionStop {
     // Only a ferret's session is ever ended through a handle: a pane id of a person's shell is not ours to end.
     const ours = isFerretSession(facts.session);
     // Every process under the session's panes is NAMED before anything is signalled: afterwards they are children of init.
-    let doomed = ours ? await this.nameSession(facts.session, facts.pid) : [];
+    let doomed = ours ? await this.nameSession(facts.session, ferret, facts.pid) : [];
     if (how === 'polite' && !facts.dead) {
       // The harness's own interrupt first, then a bounded wait for the session to end by itself. A refusal is thrown:
       // a polite stop that reached nothing is never taken for one that did. A session still there after the grace is
@@ -54,7 +54,7 @@ export class SessionStop {
           `could not interrupt ${facts.session}: ${pressed.stderr.trim() || `tmux exited ${String(pressed.code)}`}`,
         );
       if (!ours) return;
-      doomed = await this.untilSessionEnds(facts.session, doomed);
+      doomed = await this.untilSessionEnds(facts.session, doomed, ferret);
     }
     if (ours) {
       const killed = await this.options.tmux.execute(killSessionArguments(facts.session));
@@ -93,7 +93,7 @@ export class SessionStop {
         isServerEmpty(present.stderr) ||
         isTmuxServerAbsent(present.stderr)
       ) {
-        await this.endProcesses(session, await this.nameSession(session));
+        await this.endProcesses(session, await this.nameSession(session, ferret));
         return;
       }
       const why = present.stderr.trim() || `tmux exited ${String(present.code)}`;
@@ -104,7 +104,7 @@ export class SessionStop {
         `could not check whether ${session} is running (${why}), so it was not stopped; it may still be running`,
       );
     }
-    let doomed = await this.nameSession(session);
+    let doomed = await this.nameSession(session, ferret);
     if (how === 'polite') {
       const panes = await this.options.tmux
         .execute(['list-panes', '-s', '-t', exact, '-F', '#{pane_dead}'])
@@ -134,7 +134,7 @@ export class SessionStop {
         const pressed = await this.options.tmux.execute(['send-keys', '-t', `${exact}:`, 'C-c']);
         if (pressed.code !== 0)
           throw new Error(`could not interrupt ${session}: ${pressed.stderr.trim() || `tmux exited ${pressed.code}`}`);
-        doomed = await this.untilSessionEnds(session, doomed);
+        doomed = await this.untilSessionEnds(session, doomed, ferret);
       }
     }
     const killed = await this.options.tmux.execute(['kill-session', '-t', exact]);
@@ -152,7 +152,11 @@ export class SessionStop {
    * Every process under `session`'s panes (its pane roots, `first` among them, and their descendants), named now. Nothing
    * without a process host: a fixture that cannot read processes cannot prove them gone either.
    */
-  private async nameSession(session: string, first?: number): Promise<readonly DoomedProcess[]> {
+  private async nameSession(
+    session: string,
+    ferret: string | undefined,
+    first?: number,
+  ): Promise<readonly DoomedProcess[]> {
     const host = this.options.processes;
     if (host === undefined) return [];
     const listed = await this.options.tmux
@@ -168,8 +172,9 @@ export class SessionStop {
             .filter(pid => Number.isSafeInteger(pid) && pid > 1)),
     ];
     const recorded = this.#scopes.get(session) ?? (await this.options.scopes?.scopeOf(session));
-    const scope = recorded !== undefined && scopeBelongsTo(recorded, session.slice(3)) ? recorded : undefined;
-    return await nameDoomed(host, [...new Set(roots)], scope, session.slice(3));
+    const scope =
+      recorded !== undefined && ferret !== undefined && scopeBelongsTo(recorded, ferret) ? recorded : undefined;
+    return await nameDoomed(host, [...new Set(roots)], scope, ferret);
   }
 
   /**
@@ -177,7 +182,11 @@ export class SessionStop {
    * (the processes named again, so one that started meanwhile is not missed). A session that is still there is the
    * caller's to end.
    */
-  private async untilSessionEnds(session: string, named: readonly DoomedProcess[]): Promise<readonly DoomedProcess[]> {
+  private async untilSessionEnds(
+    session: string,
+    named: readonly DoomedProcess[],
+    ferret: string | undefined,
+  ): Promise<readonly DoomedProcess[]> {
     const grace = this.options.politeGraceMs ?? 5_000;
     const poll = this.options.treeEnd?.pollMs ?? DEFAULT_TREE_END_TIMES.pollMs;
     for (let waited = 0; waited < grace; waited += poll) {
@@ -185,7 +194,7 @@ export class SessionStop {
       if (present !== undefined && present.code !== 0) break;
       await this.sleepFor(poll);
     }
-    const again = await this.nameSession(session);
+    const again = await this.nameSession(session, ferret);
     const seen = new Set(named.map(process => `${process.pid}:${process.start}`));
     return [...named, ...again.filter(process => !seen.has(`${process.pid}:${process.start}`))];
   }
