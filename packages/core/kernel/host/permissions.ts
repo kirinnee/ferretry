@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs';
+import { isAbsolute, relative, sep } from 'node:path';
 import type { ChildEnvironmentOpener, FencedPath } from '../contract/bound.ts';
 import type { StateFileDef } from '../contract/define.ts';
 import { CORE_IDS } from '../contract/ids.ts';
@@ -99,6 +101,50 @@ export class PermissionError extends Error {
   }
 }
 
+/** Git's global directory options may narrow a read pin, never redirect it to another tree. */
+function gitReadPathsAllow(args: readonly string[], pinned: string): boolean {
+  try {
+    const paths: string[] = [];
+    let cwd = pinned;
+    let root: string | undefined;
+    const inside = (given: string): string | undefined => {
+      // native preserves symlink/.. traversal; lexical path normalization before realpath would hide an escape.
+      root ??= realpathSync.native(pinned);
+      const actual = realpathSync.native(isAbsolute(given) ? given : `${cwd}/${given}`);
+      const rel = relative(root, actual);
+      return rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? undefined : actual;
+    };
+    for (let index = 0; index < args.length; index++) {
+      const arg = args[index] as string;
+      if (!arg.startsWith('-') || arg === '--') break;
+      if (arg === '-c' || arg === '--config-env') {
+        index++;
+        continue;
+      }
+      if (arg.startsWith('-C')) {
+        const given = arg === '-C' ? args[++index] : arg.slice(2);
+        if (given === undefined) return false;
+        if (given === '') continue; // Git treats -C '' as keeping the current directory.
+        const actual = inside(given);
+        if (actual === undefined) return false;
+        cwd = actual;
+      } else if (arg === '--git-dir' || arg === '--work-tree') {
+        const given = args[++index];
+        if (!given) return false;
+        paths.push(given);
+      } else if (arg.startsWith('--git-dir=') || arg.startsWith('--work-tree=')) {
+        const given = arg.slice(arg.indexOf('=') + 1);
+        if (given === '') return false;
+        paths.push(given);
+      }
+    }
+    // Git resolves these relative to the final -C directory, even when they precede -C in argv.
+    return paths.every(given => inside(given) !== undefined);
+  } catch {
+    return false;
+  }
+}
+
 /** Snapshot and authorize a pinned cwd before forwarding it; shared by the real and in-memory hosts. */
 export function pinnedSpawnOptions<O extends SpawnOptions | undefined>(
   plugin: string,
@@ -120,7 +166,10 @@ export function pinnedSpawnOptions<O extends SpawnOptions | undefined>(
       ? (Object.freeze({ ...owned?.env }) as Readonly<Record<string, string>>)
       : undefined;
   const forwarded = env === undefined ? owned : { ...owned, env };
-  const readOnly = minted.authority === 'read' && readOnlySpawnAllows(readOnlySpawn, program, args, env);
+  const readOnly =
+    minted.authority === 'read' &&
+    readOnlySpawnAllows(readOnlySpawn, program, args, env) &&
+    (programName(program) !== 'git' || gitReadPathsAllow(args, minted.alias ?? minted.hold.root.rootReal));
   if (minted.authority !== 'write' && !(minted.authority === 'read' && readOnly))
     throw new PermissionError(
       `${plugin} needs write authority on the pinned root to run ${programName(program)}.`,

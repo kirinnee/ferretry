@@ -24,6 +24,8 @@
 # from 4.x (packages/daemon/bin/fyd.ts, the browser and tunnel adapters, the fleet descriptor brackets) adds its
 # line here, under its new path, with the same reasoning.
 
+2 packages/core/kernel/host/permissions.ts  # bracket: canonicalize read-pin Git directory operands immediately before synchronous spawn/start admission, without yielding; native realpath preserves symlink/.. traversal
+
 2 packages/core/kernel/host/adapters/file-events.ts  # gap: arming a directory watch resolves its real path and identity (realpath, stat) once per watch and once per config read to re-arm a replaced folder; a few folders, but on the event and backstop path
 1 packages/core/kernel/host/fyd.ts  # gap: the daemon log sink appends each line synchronously, so a slow disk holds the loop; move to a buffered async writer
 2 packages/core/kernel/host/state/home-lock.ts  # boot: takes the home lock (creates run/, sets its mode) once while the daemon starts, before it serves

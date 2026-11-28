@@ -21,12 +21,31 @@ export const HARDENED_GIT_ARGUMENTS: readonly string[] = [
 
 type Arg = string | null | { readonly prefix: string };
 const env = { GIT_OPTIONAL_LOCKS: '0', GIT_NO_LAZY_FETCH: '1' } as const;
+// The exact safe overlays supplied by gitEnvironment, with/without global config and literal pathspecs.
+// Keep the minimal environment for callers which supply only the mandatory read guards.
+const environments = [
+  env,
+  ...[false, true].flatMap(global =>
+    [false, true].map(literal => ({
+      ...env,
+      GIT_CONFIG_SYSTEM: '/dev/null',
+      ...(global ? {} : { GIT_CONFIG_GLOBAL: '/dev/null' }),
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_PAGER: 'cat',
+      GIT_ASKPASS: '',
+      ...(literal ? { GIT_LITERAL_PATHSPECS: '1' } : {}),
+    })),
+  ),
+];
 const shapes = (queries: readonly (readonly Arg[])[], prefix: readonly Arg[] = []) =>
-  queries.map(args => ({
-    program: 'git',
-    args: [...HARDENED_GIT_ARGUMENTS, ...prefix, ...args],
-    env,
-  }));
+  queries.flatMap(args =>
+    environments.map(env => ({
+      program: 'git',
+      args: [...HARDENED_GIT_ARGUMENTS, ...prefix, ...args],
+      env,
+    })),
+  );
 
 /** The exact shared file-index queries; null is one non-option operand, never a wildcard option list. */
 export const TREE_GIT_READS = shapes([
@@ -92,7 +111,7 @@ export const MOVE_SOURCE_GIT_READS = [
     ['ls-files', '--others', '--exclude-standard', '-z'],
     ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'],
   ]),
-  {
+  ...environments.map(env => ({
     program: 'git',
     env,
     rest: 'paths' as const,
@@ -111,5 +130,5 @@ export const MOVE_SOURCE_GIT_READS = [
       null,
       '--',
     ],
-  },
+  })),
 ];
