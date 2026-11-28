@@ -65,8 +65,8 @@ describe('the project page: Branches & worktrees (F-120, F-121)', () => {
     expect(text).toContain('2 ahead');
     expect(text).toContain('5 behind');
     expect(calls.filter(call => call.route === LIST).map(call => call.query)).toEqual([
-      { commonDir: '/work/ferretry/site/.git' },
-      { commonDir: '/work/ferretry/docs/.git' },
+      { commonDir: '/work/ferretry/site/.git', moveProject: PROJECT.id },
+      { commonDir: '/work/ferretry/docs/.git', moveProject: PROJECT.id },
     ]);
     await mounted.unmount();
   });

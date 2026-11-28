@@ -8,11 +8,18 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fakeLogins } from '@ferretry/plugin-logins/contract/testing';
+import { claudeRuntimesKit } from '../../../../claude-code/daemon/lib/runtimes-kit/index.ts';
+import { codexRuntimesKit } from '../../../../codex/daemon/lib/runtimes-kit/index.ts';
 import type { RootsPort } from '@ferretry/kernel/contract';
 import { nodeFs } from '../../../../../core/kernel/host/adapters/node-fs.ts';
 import { rootsPortFor } from '../../../../../core/kernel/host/roots.ts';
 import { harnessMounts, rootHostFiles } from '../../../daemon/adapters/root-host-files.ts';
 import { HostHarnessScanner } from '../../../daemon/adapters/host-harness-scan.ts';
+
+const IMPORT_KITS = new Map([
+  ['claude', claudeRuntimesKit],
+  ['codex', codexRuntimesKit],
+] as const);
 
 const INERT = 'INERT_SIGN_IN_FIXTURE';
 let parent: string;
@@ -46,6 +53,7 @@ const roots = (): RootsPort =>
 
 const scanner = (port: RootsPort = roots()) =>
   new HostHarnessScanner({
+    kits: () => IMPORT_KITS,
     files: rootHostFiles(
       harnessMounts(port, [join(user, '.claude'), join(user, '.codex')], join(user, '.claude.json')),
     ),
@@ -150,6 +158,7 @@ describe('O8-4 HostHarnessScanner hashes a deep skill in a bounded number of loo
     return {
       calls,
       scanner: new HostHarnessScanner({
+        kits: () => IMPORT_KITS,
         files: {
           readText: count('readText', files.readText),
           readBytes: count('readBytes', files.readBytes),

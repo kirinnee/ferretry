@@ -311,6 +311,12 @@ export class BrowserProfileStore implements BrowserProfilePort {
     }
   }
 
+  /** When this identity's profile folder last changed (Chrome adds and removes its lock files at launch and at exit), `undefined` when it has no folder yet. */
+  async lastUsedAt(identity: string): Promise<string | undefined> {
+    const stats = await lstat(this.paths(identity).profile).catch(() => undefined);
+    return stats?.mtime.toISOString();
+  }
+
   async isPrimed(identity: string): Promise<boolean> {
     return isPrimedMarker(await this.readJson(this.paths(identity).primedFile, z.unknown()));
   }

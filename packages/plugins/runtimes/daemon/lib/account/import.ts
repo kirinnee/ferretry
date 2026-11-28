@@ -35,11 +35,16 @@
 import { secretReference, secretReferencesIn } from '@ferretry/core-vault/contract';
 import { looksSecret } from '@ferretry/std/credential-words';
 import { GITHUB_TOKEN_NAMES, maskedVariableName, nameLooksLikeKey } from '@ferretry/plugin-logins/contract';
-import { importItemId, importNamedItemId, type RuntimesHarnessKit } from '../../../contract/index.ts';
+import {
+  importItemId,
+  importNamedItemId,
+  type KitImportedEnvironment as EnvImport,
+  type RuntimesHarnessKit,
+} from '../../../contract/index.ts';
 import { harnessNamed } from './import-scope.ts';
 import { isUsableSkillItemName } from '../assets.ts';
 import { RESERVED_ENV_NAMES } from '../config.ts';
-import { byHarness, harnessKeyOfKind, isKind } from '../harness-kind.ts';
+import { byHarness, harnessKeyOfKind, isKind, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { StarterModels } from '../models/catalog.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
@@ -135,13 +140,7 @@ export interface HostHarnessScan {
   readonly problems: readonly string[];
 }
 
-/** The format each harness writes its settings in. */
-const HOST_SETTINGS_FORMAT: Readonly<Record<HarnessKind, SettingsFormat>> = {
-  claude: 'json',
-  codex: 'toml',
-};
-
-/** What each harness calls its instructions document. */
+/** What the import preview calls each harness's instructions document. */
 export const HOST_INSTRUCTIONS_NAME: Readonly<Record<HarnessKind, string>> = {
   claude: 'CLAUDE.md',
   codex: 'AGENTS.md',
@@ -300,7 +299,7 @@ export interface ImportPlan {
 
 export interface ImportOptions {
   /** The kit each installed harness's own plugin gives this import. */
-  readonly kits?: ReadonlyMap<HarnessKind, RuntimesHarnessKit>;
+  readonly kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined;
   /** The harnesses the person chose to import. Default: every installed one. */
   readonly include?: readonly HarnessKind[];
   /**
@@ -408,18 +407,6 @@ export class SecretNames {
 
 /** The three variables that carry a GitHub account's token: the login's environment leaves them out unless ticked. */
 const isGithubTokenName = (name: string): boolean => GITHUB_TOKEN_NAMES.includes(name.toUpperCase());
-
-interface EnvImport {
-  readonly env: Record<string, string>;
-  readonly secretKeys: string[];
-  readonly dropped: string[];
-  /** GitHub token variables left out until ticked, by NAME: the scan still lists them so the person can tick one. */
-  readonly gated: string[];
-  /** The variables as host text (no secret-looking value): what a login's environment takes as plain text (r9 A8). */
-  readonly plain: LoginEnvPlain[];
-  /** The variables whose value went to the Vault, by the secret's NAME: what a login's environment binds a reference to. */
-  readonly minted: LoginEnvMinted[];
-}
 
 /** A host variable as written, for the imported login's environment (r9 A8). */
 interface LoginEnvPlain {
@@ -697,9 +684,6 @@ export interface HarnessHarvest {
   readonly found: boolean;
 }
 
-/** Codex keys a runtime's plumbing sets itself (§8.3), dropped from an imported settings file. */
-const CODEX_PLUMBING_KEYS = ['cli_auth_credentials_store', 'sqlite_home'] as const;
-
 /** How many hook handlers a hooks block carries, for "6 settings, 1 hook". */
 const countHooks = (block: Readonly<Record<string, unknown>>): number =>
   Object.values(block).reduce<number>(
@@ -713,9 +697,6 @@ const countHooks = (block: Readonly<Record<string, unknown>>): number =>
         : 0),
     0,
   );
-
-/** The wire key a harness goes by in an item id. */
-const itemHarness = (harness: HarnessKind) => harnessKeyOfKind(harness);
 
 /** The profiles a `config.toml` declares: names, and the two keys an import would keep. Never anything else. */
 function codexProfilesOf(settings: Readonly<Record<string, unknown>> | undefined): CodexProfileHint[] {
@@ -739,19 +720,18 @@ export function harvest(
   skip: ReadonlySet<string>,
   ticked: ReadonlySet<string>,
   starters: StarterModels,
-  _kit?: RuntimesHarnessKit,
+  kit: RuntimesHarnessKit | undefined,
 ): HarnessHarvest {
   const { harness } = scan;
-  const key = itemHarness(harness);
+  const key = harnessKeyOfKind(harness);
   const skipped = (kind: 'instructions' | 'settings' | 'env' | 'model-set'): boolean =>
     skip.has(importItemId(key, kind));
   const problems: string[] = [...scan.problems];
   const secretKeys: string[] = [];
-  const format = HOST_SETTINGS_FORMAT[harness];
-  const settingsFile = byHarness(harness, { claude: () => 'settings.json', codex: () => 'config.toml' });
+  if (kit?.importSetup === undefined) throw new UnsupportedHarnessError(harness);
+  const { settingsFormat: format, settingsFile, instructionsName } = kit.importSetup;
 
   // Instructions.
-  const instructionsName = HOST_INSTRUCTIONS_NAME[harness];
   const instructionsProblem = unreadableReason(scan.instructions, instructionsName);
   if (instructionsProblem !== undefined) problems.push(instructionsProblem);
   const instructions =
@@ -762,41 +742,20 @@ export function harvest(
   // Settings, with the parts that become their own components taken out.
   const parsed = parsedDocument(scan.settings, format, settingsFile, problems);
   const rest: Record<string, unknown> = { ...(parsed ?? {}) };
-  const taken = byHarness<{ hooks?: HarnessHarvest['hooks']; envImport?: EnvImport | undefined }>(harness, {
-    claude: () => {
-      // Hooks are counted so the screen can say "found N, not imported", and dropped: Ferretry runs none of the host's.
-      const counted =
-        isRecord(rest.hooks) && Object.keys(rest.hooks).length > 0
-          ? { source: scan.settings.source, count: countHooks(rest.hooks) }
-          : undefined;
-      delete rest.hooks;
-      const claudeEnv = skipped('env') ? undefined : importEnv(rest.env, 'env.', settingsFile, names, secrets, ticked);
-      delete rest.env;
-      return { hooks: counted, envImport: claudeEnv };
-    },
-    codex: () => {
-      delete rest.mcp_servers;
-      for (const key of CODEX_PLUMBING_KEYS) delete rest[key];
-      let codexEnv: EnvImport | undefined;
-      const policy = rest.shell_environment_policy;
-      if (isRecord(policy) && isRecord(policy.set)) {
-        codexEnv = skipped('env')
-          ? undefined
-          : importEnv(policy.set, 'shell_environment_policy.set.', settingsFile, names, secrets, ticked);
-        const kept = Object.fromEntries(Object.entries(policy).filter(([key]) => key !== 'set'));
-        if (Object.keys(kept).length === 0) delete rest.shell_environment_policy;
-        else rest.shell_environment_policy = kept;
-      }
-      const hooksDocument = parsedDocument(scan.hooks, 'json', 'hooks.json', problems);
-      const counted =
-        hooksDocument !== undefined && Object.keys(hooksDocument).length > 0 && scan.hooks !== undefined
-          ? {
-              source: scan.hooks.source,
-              count: countHooks(isRecord(hooksDocument.hooks) ? hooksDocument.hooks : hooksDocument),
-            }
-          : undefined;
-      return { hooks: counted, envImport: codexEnv };
-    },
+  if (kit.harvest === undefined) throw new UnsupportedHarnessError(harness);
+  const hooksDocument = parsedDocument(scan.hooks, 'json', 'hooks.json', problems);
+  const taken = kit.harvest({
+    rest,
+    source: scan.settings.source,
+    mcpSource: scan.mcp?.source,
+    parsedEnv: parsed?.env,
+    ...(hooksDocument === undefined || scan.hooks === undefined
+      ? {}
+      : { hooks: { source: scan.hooks.source, document: hooksDocument } }),
+    skippedEnv: skipped('env'),
+    skippedModelSet: skipped('model-set'),
+    countHooks,
+    importEnvironment: (value, prefix, source) => importEnv(value, prefix, source, names, secrets, ticked),
   });
   const { hooks, envImport } = taken;
   if (envImport !== undefined) {
@@ -823,9 +782,7 @@ export function harvest(
   const modelSource: SettingsObject = {
     ...(namedModel === undefined || skipped('model-set') ? {} : { model: namedModel }),
     ...(rest.profiles === undefined ? {} : { profiles: rest.profiles }),
-    ...(isKind(harness, 'claude') && !skipped('env') && !skipped('model-set') && isRecord(parsed?.env)
-      ? { env: parsed.env }
-      : {}),
+    ...(taken.modelEnvironment === undefined ? {} : { env: taken.modelEnvironment }),
   };
   const hasRest = Object.keys(rest).length > 0;
   const hasEnv = Object.keys(env).length > 0;
@@ -845,10 +802,7 @@ export function harvest(
 
   // MCP servers.
   const missing = new Set(scan.missingCommands);
-  const mcpSource = byHarness(harness, {
-    claude: () => scan.mcp?.source ?? '.claude.json',
-    codex: () => scan.settings.source,
-  });
+  const { mcpSource } = taken;
   const mcp = scannedMcpServers(scan).flatMap(server => {
     if (skip.has(importNamedItemId(key, 'mcp', server.name))) return [];
     const warnings: string[] = [];
@@ -1137,22 +1091,7 @@ export function credentialOf(harness: HarnessKind, login: HostLogin): Credential
   return login.state === 'not-shareable' ? { harness, store: 'ferretry' } : { harness, store: 'host' };
 }
 
-export function loginNote(harness: HarnessKind, login: HostLogin, _kit?: RuntimesHarnessKit): string {
-  const label = HARNESS_DISPLAY_NAMES[harness];
-  const own = byHarness(harness, { claude: () => 'claude', codex: () => 'codex' });
-  const who = login.email === undefined ? 'your login' : login.email;
-  switch (login.state) {
-    case 'signed-in':
-      return `Login · ${who}. Ferretry and your own \`${own}\` share this login: signing out in one signs out both.`;
-    case 'refresh-due':
-      return `Login · ${who} · Refresh due. Ferretry renews it the first time you launch.`;
-    case 'not-signed-in':
-      return `${label} isn't signed in on this machine. Your setup was still imported; sign in later and every runtime on this login can launch.`;
-    case 'unknown':
-      return `${label} sign-in is unknown (${login.reason ?? 'Logins has no host discovery fact'}). Your login stays shared in place.`;
-    case 'unreadable':
-      return `Ferretry couldn't read your ${label} login (${login.reason ?? 'no reason given'}). It is still shared in place; check it on the Sign-ins tab.`;
-    default:
-      return `Your ${label} login can't be shared in place (${login.reason ?? 'it is not kept in a file'}), so this login needs its own sign-in.`;
-  }
+export function loginNote(harness: HarnessKind, login: HostLogin, kit?: RuntimesHarnessKit): string {
+  if (kit?.loginNote === undefined) throw new UnsupportedHarnessError(harness);
+  return kit.loginNote(login);
 }

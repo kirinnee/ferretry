@@ -231,6 +231,10 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     );
   }
 
+  identify(pid: number): Promise<string | undefined> {
+    return this.processes.identify(pid);
+  }
+
   async assertServes(pidHint: number | undefined): Promise<void> {
     await assertDefinitionServes(
       () => this.files.read(this.definitionPath),
@@ -364,6 +368,10 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     );
   }
 
+  identify(pid: number): Promise<string | undefined> {
+    return this.processes.identify(pid);
+  }
+
   async assertServes(pidHint: number | undefined): Promise<void> {
     await assertDefinitionServes(
       () => this.#definitionText(),
@@ -478,30 +486,41 @@ export class DirectSupervisor implements IDaemonSupervisor {
    * this is the one place a pid that arrived over HTTP turns into a SIGKILL, so it is the place that
    * has to be unable to send one to a stranger. A host that cannot answer refuses too, because there
    * is no service manager behind this to stop the right thing instead.
+   *
+   * Every signal is tied to the daemon's ORIGINAL identity (`request.identity`, its pid plus start identity as seen
+   * before the stop began). A pid that now answers with another identity, or with none, is the daemon having exited
+   * (and its number perhaps reused): there is nothing of ours left to signal, so nothing is, and the caller's next
+   * check of the listener and the process settles the stop. The lock proves the first press; an escalation is decided
+   * by ONE look at the identity, because the lock is released as the daemon exits and a second look would read that
+   * clean exit as a stranger.
    */
   async stop(request: StopRequest): Promise<void> {
-    if (request.pidHint === undefined) return;
-    await this.assertServes(request.pidHint);
-    this.processes.signal(request.pidHint, request.escalate ? 'SIGKILL' : 'SIGTERM');
+    const { pidHint: pid, identity } = request;
+    if (pid === undefined) return;
+    if (identity === undefined || !request.escalate) await this.assertServes(pid);
+    if (identity !== undefined && (await this.processes.identify(pid)) !== identity) return;
+    this.processes.signal(pid, request.escalate ? 'SIGKILL' : 'SIGTERM');
+  }
+
+  identify(pid: number): Promise<string | undefined> {
+    return this.processes.identify(pid);
   }
 
   async assertServes(pidHint: number | undefined): Promise<void> {
     if (pidHint !== undefined) await assertPidServes(this.processes, this.layout, pidHint, false);
   }
 
-  inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport> {
+  async inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport> {
     const pid = handle?.pid;
     if (pid === undefined) {
-      return Promise.resolve({
-        manager: 'direct',
-        state: 'absent',
-        detail: 'no service manager owns the daemon on this host',
-      });
+      return { manager: 'direct', state: 'absent', detail: 'no service manager owns the daemon on this host' };
     }
-    return Promise.resolve(
-      this.processes.alive(pid)
-        ? { manager: 'direct', state: 'running', pid, detail: 'started directly by this command' }
-        : { manager: 'direct', state: 'failed', pid, detail: 'the process this command started has exited' },
-    );
+    // A pid that is alive but is another process now (its number reused) is not the daemon: it has exited.
+    const running =
+      this.processes.alive(pid) &&
+      (handle?.identity === undefined || (await this.processes.identify(pid)) === handle.identity);
+    return running
+      ? { manager: 'direct', state: 'running', pid, detail: 'started directly by this command' }
+      : { manager: 'direct', state: 'failed', pid, detail: 'the process this command started has exited' };
   }
 }

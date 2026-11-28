@@ -4,8 +4,9 @@
  * (the scan, the plan's shapes, the harvest of each document) this planner reads. Pure: documents in, a plan out.
  */
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
+import type { RuntimesHarnessKit } from '../../../contract/index.ts';
 import { harnessNamed, keepScope, ownMcpItem } from './import-scope.ts';
-import { supportedKinds } from '../harness-kind.ts';
+import { supportedKinds, UnsupportedHarnessError } from '../harness-kind.ts';
 import type { HarnessKind } from '../manifest.ts';
 import { NO_STARTERS } from '../models/catalog.ts';
 import {
@@ -124,6 +125,58 @@ function previewOf(scan: HostHarnessScan, entry: HarnessHarvest | undefined): Ha
 }
 
 /**
+ * Holds, before any harvest starts, the kit of every requested harness, refusing one whose plugin lacks what planning
+ * needs: a refused plan then has run no harvest for the harnesses that were fine.
+ */
+function requireImportKits(
+  harnesses: readonly HarnessKind[],
+  kits: ImportOptions['kits'],
+): ReadonlyMap<HarnessKind, RuntimesHarnessKit> {
+  const held = new Map<HarnessKind, RuntimesHarnessKit>();
+  for (const harness of harnesses) {
+    const kit = kits?.get(harness);
+    if (kit?.importSetup === undefined || kit.harvest === undefined || kit.loginNote === undefined) {
+      throw new UnsupportedHarnessError(harness);
+    }
+    held.set(harness, kit);
+  }
+  return held;
+}
+
+/**
+ * Reads the host scans, a harness whose plugin offers no scan refused in the typed refusal of the route that asked (a 409,
+ * like {@link planImportRefusing}) and any other failure as `unreadable`.
+ */
+export async function scansRefusing(
+  scan: () => Promise<readonly HostHarnessScan[]>,
+  refuse: (sentence: string) => Error,
+  unreadable: (error: unknown) => Error,
+): Promise<readonly HostHarnessScan[]> {
+  try {
+    return await scan();
+  } catch (error) {
+    throw error instanceof UnsupportedHarnessError ? refuse(error.message) : unreadable(error);
+  }
+}
+
+/**
+ * {@link planImport}, with a harness whose plugin gave no import kit refused in the typed refusal of the route that asked
+ * (a 409): that is a plugin absent or partial, not a fault of this machine, so it is never an internal error.
+ */
+export function planImportRefusing(
+  refuse: (sentence: string) => Error,
+  scans: readonly HostHarnessScan[],
+  options: ImportOptions,
+): ImportPlan {
+  try {
+    return planImport(scans, options);
+  } catch (error) {
+    if (error instanceof UnsupportedHarnessError) throw refuse(error.message);
+    throw error;
+  }
+}
+
+/**
  * Plan an import of the given harnesses' setups (§4.3 steps 2–4, Import again).
  *
  * Total: a document that cannot be read becomes a problem sentence in the preview and the rest of
@@ -137,6 +190,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
   const imported = importedHarnesses(scans, options.include);
   const skip = new Set(options.skip ?? []);
   const ticked = new Set(options.tickedEnv ?? []);
+  const kits = requireImportKits(imported, options.kits);
   const harvests = imported.map(harness =>
     harvest(
       scans.find(scan => scan.harness === harness) as HostHarnessScan,
@@ -145,7 +199,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
       skip,
       ticked,
       options.starters ?? NO_STARTERS,
-      options.kits?.get(harness),
+      kits.get(harness),
     ),
   );
   const harvestOf = (harness: HarnessKind) => harvests.find(entry => entry.harness === harness);
@@ -165,7 +219,7 @@ export function planImport(scans: readonly HostHarnessScan[], options: ImportOpt
     const scan = scans.find(each => each.harness === entry.harness) as HostHarnessScan;
     notes.push({
       harness: entry.harness,
-      text: loginNote(entry.harness, scan.login, options.kits?.get(entry.harness)),
+      text: loginNote(entry.harness, scan.login, kits.get(entry.harness)),
     });
     if (entry.secretKeys.length > 0) {
       notes.push({

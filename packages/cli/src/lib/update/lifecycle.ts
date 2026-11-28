@@ -95,17 +95,18 @@ export class UpdateLifecycle implements IUpdateLifecyclePort {
 
   async #stop(owner: IDaemonSupervisor, health: LocalUpdateHealth | undefined): Promise<void> {
     await owner.assertServes(health?.pid);
-    await owner.stop({ pidHint: health?.pid, escalate: false });
+    const identity = health === undefined ? undefined : await owner.identify(health.pid);
+    await owner.stop({ pidHint: health?.pid, identity, escalate: false });
     const start = this.deps.clock.now();
     const policy = defaultShutdownPolicy();
     let escalated = false;
     while (true) {
-      const report = await owner.inspect(health === undefined ? undefined : { pid: health.pid });
+      const report = await owner.inspect(health === undefined ? undefined : { pid: health.pid, identity });
       if ((await this.deps.health()) === undefined && report.state !== 'running') return;
       const next = decideShutdown(this.deps.clock.now() - start, escalated, policy);
       if (next === 'give-up') throw new Error('the daemon did not stop; nothing else was started');
       if (next === 'escalate') {
-        await owner.stop({ pidHint: health?.pid, escalate: true });
+        await owner.stop({ pidHint: health?.pid, identity, escalate: true });
         escalated = true;
       }
       await this.deps.clock.sleep(policy.cadenceMs);

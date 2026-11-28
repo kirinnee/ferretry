@@ -1,6 +1,7 @@
 import type { FencedPath, FerretId, RootHandle } from '@ferretry/kernel/contract';
 import type { HomePlan, LaunchSpec } from '@ferretry/core-ferrets/contract';
 import { materializeSkills } from '@ferretry/core-ferrets/contract';
+import { seconds } from '@ferretry/std';
 import { tomlDocument, tomlTables } from '../../lib/index.ts';
 import { settingsDocument } from '../../lib/settings.ts';
 import type { SettingsItem } from '../../../contract/index.ts';
@@ -108,14 +109,36 @@ export const homePart: HarnessPart<'homeFor' | 'prepareHome'> = ({
       ] as const) {
         const target = root.resolve(name);
         if (!target.ok) throw new Error(`Codex's ${name} could not be placed in the ferret's home: ${target.error}`);
+        const found = await root.lstat(target.value);
+        if (found?.kind === 'symlink') {
+          // Repair only a dangling link to an absent name in this home. The scoped checks prove its parent exists
+          // inside the home too; an existing target, an escape or an unprovable target stays refused. `readlink` is
+          // already a declared host program and reads only the link text, never a target's contents.
+          const link = await kernel.spawn
+            ?.run('readlink', [target.value], { timeout: seconds(10) })
+            .catch(() => undefined);
+          const destination = link?.exitCode === 0 ? root.resolve(link.stdout.replace(/\n$/u, '')) : undefined;
+          if (destination?.ok !== true || (await root.lstat(destination.value)) !== undefined)
+            throw new Error('root refused: link_escape');
+          const parent = destination.value.slice(0, destination.value.lastIndexOf('/')) as FencedPath;
+          await root.realPath(parent).catch(() => {
+            throw new Error('root refused: link_escape');
+          });
+          await root.unlink(target.value);
+        }
         if (text === '') {
           // Nothing to say now: a config.toml an earlier launch of this reused home left must not stay applied (the
-          // settings this profile no longer selects). Agent homes are Ferretry's only, so a FILE there is ours to clear.
-          if (name === CODEX_FACTS.mcp.file && (await root.lstat(target.value))?.kind === 'file')
-            await root.remove(target.value);
+          // settings this profile no longer selects). A FILE there is ours to clear too.
+          if (name === CODEX_FACTS.mcp.file && found?.kind === 'file') await root.remove(target.value);
           continue;
         }
-        await root.writeText(target.value, text);
+        // Both modes keep the leaf literal and use the kernel's scoped no-follow write: a link swapped in after
+        // the look above is refused, including one that points at another file in the same home.
+        await root.writeText(
+          target.value,
+          text,
+          found?.kind === 'file' ? { replaceExisting: true } : { exclusive: true },
+        );
         files.push(target.value);
       }
       return { files, args: [] };

@@ -37,8 +37,9 @@ describe("a daemon's tmux server's global environment", () => {
       ['set-environment', '-g', '-u', 'FY_SESSION_TOKEN'],
       ['set-environment', '-g', '-u', 'FY_SESSION_BOARD_CAPABILITY'],
       ['set-environment', '-g', '-u', 'FY_SESSION_ID'],
+      ['set-environment', '-g', '-u', 'FY_SESSION_MODE'],
     ]);
-    should(cleared).deepEqual(['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_ID']);
+    should(cleared).deepEqual(['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY', 'FY_SESSION_ID', 'FY_SESSION_MODE']);
   });
 
   it('should never fail a boot when no server is running or tmux cannot be run', async () => {
@@ -101,7 +102,7 @@ describe("a daemon's tmux server's global environment", () => {
     });
 
     // Assert
-    should(cleared).have.length(3);
+    should(cleared).have.length(4);
     should(stalled).equal(0);
   });
 });

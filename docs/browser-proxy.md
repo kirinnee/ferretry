@@ -96,6 +96,13 @@ page with an error rather than a direct connection.
   (`identities.<key>.proxy`, the same shape) replaces the machine's for that identity's Chrome, and a credentialed one gets its
   own sign-in relay. Setting or changing one is a loosening, held for the owner like the machine's. There is no per-site or
   per-agent routing beyond the bypass list.
+  - **Where it is set.** Settings › Browser › **Identities** adds an identity, with an optional proxy **address** of its own
+    (`identities.<key>.proxy.url`): the app writes it into `browsers.yaml` through the config write, the daemon holds it for the
+    owner, and the row says "Waits for you" until it is confirmed. The list shows each identity's proxy **by name only**
+    (`host:port`, and whether it is the identity's own or the machine's) — never a credential or a secret name. Credentials for an
+    identity's proxy are `${secret:NAME}` references written in the file; the form does not take them.
+    A running identity's **Now** label comes from its launch proxy. When that differs from the configured setting,
+    **Next launch** shows the new setting separately, including a switch to or from direct traffic.
   - **GAP: a credentialed proxy still refuses to launch** for either, until Browsers has a Vault read path for its credentials.
 
 ## Test proxy
