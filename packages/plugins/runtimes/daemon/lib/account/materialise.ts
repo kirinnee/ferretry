@@ -389,6 +389,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const adapted = adaptProfile({
       resolved,
       plumbing: plumbingOf(harness, { claudeStatusline: input.claudeStatusline, codexSqliteHome: sqliteHome }, kit),
+      kit,
       bodies: {
         ...(input.bodies?.instructions === undefined ? {} : { instructions: input.bodies.instructions }),
         ...(input.bodies?.hooks === undefined ? {} : { hooks: input.bodies.hooks }),

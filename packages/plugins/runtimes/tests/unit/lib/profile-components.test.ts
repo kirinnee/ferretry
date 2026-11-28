@@ -18,6 +18,7 @@ import {
 import { adaptProfile } from '../../../daemon/lib/account/adapt.ts';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { claudeStatuslineFor } from '../../../daemon/lib/account/statusline.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const runtime = (login: string): RuntimeFile => ({ login, profile: 'default' }) as RuntimeFile;
 const profile = (contents: readonly string[]): ProfileFile => ({ contents: [...contents] }) as ProfileFile;
@@ -336,6 +337,7 @@ describe('an instructions component given as text', () => {
     const adapted = adaptProfile({
       resolved: resolved.resolved,
       plumbing: { harness: 'claude', statusLine: claudeStatuslineFor('ferretry') },
+      kit: REAL_KITS.get('claude'),
       bodies: { instructions: { house: 'Be brief.' } },
     });
 

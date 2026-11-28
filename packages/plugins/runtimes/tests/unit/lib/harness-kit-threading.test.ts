@@ -1,8 +1,8 @@
 /**
  * The kit a harness's own plugin hands Runtimes reaches every group a materialisation asks about that harness (E-276 PR 1):
  * each group function is given the kit of the runtime's own harness, and a harness whose plugin gives none is given none —
- * never another harness's. No group reads a member yet, so a plan is byte-identical; this pins the plumbing so a later move
- * never has to touch `materialise.ts`.
+ * never another harness's. Claude's MCP and document members are read now (E-276 PR 6), so a Claude runtime without its kit is
+ * REFUSED by name instead of written in another shape; Codex still branches in Runtimes, so its fake kit is only handed through.
  *
  * It is also the startup order: the settings sources can answer `unavailable` while plugins are still starting, so the
  * kit is read live with each plan and the first plan after a source comes online carries it.
@@ -16,13 +16,14 @@ import {
 } from '../../../contract/index.ts';
 import { harnessKits } from '../../../daemon/adapters/profile-components.ts';
 import { installGroupSpies } from '../../support/group-spies.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const spies = installGroupSpies();
 afterAll(spies.restore);
 
 const { twoHarnessWorld } = await import('../../support/two-harness-world.ts');
 
-const CLAUDE_KIT: RuntimesHarnessKit = { command: 'claude' };
+const CLAUDE_KIT = REAL_KITS.get('claude') as RuntimesHarnessKit;
 const CODEX_KIT: RuntimesHarnessKit = { command: 'codex' };
 const GROUPS = ['fixedLayerOf', 'plumbingOf', 'priorServersOf', 'runtimeExtras', 'autonomousPreparation'] as const;
 
@@ -50,20 +51,18 @@ describe('the kit threaded to the groups of a materialisation', () => {
     }
   });
 
-  it('should hand a harness whose plugin gives no kit no kit, never another harness one', async () => {
+  it('should hand a harness whose plugin gives no kit no kit, never another harness one, and refuse its runtime', async () => {
     spies.calls.length = 0;
     const { service } = twoHarnessWorld({ kits: () => new Map([['codex', CODEX_KIT]] as const) });
-    await service.publishFromFiles();
-    for (const group of GROUPS) {
-      expect(kitsOf(group, 'claude')).toEqual([undefined]);
-      expect(kitsOf(group, 'codex')[0]).toBe(CODEX_KIT);
-    }
+    await expect(service.publishFromFiles()).rejects.toThrow('claude is not supported here');
+    expect(kitsOf('plumbingOf', 'claude')).toEqual([undefined]);
+    expect(kitsOf('plumbingOf', 'codex').every(kit => kit === CODEX_KIT)).toBe(true);
   });
 
   it('should hand no group a kit when nothing supplies kits', async () => {
     spies.calls.length = 0;
-    const { service } = twoHarnessWorld();
-    await service.publishFromFiles();
+    const { service } = twoHarnessWorld({ kits: undefined });
+    await expect(service.publishFromFiles()).rejects.toThrow('is not supported here');
     expect(spies.calls.length).toBeGreaterThan(0);
     expect(spies.calls.every(call => call.kit === undefined)).toBe(true);
   });
@@ -82,13 +81,13 @@ describe('the kit threaded to the groups of a materialisation', () => {
               : 'unavailable';
         }),
     });
-    await service.publishFromFiles();
-    for (const group of GROUPS) expect(kitsOf(group, 'claude')).toEqual([undefined]);
+    await expect(service.publishFromFiles()).rejects.toThrow('claude is not supported here');
+    expect(kitsOf('plumbingOf', 'claude')).toEqual([undefined]);
     online = true;
     await service.publishFromFiles();
     for (const group of GROUPS) {
-      expect(kitsOf(group, 'claude')[1]).toBe(CLAUDE_KIT);
-      expect(kitsOf(group, 'codex')[1]).toBe(CODEX_KIT);
+      expect(kitsOf(group, 'claude').at(-1)).toBe(CLAUDE_KIT);
+      expect(kitsOf(group, 'codex').at(-1)).toBe(CODEX_KIT);
     }
   });
 });

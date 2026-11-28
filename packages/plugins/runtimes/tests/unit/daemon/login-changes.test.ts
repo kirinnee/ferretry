@@ -24,6 +24,7 @@ import {
 import { loginUsers } from '../../../daemon/lib/service/login-users.ts';
 import { loginChangeOf, movedSentence } from '../../../daemon/lib/service/login-changes.ts';
 import type { AccountChange, RuntimeFile } from '../../../contract/index.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const MODEL = parseAccountModel({
   version: 1,
@@ -101,6 +102,7 @@ function world(
     layout: LAYOUT,
     claudeStatusline: own => (own === undefined ? "'fy' statusline" : `'fy' statusline --then '${own}'`),
     fyCommand: '/opt/ferretry/bin/fy',
+    kits: () => REAL_KITS,
     provisioner: {
       preview: async plan => ({ ...plan, sharedHistory: [] }),
       apply: async plan => {

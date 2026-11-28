@@ -97,7 +97,7 @@ describe.each(UNKNOWN)('a harness Runtimes has no behaviour for (%s)', unknown =
 
   test('is refused where MCP servers were rendered in Claude’s shape unless Codex’s', () => {
     const servers = { s: { command: 'x' } } as never;
-    expect(refused(() => renderMcpComponents(unknown as never, servers))).toBe(refusal(unknown));
+    expect(refused(() => renderMcpComponents(unknown as never, servers, undefined))).toBe(refusal(unknown));
   });
 
   test('is refused where a host scan read Claude’s MCP document unless Codex’s', () => {
