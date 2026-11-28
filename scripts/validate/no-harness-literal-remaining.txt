@@ -52,7 +52,8 @@
 #
 # (C) NOT counted by this gate, and named here instead (each is a value, not a harness-keyed type, so the gate cannot see it):
 #   adapters/profile-components.ts       SOURCES: the Claude and Codex bindings (`ownedBy(ProfileClaudeSettingsSource)`, ...Codex..., and
-#                                        the two hooks sources), which kit-less hooks still go through (17b-2)
+#                                        the two hooks sources): the contract's own per-harness hook slots (`ProfileClaudeSettingsSource` ...), which
+#                                        name the plugin that takes them, so they stay (a plan exception like KEY_OF_KIND)
 #   lib/account/credentials.ts           SIGN_IN_FILES: Claude's and Codex's sign-in file names. It stays: `isSignInName` is the security
 #                                        gate of document-link, fleet-disk, following-handle and host-harness-scan, and a sign-in file
 #                                        must stay unreadable and unlinkable even when a plugin is OFF, which a kit cannot say
