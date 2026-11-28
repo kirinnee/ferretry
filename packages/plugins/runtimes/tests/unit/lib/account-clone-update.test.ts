@@ -2068,6 +2068,41 @@ describe('profile and runtime settings an update writes (#F575 finding 4)', () =
     should(plan.model.runtimes.agent?.disabled).eql(disabled);
   });
 
+  it('should keep the name the owner typed here when a threshold is taken from a source that never flagged it', () => {
+    // Arrange: only the threshold differs; the source record carries no namedByOwner, the local one does.
+    const analysis = analyseCloneUpdate(
+      bareInput(theirs({}, { compactAt: 250000 }), mine({}, { compactAt: 300000, namedByOwner: true })),
+    );
+
+    // Act
+    const plan = planCloneUpdate(analysis, { decisions: { 'runtime/agent': 'take' } });
+
+    // Assert: the setting lands and the owner's name stays the owner's.
+    should(plan.done.taken).eql(['runtime/agent']);
+    should(plan.model.runtimes.agent?.compactAt).equal(250000);
+    should(plan.model.runtimes.agent?.namedByOwner).equal(true);
+  });
+
+  it('should not flag a name here as typed when the source flagged its own and this one was made', () => {
+    // Arrange
+    const analysis = analyseCloneUpdate(
+      bareInput(theirs({}, { compactAt: 250000, namedByOwner: true }), mine({}, { compactAt: 300000 })),
+    );
+
+    // Act
+    const plan = planCloneUpdate(analysis, { decisions: { 'runtime/agent': 'take' } });
+
+    // Assert
+    should(plan.model.runtimes.agent?.compactAt).equal(250000);
+    should(plan.model.runtimes.agent?.namedByOwner).equal(undefined);
+  });
+
+  it('should carry the source flag onto a runtime that is added', () => {
+    const analysis = analyseCloneUpdate(bareInput(theirs({}, { namedByOwner: true })));
+    const plan = planCloneUpdate(analysis, { decisions: {} });
+    should(plan.model.runtimes.agent?.namedByOwner).equal(true);
+  });
+
   it('should show a change to the runtime threshold alone as a change, naming the field', () => {
     // Arrange
     const analysis = analyseCloneUpdate(bareInput(theirs({}, { compactAt: 250000 }), mine({}, {})));

@@ -14,6 +14,7 @@ import { type AccountModel, type AccountModelDocument, parseAccountModel } from 
 import { builtInModelCatalogs, builtInPresets } from './fixtures/built-ins.ts';
 import type { FleetLayout, FleetModelApplyPlan, FleetWriteOperation } from '../../../daemon/lib/provisioning.ts';
 import { MANAGED_MARKER, shellQuote } from '../../../daemon/lib/wrappers.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 
 const LAYOUT: FleetLayout = {
   stateHome: '/fy',
@@ -85,6 +86,7 @@ const plan = (model: AccountModel, overrides: Partial<MaterialiseInput> = {}): F
     hostCodexHome: '/home/person/.codex',
     acceptsAutoPermissionMode: true,
     loginStores: LOGIN_STORES,
+    kits: REAL_KITS,
     ...overrides,
   });
 

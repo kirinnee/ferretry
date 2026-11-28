@@ -108,13 +108,14 @@ describe('runtime verbs', () => {
       credential: 'claude-you',
       profile: 'default',
       create: true,
+      namedByOwner: true,
       addAnother: true,
     });
     should(world.prompt.questions).be.empty();
 
     const plain = fakeWorld();
     await runVerb(plain, 'runtime add', ['x'], { login: 'c', profile: 'p' });
-    should(plain.gateway.called('stage')[0]?.args[0]).match({ create: true });
+    should(plain.gateway.called('stage')[0]?.args[0]).match({ create: true, namedByOwner: true });
   });
 
   it('should refuse an add that does not say which login and profile', async () => {

@@ -295,6 +295,39 @@ describe('runtime.rename', () => {
     );
   });
 
+  it('should record who typed a runtime name: a rename and a typed add do, an edit keeps it, a made name never does (E-296)', () => {
+    const model = modelOf();
+    const renamed = derive(rename({ name: 'claude-default', to: 'claude-work' }), {}, model);
+    should(renamed.model.runtimes['claude-work']?.namedByOwner).equal(true);
+    should(model.runtimes['claude-default']?.namedByOwner).be.undefined();
+    const typed = derive({
+      kind: 'runtime.put',
+      name: 'claude-review',
+      create: true,
+      namedByOwner: true,
+      credential: 'claude-b',
+      profile: 'plain',
+    });
+    should(typed.model.runtimes['claude-review']?.namedByOwner).equal(true);
+    const made = derive({
+      kind: 'runtime.put',
+      name: 'claude-made',
+      create: true,
+      credential: 'claude-b',
+      profile: 'plain',
+    });
+    should(made.model.runtimes['claude-made']?.namedByOwner).be.undefined();
+    const own = modelOf({
+      runtimes: { 'claude-work': { credential: 'claude-a', profile: 'plain', namedByOwner: true } },
+    });
+    const edited = derive(
+      { kind: 'runtime.put', name: 'claude-work', create: false, credential: 'claude-a', profile: 'base' },
+      {},
+      own,
+    );
+    should(edited.model.runtimes['claude-work']?.namedByOwner).equal(true);
+  });
+
   it('should carry the default runtime and each command that runs it to the new name', () => {
     const model = modelOf({
       advanced: {

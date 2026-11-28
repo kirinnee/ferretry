@@ -74,6 +74,24 @@ describe('how a runtime is named for a person (O9-5)', () => {
     expect(runtimeDisplayName(source({ harness: 'claude-code', name: 'codex-fast' }))).toBe('codex-fast');
   });
 
+  it('shows a name the owner typed as typed, even when it is spelled like a generated one (E-296)', () => {
+    const typed = source({
+      harness: 'claude-code',
+      name: 'claude-work',
+      namedByOwner: true,
+      credential: { id: 'claude-you', store: 'host' },
+    });
+    expect(runtimeDisplayName(typed)).toBe('claude-work');
+    // The same record without the proof reads the way it always did.
+    const { namedByOwner: _proof, ...unproved } = typed;
+    expect(runtimeDisplayName(unproved)).toBe('Claude · your terminal sign-in');
+    // It neither takes a twin's suffix nor gives one.
+    const made = source({ harness: 'claude-code', name: 'claude-default', profile: 'Default' });
+    expect(runtimeDisplayName(typed, [typed, made])).toBe('claude-work');
+    expect(runtimeDisplayName(made, [typed, made])).toBe('Claude · your terminal sign-in');
+    expect(isMachineMadeRuntimeName(typed)).toBe(false);
+  });
+
   it('reads the names the machine makes as machine-made', () => {
     const claude = source({ harness: 'claude-code' });
     for (const name of ['claude-you', 'claude-default', 'claude-default-2', 'claude']) {

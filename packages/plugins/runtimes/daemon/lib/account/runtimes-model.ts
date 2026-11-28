@@ -249,6 +249,7 @@ function runtimeOf(file: RuntimeFile): Runtime {
     ...(file.shell === undefined ? {} : { shell: file.shell }),
     ...(file.disabled === undefined ? {} : { disabled: file.disabled }),
     ...(file.compactAt === undefined ? {} : { compactAt: file.compactAt }),
+    ...(file.namedByOwner === undefined ? {} : { namedByOwner: true }),
     ...(file.clonedFromKey === undefined ? {} : { clonedFromKey: file.clonedFromKey }),
   } as Runtime;
 }

@@ -1092,10 +1092,13 @@ describe('the setup.import executor', () => {
     const named = world();
     await importOnce(named.service, IMPORT({ names: { 'claude-code': 'my-claude', codex: 'unused' } }));
     should(configTextOf(named.applied[0]?.documents ?? [])).containEql('my-claude');
+    // E-296: the name the person typed is recorded as theirs, so it is shown as typed.
+    should(configTextOf(named.applied[0]?.documents ?? [])).containEql('"namedByOwner": true');
 
     const same = world();
     await importOnce(same.service, IMPORT({ names: { 'claude-code': 'claude-default' } }));
     should(configTextOf(same.applied[0]?.documents ?? [])).containEql('claude-default');
+    should(configTextOf(same.applied[0]?.documents ?? [])).not.containEql('namedByOwner');
 
     const invalid = await catalogRefusal(
       world().service.executors.setup.describe(IMPORT({ names: { 'claude-code': 'no spaces' } }), MACHINE),

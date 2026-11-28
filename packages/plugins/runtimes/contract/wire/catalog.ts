@@ -587,6 +587,8 @@ export const RuntimeViewSchema = z.strictObject({
     label: NonEmptyStringSchema.optional(),
     status: CredentialStatusWordSchema.optional(),
   }),
+  /** True when the owner typed the name: it is shown as typed, never as the words a generated name gets. */
+  namedByOwner: z.literal(true).optional(),
   profile: NonEmptyStringSchema,
   stack: StackViewSchema,
   modelSet: RuntimeModelSetSchema,
@@ -715,6 +717,8 @@ export const AccountChangeSchema = z.discriminatedUnion('kind', [
     create: z.boolean(),
     /** E15: the person saw "already uses this login and profile" and chose to add another anyway. */
     addAnother: z.boolean().optional(),
+    /** The person typed the name (`fy runtime add`, a rename); absent: the app or an import made it. */
+    namedByOwner: z.literal(true).optional(),
   }),
   z.strictObject({ kind: z.literal('runtime.remove'), name: NonEmptyStringSchema }),
   /**
