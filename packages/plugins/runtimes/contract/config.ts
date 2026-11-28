@@ -135,6 +135,8 @@ export const RuntimeFileSchema = z.preprocess(
     shell: ItemNameSchema.optional(),
     disabled: DisabledConfigSchema.optional(),
     compactAt: CompactAtSchema.optional(),
+    /** Set when the owner typed this runtime's name (not one an import or the app made); it is then shown as typed. */
+    namedByOwner: z.literal(true).optional(),
     /** The source's origin key for this runtime, set by Clone: how a repeat copy finds it again. */
     clonedFromKey: NonEmptyStringSchema.optional(),
   }),
