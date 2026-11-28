@@ -693,13 +693,11 @@ describe('adaptProfile — plumbing', () => {
 describe('componentPartialSupport', () => {
   it('should declare a skill limiting its tools as partly supported on Codex (E22)', () => {
     // Act
-    const actual = componentPartialSupport(
-      {
-        components: { instructions: {}, mcp: {}, skills: { mine: { items: ['release-notes', 'plain'] } } },
-        skillFrontmatter: { 'release-notes': ['name', 'allowed-tools', 'model', 'hooks'], plain: ['name'] },
-      },
-      REAL_KITS,
-    );
+    const actual = componentPartialSupport({
+      components: { instructions: {}, mcp: {}, skills: { mine: { items: ['release-notes', 'plain'] } } },
+      skillFrontmatter: { 'release-notes': ['name', 'allowed-tools', 'model', 'hooks'], plain: ['name'] },
+      kits: REAL_KITS,
+    });
 
     // Assert
     actual.should.deepEqual([
@@ -726,28 +724,26 @@ describe('componentPartialSupport', () => {
 
   it('should declare instructions with @path imports and an SSE server as partly supported on Codex', () => {
     // Act
-    const actual = componentPartialSupport(
-      {
-        components: {
-          instructions: {
-            main: { file: 'm.md' },
-            plain: { file: 'p.md' },
-            unread: { file: 'u.md' },
-            claudeOnly: { file: 'c.md', harness: 'claude' },
-          },
-          mcp: {
-            linear: { url: 'https://mcp.linear.app/sse' },
-            api: { url: 'https://mcp.example.com/mcp' },
-            local: { command: 'uvx' },
-            claudeSse: { url: 'https://x.example.com/sse', harness: 'claude' },
-          },
-          skills: { claudeSkills: { items: ['release-notes'], harness: 'claude' } },
+    const actual = componentPartialSupport({
+      components: {
+        instructions: {
+          main: { file: 'm.md' },
+          plain: { file: 'p.md' },
+          unread: { file: 'u.md' },
+          claudeOnly: { file: 'c.md', harness: 'claude' },
         },
-        skillFrontmatter: { 'release-notes': ['allowed-tools'] },
-        instructionBodies: { main: 'Read this.\n@docs/style.md\n', plain: 'Mail me@example.com.', claudeOnly: '@x.md' },
+        mcp: {
+          linear: { url: 'https://mcp.linear.app/sse' },
+          api: { url: 'https://mcp.example.com/mcp' },
+          local: { command: 'uvx' },
+          claudeSse: { url: 'https://x.example.com/sse', harness: 'claude' },
+        },
+        skills: { claudeSkills: { items: ['release-notes'], harness: 'claude' } },
       },
-      REAL_KITS,
-    );
+      skillFrontmatter: { 'release-notes': ['allowed-tools'] },
+      instructionBodies: { main: 'Read this.\n@docs/style.md\n', plain: 'Mail me@example.com.', claudeOnly: '@x.md' },
+      kits: REAL_KITS,
+    });
 
     // Assert
     actual.should.deepEqual([
@@ -768,12 +764,10 @@ describe('componentPartialSupport', () => {
 
   it('should declare nothing without the facts it is decided from', () => {
     // Act
-    const actual = componentPartialSupport(
-      {
-        components: { instructions: {}, mcp: {}, skills: { mine: { items: ['release-notes'] } } },
-      },
-      REAL_KITS,
-    );
+    const actual = componentPartialSupport({
+      components: { instructions: {}, mcp: {}, skills: { mine: { items: ['release-notes'] } } },
+      kits: REAL_KITS,
+    });
 
     // Assert
     actual.should.deepEqual([]);
@@ -786,13 +780,11 @@ describe('componentPartialSupport', () => {
       components: { skills: { mine: { items: ['release-notes'] } } },
       profiles: { p: { layers: ['skills/mine'] } },
     });
-    const partialSupport = componentPartialSupport(
-      {
-        components: model.components,
-        skillFrontmatter: { 'release-notes': ['allowed-tools'] },
-      },
-      REAL_KITS,
-    );
+    const partialSupport = componentPartialSupport({
+      components: model.components,
+      skillFrontmatter: { 'release-notes': ['allowed-tools'] },
+      kits: REAL_KITS,
+    });
 
     // Act
     const codex = resolveProfile({ model, profile: 'p', harness: 'codex', partialSupport });

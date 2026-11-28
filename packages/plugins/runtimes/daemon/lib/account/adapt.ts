@@ -746,6 +746,8 @@ export interface PartialSupportFacts {
   readonly skillFrontmatter?: Readonly<Record<string, readonly string[]>>;
   /** Instructions text, by component name. */
   readonly instructionBodies?: Readonly<Record<string, string>>;
+  /** What each harness's own plugin hands Runtimes: a harness reads only in part what its kit says it does. */
+  readonly kits?: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined;
 }
 
 /**
@@ -754,10 +756,8 @@ export interface PartialSupportFacts {
  * only be partial on that harness, and Claude honours everything these components can say, so every
  * entry today is about Codex.
  */
-export function componentPartialSupport(
-  facts: PartialSupportFacts,
-  kits: ReadonlyMap<HarnessKind, RuntimesHarnessKit> | undefined,
-): readonly PartialSupport[] {
+export function componentPartialSupport(facts: PartialSupportFacts): readonly PartialSupport[] {
+  const { kits } = facts;
   const entries: PartialSupport[] = [];
   for (const kind of supportedKinds()) {
     const partialSupport = kits?.get(kind)?.partialSupport;

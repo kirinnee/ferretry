@@ -286,14 +286,12 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     userHome: layout.userHome,
     ...(input.hostCodexHome === undefined ? {} : { hostCodexHome: input.hostCodexHome }),
   };
-  const partialSupport = componentPartialSupport(
-    {
-      components: model.components,
-      ...(input.bodies?.skillFrontmatter === undefined ? {} : { skillFrontmatter: input.bodies.skillFrontmatter }),
-      ...(input.bodies?.instructions === undefined ? {} : { instructionBodies: input.bodies.instructions }),
-    },
-    input.kits,
-  );
+  const partialSupport = componentPartialSupport({
+    components: model.components,
+    ...(input.bodies?.skillFrontmatter === undefined ? {} : { skillFrontmatter: input.bodies.skillFrontmatter }),
+    ...(input.bodies?.instructions === undefined ? {} : { instructionBodies: input.bodies.instructions }),
+    kits: input.kits,
+  });
 
   const operations: FleetWriteOperation[] = [
     { kind: 'directory', path: fleet, mode: DIRECTORY_MODE },
