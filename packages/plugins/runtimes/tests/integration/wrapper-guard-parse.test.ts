@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import type { HarnessKind } from '../../daemon/lib/manifest.ts';
+import { REAL_KITS } from '../support/real-kits.ts';
 import {
   type RuntimeWrapperInput,
   renderCommandScript,
@@ -56,6 +57,7 @@ const runtime = (
   name: `${harness}-auto`,
   id: ID,
   harness,
+  kit: REAL_KITS.get(harness),
   configDirectory: '$HOME/.state/fleet/homes/x',
   env,
   args: [],

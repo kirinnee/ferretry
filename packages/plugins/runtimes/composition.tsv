@@ -1,5 +1,6 @@
 kind	path	limit	expires	reason
 oversize	contract/harness-kit.ts	400	2026-12-31	E-276 move PRs 2-16 each add one kit member here; hot until the lane ends, then split by group
+oversize	contract/harness-kit.ts	450	2026-12-31	E-276 move PRs 2-16 each add one kit member here; hot until the lane ends, then split by group
 oversize	daemon/lib/account/clone-update.ts	1680	2026-12-16	one clone/update module; split by step when next touched
 oversize	daemon/lib/account/import.ts	1200	2026-12-31	r10 O8 model-set choice; the planner moved to import-plan.ts, this file keeps the scan words and the harvest
 oversize	daemon/lib/service/catalog.ts	1520	2026-12-16	one catalog service; split by concern when next touched

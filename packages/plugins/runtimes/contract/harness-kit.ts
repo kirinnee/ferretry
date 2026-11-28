@@ -261,6 +261,41 @@ export interface KitExtras {
   readonly catalog?: { readonly path: string; readonly text: string; readonly args: readonly string[] };
 }
 
+/** What a launch's autonomous prelude is asked for. */
+export interface KitAutonomousPreludeInput {
+  /** The variable that points the harness at its home, as Runtimes' wrapper exports it. */
+  readonly homeEnv: string;
+}
+
+/**
+ * The instruction argument of a launch, split around the place the ferret's sections go: the wrapper writes the shell
+ * word `before`, then the sections, then `after` (an empty `after` writes nothing). Both parts are quoted by Runtimes.
+ */
+export interface KitInstructionArgument {
+  readonly before: string;
+  readonly after: string;
+}
+
+/** What a harness adds to the launch line of a runtime's wrapper script. */
+export interface KitWrapper {
+  /** The shell `case` patterns of the arguments that may name a conversation to resume. */
+  readonly conversationArgs: string;
+  /** The arguments that start a runtime on a model. */
+  modelArgs(model: string): readonly string[];
+  /** A per-ferret section as this harness's own argument carries it, before Runtimes quotes it for the shell. */
+  quoteSection(text: string): string;
+  /** The instruction argument with a place for the sections, or `undefined` for any other argument. */
+  instructionArgument(arg: string): KitInstructionArgument | undefined;
+  /** The lines that withhold the question tool from an agent. */
+  questionLines(): readonly string[];
+  /** Arguments the wrapper supplies itself (`questionLines`), which the exec line drops from the launch's own. */
+  readonly suppliedArguments?: readonly string[];
+  /** What an auto launch prepares first (Claude's first-run seed, Codex's trusted folder). Absent: nothing. */
+  autonomousPrelude?(input: KitAutonomousPreludeInput): readonly string[];
+  /** Lines that ask the installed harness about a flag, run before the auto launch's `exec`. */
+  promptSnapshotLines?(command: string): readonly string[];
+}
+
 /** What a harness plugin hands Runtimes for the harness it owns. Every member is optional; see the file comment. */
 export interface RuntimesHarnessKit {
   // Words.
@@ -309,16 +344,7 @@ export interface RuntimesHarnessKit {
   harvest?(input: KitHarvestInput): KitHarvestParts;
 
   // The launch line.
-  readonly wrapper?: {
-    readonly conversationArgs: string;
-    modelArgs(model: string): readonly string[];
-    quoteSection(text: string): string;
-    instructionArgument(arg: string): string | undefined;
-    questionLines(): readonly string[];
-    /** What an auto launch prepares first (Claude's first-run seed, Codex's trusted folder). */
-    autonomousPrelude?(): readonly string[];
-    promptSnapshotLines?(command: string): readonly string[];
-  };
+  readonly wrapper?: KitWrapper;
 
   // What one harness adds to a runtime beyond the common launch.
   runtimeExtras?(input: KitExtrasInput): KitExtras;

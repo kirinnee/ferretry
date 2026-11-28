@@ -12,6 +12,7 @@ import {
   renderRuntimeWrapperScript,
   type RuntimeWrapperInput,
 } from '../../../daemon/lib/wrappers.ts';
+import { REAL_KITS } from '../../support/real-kits.ts';
 import { expectGolden } from './support/golden.ts';
 import { outcome, THIRD_KEY } from './support/thrown.ts';
 import { FY_COMMAND, RUNTIME_ID } from './support/world.ts';
@@ -23,6 +24,7 @@ const base = (harness: 'claude' | 'codex'): RuntimeWrapperInput => ({
   name: `${harness}-golden`,
   id: RUNTIME_ID,
   harness,
+  kit: REAL_KITS.get(harness),
   configDirectory: `/fy/fleet/homes/${RUNTIME_ID}`,
   env: {
     FY_CREDENTIAL: `${harness}-host`,
