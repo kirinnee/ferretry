@@ -33,7 +33,6 @@ export const tablesKey = (path: string): string => `${path}::tables`;
 
 /** Per-harness tables that stand in Runtimes' daemon, by file (under {@link SCOPE}) with their count. See the list for what each is. */
 const TABLE_PINS: readonly (readonly [string, number])[] = [
-  ['adapters/host-harness-scan.ts', 1],
   ['lib/account/halves.ts', 2],
   ['lib/account/import-plan.ts', 2],
   ['lib/account/import.ts', 1],

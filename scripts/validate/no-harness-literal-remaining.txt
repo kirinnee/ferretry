@@ -1,9 +1,9 @@
 # What still names a harness inside packages/plugins/runtimes/daemon, one row per file with the exact count. Two kinds of row:
 #
-#   path::N         harness LITERALS: a string that is exactly 'claude' or 'codex' (4 files, listed below).
+#   path::N         harness LITERALS: a string that is exactly 'claude' or 'codex' (3 files, listed below).
 #   path::tables::N per-harness TABLES: a Record<HarnessKind, ...> (or Record<HarnessScope, ...>), a `satisfies`/`as` of one, or a
 #                   mapped type `[x in HarnessKind]`. Their keys are identifiers, not quoted strings, so no literal row can count them
-#                   (18 files, 29 tables; what each is is named below).
+#                   (11 files, 16 tables; what each is is named below).
 #
 # Enforced by scripts/validate/no-harness-literal.sh. It is a NAMED, SHRINKING list, not an exemption: the part of E-276 named in
 # each comment deletes its row; a new literal, a new table, a higher count or a row left behind for a file that is now clean all
@@ -12,61 +12,60 @@
 #
 # The rows are PINNED in scripts/validate/no-harness-literal.ts (PINNED): this list can only lose rows or lower a count.
 #
-# ── The E-276 PR 17b inventory: EVERYTHING that still decides per harness inside Runtimes, so none is a silent leftover ──────────────
+# ── What PR 17b-1 moved (it is gone from the rows below) ────────────────────────────────────────────────────────────────────────────
+#   HARNESS_DISPLAY_NAMES, HARNESS_SCOPE_WORDS, HARNESS_LABELS/TOOL_NAME: read from the contract's one table of words (`displayNameOf`,
+#     `shortNameOf`, `scopeWord`)                                  HARNESS_PACKAGES, TOOL_PACKAGES: the kits' `install`
+#   HARNESS_OWNED_SKILL_ENTRIES: the kits' `ownedSkillEntries`     SETTINGS_FORMAT: the kits' `settingsFile`
+#   CODEX_FIXED_CONFIG_KEYS, CARRIED_FLAGS: the fixed layer's own `fixedConfigKeys` / `carriedFlags` (beside `supersededFlags`)
+#   defaultHomeDirectories, harnessHomesOf: derived from the same words (`hostFolderOf`); the scanner's home variables: `kit.homeEnv`
+#   the contract's HARNESS_WORD and CLI_WORD (display-name.ts): read from harness-words.ts
 #
-# (A) Literal rows (each needs a kit member AND the frozen goldens' SETUP threaded with the real kits):
+# ── What 17b-2 moves (named, with why it is not in 17b-1) ───────────────────────────────────────────────────────────────────────────
+# The owner-file MODEL ASSEMBLY (runtimes-model, derived-runtimes, runtimes-edits, import-plan, the config-files adapter) reads these with
+# NO kit today, because it runs from the owner's files before any plugin is asked. Moving them means threading the kit map through
+# `assembleRuntimesModel` and its callers and the frozen consumers/precedence goldens' setup, which is one lane of its own:
+#
+# (A) Literal rows:
 #   builtin-autonomous.ts  Claude's comfort settings and the layer that names them (kit `comfortSettings`; BUILTIN_COMPONENTS is read
 #                          with no kit by runtimes-model.ts, derived-runtimes.ts, runtimes-edits.ts and consumers.golden / world.ts)
 #   layering.ts            modelHarness: which harness a model id belongs to (kit `ownsModel`; resolveProfile and scope.ts read it
 #                          with no kit, and precedence.golden calls resolveProfile)
-#   scope.ts               a profile's derived scope names `claude` and `codex` (the `mixed` shape carries a property for each)
-#   foreign.ts             HARNESS_PACKAGES, the install package names (kit `install`; ToolInstallService, tool-install.golden and
-#                          words.golden read the table with no kit)
+#   scope.ts               a profile's derived scope names `claude` and `codex` (the `mixed` shape carries a property for each; it is
+#                          the wire shape of a refusal, so it needs its own change)
 #
-# (B) Table rows, PER-HARNESS BEHAVIOUR tables (each moves into the kits in 17b; the file is the row):
-#   lib/account/layering.ts       HARNESS_DISPLAY_NAMES (1): the product's name for each harness (words.golden reads it with no kit)
-#   lib/account/scope.ts          HARNESS_SCOPE_WORDS (1, keyed by HarnessScope): what a scope badge says
-#   lib/service/foreign.ts        HARNESS_PACKAGES, HARNESS_LABELS (2)
-#   lib/assets.ts                 HARNESS_ASSETS table type and HARNESS_OWNED_SKILL_ENTRIES (2): words.golden and assets.test read
-#                                 them; drift-tested equal to the kits' ownedSkillEntries
-#   lib/settings.ts               SETTINGS_FORMAT (1): read with no kit by mutations.ts, owner-components.ts, setup-service.ts, catalog-service.ts
-#   lib/models/catalog.ts         SIGN_IN_MODEL_CATALOGS (1): loginModelCatalog / starterModelsOf are called with no kit (kit
-#                                 `signInCatalog`); the other 3 are per-harness data types (the halves a catalog reads, StarterModels
-#                                 and its builder), not behaviour
-#   lib/service/tool-install.ts   TOOL_PACKAGES, TOOL_NAME and the table they are built into (4): derived from the kinds table
+# (B) Table rows, per-harness BEHAVIOUR tables:
+#   lib/assets.ts                 the HarnessAssetTable type and HARNESS_ASSETS (1): the destination of each profile asset inside a
+#                                 harness home. A kit member for it would make a Claude kit without it refuse (the base keeps Claude
+#                                 available whichever member it lacks: kit-member-parity pins that), so it needs the parity rule first
+#   lib/models/catalog.ts         SIGN_IN_MODEL_CATALOGS (1): loginModelCatalog / starterModelsOf / launchModelsOf are called by the model
+#                                 assembly with no kit (kit `signInCatalog`); the other 3 are per-harness data types (the halves a
+#                                 catalog reads, StarterModels and its builder), not behaviour
 #   lib/harness-kind.ts           KIT_FACTS (1): what must hold with a plugin OFF (a kit cannot say it), pinned to the kits by a drift
 #                                 test; and the mapped type KindOfKey (1), which with KEY_OF_KIND is a plan exception
-#   lib/provisioning.ts           the type of `defaultHomeDirectories` (1); the VALUE is a (C) item, and lib/service/assembly.ts (1)
-#                                 builds the placeholder one for a fleet that does not exist yet
-#   adapters/host-harness-scan.ts the two host-home dependencies (`claudeConfigDir`, `codexHome`), named by the composition root (1)
-#   lib/service/catalog.ts        CatalogDeps.tools (1): the command each harness resolves to, a data table the caller fills
-#   lib/service/harness-facts.ts  harnessCommandsOf (1): the same data, from `locate`
 #
 # (B') Table rows that are per-harness DATA, not behaviour (a stored or answered value per harness; they stay, but are counted so a new
 #   per-harness table cannot hide among them):
 #   lib/account/halves.ts (2: credentialHalves and its result), lib/account/import-plan.ts (2: the profile each harness got),
 #   lib/account/import.ts (1: ImportRecord.profiles, a stored shape), lib/account/materialise.ts (1: harnessCommands),
-#   lib/service/setup-service.ts (1: the names a person gave each harness's runtime)
+#   lib/service/setup-service.ts (1: the names a person gave each harness's runtime), lib/service/catalog.ts (1: CatalogDeps.tools) and
+#   lib/service/harness-facts.ts (1: harnessCommandsOf): the command each harness LOCATED to, a fact the caller fills
 #
-# (C) NOT counted by this gate, and named here instead (each is a value, not a harness-keyed type, so the gate cannot see it; 17b moves
-#   it, and a new one is a review matter):
-#   adapters/account-model-files.ts:262  defaultHomeDirectories: `{ claude: join(userHome, '.claude'), codex: ... }` (the VALUE of the
-#                                        typed field counted at lib/provisioning.ts)
-#   host-assembly.ts:267                 harnessHomesOf: the `.claude` / `.codex` homes a first run may read
-#   lib/account/fixed-layer.ts           CODEX_FIXED_CONFIG_KEYS (the Codex `-c` keys the fixed layer decides) and CARRIED_FLAGS (the
-#                                        Claude and Codex flags a fixed layer carries)
+# (C) NOT counted by this gate, and named here instead (each is a value, not a harness-keyed type, so the gate cannot see it):
 #   adapters/profile-components.ts       SOURCES: the Claude and Codex bindings (`ownedBy(ProfileClaudeSettingsSource)`, ...Codex..., and
-#                                        the two hooks sources), which kit-less hooks still go through
-#   lib/account/credentials.ts           SIGN_IN_FILES: Claude's and Codex's sign-in file names
+#                                        the two hooks sources), which kit-less hooks still go through (17b-2)
+#   lib/account/credentials.ts           SIGN_IN_FILES: Claude's and Codex's sign-in file names. It stays: `isSignInName` is the security
+#                                        gate of document-link, fleet-disk, following-handle and host-harness-scan, and a sign-in file
+#                                        must stay unreadable and unlinkable even when a plugin is OFF, which a kit cannot say
 #
-# (D) OUTSIDE this gate (it reads the daemon only), for 17b: the contract side holds its own harness tables:
-#   packages/plugins/runtimes/contract/display-name.ts   HARNESS_WORD, CLI_WORD and FERRETRY_SIGN_IN (a runtime's display words)
+# (D) OUTSIDE this gate (it reads the daemon only): the contract side's own harness tables. They are the ONE table the app and the
+#   daemon share, and the app holds no kits, so they stay (a plan exception like KEY_OF_KIND):
+#   packages/plugins/runtimes/contract/display-name.ts   FERRETRY_SIGN_IN (a Ferretry-kept sign-in's words; adding them to the words table
+#                                                        would change the words golden's fixture)
 #   packages/plugins/runtimes/contract/harness-words.ts  the per-harness word table (catalog half, command word, host folder)
 #
 packages/plugins/runtimes/daemon/lib/account/builtin-autonomous.ts::2
 packages/plugins/runtimes/daemon/lib/account/layering.ts::2
 packages/plugins/runtimes/daemon/lib/account/scope.ts::4
-packages/plugins/runtimes/daemon/adapters/host-harness-scan.ts::tables::1
 packages/plugins/runtimes/daemon/lib/account/halves.ts::tables::2
 packages/plugins/runtimes/daemon/lib/account/import-plan.ts::tables::2
 packages/plugins/runtimes/daemon/lib/account/import.ts::tables::1

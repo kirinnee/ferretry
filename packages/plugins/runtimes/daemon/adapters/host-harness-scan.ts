@@ -54,10 +54,8 @@ export interface HostHarnessScanDeps {
   readonly files: HostFiles;
   /** The home root provided by the permitted host adapter. */
   readonly userHome: string;
-  /** `CLAUDE_CONFIG_DIR` as the person's shell has it, if at all. */
-  readonly claudeConfigDir?: string;
-  /** `CODEX_HOME` as the person's shell has it, if at all. */
-  readonly codexHome?: string;
+  /** The person's shell environment, if the caller has it: each harness's home variable (`kit.homeEnv`: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`) is read from it. */
+  readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly commands: HostCommandResolver;
   /** Safe sign-in facts only; no credential material is reachable through this port. */
   readonly logins: Pick<LoginsApi, 'list'>;
@@ -93,10 +91,6 @@ export class HostHarnessScanner {
   /** Both harnesses, installed or not, in a stable order. A harness without its kit refuses before anything is read. */
   async scan(): Promise<readonly HostHarnessScan[]> {
     const kits = this.deps.kits();
-    const homes: Readonly<Record<HarnessKind, string | undefined>> = {
-      claude: this.deps.claudeConfigDir,
-      codex: this.deps.codexHome,
-    };
     const ready = supportedKinds().map(harness => {
       const kit = kits?.get(harness);
       if (kit?.scanHost === undefined) throw new UnsupportedHarnessError(harness);
@@ -109,7 +103,7 @@ export class HostHarnessScanner {
             harness,
             ...(await scanHost({
               userHome: this.deps.userHome,
-              configuredHome: homes[harness],
+              configuredHome: kit.homeEnv === undefined ? undefined : this.deps.environment?.[kit.homeEnv],
               read: (home, path) => this.#read(home, path),
               readUserMcp: () => this.#readUserClaudeJson(),
               skills: (home, directory) => this.#skills(ownedSkillEntriesOf(kit), home, directory),

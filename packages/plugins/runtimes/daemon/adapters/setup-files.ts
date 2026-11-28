@@ -160,9 +160,8 @@ export interface FileFleetSetupOptions {
   readonly host: AdapterHost;
   /** The catalogue's collaborators, so both surfaces read and write one machine the same way. */
   readonly catalog: SetupCatalogDeps;
-  /** `CLAUDE_CONFIG_DIR` / `CODEX_HOME` as this daemon inherited them. */
-  readonly claudeConfigDir?: string;
-  readonly codexHome?: string;
+  /** The environment this daemon inherited: each harness's home variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`) is read from it by its kit's `homeEnv`. */
+  readonly environment?: Readonly<Record<string, string | undefined>>;
   /** Safe Logins contract facts; host sign-in files stay opaque. */
   readonly logins: Pick<import('@ferretry/plugin-logins/contract').LoginsApi, 'list'>;
   readonly tools: FleetSetupServiceDeps['tools'];
@@ -227,8 +226,7 @@ export function fileFleetSetupDeps(options: FileFleetSetupOptions): FleetSetupSe
     kits: () => catalog.kits?.(),
     files: host.files,
     userHome: layout.userHome,
-    ...(options.claudeConfigDir === undefined ? {} : { claudeConfigDir: options.claudeConfigDir }),
-    ...(options.codexHome === undefined ? {} : { codexHome: options.codexHome }),
+    ...(options.environment === undefined ? {} : { environment: options.environment }),
     // A harness through the daemon's one rule, never a second detector; an MCP command on `PATH`.
     commands: {
       resolve: name => (isSupportedKind(name) ? catalog.locate(name) : host.commands.which(name)),
